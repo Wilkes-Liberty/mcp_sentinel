@@ -1,0 +1,10 @@
+mcp_sentinel_approval.settings:
+  type: config_object
+  label: 'MCP Sentinel Approval settings'
+  mapping:
+    gated_operations:
+      type: sequence
+      label: 'Operations that require approval'
+      sequence:
+        type: string
+        label: 'Operation'

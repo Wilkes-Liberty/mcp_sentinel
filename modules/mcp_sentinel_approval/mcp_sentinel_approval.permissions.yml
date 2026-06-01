@@ -1,0 +1,4 @@
+approve mcp sentinel operations:
+  title: 'Approve MCP Sentinel operations'
+  description: 'Approve or deny governed destructive operations queued for human approval.'
+  restrict access: true

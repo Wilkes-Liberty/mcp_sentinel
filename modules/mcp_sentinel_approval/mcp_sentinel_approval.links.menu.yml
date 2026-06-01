@@ -1,0 +1,5 @@
+mcp_sentinel_approval.approvals:
+  title: 'MCP Sentinel Approvals'
+  description: 'Review and decide destructive operations queued for approval.'
+  route_name: entity.mcp_approval_request.collection
+  parent: system.admin_reports

@@ -1,0 +1,126 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\mcp_sentinel_approval\Form;
+
+use Drupal\Core\Form\ConfirmFormBase;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Url;
+use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
+use Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor;
+use Symfony\Component\DependencyInjection\ContainerInterface;
+
+/**
+ * Confirm form to approve or deny an MCP approval request.
+ *
+ * The decision (approve|deny) is fixed per route via the buildForm $decision
+ * argument supplied by the routing definition.
+ */
+final class McpApprovalDecisionForm extends ConfirmFormBase {
+
+  /**
+   * The approval request being decided.
+   */
+  protected ?McpApprovalRequestInterface $request = NULL;
+
+  /**
+   * The decision: 'approve' or 'deny'.
+   */
+  protected string $decision = 'approve';
+
+  /**
+   * Constructs the form.
+   *
+   * @param \Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor $executor
+   *   The approval executor service.
+   */
+  public function __construct(
+    private readonly McpApprovalExecutor $executor,
+  ) {}
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container): static {
+    return new static(
+      $container->get('mcp_sentinel_approval.executor'),
+    );
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getFormId(): string {
+    return 'mcp_approval_decision_form';
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function buildForm(array $form, FormStateInterface $form_state, ?McpApprovalRequestInterface $mcp_approval_request = NULL, string $decision = 'approve'): array {
+    $this->request = $mcp_approval_request;
+    $this->decision = $decision === 'deny' ? 'deny' : 'approve';
+    return parent::buildForm($form, $form_state);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getQuestion() {
+    if ($this->request === NULL) {
+      return $this->t('Decide on this request?');
+    }
+    return $this->decision === 'deny'
+      ? $this->t('Deny request #@id (@op on @target)?', [
+        '@id' => $this->request->id(),
+        '@op' => $this->request->getOperation(),
+        '@target' => $this->request->getTargetEntityTypeId() . ':' . $this->request->getTargetEntityId(),
+      ])
+      : $this->t('Approve request #@id (@op on @target)? This will execute the operation.', [
+        '@id' => $this->request->id(),
+        '@op' => $this->request->getOperation(),
+        '@target' => $this->request->getTargetEntityTypeId() . ':' . $this->request->getTargetEntityId(),
+      ]);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getConfirmText() {
+    return $this->decision === 'deny' ? $this->t('Deny') : $this->t('Approve');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getCancelUrl(): Url {
+    return Url::fromRoute('entity.mcp_approval_request.collection');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function submitForm(array &$form, FormStateInterface $form_state): void {
+    if ($this->request === NULL || !$this->request->isPending()) {
+      $this->messenger()->addWarning($this->t('Request is not pending; no action taken.'));
+      $form_state->setRedirectUrl($this->getCancelUrl());
+      return;
+    }
+
+    if ($this->decision === 'deny') {
+      $this->executor->deny($this->request);
+      $this->messenger()->addStatus($this->t('Request #@id denied.', ['@id' => $this->request->id()]));
+    }
+    else {
+      $result = $this->executor->approve($this->request);
+      $this->messenger()->addStatus($this->t('Request #@id approved. @msg', [
+        '@id' => $this->request->id(),
+        '@msg' => $result['message'],
+      ]));
+    }
+
+    $form_state->setRedirectUrl($this->getCancelUrl());
+  }
+
+}

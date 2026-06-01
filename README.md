@@ -66,6 +66,26 @@ drush mcp-sentinel:setup
 |-----------|---------|
 | `mcp_sentinel_server` | Registers the Tool plugins with mcp_server (`mcp_tool_config` entities) and wires OAuth scopes. Provides `drush mcp-sentinel:setup` / `:teardown`. Depends on `mcp_server_tool_bridge`. |
 | `mcp_sentinel_graphql` | Extends governance to the GraphQL endpoint: gates mutations/reads, redacts fields, and audits operations for governed agents. Depends on `graphql_compose`. |
+| `mcp_sentinel_approval` | Optional human-approval gate: queues governed destructive operations (bulk delete) as approval requests instead of executing them, for an authorized human to approve or deny. Depends only on `mcp_sentinel`. |
+
+### Approval workflow (`mcp_sentinel_approval`)
+
+When enabled, governed **destructive** operations (currently the bulk-delete
+path) are not executed immediately. Instead the base bulk tool dispatches a
+veto-capable `McpDestructiveOpEvent`; this submodule's subscriber records a
+pending `mcp_approval_request` and vetoes execution, so the entity is left
+intact and reported back to the agent as *queued for approval*.
+
+An operator with the **Approve MCP Sentinel operations** permission reviews the
+queue at `/admin/reports/mcp-sentinel/approvals` and approves or denies each
+request. Approving replays the stored operation (re-checking the approver's own
+delete access), marks the request approved, and writes an `approval_decision`
+row to the audit log; denying records the denial and leaves the target intact.
+
+Which operations are gated is configurable via the
+`mcp_sentinel_approval.settings:gated_operations` key (default: `[delete]`).
+The base module has **no dependency** on this submodule — with the submodule
+absent, the event is never vetoed and destructive operations proceed unchanged.
 
 ### GraphQL governance (`mcp_sentinel_graphql`)
 

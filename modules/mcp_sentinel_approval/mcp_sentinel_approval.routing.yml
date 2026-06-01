@@ -1,0 +1,25 @@
+mcp_sentinel_approval.approve:
+  path: '/admin/reports/mcp-sentinel/approvals/{mcp_approval_request}/approve'
+  defaults:
+    _form: '\Drupal\mcp_sentinel_approval\Form\McpApprovalDecisionForm'
+    _title: 'Approve request'
+    decision: 'approve'
+  requirements:
+    _permission: 'approve mcp sentinel operations'
+  options:
+    parameters:
+      mcp_approval_request:
+        type: entity:mcp_approval_request
+
+mcp_sentinel_approval.deny:
+  path: '/admin/reports/mcp-sentinel/approvals/{mcp_approval_request}/deny'
+  defaults:
+    _form: '\Drupal\mcp_sentinel_approval\Form\McpApprovalDecisionForm'
+    _title: 'Deny request'
+    decision: 'deny'
+  requirements:
+    _permission: 'approve mcp sentinel operations'
+  options:
+    parameters:
+      mcp_approval_request:
+        type: entity:mcp_approval_request

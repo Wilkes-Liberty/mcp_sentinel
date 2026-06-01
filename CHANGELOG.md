@@ -32,6 +32,19 @@ stable release is tagged.
   not matched. The separator after `)` is now optional (`[\s.\-]?`).
 
 ### Added
+- **Approval-workflow submodule (`mcp_sentinel_approval`, optional):** an
+  opt-in human-approval gate for governed destructive operations. When enabled,
+  the base bulk-operations tool dispatches a veto-capable `McpDestructiveOpEvent`
+  before each delete; the submodule's subscriber queues a pending
+  `mcp_approval_request` content entity and vetoes execution, so the target is
+  left intact and reported to the agent as *queued for approval*. Operators with
+  the new **Approve MCP Sentinel operations** permission review the queue at
+  `/admin/reports/mcp-sentinel/approvals` and approve or deny requests; approving
+  replays the stored operation (re-checking the approver's delete access) and
+  writes an `approval_decision` audit row. Gated operations are configurable
+  (`gated_operations`, default `[delete]`). The base module has no dependency on
+  the submodule — when it is absent the event is never vetoed and destructive
+  operations proceed unchanged.
 - **DLP value-pattern redaction + partial masking (opt-in):** a new
   `McpDlp` service scans governed field values against configurable PII
   patterns (email, US phone, SSN, 16-digit credit card, plus unlimited

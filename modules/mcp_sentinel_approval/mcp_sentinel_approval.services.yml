@@ -1,0 +1,22 @@
+services:
+  mcp_sentinel_approval.gate:
+    class: Drupal\mcp_sentinel_approval\Service\McpApprovalGate
+    arguments:
+      - '@config.factory'
+
+  mcp_sentinel_approval.executor:
+    class: Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor
+    arguments:
+      - '@entity_type.manager'
+      - '@mcp_sentinel.audit_logger'
+      - '@current_user'
+      - '@datetime.time'
+
+  mcp_sentinel_approval.destructive_op_subscriber:
+    class: Drupal\mcp_sentinel_approval\EventSubscriber\McpDestructiveOpSubscriber
+    arguments:
+      - '@mcp_sentinel_approval.gate'
+      - '@entity_type.manager'
+      - '@logger.channel.mcp_sentinel'
+    tags:
+      - { name: event_subscriber }

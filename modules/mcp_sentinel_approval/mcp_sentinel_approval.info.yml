@@ -1,0 +1,8 @@
+name: 'MCP Sentinel Approval'
+type: module
+description: 'Optional human-approval gate: queues governed destructive operations (bulk delete) as approval requests for an authorized human to approve or deny.'
+package: 'AI / MCP'
+core_version_requirement: ^10.3 || ^11
+
+dependencies:
+  - mcp_sentinel:mcp_sentinel

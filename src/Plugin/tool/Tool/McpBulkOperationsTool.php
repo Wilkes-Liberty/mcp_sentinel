@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\mcp_sentinel\Event\McpDestructiveOpEvent;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
@@ -19,6 +20,7 @@ use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolOperation;
 use Drupal\tool\TypedData\InputDefinition;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Bulk publish, unpublish, or delete entities under MCP Sentinel policy.
@@ -87,6 +89,15 @@ final class McpBulkOperationsTool extends ToolBase {
   protected McpPolicyResolver $policyResolver;
 
   /**
+   * The Symfony event dispatcher.
+   *
+   * Used to dispatch the veto-capable McpDestructiveOpEvent before a
+   * destructive operation. When no subscriber is registered (e.g. the approval
+   * submodule is absent) the event is a no-op and the operation proceeds.
+   */
+  protected EventDispatcherInterface $eventDispatcher;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -95,6 +106,7 @@ final class McpBulkOperationsTool extends ToolBase {
     $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->contentLock = $container->get('mcp_sentinel.content_lock');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
+    $instance->eventDispatcher = $container->get('event_dispatcher');
     return $instance;
   }
 
@@ -117,7 +129,7 @@ final class McpBulkOperationsTool extends ToolBase {
 
     $entity_op = $operation === 'delete' ? 'delete' : 'update';
     $storage = $this->entityTypeManager->getStorage($entity_type);
-    $results = ['succeeded' => [], 'failed' => []];
+    $results = ['succeeded' => [], 'failed' => [], 'queued' => []];
 
     foreach ($ids as $id) {
       $entity = $storage->load($id);
@@ -144,6 +156,20 @@ final class McpBulkOperationsTool extends ToolBase {
         continue;
       }
 
+      // For destructive operations, give optional subscribers (e.g. the
+      // mcp_sentinel_approval submodule) a chance to veto execution — for
+      // instance to queue the operation for human approval. When nothing
+      // subscribes, the event is never vetoed and the delete proceeds as
+      // before, keeping the base module fully decoupled.
+      if ($operation === 'delete') {
+        $event = new McpDestructiveOpEvent($entity, $operation, $this->currentUser);
+        $this->eventDispatcher->dispatch($event, McpDestructiveOpEvent::NAME);
+        if ($event->isVetoed()) {
+          $results['queued'][$id] = (string) $event->getVetoReason();
+          continue;
+        }
+      }
+
       try {
         $this->performOperation($entity, $operation);
         $results['succeeded'][] = $id;
@@ -154,10 +180,11 @@ final class McpBulkOperationsTool extends ToolBase {
     }
 
     return ExecutableResult::success(
-      $this->t('@op complete: @ok succeeded, @fail failed.', [
+      $this->t('@op complete: @ok succeeded, @fail failed, @queued queued for approval.', [
         '@op' => $operation,
         '@ok' => count($results['succeeded']),
         '@fail' => count($results['failed']),
+        '@queued' => count($results['queued']),
       ]),
       $results,
     );
