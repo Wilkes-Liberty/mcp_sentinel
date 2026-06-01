@@ -15,3 +15,4 @@ agent_scopes:
 governed_role_fallback: false
 audit_hash_key: ''
 siem_enabled: false
+audit_encryption_profile: ''

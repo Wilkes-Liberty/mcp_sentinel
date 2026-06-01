@@ -20,7 +20,8 @@
     "drupal/tool": "*",
     "drupal/key": "^1.20",
     "drupal/simple_oauth": "^6.1",
-    "drupal/consumers": "^1.18"
+    "drupal/consumers": "^1.18",
+    "drupal/encrypt": "^3.2"
   },
   "require-dev": {
     "drupal/graphql_compose": "^2.4",

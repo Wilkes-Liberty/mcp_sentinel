@@ -13,6 +13,7 @@ dependencies:
   - key:key
   - simple_oauth:simple_oauth
   - consumers:consumers
+  - encrypt:encrypt
 
 # drupal/mcp_server: strongly recommended (exposes Tool plugins to MCP clients)
 # but NOT required — security, audit, content locks, and webhooks all work without it.

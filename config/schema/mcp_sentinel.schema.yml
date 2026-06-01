@@ -50,6 +50,9 @@ mcp_sentinel.settings:
     siem_enabled:
       type: boolean
       label: 'SIEM streaming enabled'
+    audit_encryption_profile:
+      type: string
+      label: 'Audit encryption profile — Encryption Profile entity ID'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

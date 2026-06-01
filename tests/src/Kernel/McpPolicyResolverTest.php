@@ -42,6 +42,7 @@ final class McpPolicyResolverTest extends KernelTestBase {
     'path_alias',
     'consumers',
     'simple_oauth',
+    'encrypt',
     'mcp_sentinel',
   ];
 

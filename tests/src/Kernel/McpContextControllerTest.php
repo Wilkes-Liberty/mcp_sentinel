@@ -36,6 +36,7 @@ final class McpContextControllerTest extends KernelTestBase {
     'path_alias',
     'consumers',
     'simple_oauth',
+    'encrypt',
     'mcp_sentinel',
   ];
 

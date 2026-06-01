@@ -31,7 +31,10 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 - Drupal 10.3+ or 11
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
 - [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
-  signing secret outside exported configuration
+  signing secret and (optionally) the audit encryption key outside exported
+  configuration
+- [Encrypt](https://www.drupal.org/project/encrypt) (`drupal/encrypt`) —
+  provides Encryption Profiles for optional at-rest encryption of audit metadata
 - **Strongly recommended:** [MCP Server](https://www.drupal.org/project/mcp_server),
   [Simple OAuth](https://www.drupal.org/project/simple_oauth)
 
@@ -117,6 +120,33 @@ broken row id) if tampering is detected. Run `update_10003` (via
 `drush updb`) to add the `prev_hash`/`row_hash` columns to an existing install.
 New rows written after the update are automatically chained; rows written before
 the update have NULL hashes and are skipped by the verifier.
+
+## Audit metadata encryption at rest
+
+MCP Sentinel can encrypt the `metadata` column of every audit row using
+[drupal/encrypt](https://www.drupal.org/project/encrypt) Encryption Profiles.
+
+### Setup
+
+1. Install and enable drupal/encrypt: `composer require drupal/encrypt && drush en encrypt -y`.
+2. Create a Key entity at **Configuration → System → Keys** (use a File or
+   Environment key provider so the secret never appears in exported config).
+3. Create an Encryption Profile at
+   **Configuration → System → Encryption → Encryption Profiles**, pointing it
+   at the key you just created.
+4. In the MCP Sentinel settings form (**Configuration → Web services →
+   MCP Sentinel**), open the *Audit Logging* fieldset and choose your
+   Encryption Profile from the *Audit metadata encryption profile* select.
+5. Save the form. New audit rows will be encrypted; existing plaintext rows
+   remain readable (decryption failure falls back to plain JSON decode, so no
+   data migration is needed).
+
+### Hash chain and encryption
+
+The tamper-evident hash chain hashes **plaintext** canonical content before
+encryption occurs. This means `drush mcp-sentinel:audit-verify` continues to
+work correctly regardless of key rotation or profile changes — only the stored
+column is encrypted; the canonical used for hashing is always plaintext.
 
 ## SIEM streaming
 

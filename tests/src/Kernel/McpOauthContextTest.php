@@ -49,6 +49,7 @@ final class McpOauthContextTest extends KernelTestBase {
     'key',
     'consumers',
     'simple_oauth',
+    'encrypt',
     'mcp_sentinel',
   ];
 

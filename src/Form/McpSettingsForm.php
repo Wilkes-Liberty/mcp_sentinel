@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Form;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -24,11 +25,17 @@ class McpSettingsForm extends ConfigFormBase {
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
+   * The encryption profile manager.
+   */
+  protected EncryptionProfileManagerInterface $encryptionProfileManager;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
     $instance = parent::create($container);
     $instance->entityTypeManager = $container->get('entity_type.manager');
+    $instance->encryptionProfileManager = $container->get('encrypt.encryption_profile.manager');
     return $instance;
   }
 
@@ -141,6 +148,22 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
 
+    $profiles = $this->encryptionProfileManager->getAllEncryptionProfiles();
+    $profile_options = ['' => $this->t('- None (plaintext) -')];
+    foreach ($profiles as $profile_id => $profile) {
+      $profile_options[$profile_id] = (string) $profile->label();
+    }
+    $form['audit']['audit_encryption_profile'] = [
+      '#type'          => 'select',
+      '#title'         => $this->t('Audit metadata encryption profile'),
+      '#description'   => $this->t('Select an <a href=":url">Encryption Profile</a> to encrypt audit metadata at rest. When set, the metadata column is encrypted on write and decrypted on read. Pre-existing plaintext rows remain readable (decryption failure gracefully falls back to JSON decode).', [
+        ':url' => '/admin/config/system/encryption/profiles',
+      ]),
+      '#options'       => $profile_options,
+      '#default_value' => $config->get('audit_encryption_profile') ?? '',
+      '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
+    ];
+
     $form['webhooks'] = ['#type' => 'fieldset', '#title' => $this->t('HTTPS Webhooks')];
     $form['webhooks']['webhook_enabled'] = [
       '#type'          => 'checkbox',
@@ -195,6 +218,7 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_retention_days', (int) $form_state->getValue('audit_retention_days'))
       ->set('audit_hash_key', $form_state->getValue('audit_hash_key'))
       ->set('siem_enabled', (bool) $form_state->getValue('siem_enabled'))
+      ->set('audit_encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
       ->set('webhook_enabled', (bool) $form_state->getValue('webhook_enabled'))
       ->set('webhook_url', $form_state->getValue('webhook_url'))
       ->set('webhook_secret_key', $form_state->getValue('webhook_secret_key'))

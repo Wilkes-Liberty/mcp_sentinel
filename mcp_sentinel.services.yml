@@ -20,6 +20,8 @@ services:
       - '@key.repository'
       - '@lock'
       - '@logger.channel.mcp_sentinel_audit'
+      - '@encryption'
+      - '@entity_type.manager'
 
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver

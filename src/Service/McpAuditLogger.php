@@ -6,10 +6,14 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\encrypt\EncryptionProfileInterface;
+use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\key\KeyRepositoryInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -70,6 +74,11 @@ class McpAuditLogger {
    *   streaming is enabled, every successful audit write is also emitted to
    *   this channel as a structured record so operators can route it to syslog
    *   or Monolog and stream events to a SIEM without DB polling.
+   * @param \Drupal\encrypt\EncryptServiceInterface $encryptService
+   *   The Encrypt service. When an audit_encryption_profile is configured,
+   *   metadata payloads are encrypted before storage and decrypted on read.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
+   *   The entity type manager (used to load EncryptionProfile config entities).
    */
   public function __construct(
     private readonly Connection $database,
@@ -80,6 +89,8 @@ class McpAuditLogger {
     private readonly KeyRepositoryInterface $keyRepository,
     private readonly LockBackendInterface $lock,
     private readonly LoggerInterface $auditChannel,
+    private readonly EncryptServiceInterface $encryptService,
+    private readonly EntityTypeManagerInterface $entityTypeManager,
   ) {}
 
   /**
@@ -154,7 +165,7 @@ class McpAuditLogger {
           'entity_label' => $entity_label,
           'ip_address'   => $ip_address,
           'user_agent'   => $user_agent,
-          'metadata'     => json_encode($extra_metadata),
+          'metadata'     => $this->encodeMetadata($extra_metadata, $config),
           'prev_hash'    => $prev_hash,
           'row_hash'     => $row_hash,
         ])
@@ -262,8 +273,11 @@ class McpAuditLogger {
   /**
    * Decodes stored metadata JSON into an array.
    *
-   * This is the single accessor for metadata reads. Future features (e.g.
-   * at-rest encryption) only need to update this method.
+   * When an audit_encryption_profile is configured, this method first attempts
+   * to decrypt the stored value using the configured Encryption Profile. If
+   * decryption fails (e.g. on pre-encryption rows or plaintext fallbacks), it
+   * falls back to direct JSON decoding so legacy rows remain readable after
+   * encryption is enabled.
    *
    * @param string $stored
    *   The raw stored metadata string from the database.
@@ -275,8 +289,88 @@ class McpAuditLogger {
     if ($stored === '') {
       return [];
     }
+
+    $config = $this->configFactory->get('mcp_sentinel.settings');
+    $profile_id = (string) ($config->get('audit_encryption_profile') ?? '');
+
+    if ($profile_id !== '') {
+      $profile = $this->loadEncryptionProfile($profile_id);
+      if ($profile !== NULL) {
+        try {
+          $decrypted = $this->encryptService->decrypt($stored, $profile);
+          $decoded = json_decode($decrypted, TRUE);
+          if (is_array($decoded)) {
+            return $decoded;
+          }
+        }
+        catch (\Throwable $e) {
+          // Fall through to plain JSON decode below (pre-encryption rows).
+        }
+      }
+    }
+
     $decoded = json_decode($stored, TRUE);
     return is_array($decoded) ? $decoded : [];
+  }
+
+  /**
+   * Encodes a metadata array to a string for storage.
+   *
+   * When an audit_encryption_profile is configured, the JSON is encrypted
+   * before being returned. Falls back to plain JSON encoding if no profile is
+   * configured or the profile cannot be loaded.
+   *
+   * The hash chain always operates on the plaintext metadata (via
+   * buildCanonical()) before this method is called, so encryption does not
+   * affect chain integrity.
+   *
+   * @param array $metadata
+   *   The metadata array to encode.
+   * @param \Drupal\Core\Config\ImmutableConfig $config
+   *   The mcp_sentinel settings config object.
+   *
+   * @return string
+   *   The encoded (and optionally encrypted) metadata string.
+   */
+  private function encodeMetadata(array $metadata, ImmutableConfig $config): string {
+    $json = (string) json_encode($metadata);
+
+    $profile_id = (string) ($config->get('audit_encryption_profile') ?? '');
+    if ($profile_id === '') {
+      return $json;
+    }
+
+    $profile = $this->loadEncryptionProfile($profile_id);
+    if ($profile === NULL) {
+      return $json;
+    }
+
+    try {
+      return $this->encryptService->encrypt($json, $profile);
+    }
+    catch (\Throwable $e) {
+      return $json;
+    }
+  }
+
+  /**
+   * Loads an EncryptionProfile config entity by ID, or returns NULL.
+   *
+   * @param string $profile_id
+   *   The encryption profile entity ID.
+   *
+   * @return \Drupal\encrypt\EncryptionProfileInterface|null
+   *   The loaded profile, or NULL if not found.
+   */
+  private function loadEncryptionProfile(string $profile_id): ?EncryptionProfileInterface {
+    try {
+      $storage = $this->entityTypeManager->getStorage('encryption_profile');
+      $profile = $storage->load($profile_id);
+      return ($profile instanceof EncryptionProfileInterface) ? $profile : NULL;
+    }
+    catch (\Throwable $e) {
+      return NULL;
+    }
   }
 
   /**

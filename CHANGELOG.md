@@ -8,6 +8,15 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Security
+- **Optional at-rest encryption of audit metadata:** when `audit_encryption_profile`
+  is set to an Encryption Profile entity ID (from drupal/encrypt), the `metadata`
+  column of every new audit row is encrypted at rest. Reads transparently decrypt
+  via the `decodeMetadata()` accessor with graceful fallback to plain JSON for
+  pre-encryption rows, so no data migration is required when enabling encryption
+  on an existing install. The hash chain continues to hash plaintext canonical
+  content (encryption only affects storage), so `drush mcp-sentinel:audit-verify`
+  remains reliable across key rotations. drupal/encrypt is now a required
+  dependency.
 - **HMAC-keyed audit hash chain:** the audit hash chain now uses
   HMAC-SHA256 when `audit_hash_key` is set to a Key entity ID (plain SHA-256
   is retained as a zero-config fallback). Set the key to a File or Environment
