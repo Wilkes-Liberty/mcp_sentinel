@@ -44,6 +44,9 @@ mcp_sentinel.settings:
     governed_role_fallback:
       type: boolean
       label: 'Treat governed roles as governed even without an OAuth agent token (local dev)'
+    audit_hash_key:
+      type: string
+      label: 'Audit hash signing key — Key entity ID (HMAC-SHA256)'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

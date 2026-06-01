@@ -13,3 +13,4 @@ agent_scopes:
   - 'mcp:read'
   - 'mcp:write'
 governed_role_fallback: false
+audit_hash_key: ''

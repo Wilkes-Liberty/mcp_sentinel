@@ -7,7 +7,9 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\key\KeyRepositoryInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -17,12 +19,21 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * OAuth agent channel). Each entry is attributed to the authenticated account —
  * the acting admin (the OAuth subject) on the agent channel.
  *
- * Each row participates in a tamper-evident SHA-256 hash chain: row_hash is
- * computed over the previous row's hash plus a stable canonical serialization
- * of this row's content. Any modification of a historical row breaks the chain,
- * detectable by verifyChain().
+ * Each row participates in a tamper-evident hash chain: row_hash is computed
+ * over the previous row's hash plus a stable canonical serialization of this
+ * row's content using HMAC-SHA256 (when a Key is configured via
+ * audit_hash_key) or plain SHA-256 as a fallback. Any modification of a
+ * historical row breaks the chain, detectable by verifyChain().
+ *
+ * The canonical payload includes: bundle, entity_id, entity_label, entity_type,
+ * ip_address, metadata, operation, timestamp, uid, user_agent (fixed order).
  */
 class McpAuditLogger {
+
+  /**
+   * Lock name used to serialize the read-latest-then-insert critical section.
+   */
+  private const CHAIN_LOCK = 'mcp_sentinel_audit_chain';
 
   /**
    * Constructs an McpAuditLogger.
@@ -37,6 +48,11 @@ class McpAuditLogger {
    *   The config factory service.
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service.
+   * @param \Drupal\key\KeyRepositoryInterface $keyRepository
+   *   The Key repository (resolves the audit HMAC signing key).
+   * @param \Drupal\Core\Lock\LockBackendInterface $lock
+   *   The lock backend (serializes the read-latest-then-insert critical
+   *   section to prevent hash-chain races under concurrent writes).
    */
   public function __construct(
     private readonly Connection $database,
@@ -44,6 +60,8 @@ class McpAuditLogger {
     private readonly RequestStack $requestStack,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly TimeInterface $time,
+    private readonly KeyRepositoryInterface $keyRepository,
+    private readonly LockBackendInterface $lock,
   ) {}
 
   /**
@@ -71,59 +89,85 @@ class McpAuditLogger {
     $entity_type = $metadata['entity_type'] ?? NULL;
     $bundle = $metadata['bundle'] ?? NULL;
     $entity_id = (string) ($metadata['id'] ?? '');
+    $entity_label = isset($metadata['label'])
+      ? substr($metadata['label'], 0, 255)
+      : NULL;
+    $ip_address = $request?->getClientIp();
+    $user_agent = $request
+      ? substr($request->headers->get('User-Agent', ''), 0, 512)
+      : NULL;
     $extra_metadata = array_diff_key($metadata, array_flip(['entity_type', 'bundle', 'id', 'label']));
 
-    // Build the canonical JSON for this row (stable key order, no floats).
-    $canonical = $this->buildCanonical(
-      $timestamp,
-      $uid,
-      $op,
-      $entity_type,
-      $bundle,
-      $entity_id,
-      $extra_metadata,
-    );
+    $key_value = $this->resolveHashKey($config->get('audit_hash_key'));
 
-    // Fetch the most recent row_hash to use as prev_hash.
-    $prev_hash = $this->getLatestRowHash();
+    // Serialize the read-latest-then-insert critical section.
+    // If the lock cannot be acquired we still write (never drop audit entries)
+    // but the guarantee is best-effort for that request.
+    $locked = $this->lock->acquire(self::CHAIN_LOCK, 3.0);
+    try {
+      // Build the canonical JSON for this row (stable key order, no floats).
+      $canonical = $this->buildCanonical(
+        $timestamp,
+        $uid,
+        $op,
+        $entity_type,
+        $bundle,
+        $entity_id,
+        $entity_label,
+        $ip_address,
+        $user_agent,
+        $extra_metadata,
+      );
 
-    // Compute this row's hash: sha256(prev_hash | canonical).
-    $row_hash = hash('sha256', ($prev_hash ?? '') . '|' . $canonical);
+      // Fetch the most recent row_hash to use as prev_hash.
+      $prev_hash = $this->getLatestRowHash();
 
-    $this->database->insert('mcp_sentinel_audit_log')
-      ->fields([
-        'timestamp'    => $timestamp,
-        'uid'          => $uid,
-        'operation'    => $op,
-        'entity_type'  => $entity_type,
-        'bundle'       => $bundle,
-        'entity_id'    => $entity_id,
-        'entity_label' => isset($metadata['label'])
-          ? substr($metadata['label'], 0, 255)
-          : NULL,
-        'ip_address'   => $request?->getClientIp(),
-        'user_agent'   => $request
-          ? substr($request->headers->get('User-Agent', ''), 0, 512)
-          : NULL,
-        'metadata'     => json_encode($extra_metadata),
-        'prev_hash'    => $prev_hash,
-        'row_hash'     => $row_hash,
-      ])
-      ->execute();
+      // Compute this row's hash: hmac-sha256(prev_hash|canonical) or fallback.
+      $row_hash = $this->hashRow($prev_hash ?? '', $canonical, $key_value);
+
+      $this->database->insert('mcp_sentinel_audit_log')
+        ->fields([
+          'timestamp'    => $timestamp,
+          'uid'          => $uid,
+          'operation'    => $op,
+          'entity_type'  => $entity_type,
+          'bundle'       => $bundle,
+          'entity_id'    => $entity_id,
+          'entity_label' => $entity_label,
+          'ip_address'   => $ip_address,
+          'user_agent'   => $user_agent,
+          'metadata'     => json_encode($extra_metadata),
+          'prev_hash'    => $prev_hash,
+          'row_hash'     => $row_hash,
+        ])
+        ->execute();
+    }
+    finally {
+      if ($locked) {
+        $this->lock->release(self::CHAIN_LOCK);
+      }
+    }
   }
 
   /**
    * Walks all rows in id order and verifies the hash chain is intact.
    *
-   * Each row's row_hash must equal sha256(prev_hash|canonical) and each row's
-   * prev_hash must equal the immediately preceding row's row_hash. The first
-   * row's prev_hash must be empty string (null stored as empty).
+   * Rows written before update_10003 (NULL/empty row_hash) are skipped; the
+   * first chained row after a gap starts a fresh chain segment whose prev_hash
+   * must itself be NULL/empty.
+   *
+   * Each chained row's row_hash must equal hashRow(prev_hash, canonical) and
+   * each row's prev_hash must equal the immediately preceding chained row's
+   * row_hash.
    *
    * @return array{ok: bool, broken_at: int|null}
    *   'ok' TRUE if the chain is intact; FALSE if any row fails verification.
    *   'broken_at' is the row id of the first broken link, or NULL if ok.
    */
   public function verifyChain(): array {
+    $config = $this->configFactory->get('mcp_sentinel.settings');
+    $key_value = $this->resolveHashKey($config->get('audit_hash_key'));
+
     $result = $this->database->select('mcp_sentinel_audit_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
@@ -134,19 +178,35 @@ class McpAuditLogger {
     foreach ($result as $row) {
       $row = (array) $row;
 
+      // FIX C1: skip pre-update_10003 rows whose row_hash was never populated.
+      // Reset prev_row_hash so the first chained row after this gap can start
+      // a fresh chain segment (its prev_hash will also be NULL/empty).
+      if ($row['row_hash'] === NULL || $row['row_hash'] === '') {
+        $prev_row_hash = '';
+        continue;
+      }
+
+      // FIX M2: truncate operation to 64 chars before buildCanonical, matching
+      // the write path, so a future column-width change cannot desync hashes.
+      $op = substr((string) $row['operation'], 0, 64);
+
       $canonical = $this->buildCanonical(
         (int) $row['timestamp'],
         (int) $row['uid'],
-        (string) $row['operation'],
+        $op,
         $row['entity_type'],
         $row['bundle'],
         (string) ($row['entity_id'] ?? ''),
+        isset($row['entity_label']) ? (string) $row['entity_label'] : NULL,
+        isset($row['ip_address']) ? (string) $row['ip_address'] : NULL,
+        isset($row['user_agent']) ? (string) $row['user_agent'] : NULL,
         $this->decodeMetadata((string) ($row['metadata'] ?? '')),
       );
 
-      // The stored prev_hash for the very first row must be empty / NULL.
+      // The stored prev_hash for the very first chained row must be empty /
+      // NULL; subsequent rows must match the previous chained row's row_hash.
       $stored_prev = (string) ($row['prev_hash'] ?? '');
-      $expected_row_hash = hash('sha256', $stored_prev . '|' . $canonical);
+      $expected_row_hash = $this->hashRow($stored_prev, $canonical, $key_value);
 
       // Chain continuity: this row's prev_hash must match the prior row_hash.
       if ($stored_prev !== $prev_row_hash) {
@@ -154,11 +214,11 @@ class McpAuditLogger {
       }
 
       // Content integrity: the stored row_hash must match our recomputation.
-      if ((string) ($row['row_hash'] ?? '') !== $expected_row_hash) {
+      if ((string) $row['row_hash'] !== $expected_row_hash) {
         return ['ok' => FALSE, 'broken_at' => (int) $row['id']];
       }
 
-      $prev_row_hash = (string) ($row['row_hash'] ?? '');
+      $prev_row_hash = (string) $row['row_hash'];
     }
 
     return ['ok' => TRUE, 'broken_at' => NULL];
@@ -206,8 +266,10 @@ class McpAuditLogger {
   /**
    * Returns the row_hash of the most-recently inserted row, or NULL.
    *
+   * Must be called while holding CHAIN_LOCK to be race-free.
+   *
    * @return string|null
-   *   The hex SHA-256 hash string, or NULL if no rows exist.
+   *   The hex hash string, or NULL if no rows exist.
    */
   private function getLatestRowHash(): ?string {
     $hash = $this->database->select('mcp_sentinel_audit_log', 'l')
@@ -221,10 +283,65 @@ class McpAuditLogger {
   }
 
   /**
+   * Computes the row hash using HMAC-SHA256 (keyed) or SHA-256 (fallback).
+   *
+   * HMAC-SHA256 is used when a Key value has been resolved from the
+   * audit_hash_key setting; otherwise plain SHA-256 is used so the chain still
+   * works on sites that have not configured a signing key.
+   *
+   * @param string $prev_hash
+   *   The previous row's hash (empty string for the first row).
+   * @param string $canonical
+   *   The stable canonical JSON for the current row.
+   * @param string $key_value
+   *   The resolved HMAC signing key, or empty string for the SHA-256 fallback.
+   *
+   * @return string
+   *   Lowercase hex hash string (64 chars for SHA-256/HMAC-SHA256).
+   */
+  private function hashRow(string $prev_hash, string $canonical, string $key_value): string {
+    $message = $prev_hash . '|' . $canonical;
+    if ($key_value !== '') {
+      return hash_hmac('sha256', $message, $key_value);
+    }
+    return hash('sha256', $message);
+  }
+
+  /**
+   * Resolves the HMAC signing key value from the configured Key entity.
+   *
+   * Returns an empty string if no key is configured or the Key cannot be
+   * found, so the caller falls back to plain SHA-256.
+   *
+   * @param mixed $key_id
+   *   The audit_hash_key config value (Key entity ID string or NULL).
+   *
+   * @return string
+   *   The key value, or empty string when unavailable.
+   */
+  private function resolveHashKey(mixed $key_id): string {
+    $id = (string) ($key_id ?? '');
+    if ($id === '') {
+      return '';
+    }
+    $key = $this->keyRepository->getKey($id);
+    if (!$key) {
+      return '';
+    }
+    return (string) $key->getKeyValue();
+  }
+
+  /**
    * Builds a stable canonical JSON string for hashing.
    *
    * The canonical form has a fixed key order so the hash is reproducible
    * regardless of insertion order. All values are cast to their storage types.
+   * Forensic columns entity_label, ip_address, and user_agent are included
+   * so that post-hoc alteration of those fields also breaks the chain.
+   *
+   * Fixed payload key order:
+   *   bundle, entity_id, entity_label, entity_type, ip_address, metadata,
+   *   operation, timestamp, uid, user_agent.
    *
    * @param int $timestamp
    *   Unix timestamp.
@@ -238,6 +355,12 @@ class McpAuditLogger {
    *   Bundle, or NULL.
    * @param string $entity_id
    *   Entity ID string.
+   * @param string|null $entity_label
+   *   Entity label (already truncated to 255 chars), or NULL.
+   * @param string|null $ip_address
+   *   Client IP address, or NULL.
+   * @param string|null $user_agent
+   *   HTTP User-Agent (already truncated to 512 chars), or NULL.
    * @param array $metadata
    *   Extra metadata (already decoded from JSON).
    *
@@ -251,19 +374,25 @@ class McpAuditLogger {
     ?string $entity_type,
     ?string $bundle,
     string $entity_id,
+    ?string $entity_label,
+    ?string $ip_address,
+    ?string $user_agent,
     array $metadata,
   ): string {
     // Sort metadata keys for stable ordering.
     ksort($metadata);
 
     $payload = [
-      'bundle'      => $bundle,
-      'entity_id'   => $entity_id,
-      'entity_type' => $entity_type,
-      'metadata'    => $metadata,
-      'operation'   => $operation,
-      'timestamp'   => $timestamp,
-      'uid'         => $uid,
+      'bundle'       => $bundle,
+      'entity_id'    => $entity_id,
+      'entity_label' => $entity_label,
+      'entity_type'  => $entity_type,
+      'ip_address'   => $ip_address,
+      'metadata'     => $metadata,
+      'operation'    => $operation,
+      'timestamp'    => $timestamp,
+      'uid'          => $uid,
+      'user_agent'   => $user_agent,
     ];
 
     return (string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

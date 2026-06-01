@@ -184,6 +184,17 @@ function mcp_sentinel_update_10003(): string {
 }
 
 /**
+ * Add audit_hash_key setting for HMAC-keyed audit hash chain.
+ */
+function mcp_sentinel_update_10004(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  if ($config->get('audit_hash_key') === NULL) {
+    $config->set('audit_hash_key', '')->save();
+  }
+  return 'Added audit_hash_key setting (empty = plain SHA-256 fallback; set to a Key entity ID to use HMAC-SHA256).';
+}
+
+/**
  * Implements hook_uninstall().
  */
 function mcp_sentinel_uninstall(): void {

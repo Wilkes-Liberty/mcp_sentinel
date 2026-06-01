@@ -8,11 +8,23 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Security
+- **HMAC-keyed audit hash chain:** the audit hash chain now uses
+  HMAC-SHA256 when `audit_hash_key` is set to a Key entity ID (plain SHA-256
+  is retained as a zero-config fallback). Set the key to a File or Environment
+  provider so the signing secret never appears in exported configuration.
+  `update_10004` adds the `audit_hash_key` setting to existing installs.
 - **Tamper-evident audit log (hash chain):** every audit row now stores a
-  `prev_hash` (the preceding row's hash) and `row_hash` (SHA-256 of
-  `prev_hash | canonical-JSON`). Any insertion, deletion, or modification of a
-  historical row breaks the chain; run `drush mcp-sentinel:audit-verify` to
-  detect it. `update_10003` adds the two columns to existing installs.
+  `prev_hash` (the preceding row's hash) and `row_hash` (HMAC-SHA256 or
+  SHA-256 of `prev_hash | canonical-JSON`). Any insertion, deletion, or
+  modification of a historical row breaks the chain; run
+  `drush mcp-sentinel:audit-verify` to detect it. `update_10003` adds the two
+  columns to existing installs.
+- **Full-column canonical:** the audit chain canonical now includes
+  `entity_label`, `ip_address`, and `user_agent` in fixed key order, so
+  post-hoc alteration of forensic columns also breaks the chain.
+- **Serialized chain writes:** the read-latest-then-insert critical section
+  in the audit logger is protected by Drupal's lock service to prevent
+  hash-chain races under concurrent writes.
 - MCP governance triggers on the **validated OAuth agent channel**
   (consumer/scope on the request's access token), not on role alone. An admin's
   direct cookie-session Drupal UI is never governed; only token-bearing agent

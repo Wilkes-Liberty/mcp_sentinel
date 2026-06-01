@@ -123,6 +123,16 @@ class McpSettingsForm extends ConfigFormBase {
       '#max' => 3650,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
+    $form['audit']['audit_hash_key'] = [
+      '#type'          => 'key_select',
+      '#title'         => $this->t('Audit hash signing key (HMAC-SHA256)'),
+      '#description'   => $this->t('Select a <a href=":url">Key</a> to sign the audit hash chain with HMAC-SHA256 instead of plain SHA-256. Recommended: use a File or Environment key provider so the secret never appears in exported configuration.', [
+        ':url' => '/admin/config/system/keys',
+      ]),
+      '#default_value' => $config->get('audit_hash_key') ?? '',
+      '#empty_option'  => $this->t('- None (plain SHA-256) -'),
+      '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
+    ];
 
     $form['webhooks'] = ['#type' => 'fieldset', '#title' => $this->t('HTTPS Webhooks')];
     $form['webhooks']['webhook_enabled'] = [
@@ -176,6 +186,7 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_enabled', (bool) $form_state->getValue('audit_enabled'))
       ->set('audit_log_reads', (bool) $form_state->getValue('audit_log_reads'))
       ->set('audit_retention_days', (int) $form_state->getValue('audit_retention_days'))
+      ->set('audit_hash_key', $form_state->getValue('audit_hash_key'))
       ->set('webhook_enabled', (bool) $form_state->getValue('webhook_enabled'))
       ->set('webhook_url', $form_state->getValue('webhook_url'))
       ->set('webhook_secret_key', $form_state->getValue('webhook_secret_key'))

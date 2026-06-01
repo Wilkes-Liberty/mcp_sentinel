@@ -12,6 +12,8 @@ services:
       - '@request_stack'
       - '@config.factory'
       - '@datetime.time'
+      - '@key.repository'
+      - '@lock'
 
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver
