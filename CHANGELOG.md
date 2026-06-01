@@ -7,6 +7,30 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Fixed
+- **DLP fail-open on PCRE runtime error:** `McpDlp::replaceMatches()` now
+  detects a NULL return from `preg_replace`/`preg_replace_callback` (e.g. on
+  a backtrack-limit hit) and returns the **original value unchanged** instead of
+  silently coercing NULL to `''`. A warning is logged to the `mcp_sentinel`
+  channel. Previously a PCRE error would blank the field value.
+- **DLP partial mode fully masks short matches:** in partial masking mode, a
+  match whose length is ≤ 4 characters (equal to `PARTIAL_KEEP`) is now
+  **fully replaced with `*` characters** instead of being returned verbatim.
+  The previous behaviour exposed the entire matched value — e.g. a 4-digit PIN
+  matched by a custom pattern would pass through unmasked. Matches longer than
+  4 characters are unaffected (last-4 semantics preserved).
+- **DLP custom-pattern UI (spec T6.1):** the settings form now exposes a
+  *Custom DLP patterns* textarea in the DLP fieldset. Operators enter one
+  pattern per line as `label|regex|mask` (mask is optional). The form validates
+  each regex using `McpDlp::wrapPattern()` before saving and rejects malformed
+  lines with a clear error message. Saving an empty textarea clears to `[]` and
+  falls back to the built-in defaults at runtime. A new `McpDlp::wrapPattern()`
+  public static helper ensures the form and the service always agree on the
+  exact delimiter convention.
+- **DLP `us_phone` regex matches no-separator format:** `(555)123-4567`
+  (closing area-code paren with no following space or separator) was previously
+  not matched. The separator after `)` is now optional (`[\s.\-]?`).
+
 ### Added
 - **DLP value-pattern redaction + partial masking (opt-in):** a new
   `McpDlp` service scans governed field values against configurable PII

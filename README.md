@@ -206,8 +206,24 @@ false`):
 
 ### Adding custom patterns
 
-Custom patterns are stored in the `dlp_patterns` config sequence. Each entry
-has three keys:
+Operators can configure custom patterns directly from the settings form:
+
+1. Go to **Configuration → Web services → MCP Sentinel**.
+2. Enable DLP and open the *Custom DLP patterns* textarea.
+3. Enter one pattern per line in the format `label|regex|mask` (`mask` is
+   optional and defaults to `*`). Example:
+
+   ```
+   employee_id|EMP-\d{6}|*
+   internal_ref|CUST-\d{8}
+   ```
+
+4. Save. Invalid regex lines are rejected with a validation error before saving.
+
+Leaving the textarea empty clears any custom patterns and falls back to the
+four built-in defaults (email, US phone, SSN, credit card) at runtime.
+
+Custom patterns can also be managed directly in `mcp_sentinel.settings.yml`:
 
 ```yaml
 dlp_patterns:

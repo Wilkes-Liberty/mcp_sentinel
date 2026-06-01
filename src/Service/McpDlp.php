@@ -101,7 +101,7 @@ final class McpDlp {
 
       // Wrap in '#...#i' delimiters (case-insensitive, '#' delimiter avoids
       // having to escape the common '/' character in URLs / emails).
-      $regex = '#' . $regex_body . '#i';
+      $regex = static::wrapPattern($regex_body);
 
       // Validate the regex before using it — preg_match() with '' returns FALSE
       // when the pattern is invalid. The '@' suppresses the PHP warning.
@@ -142,9 +142,10 @@ final class McpDlp {
     $config = $configFactory->get('mcp_sentinel.settings');
     $enabled = (bool) ($config->get('dlp_enabled') ?? FALSE);
     $mask_mode = (string) ($config->get('dlp_mask_mode') ?? 'redact');
-    $patterns = $config->get('dlp_patterns') ?? static::defaultPatterns();
-    // Coerce to an array in case config returns NULL.
-    if (!is_array($patterns)) {
+    $patterns = $config->get('dlp_patterns');
+    // Use default patterns when config is NULL (never configured) or an empty
+    // array (operator cleared the textarea, intending "use the built-in set").
+    if (!is_array($patterns) || $patterns === []) {
       $patterns = static::defaultPatterns();
     }
     return new static($enabled, $patterns, $mask_mode, $logger);
@@ -175,8 +176,9 @@ final class McpDlp {
       [
         'label' => 'us_phone',
         // Matches US phone numbers in common formats:
-        // 555-123-4567, (555) 123-4567, 555.123.4567, 555 123 4567.
-        'regex' => '\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}',
+        // 555-123-4567, (555) 123-4567, 555.123.4567, 555 123 4567,
+        // (555)123-4567 (no separator after closing paren).
+        'regex' => '\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]\d{4}',
         'mask'  => '*',
       ],
       [
@@ -195,7 +197,28 @@ final class McpDlp {
   }
 
   /**
+   * Wraps a bare PCRE pattern body in the '#...#i' delimiter form.
+   *
+   * Both the service (scan()) and the settings form (validateForm()) use this
+   * helper so that both always agree on the exact wrapped pattern string that
+   * will be passed to preg_match()/preg_replace().
+   *
+   * @param string $body
+   *   A PCRE pattern body WITHOUT delimiters.
+   *
+   * @return string
+   *   The pattern wrapped as '#body#i'.
+   */
+  public static function wrapPattern(string $body): string {
+    return '#' . $body . '#i';
+  }
+
+  /**
    * Applies the replacement callback to all matches of $regex in $value.
+   *
+   * Fails open on PCRE errors: if preg_replace/preg_replace_callback returns
+   * NULL or preg_last_error() is non-zero, the original value is returned
+   * unchanged and a warning is logged so callers never silently blank a field.
    *
    * @param string $value
    *   The input string.
@@ -203,43 +226,65 @@ final class McpDlp {
    *   A complete PCRE regex including delimiters.
    *
    * @return string
-   *   The string with matches replaced according to $maskMode.
+   *   The string with matches replaced according to $maskMode, or the original
+   *   $value when a PCRE runtime error occurs.
    */
   private function replaceMatches(string $value, string $regex): string {
     if ($this->maskMode === 'partial') {
-      return (string) preg_replace_callback(
+      $result = preg_replace_callback(
         $regex,
         function (array $matches): string {
           return $this->partialMask($matches[0]);
         },
         $value,
       );
+      if ($result === NULL || preg_last_error() !== PREG_NO_ERROR) {
+        if ($this->logger !== NULL) {
+          $this->logger->warning(
+            'MCP Sentinel DLP: PCRE error (@code) during partial-mask replacement for pattern @regex; returning original value unchanged.',
+            ['@code' => preg_last_error(), '@regex' => $regex],
+          );
+        }
+        return $value;
+      }
+      return $result;
     }
 
     // Default: 'redact' — replace the full match with the placeholder.
-    return (string) preg_replace($regex, self::REDACT_PLACEHOLDER, $value);
+    $result = preg_replace($regex, self::REDACT_PLACEHOLDER, $value);
+    if ($result === NULL || preg_last_error() !== PREG_NO_ERROR) {
+      if ($this->logger !== NULL) {
+        $this->logger->warning(
+          'MCP Sentinel DLP: PCRE error (@code) during redact replacement for pattern @regex; returning original value unchanged.',
+          ['@code' => preg_last_error(), '@regex' => $regex],
+        );
+      }
+      return $value;
+    }
+    return $result;
   }
 
   /**
    * Masks all but the last PARTIAL_KEEP characters of a matched string.
    *
-   * When the match is shorter than or equal to PARTIAL_KEEP characters,
-   * the full match is returned unmasked (there is nothing to mask).
-   * This avoids a degenerate case where a very short match produces an
-   * empty mask prefix that adds no privacy benefit.
+   * When the match length is shorter than or equal to PARTIAL_KEEP characters,
+   * the ENTIRE match is masked with '*' so that a short sensitive value (e.g.
+   * a 4-digit PIN) is never exposed unmasked. The "keep last 4" semantic only
+   * applies when there are more than 4 characters to mask.
    *
    * @param string $match
    *   The full matched string.
    *
    * @return string
    *   The partially-masked string (e.g. '************4567' for a 16-char match
-   *   in partial mode with PARTIAL_KEEP=4).
+   *   in partial mode with PARTIAL_KEEP=4, or '****' for a 4-char match).
    */
   private function partialMask(string $match): string {
     $len = strlen($match);
     $keep = self::PARTIAL_KEEP;
     if ($len <= $keep) {
-      return $match;
+      // Fully mask short matches — revealing a ≤4-char value is 100% exposure.
+      return str_repeat('*', $len);
     }
     $mask_len = $len - $keep;
     return str_repeat('*', $mask_len) . substr($match, -$keep);

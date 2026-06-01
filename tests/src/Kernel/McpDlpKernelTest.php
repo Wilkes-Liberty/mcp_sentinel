@@ -380,6 +380,70 @@ final class McpDlpKernelTest extends KernelTestBase {
   }
 
   /**
+   * Fix C: custom patterns saved as dlp_patterns config are honoured by scan().
+   *
+   * Saves a custom pattern directly into config (mimicking what the settings
+   * form submitForm() now does) and verifies that McpDlp picks it up after a
+   * container rebuild.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpDlp::scan
+   */
+  public function testCustomPatternPersistsAndIsApplied(): void {
+    // Store a custom pattern via config (as the form would do).
+    $this->config('mcp_sentinel.settings')
+      ->set('dlp_enabled', TRUE)
+      ->set('dlp_mask_mode', 'redact')
+      ->set('dlp_patterns', [
+        [
+          'label' => 'employee_id',
+          'regex' => 'EMP-\d{6}',
+          'mask'  => '*',
+        ],
+      ])
+      ->save();
+    $this->container->get('kernel')->rebuildContainer();
+    // @phpstan-ignore assign.propertyType
+    $this->container = $this->container->get('kernel')->getContainer();
+
+    /** @var \Drupal\mcp_sentinel\Service\McpDlp $dlp */
+    $dlp = $this->container->get('mcp_sentinel.dlp');
+
+    // The custom pattern must fire.
+    $this->assertSame('[REDACTED]', $dlp->scan('EMP-123456'));
+    // The default email pattern must NOT fire because we replaced the patterns.
+    $this->assertSame(
+      'user@example.com',
+      $dlp->scan('user@example.com'),
+      'Custom patterns replace defaults; the email pattern must not apply.',
+    );
+  }
+
+  /**
+   * Fix C: an empty dlp_patterns list falls back to the default patterns.
+   *
+   * When the operator saves an empty textarea, dlp_patterns is stored as []
+   * and createFromConfig() must fall back to defaultPatterns().
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpDlp::scan
+   */
+  public function testEmptyPatternsConfigFallsBackToDefaults(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('dlp_enabled', TRUE)
+      ->set('dlp_mask_mode', 'redact')
+      ->set('dlp_patterns', [])
+      ->save();
+    $this->container->get('kernel')->rebuildContainer();
+    // @phpstan-ignore assign.propertyType
+    $this->container = $this->container->get('kernel')->getContainer();
+
+    /** @var \Drupal\mcp_sentinel\Service\McpDlp $dlp */
+    $dlp = $this->container->get('mcp_sentinel.dlp');
+
+    // Fallback to defaults: the email pattern must be active.
+    $this->assertSame('[REDACTED]', $dlp->scan('user@example.com'));
+  }
+
+  /**
    * ComputeChangeDiff() with an active McpDlp masks emails in returned values.
    *
    * Exercises the DLP path directly (no full presave), verifying that

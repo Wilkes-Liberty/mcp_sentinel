@@ -141,15 +141,19 @@ final class McpDlpTest extends UnitTestCase {
   /**
    * Data provider: common US phone formats.
    *
+   * Includes a format with no separator after the area-code closing paren
+   * (Fix D: the updated regex makes the post-paren separator optional).
+   *
    * @return array<string, array<int, string>>
    *   Keyed rows of phone format strings.
    */
   public static function phoneFormatProvider(): array {
     return [
-      'dashes'         => ['555-123-4567'],
-      'dots'           => ['555.123.4567'],
-      'spaces'         => ['555 123 4567'],
-      'parentheses'    => ['(555) 123-4567'],
+      'dashes'                          => ['555-123-4567'],
+      'dots'                            => ['555.123.4567'],
+      'spaces'                          => ['555 123 4567'],
+      'parentheses'                     => ['(555) 123-4567'],
+      'parentheses_no_separator'        => ['(555)123-4567'],
     ];
   }
 
@@ -303,10 +307,11 @@ final class McpDlpTest extends UnitTestCase {
   }
 
   /**
-   * Partial mask on a short match (<=4 chars) returns the match unchanged.
+   * Partial mask on a short match (<=4 chars) fully masks the match.
    *
-   * When the match is shorter than or equal to 4 characters, all characters
-   * fall within the "keep last 4" window, so there is nothing to mask.
+   * Fix B: a ≤4-char match must never be returned unmasked — returning the
+   * full match would expose a 100%-unmasked value (e.g. a 4-digit PIN).
+   * Instead, the entire match is replaced with '*' characters.
    *
    * @covers ::scan
    */
@@ -317,9 +322,91 @@ final class McpDlpTest extends UnitTestCase {
         ['label' => 'tiny', 'regex' => 'XY', 'mask' => '*'],
       ],
     );
-    // 'XY' is 2 chars: len <= PARTIAL_KEEP, so the match passes through.
+    // 'XY' is 2 chars (≤ PARTIAL_KEEP=4): must be fully masked as '**'.
     $result = $dlp->scan('before XY after');
-    $this->assertStringContainsString('XY', $result);
+    $this->assertStringNotContainsString('XY', $result, 'Short match must be fully masked, not returned verbatim.');
+    $this->assertStringContainsString('**', $result, 'Short match must be replaced with asterisks.');
+  }
+
+  /**
+   * Partial mask on an exactly-4-char match fully masks it.
+   *
+   * A 4-char match equals PARTIAL_KEEP, so "keep last 4" would expose the
+   * entire value. It must be fully masked.
+   *
+   * @covers ::scan
+   */
+  public function testPartialMaskExactlyFourCharsIsFullyMasked(): void {
+    $dlp = $this->makeDlp(
+      mask_mode: 'partial',
+      patterns: [
+        // A 4-digit PIN pattern.
+        ['label' => 'pin', 'regex' => '\bPIN\d{4}\b', 'mask' => '*'],
+      ],
+    );
+    // 'PIN1234' is 7 chars — last 4 are '1234', mask 3.
+    $result7 = $dlp->scan('PIN1234');
+    $this->assertStringEndsWith('1234', $result7);
+
+    // Match that is exactly 4 chars must be fully masked.
+    $dlp4 = $this->makeDlp(
+      mask_mode: 'partial',
+      patterns: [
+        ['label' => 'four', 'regex' => 'ABCD', 'mask' => '*'],
+      ],
+    );
+    $result4 = $dlp4->scan('ABCD');
+    $this->assertSame('****', $result4, 'A 4-char match must be fully masked (not returned verbatim).');
+  }
+
+  /**
+   * Fix A: a PCRE NULL result (simulated) must never replace the value with ''.
+   *
+   * This test verifies the fail-open contract by checking that no default
+   * pattern ever produces an empty-string output for a non-empty input.
+   * Reliably triggering a PCRE backtrack-limit crash inside PHPUnit is not
+   * practical (it would affect the test runner itself), so we assert the
+   * functional invariant: scan() never returns '' for a non-empty input.
+   *
+   * NOTE: A direct test of the NULL-result branch would require injecting a
+   * mock preg_replace result; that is impractical for a final class without
+   * a seam. The production guard (lines in replaceMatches()) is verified by
+   * code review and the invariant assertion below.
+   *
+   * @covers ::scan
+   */
+  public function testScanNeverReturnsEmptyForNonEmptyInput(): void {
+    $dlp = $this->makeDlp(mask_mode: 'redact');
+    $inputs = [
+      'user@example.com',
+      '555-123-4567',
+      '123-45-6789',
+      '4111-1111-1111-1111',
+      'plain text with no PII at all',
+    ];
+    foreach ($inputs as $input) {
+      $this->assertNotSame(
+        '',
+        $dlp->scan($input),
+        "scan() must never return '' for non-empty input: '$input'",
+      );
+    }
+  }
+
+  /**
+   * Fix C: wrapPattern() returns the expected '#body#i' string.
+   *
+   * Verifies the public static helper that the form uses to validate
+   * custom patterns before saving.
+   *
+   * @covers ::wrapPattern
+   */
+  public function testWrapPattern(): void {
+    $this->assertSame(
+      '#[a-z]+@[a-z]+\.[a-z]{2,}#i',
+      McpDlp::wrapPattern('[a-z]+@[a-z]+\.[a-z]{2,}'),
+    );
+    $this->assertSame('#EMP-\d{6}#i', McpDlp::wrapPattern('EMP-\d{6}'));
   }
 
 }

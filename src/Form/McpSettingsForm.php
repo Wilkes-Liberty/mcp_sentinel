@@ -8,6 +8,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
+use Drupal\mcp_sentinel\Service\McpDlp;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -187,6 +188,30 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
 
+    // Build the patterns textarea default value from stored config.
+    $stored_patterns = $config->get('dlp_patterns');
+    $patterns_lines = '';
+    if (is_array($stored_patterns) && $stored_patterns !== []) {
+      $pattern_rows = [];
+      foreach ($stored_patterns as $p) {
+        $label = (string) ($p['label'] ?? '');
+        $regex = (string) ($p['regex'] ?? '');
+        $mask = (string) ($p['mask'] ?? '');
+        if ($label !== '' && $regex !== '') {
+          $pattern_rows[] = $mask !== '' ? "$label|$regex|$mask" : "$label|$regex";
+        }
+      }
+      $patterns_lines = implode("\n", $pattern_rows);
+    }
+    $form['dlp']['dlp_patterns'] = [
+      '#type'          => 'textarea',
+      '#title'         => $this->t('Custom DLP patterns'),
+      '#description'   => $this->t('One pattern per line: <code>label|regex|mask</code> (<code>mask</code> is optional, defaults to <code>*</code>). The <code>regex</code> is a PCRE body WITHOUT delimiters — wrapped in <code>#…#i</code> automatically. Example: <code>employee_id|EMP-\d{6}|*</code>. An empty field falls back to the four built-in defaults (email, US phone, SSN, credit card). Invalid regex lines are rejected.'),
+      '#default_value' => $patterns_lines,
+      '#rows'          => 6,
+      '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
+    ];
+
     $form['webhooks'] = ['#type' => 'fieldset', '#title' => $this->t('HTTPS Webhooks')];
     $form['webhooks']['webhook_enabled'] = [
       '#type'          => 'checkbox',
@@ -218,6 +243,38 @@ class McpSettingsForm extends ConfigFormBase {
    */
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     parent::validateForm($form, $form_state);
+
+    // Validate the DLP patterns textarea.
+    $raw_patterns = (string) ($form_state->getValue('dlp_patterns') ?? '');
+    $lines = array_filter(array_map('trim', explode("\n", $raw_patterns)));
+    foreach ($lines as $line_number => $line) {
+      $parts = explode('|', $line, 3);
+      $label = trim($parts[0]);
+      $regex = trim($parts[1] ?? '');
+      if ($label === '' || $regex === '') {
+        $form_state->setErrorByName(
+          'dlp_patterns',
+          $this->t(
+            'DLP pattern line @n is invalid: each line must contain at least <code>label|regex</code>.',
+            ['@n' => (int) $line_number + 1],
+          ),
+        );
+        continue;
+      }
+      // Validate the regex by running a test match with the same wrapped form
+      // the service uses at runtime.
+      $wrapped = McpDlp::wrapPattern($regex);
+      if (@preg_match($wrapped, '') === FALSE) {
+        $form_state->setErrorByName(
+          'dlp_patterns',
+          $this->t(
+            'DLP pattern "@label" has an invalid regular expression: <code>@regex</code>.',
+            ['@label' => $label, '@regex' => $regex],
+          ),
+        );
+      }
+    }
+
     $url = $form_state->getValue('webhook_url');
     if ($form_state->getValue('webhook_enabled') && $url && !str_starts_with($url, 'https://')) {
       $form_state->setErrorByName('webhook_url', $this->t('Webhook URL must use HTTPS.'));
@@ -230,6 +287,25 @@ class McpSettingsForm extends ConfigFormBase {
   public function submitForm(array &$form, FormStateInterface $form_state): void {
     $split = static fn (string $v): array => array_values(array_filter(array_map('trim', explode("\n", $v))));
 
+    // Parse the DLP patterns textarea into the sequence-of-maps config shape.
+    $raw_patterns = (string) ($form_state->getValue('dlp_patterns') ?? '');
+    $lines = array_filter(array_map('trim', explode("\n", $raw_patterns)));
+    $dlp_patterns = [];
+    foreach ($lines as $line) {
+      $parts = explode('|', $line, 3);
+      $label = trim($parts[0]);
+      $regex = trim($parts[1] ?? '');
+      $mask  = trim($parts[2] ?? '*');
+      if ($label !== '' && $regex !== '') {
+        $dlp_patterns[] = [
+          'label' => $label,
+          'regex' => $regex,
+          'mask'  => $mask !== '' ? $mask : '*',
+        ];
+      }
+    }
+    // An empty textarea clears to [] (falls back to default patterns at runtime
+    // via McpDlp::createFromConfig, which calls defaultPatterns() when empty).
     $this->config('mcp_sentinel.settings')
       ->set('enabled', (bool) $form_state->getValue('enabled'))
       ->set('governed_roles', array_values(array_filter($form_state->getValue('governed_roles'))))
@@ -244,6 +320,7 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
       ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
+      ->set('dlp_patterns', $dlp_patterns)
       ->set('webhook_enabled', (bool) $form_state->getValue('webhook_enabled'))
       ->set('webhook_url', $form_state->getValue('webhook_url'))
       ->set('webhook_secret_key', $form_state->getValue('webhook_secret_key'))
