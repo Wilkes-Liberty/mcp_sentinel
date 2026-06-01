@@ -8,6 +8,28 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Fixed
+- **Approval executor hardening (`mcp_sentinel_approval`):** several replay and
+  identity-safety guards on `McpApprovalExecutor`.
+  - `approve()`/`deny()` now throw if the request is not pending, so a direct
+    service caller cannot re-decide an already-decided request (no double
+    execute, no duplicate audit row).
+  - `approve()` validates the stored target entity type via `hasDefinition()`
+    before loading storage; an unknown/uninstalled type is recorded as
+    approved-but-not-executed (with a `reason`) instead of throwing a fatal and
+    stranding the request pending.
+  - When the approver lacks delete access on a still-present target, the request
+    now **stays pending** and the UI shows an error so an authorized approver can
+    retry — it is no longer mislabelled as approved. Genuinely unexecutable
+    cases (target already gone, unknown type, UUID mismatch) are recorded as
+    approved with `executed=false` plus a truthful `reason`/`note`. Audit
+    metadata now always includes `executed` and `decided_by`.
+  - The queued target is bound by **UUID** as well as its integer id: if the id
+    was reused by a different entity before approval, execution is blocked
+    (`reason: uuid_mismatch`) rather than deleting the wrong entity.
+- **Bulk tool fail-closed dispatch:** in `McpBulkOperationsTool`, a throwable
+  from the destructive-op event dispatch is now treated as a veto (the id is
+  reported as *queued*), so a dispatcher-level error can never let a gated
+  delete proceed or be miscounted as failed.
 - **DLP fail-open on PCRE runtime error:** `McpDlp::replaceMatches()` now
   detects a NULL return from `preg_replace`/`preg_replace_callback` (e.g. on
   a backtrack-limit hit) and returns the **original value unchanged** instead of

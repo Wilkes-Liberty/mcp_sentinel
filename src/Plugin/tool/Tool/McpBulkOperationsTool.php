@@ -163,7 +163,16 @@ final class McpBulkOperationsTool extends ToolBase {
       // before, keeping the base module fully decoupled.
       if ($operation === 'delete') {
         $event = new McpDestructiveOpEvent($entity, $operation, $this->currentUser);
-        $this->eventDispatcher->dispatch($event, McpDestructiveOpEvent::NAME);
+        try {
+          $this->eventDispatcher->dispatch($event, McpDestructiveOpEvent::NAME);
+        }
+        catch (\Throwable $e) {
+          // Fail closed: a dispatcher-level error must never let a gated delete
+          // slip through. Treat it as a veto and report the id as queued (not
+          // failed), keeping behaviour consistent with an explicit veto.
+          $results['queued'][$id] = (string) $this->t('queued for approval (dispatcher error: @msg)', ['@msg' => $e->getMessage()]);
+          continue;
+        }
         if ($event->isVetoed()) {
           $results['queued'][$id] = (string) $event->getVetoReason();
           continue;

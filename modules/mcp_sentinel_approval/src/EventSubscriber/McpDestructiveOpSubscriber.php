@@ -57,9 +57,13 @@ final class McpDestructiveOpSubscriber implements EventSubscriberInterface {
     }
 
     $entity = $event->getEntity();
+    // Bind the target by UUID as well as its int id so a later approval cannot
+    // delete a different entity that reused the same auto-increment id after
+    // the original was removed out-of-band. See McpApprovalExecutor::approve().
     $payload = [
       'entity_type' => $entity->getEntityTypeId(),
       'entity_id'   => (string) $entity->id(),
+      'entity_uuid' => (string) $entity->uuid(),
       'label'       => (string) $entity->label(),
       'operation'   => $event->getOperation(),
     ];

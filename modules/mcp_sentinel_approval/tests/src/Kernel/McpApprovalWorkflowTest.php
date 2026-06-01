@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
 use Drupal\Core\Database\Statement\FetchAs;
+use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
@@ -81,6 +82,12 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     $role->grantPermission('delete any article content');
     $role->grantPermission('access mcp sentinel context');
     $role->save();
+
+    // An approver who may review the queue but lacks delete access on targets.
+    $weak = Role::create(['id' => 'weak_approver', 'label' => 'Weak approver']);
+    $weak->grantPermission('access mcp sentinel context');
+    $weak->grantPermission('approve mcp sentinel operations');
+    $weak->save();
 
     McpPolicyProfile::create([
       'id'           => 'agent_delete',
@@ -205,6 +212,198 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
       ->decodeMetadata((string) end($rows)['metadata']);
     $this->assertSame('approved', $meta['decision']);
     $this->assertSame((int) $request->id(), $meta['request_id']);
+    // Audit truthfully records a successful execution and the approver uid.
+    $this->assertTrue($meta['executed']);
+    $this->assertSame((int) $this->container->get('current_user')->id(), $meta['decided_by']);
+    $this->assertArrayNotHasKey('reason', $meta);
+  }
+
+  /**
+   * Approving an already-decided request throws and does not re-execute.
+   *
+   * Guards against a direct caller replaying a decision (Fix 1).
+   */
+  public function testDoubleApproveThrowsAndDoesNotReExecute(): void {
+    $this->setGovernedCurrentUser();
+
+    $node = Node::create(['type' => 'article', 'title' => 'Double approve']);
+    $node->save();
+
+    $this->runBulkDelete((int) $node->id());
+    $storage = $this->container->get('entity_type.manager')
+      ->getStorage('mcp_approval_request');
+    $requests = $storage->loadMultiple();
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
+    $request = reset($requests);
+
+    $executor = $this->container->get('mcp_sentinel_approval.executor');
+    $first = $executor->approve($request);
+    $this->assertTrue($first['executed']);
+
+    $auditCountBefore = (int) $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->condition('operation', 'approval_decision')
+      ->countQuery()->execute()->fetchField();
+
+    // Reload to a non-pending state, then attempt a second decision.
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $reloaded */
+    $reloaded = $storage->loadUnchanged($request->id());
+    $this->expectException(\LogicException::class);
+    try {
+      $executor->approve($reloaded);
+    }
+    finally {
+      // No second audit row was written by the rejected re-decision.
+      $auditCountAfter = (int) $this->container->get('database')
+        ->select('mcp_sentinel_audit_log', 'l')
+        ->condition('operation', 'approval_decision')
+        ->countQuery()->execute()->fetchField();
+      $this->assertSame($auditCountBefore, $auditCountAfter);
+    }
+  }
+
+  /**
+   * Access-denied on the target leaves the request pending and unaudited.
+   *
+   * Fix 3: a recoverable block must not be recorded as an approval.
+   */
+  public function testAccessDeniedKeepsPendingAndWritesNoApprovedAudit(): void {
+    // The governed agent is created first (uid 1) so it can act on node access
+    // grants when queueing the delete.
+    $this->setGovernedCurrentUser();
+
+    $node = Node::create(['type' => 'article', 'title' => 'No delete access']);
+    $node->save();
+    $nid = (int) $node->id();
+
+    $this->runBulkDelete($nid);
+    $storage = $this->container->get('entity_type.manager')
+      ->getStorage('mcp_approval_request');
+    $requests = $storage->loadMultiple();
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
+    $request = reset($requests);
+
+    // Create and switch to an approver WITHOUT delete access on the target.
+    // Drop to anonymous while creating the user so the creation is not itself
+    // governed/audited (avoids logging an unrelated row).
+    $current = $this->container->get('current_user');
+    $current->setAccount(new AnonymousUserSession());
+    $weak = $this->createUser([], NULL, FALSE, ['roles' => ['weak_approver']]);
+    $current->setAccount($weak);
+
+    $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
+    $this->assertTrue($result['error']);
+    $this->assertFalse($result['executed']);
+
+    // Target survives and request stays pending.
+    $this->assertNotNull(
+      $this->container->get('entity_type.manager')->getStorage('node')->load($nid),
+    );
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $reloaded */
+    $reloaded = $storage->loadUnchanged($request->id());
+    $this->assertTrue($reloaded->isPending());
+
+    // No "approved" audit row was written.
+    $approved = (int) $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->condition('operation', 'approval_decision')
+      ->countQuery()->execute()->fetchField();
+    $this->assertSame(0, $approved);
+  }
+
+  /**
+   * A UUID mismatch (id reuse) blocks deletion of the wrong entity.
+   *
+   * Fix 4: bind the target by UUID so a reused auto-increment id is not
+   * silently deleted.
+   */
+  public function testUuidMismatchBlocksDeletion(): void {
+    $this->setGovernedCurrentUser();
+
+    $node = Node::create(['type' => 'article', 'title' => 'Original']);
+    $node->save();
+    $nid = (int) $node->id();
+
+    $this->runBulkDelete($nid);
+    $storage = $this->container->get('entity_type.manager')
+      ->getStorage('mcp_approval_request');
+    $requests = $storage->loadMultiple();
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
+    $request = reset($requests);
+
+    // Simulate the original being deleted and a different entity reusing the id
+    // by rewriting the stored payload UUID to one that will not match.
+    $payload = $request->getPayload();
+    $payload['entity_uuid'] = 'deadbeef-0000-0000-0000-000000000000';
+    $request->set('payload', (string) json_encode($payload));
+    $request->save();
+
+    $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
+    $this->assertFalse($result['executed']);
+    $this->assertFalse($result['error']);
+
+    // The entity now under that id was NOT deleted.
+    $this->assertNotNull(
+      $this->container->get('entity_type.manager')->getStorage('node')->load($nid),
+      'A UUID mismatch must not delete the entity occupying the reused id.',
+    );
+
+    // Request is decided (approved, not executed) with a uuid_mismatch reason.
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $reloaded */
+    $reloaded = $storage->loadUnchanged($request->id());
+    $this->assertSame(McpApprovalRequestInterface::STATUS_APPROVED, $reloaded->getStatus());
+
+    $rows = $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->fields('l')
+      ->condition('operation', 'approval_decision')
+      ->execute()
+      ->fetchAll(FetchAs::Associative);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) end($rows)['metadata']);
+    $this->assertFalse($meta['executed']);
+    $this->assertSame('uuid_mismatch', $meta['reason']);
+  }
+
+  /**
+   * An unknown/uninstalled entity type does not fatal; it blocks cleanly.
+   *
+   * Fix 2: getStorage() is guarded by hasDefinition().
+   */
+  public function testUnknownEntityTypeIsHandledCleanly(): void {
+    $this->setGovernedCurrentUser();
+
+    $storage = $this->container->get('entity_type.manager')
+      ->getStorage('mcp_approval_request');
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
+    $request = $storage->create([
+      'requested_by' => (int) $this->container->get('current_user')->id(),
+      'operation'    => 'delete',
+      'entity_type'  => 'no_such_entity_type',
+      'entity_id'    => '1',
+      'payload'      => (string) json_encode(['entity_type' => 'no_such_entity_type', 'entity_id' => '1']),
+      'status'       => McpApprovalRequestInterface::STATUS_PENDING,
+    ]);
+    $request->save();
+
+    $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
+    $this->assertFalse($result['executed']);
+    $this->assertFalse($result['error']);
+
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $reloaded */
+    $reloaded = $storage->loadUnchanged($request->id());
+    $this->assertSame(McpApprovalRequestInterface::STATUS_APPROVED, $reloaded->getStatus());
+
+    $rows = $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->fields('l')
+      ->condition('operation', 'approval_decision')
+      ->execute()
+      ->fetchAll(FetchAs::Associative);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) end($rows)['metadata']);
+    $this->assertFalse($meta['executed']);
+    $this->assertStringContainsString('unknown_entity_type', (string) $meta['reason']);
   }
 
   /**

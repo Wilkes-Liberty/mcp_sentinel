@@ -114,10 +114,20 @@ final class McpApprovalDecisionForm extends ConfirmFormBase {
     }
     else {
       $result = $this->executor->approve($this->request);
-      $this->messenger()->addStatus($this->t('Request #@id approved. @msg', [
-        '@id' => $this->request->id(),
-        '@msg' => $result['message'],
-      ]));
+      if (!empty($result['error'])) {
+        // Recoverable block (e.g. approver lacks delete access): the request
+        // stays pending so an authorized approver can retry.
+        $this->messenger()->addError($this->t('Request #@id not approved. @msg', [
+          '@id' => $this->request->id(),
+          '@msg' => $result['message'],
+        ]));
+      }
+      else {
+        $this->messenger()->addStatus($this->t('Request #@id approved. @msg', [
+          '@id' => $this->request->id(),
+          '@msg' => $result['message'],
+        ]));
+      }
     }
 
     $form_state->setRedirectUrl($this->getCancelUrl());
