@@ -11,6 +11,7 @@
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Session\AccountInterface;
@@ -20,18 +21,38 @@ use Drupal\Core\Session\AccountInterface;
  */
 function mcp_sentinel_entity_presave(EntityInterface $entity): void {
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
-  if ($resolver->isGoverned()) {
-    /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
-    $logger = \Drupal::service('mcp_sentinel.audit_logger');
-    $logger->log('entity_save', [
-      'entity_type' => $entity->getEntityTypeId(),
-      'bundle'      => $entity->bundle(),
-      'id'          => $entity->id() ?: '(new)',
-      'label'       => $entity->label(),
-      'operation'   => $entity->isNew() ? 'create' : 'update',
-    ]);
-    \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
+  if (!$resolver->isGoverned()) {
+    return;
   }
+
+  /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
+  $logger = \Drupal::service('mcp_sentinel.audit_logger');
+
+  $metadata = [
+    'entity_type' => $entity->getEntityTypeId(),
+    'bundle'      => $entity->bundle(),
+    'id'          => $entity->id() ?: '(new)',
+    'label'       => $entity->label(),
+    'operation'   => $entity->isNew() ? 'create' : 'update',
+  ];
+
+  // For updates on fieldable entities, compute a redaction-aware change diff
+  // and attach it to the metadata under a 'changes' key so the audit row
+  // captures exactly what was modified.
+  if (!$entity->isNew()
+    && $entity instanceof FieldableEntityInterface
+    && $entity->getOriginal() !== NULL
+  ) {
+    $profile = $resolver->resolve();
+    $redacted = $profile !== NULL ? $profile->getRedactedFields() : [];
+    $diff = $logger->computeChangeDiff($entity, $redacted);
+    if ($diff !== []) {
+      $metadata['changes'] = $diff;
+    }
+  }
+
+  $logger->log('entity_save', $metadata);
+  \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
 }
 
 /**

@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\key\KeyRepositoryInterface;
@@ -34,6 +35,16 @@ class McpAuditLogger {
    * Lock name used to serialize the read-latest-then-insert critical section.
    */
   private const CHAIN_LOCK = 'mcp_sentinel_audit_chain';
+
+  /**
+   * Maximum number of changed fields recorded in a single change diff.
+   */
+  private const DIFF_MAX_FIELDS = 50;
+
+  /**
+   * Maximum byte length of each field value string in the change diff.
+   */
+  private const DIFF_MAX_VALUE_LENGTH = 255;
 
   /**
    * Constructs an McpAuditLogger.
@@ -242,6 +253,130 @@ class McpAuditLogger {
     }
     $decoded = json_decode($stored, TRUE);
     return is_array($decoded) ? $decoded : [];
+  }
+
+  /**
+   * Computes a redaction-aware change diff for an entity update.
+   *
+   * Compares each field on $entity against the same field on $entity->original,
+   * recording only fields whose values genuinely changed. Fields listed in
+   * $redacted_fields are recorded with '[REDACTED]' for both old and new values
+   * so that sensitive data is never written to the audit log. Internal Drupal
+   * fields (those whose names begin with 'revision_' or are in the excluded-
+   * field list) are skipped. The diff is capped at DIFF_MAX_FIELDS entries and
+   * each serialized value is capped at DIFF_MAX_VALUE_LENGTH bytes.
+   *
+   * This method is intentionally public so it can be exercised in isolation by
+   * kernel tests without triggering a full presave flow.
+   *
+   * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
+   *   The entity being saved. Must have a populated $entity->original.
+   * @param string[] $redacted_fields
+   *   Field machine names whose values must never appear in the diff.
+   *
+   * @return array<string, array{old: string, new: string}>
+   *   A map of changed field names to their old/new string representations.
+   *   Returns an empty array when $entity->original is absent or the entity
+   *   is new.
+   */
+  public function computeChangeDiff(FieldableEntityInterface $entity, array $redacted_fields): array {
+    // getOriginal() is set by Drupal core during presave for updates only.
+    // isNew() check guards against entities that have no original yet.
+    if ($entity->isNew()) {
+      return [];
+    }
+
+    $original = $entity->getOriginal();
+    if (!$original instanceof FieldableEntityInterface) {
+      return [];
+    }
+
+    // Fields that should never appear in the diff because they carry
+    // Drupal-internal state rather than content authored by a governed agent.
+    $skip_fields = [
+      'vid',
+      'revision_timestamp',
+      'revision_uid',
+      'revision_log',
+      'revision_translation_affected',
+      'default_langcode',
+      'content_translation_source',
+      'content_translation_outdated',
+      'content_translation_uid',
+    ];
+
+    $diff = [];
+    $field_definitions = $entity->getFieldDefinitions();
+    foreach ($field_definitions as $field_name => $definition) {
+      if (count($diff) >= self::DIFF_MAX_FIELDS) {
+        break;
+      }
+
+      // Skip internal / revision bookkeeping fields.
+      if (in_array($field_name, $skip_fields, TRUE)) {
+        continue;
+      }
+
+      // Fetch raw field values from both versions.
+      $new_value = $entity->get($field_name)->getValue();
+      $old_value = $original->get($field_name)->getValue();
+
+      // Redacted field: compare and record sentinel strings, never log
+      // actual values. For redacted fields we still need to detect a change
+      // so we compute the string representations for comparison only, but
+      // always store '[REDACTED]'.
+      if (in_array($field_name, $redacted_fields, TRUE)) {
+        $new_str = $this->stringifyFieldValue($new_value);
+        $old_str = $this->stringifyFieldValue($old_value);
+        if ($new_str !== $old_str) {
+          $diff[$field_name] = ['old' => '[REDACTED]', 'new' => '[REDACTED]'];
+        }
+        continue;
+      }
+
+      // Stringify both values and compare the representations. This avoids
+      // spurious diffs caused by PHP type differences between a freshly-
+      // created entity (PHP-typed integers/booleans) and the original entity
+      // loaded from the database (where Drupal's typed-data layer normalises
+      // values during the round-trip).
+      $new_str = $this->stringifyFieldValue($new_value);
+      $old_str = $this->stringifyFieldValue($old_value);
+      if ($new_str === $old_str) {
+        continue;
+      }
+
+      $diff[$field_name] = ['old' => $old_str, 'new' => $new_str];
+    }
+
+    return $diff;
+  }
+
+  /**
+   * Converts a raw field value array to a capped string for the change diff.
+   *
+   * Single-item single-property arrays (e.g. string fields) are unwrapped to
+   * their scalar value for readability. Everything else is JSON-encoded so the
+   * representation is always a valid, deterministic string.
+   *
+   * @param mixed $value
+   *   The raw value returned by FieldItemListInterface::getValue().
+   *
+   * @return string
+   *   A string representation capped at DIFF_MAX_VALUE_LENGTH bytes.
+   */
+  private function stringifyFieldValue(mixed $value): string {
+    if (!is_array($value)) {
+      $str = (string) $value;
+    }
+    elseif (count($value) === 1 && count($value[0]) === 1) {
+      // Single-delta, single-property field (e.g. title, body summary).
+      $str = (string) reset($value[0]);
+    }
+    else {
+      $str = (string) json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    return substr($str, 0, self::DIFF_MAX_VALUE_LENGTH);
   }
 
   /**

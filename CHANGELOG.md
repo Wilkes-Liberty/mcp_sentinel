@@ -53,6 +53,13 @@ stable release is tagged.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
 ### Added
+- **Redaction-aware change diffs in the audit log:** governed entity updates now
+  include a `changes` map (`{field: {old, new}}`) in the audit metadata,
+  capturing exactly what changed. Fields listed in the resolved policy profile's
+  `redacted_fields` are stored as `[REDACTED]` (both old and new values), so
+  sensitive field values never appear in the audit trail. Unchanged fields and
+  internal revision-bookkeeping fields are omitted. Values are capped at 255
+  characters and at most 50 fields are recorded per event.
 - `McpOauthContext` service (`mcp_sentinel.oauth_context`) — reads the
   server-validated OAuth agent channel (consumer `client_id` + token scopes)
   for the current request. Single seam between MCP Sentinel and simple_oauth.
