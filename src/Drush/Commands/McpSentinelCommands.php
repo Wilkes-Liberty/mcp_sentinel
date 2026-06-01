@@ -126,4 +126,26 @@ final class McpSentinelCommands extends DrushCommands {
     return self::EXIT_SUCCESS;
   }
 
+  /**
+   * Verify the tamper-evident hash chain of the audit log.
+   *
+   * Walks all audit rows in insertion order, recomputing each row's SHA-256
+   * hash from its stored prev_hash and canonical content. Prints OK if the
+   * chain is intact, or the id of the first broken link if not.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:audit-verify', aliases: ['mcps:audit-verify'])]
+  #[CLI\Usage(name: 'drush mcp-sentinel:audit-verify', description: 'Verify the tamper-evident audit log hash chain.')]
+  public function auditVerify(): int {
+    $result = $this->auditLogger->verifyChain();
+    if ($result['ok']) {
+      $this->logger()->success('Audit log hash chain OK — no tampering detected.');
+      return self::EXIT_SUCCESS;
+    }
+    $this->logger()->error(sprintf(
+      'Audit log hash chain BROKEN at row id %d. One or more rows have been tampered with.',
+      (int) $result['broken_at'],
+    ));
+    return self::EXIT_FAILURE;
+  }
+
 }

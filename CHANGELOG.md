@@ -8,6 +8,11 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Security
+- **Tamper-evident audit log (hash chain):** every audit row now stores a
+  `prev_hash` (the preceding row's hash) and `row_hash` (SHA-256 of
+  `prev_hash | canonical-JSON`). Any insertion, deletion, or modification of a
+  historical row breaks the chain; run `drush mcp-sentinel:audit-verify` to
+  detect it. `update_10003` adds the two columns to existing installs.
 - MCP governance triggers on the **validated OAuth agent channel**
   (consumer/scope on the request's access token), not on role alone. An admin's
   direct cookie-session Drupal UI is never governed; only token-bearing agent
@@ -64,7 +69,8 @@ stable release is tagged.
 - Field-level redaction unified across JSON:API/REST (stripped) and GraphQL
   (`[REDACTED]`) via `hook_entity_field_access` and the `user.roles` +
   `oauth2_scopes` cache contexts.
-- Base Drush commands: `mcp-sentinel:status`, `:audit-purge`, `:lock-clear`.
+- Base Drush commands: `mcp-sentinel:status`, `:audit-purge`, `:lock-clear`,
+  `:audit-verify` (verifies the hash chain; exits non-zero if broken).
 - `phpcs.xml.dist`, `phpstan.neon.dist` (level 6), and unit/kernel/functional
   test coverage.
 

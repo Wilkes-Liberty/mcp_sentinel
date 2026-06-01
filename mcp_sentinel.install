@@ -28,6 +28,8 @@ function mcp_sentinel_schema(): array {
       'ip_address'   => ['type' => 'varchar', 'length' => 45, 'not null' => FALSE],
       'user_agent'   => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
       'metadata'     => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
+      'prev_hash'    => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
+      'row_hash'     => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
     ],
     'primary key' => ['id'],
     'indexes' => [
@@ -35,6 +37,7 @@ function mcp_sentinel_schema(): array {
       'uid'         => ['uid'],
       'operation'   => ['operation'],
       'entity_type' => ['entity_type'],
+      'row_hash'    => ['row_hash'],
     ],
   ];
 
@@ -147,6 +150,37 @@ function mcp_sentinel_update_10002(): string {
   $config->save();
 
   return 'Migrated MCP access/redaction settings into the default policy profile.';
+}
+
+/**
+ * Add prev_hash and row_hash columns to mcp_sentinel_audit_log.
+ */
+function mcp_sentinel_update_10003(): string {
+  $schema = \Drupal::database()->schema();
+  $table = 'mcp_sentinel_audit_log';
+
+  if (!$schema->fieldExists($table, 'prev_hash')) {
+    $schema->addField($table, 'prev_hash', [
+      'type' => 'varchar',
+      'length' => 64,
+      'not null' => FALSE,
+    ]);
+  }
+
+  if (!$schema->fieldExists($table, 'row_hash')) {
+    $schema->addField($table, 'row_hash', [
+      'type' => 'varchar',
+      'length' => 64,
+      'not null' => FALSE,
+    ]);
+    $schema->addIndex($table, 'row_hash', ['row_hash'], [
+      'fields' => [
+        'row_hash' => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
+      ],
+    ]);
+  }
+
+  return 'Added prev_hash and row_hash columns to mcp_sentinel_audit_log for tamper-evident hash chaining.';
 }
 
 /**

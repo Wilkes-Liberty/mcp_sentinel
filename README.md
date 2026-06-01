@@ -94,10 +94,29 @@ discover available types, queries, and mutations.
 | Entity type allow/deny lists | ❌ | ✅ |
 | Field-level PII redaction | ❌ | ✅ |
 | Audit log | ❌ | ✅ |
+| Tamper-evident audit hash chain | ❌ | ✅ |
 | Content locks | ❌ | ✅ |
 | HMAC webhooks | ❌ | ✅ |
 | Rich context endpoint | ❌ | ✅ |
 | mcp_api role | ❌ | ✅ |
+
+## Tamper-evident audit log
+
+Every audit row stores a `prev_hash` and a `row_hash` (SHA-256 of the prior
+row's hash concatenated with a canonical JSON of this row's content). Inserting,
+deleting, or editing any historical row breaks the cryptographic chain.
+
+Verify the chain at any time:
+
+```bash
+drush mcp-sentinel:audit-verify
+```
+
+The command exits 0 if the chain is intact, non-zero (and prints the first
+broken row id) if tampering is detected. Run `update_10003` (via
+`drush updb`) to add the `prev_hash`/`row_hash` columns to an existing install.
+New rows written after the update are automatically chained; rows written before
+the update have NULL hashes and are skipped by the verifier.
 
 ## Configuration
 
