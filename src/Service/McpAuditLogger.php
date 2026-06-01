@@ -279,6 +279,12 @@ class McpAuditLogger {
    * falls back to direct JSON decoding so legacy rows remain readable after
    * encryption is enabled.
    *
+   * Profile-rotation caveat: a row encrypted under profile A cannot be
+   * decrypted after switching to a different profile B. When that happens,
+   * decryption throws and this method falls back to returning an empty array,
+   * which causes verifyChain() to report those historical rows as broken.
+   * Export or re-encrypt existing audit rows before rotating the profile.
+   *
    * @param string $stored
    *   The raw stored metadata string from the database.
    *
@@ -349,6 +355,10 @@ class McpAuditLogger {
       return $this->encryptService->encrypt($json, $profile);
     }
     catch (\Throwable $e) {
+      $this->auditChannel->warning(
+        'Audit metadata encryption failed; storing plaintext for this row. Error: @msg',
+        ['@msg' => $e->getMessage()],
+      );
       return $json;
     }
   }

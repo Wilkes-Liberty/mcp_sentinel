@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Core\Database\Statement\FetchAs;
+use Drupal\encrypt\EncryptionProfileInterface;
+use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\encrypt\Entity\EncryptionProfile;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Psr\Log\LoggerInterface;
+use Psr\Log\LoggerTrait;
+use Psr\Log\LogLevel;
 
 /**
  * Kernel tests for at-rest encryption of audit metadata.
@@ -330,6 +335,139 @@ final class McpAuditEncryptionTest extends KernelTestBase {
 
     $result = $logger->verifyChain();
     $this->assertFalse($result['ok'], 'verifyChain() must detect tampering when encryption is enabled.');
+  }
+
+  /**
+   * When encrypt() throws, a row is still written and metadata is plain JSON.
+   *
+   * Forces the encryption downgrade path by replacing the container's encrypt
+   * service with a fake whose encrypt() always throws. Verifies:
+   *   (a) A row is still written to the audit log (never drop audit entries).
+   *   (b) The metadata column contains the plaintext JSON (readable via
+   *       decodeMetadata()'s plain-JSON fallback).
+   *   (c) A warning was emitted to the audit logger channel.
+   *
+   * @covers ::log
+   * @covers ::encodeMetadata
+   */
+  public function testEncryptionFailureWritesPlaintextRowAndEmitsWarning(): void {
+    // Create a real profile so encodeMetadata() gets past the profile-load
+    // guard and actually attempts to call encrypt().
+    $profile_id = $this->createTestEncryptionProfile();
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_encryption_profile', $profile_id)
+      ->save();
+
+    // Replace the encrypt service in the container with a fake that always
+    // throws, simulating an encryption back-end failure at runtime.
+    $failing_encrypt = new class() implements EncryptServiceInterface {
+
+      /**
+       * {@inheritdoc}
+       */
+      public function loadEncryptionMethods($with_deprecated = TRUE): array {
+        return [];
+      }
+
+      /**
+       * {@inheritdoc}
+       */
+      public function encrypt($text, EncryptionProfileInterface $profile): string {
+        throw new \RuntimeException('Simulated encrypt() failure for testing.');
+      }
+
+      /**
+       * {@inheritdoc}
+       */
+      public function decrypt($text, EncryptionProfileInterface $profile): string {
+        return (string) $text;
+      }
+
+    };
+    $this->container->set('encryption', $failing_encrypt);
+
+    // Capture warnings via a PSR-3 spy on the audit logger channel.
+    $spy_logger = new class() implements LoggerInterface {
+
+      use LoggerTrait;
+
+      /**
+       * Buffered log entries for test assertions.
+       *
+       * @var array<int, array{level: string, message: string}>
+       */
+      public array $captured = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->captured[] = [
+          'level' => (string) $level,
+          'message' => (string) $message,
+        ];
+      }
+
+    };
+    // Rebuild the audit_logger service with the spy channel injected by
+    // directly replacing the channel in the container.
+    $this->container->set('logger.channel.mcp_sentinel_audit', $spy_logger);
+    // Re-instantiate the audit logger so it picks up both swapped services.
+    $this->container->set('mcp_sentinel.audit_logger', NULL);
+
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $db = $this->container->get('database');
+
+    $logger->log('entity_save', [
+      'entity_type' => 'node',
+      'bundle' => 'article',
+      'id' => '77',
+      'label' => 'Downgrade test',
+      'sensitive_key' => 'visible_because_encrypt_failed',
+    ]);
+
+    // (a) A row must have been written.
+    $count = (int) $db->select('mcp_sentinel_audit_log', 'l')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $count, 'A row must be written even when encrypt() throws.');
+
+    // (b) The metadata column must be the plaintext JSON fallback.
+    $stored = (string) $db->select('mcp_sentinel_audit_log', 'l')
+      ->fields('l', ['metadata'])
+      ->execute()
+      ->fetchField();
+
+    $this->assertStringContainsString(
+      'sensitive_key',
+      $stored,
+      'When encryption fails, metadata must fall back to plaintext JSON.',
+    );
+    // decodeMetadata() must recover the array via the plain-JSON fallback path.
+    $decoded = $logger->decodeMetadata($stored);
+    $this->assertArrayHasKey(
+      'sensitive_key',
+      $decoded,
+      'decodeMetadata() must round-trip the plaintext fallback row.',
+    );
+    $this->assertSame('visible_because_encrypt_failed', $decoded['sensitive_key']);
+
+    // (c) A warning must have been emitted to the audit channel.
+    $captured_levels = array_column($spy_logger->captured, 'level');
+    $this->assertContains(
+      LogLevel::WARNING,
+      $captured_levels,
+      'A warning must be logged when encryption fails.',
+    );
+    $found_warning = FALSE;
+    foreach ($spy_logger->captured as $entry) {
+      if (str_contains($entry['message'], 'encryption failed')) {
+        $found_warning = TRUE;
+        break;
+      }
+    }
+    $this->assertTrue($found_warning, 'Warning message must mention "encryption failed".');
   }
 
   /**

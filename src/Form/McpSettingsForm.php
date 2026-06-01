@@ -156,7 +156,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['audit']['audit_encryption_profile'] = [
       '#type'          => 'select',
       '#title'         => $this->t('Audit metadata encryption profile'),
-      '#description'   => $this->t('Select an <a href=":url">Encryption Profile</a> to encrypt audit metadata at rest. When set, the metadata column is encrypted on write and decrypted on read. Pre-existing plaintext rows remain readable (decryption failure gracefully falls back to JSON decode).', [
+      '#description'   => $this->t('Select an <a href=":url">Encryption Profile</a> to encrypt audit metadata at rest. When set, the metadata column is encrypted on write and decrypted on read. Pre-existing plaintext rows remain readable (decryption failure gracefully falls back to JSON decode). Changing the profile later prevents decryption (and tamper-verification) of rows already encrypted under the previous profile — export or re-encrypt existing audit rows before rotating.', [
         ':url' => '/admin/config/system/encryption/profiles',
       ]),
       '#options'       => $profile_options,
