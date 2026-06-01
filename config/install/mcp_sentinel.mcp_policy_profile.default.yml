@@ -1,0 +1,17 @@
+langcode: en
+status: true
+dependencies: {  }
+id: default
+label: Default
+weight: 0
+roles: {  }
+allow_read: true
+allow_write: true
+allow_delete: false
+allow_graphql_mutations: false
+allowed_entity_types: {  }
+denied_entity_types:
+  - user
+redacted_fields:
+  - pass
+  - mail

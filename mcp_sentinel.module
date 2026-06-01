@@ -1,0 +1,138 @@
+<?php
+
+/**
+ * @file
+ * MCP Sentinel companion module.
+ *
+ * Provides security presets, audit logging, content locks, and HMAC webhooks
+ * for MCP-connected Drupal sites.
+ */
+
+use Drupal\Core\Entity\EntityTypeInterface;
+use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Session\AccountInterface;
+
+/**
+ * Implements hook_entity_presave().
+ */
+function mcp_sentinel_entity_presave(EntityInterface $entity): void {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  if ($resolver->isGoverned()) {
+    /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
+    $logger = \Drupal::service('mcp_sentinel.audit_logger');
+    $logger->log('entity_save', [
+      'entity_type' => $entity->getEntityTypeId(),
+      'bundle'      => $entity->bundle(),
+      'id'          => $entity->id() ?: '(new)',
+      'label'       => $entity->label(),
+      'operation'   => $entity->isNew() ? 'create' : 'update',
+    ]);
+    \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
+  }
+}
+
+/**
+ * Implements hook_entity_delete().
+ */
+function mcp_sentinel_entity_delete(EntityInterface $entity): void {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  if ($resolver->isGoverned()) {
+    /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
+    $logger = \Drupal::service('mcp_sentinel.audit_logger');
+    $logger->log('entity_delete', [
+      'entity_type' => $entity->getEntityTypeId(),
+      'bundle'      => $entity->bundle(),
+      'id'          => $entity->id(),
+      'label'       => $entity->label(),
+    ]);
+    \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.delete', $entity);
+  }
+}
+
+/**
+ * Implements hook_entity_access().
+ */
+function mcp_sentinel_entity_access(
+  EntityInterface $entity,
+  string $operation,
+  AccountInterface $account,
+): AccessResult {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  $profile = $resolver->resolve($account);
+  if ($profile === NULL) {
+    return AccessResult::neutral()->addCacheContexts(['user.roles', 'oauth2_scopes'])->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list']);
+  }
+  /** @var \Drupal\mcp_sentinel\Service\McpAccessChecker $checker */
+  $checker = \Drupal::service('mcp_sentinel.access_checker');
+  return $checker->checkEntityAccess($entity, $operation, $profile)->addCacheContexts(['user.roles', 'oauth2_scopes']);
+}
+
+/**
+ * Implements hook_entity_field_access().
+ *
+ * Redacts fields listed in the resolved policy profile from MCP responses by
+ * forbidding 'view' access for governed agent accounts. This strips the field
+ * from JSON:API and REST output and nulls it in GraphQL — a single, uniform
+ * redaction across every read channel. The 'user.roles' and 'oauth2_scopes'
+ * cache contexts keep governed and non-governed responses cached separately so
+ * a value is never served across the boundary.
+ */
+function mcp_sentinel_entity_field_access(
+  string $operation,
+  FieldDefinitionInterface $field_definition,
+  AccountInterface $account,
+  ?FieldItemListInterface $items = NULL,
+): AccessResult {
+  if ($operation !== 'view') {
+    return AccessResult::neutral();
+  }
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  $profile = $resolver->resolve($account);
+
+  // Visibility depends on the account's roles and the OAuth agent channel
+  // (governed + which profile), so the result must vary by both 'user.roles'
+  // and 'oauth2_scopes' for the redacted and neutral outcomes — a redacted
+  // agent response is never served to a cookie-session request, and vice versa.
+  $redacted = $profile !== NULL
+    && in_array($field_definition->getName(), $profile->getRedactedFields(), TRUE);
+  $result = $redacted
+    ? AccessResult::forbidden('Field redacted by MCP Sentinel.')
+    : AccessResult::neutral();
+  return $result
+    ->addCacheContexts(['user.roles', 'oauth2_scopes'])
+    ->addCacheTags(['config:mcp_sentinel.settings', 'config:mcp_sentinel.mcp_policy_profile_list']);
+}
+
+/**
+ * Implements hook_jsonapi_entity_filter_access().
+ */
+function mcp_sentinel_jsonapi_entity_filter_access(
+  EntityTypeInterface $entity_type,
+  AccountInterface $account,
+): array {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  $profile = $resolver->resolve($account);
+  if ($profile === NULL) {
+    return [];
+  }
+  /** @var \Drupal\mcp_sentinel\Service\McpAccessChecker $checker */
+  $checker = \Drupal::service('mcp_sentinel.access_checker');
+  return $checker->getJsonApiFilterAccess($entity_type->id(), $profile);
+}
+
+/**
+ * Implements hook_cron().
+ */
+function mcp_sentinel_cron(): void {
+  $pruned = \Drupal::service('mcp_sentinel.audit_logger')->pruneOldEntries();
+  if ($pruned > 0) {
+    \Drupal::logger('mcp_sentinel')->info(
+      'Pruned @count old MCP audit log entries.',
+      ['@count' => $pruned]
+    );
+  }
+  \Drupal::service('mcp_sentinel.content_lock')->releaseExpired();
+}

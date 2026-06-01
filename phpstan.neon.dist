@@ -1,0 +1,28 @@
+# PHPStan configuration for MCP Sentinel.
+# Run on Drupal CI via commit-code-check.sh; phpstan-drupal is provided there.
+includes:
+  - phar://phpstan.phar/conf/bleedingEdge.neon
+
+parameters:
+  level: 6
+  # Inline @phpstan-ignore comments may not match across phpstan versions.
+  reportUnmatchedIgnoredErrors: false
+  paths:
+    - .
+  excludePaths:
+    - vendor (?)
+  fileExtensions:
+    - php
+    - module
+    - inc
+    - install
+  ignoreErrors:
+    # new static() is a Drupal best practice for plugins.
+    - "#^Unsafe usage of new static#"
+    - identifier: missingType.iterableValue
+    - identifier: missingType.generics
+    # The GraphQL governance test builds operation fixtures via methods the
+    # webonyx/graphql-php library marks @internal — unavoidable in tests.
+    -
+      identifier: method.internal
+      path: modules/mcp_sentinel_graphql/tests/src/Kernel/GraphqlGovernanceSubscriberTest.php

@@ -1,0 +1,15 @@
+enabled: true
+governed_roles:
+  - mcp_api
+audit_enabled: true
+audit_log_reads: false
+audit_retention_days: 90
+webhook_enabled: false
+webhook_url: ''
+webhook_secret: ''
+webhook_secret_key: ''
+agent_oauth_clients: {  }
+agent_scopes:
+  - 'mcp:read'
+  - 'mcp:write'
+governed_role_fallback: false

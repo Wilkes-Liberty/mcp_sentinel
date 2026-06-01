@@ -1,0 +1,57 @@
+<?php
+
+/**
+ * @file
+ * MCP Sentinel GraphQL governance.
+ *
+ * Applies field-level redaction to GraphQL Compose responses for MCP requests.
+ * Operation gating and audit live in GraphqlGovernanceSubscriber; entity
+ * allow/deny is handled by hook_entity_access in mcp_sentinel.module.
+ */
+
+declare(strict_types=1);
+
+use Drupal\graphql\GraphQL\Execution\FieldContext;
+use Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterface;
+
+/**
+ * Implements hook_graphql_compose_field_results_alter().
+ *
+ * Replaces the resolved value of any profile-redacted field with a redaction
+ * marker when the current request is identified as a governed MCP agent.
+ * Values are replaced (never emptied) so required single-value fields keep a
+ * value and do not trip GraphQL Compose's non-null guard.
+ *
+ * The 'user.roles' cache context is added regardless of whether the current
+ * user is a governed agent, so the GraphQL response cache stores variants
+ * separately per role-set. Without this, a redacted value cached for an MCP
+ * agent could be served to a non-agent user (or vice versa).
+ */
+function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$results, mixed $entity, GraphQLComposeFieldTypeInterface $plugin, FieldContext $context): void {
+  /** @var \Drupal\mcp_sentinel\Service\McpPolicyResolver $resolver */
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  $profile = $resolver->resolve();
+  $redacted = $profile ? $profile->getRedactedFields() : [];
+
+  // This field's output varies by the governed OAuth agent channel — vary the
+  // cache by both user.roles and oauth2_scopes so a redacted agent-channel
+  // value is never served to a cookie-session request for the same user (or
+  // vice versa). Mirrors hook_entity_field_access in the base module.
+  $context->addCacheContexts(['user.roles', 'oauth2_scopes']);
+
+  if (!$profile) {
+    return;
+  }
+
+  if (!$redacted || !in_array($plugin->getFieldName(), $redacted, TRUE)) {
+    return;
+  }
+
+  if ($results === []) {
+    $results = ['[REDACTED]'];
+    return;
+  }
+  foreach ($results as $delta => $value) {
+    $results[$delta] = '[REDACTED]';
+  }
+}

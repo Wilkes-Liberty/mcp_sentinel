@@ -1,0 +1,92 @@
+mcp_sentinel.settings:
+  type: config_object
+  label: 'MCP Sentinel settings'
+  mapping:
+    enabled:
+      type: boolean
+      label: 'MCP access enabled'
+    governed_roles:
+      type: sequence
+      label: 'Governed roles'
+      sequence:
+        type: string
+    audit_enabled:
+      type: boolean
+      label: 'Audit logging enabled'
+    audit_log_reads:
+      type: boolean
+      label: 'Log read operations'
+    audit_retention_days:
+      type: integer
+      label: 'Audit log retention in days'
+    webhook_enabled:
+      type: boolean
+      label: 'Webhooks enabled'
+    webhook_url:
+      type: string
+      label: 'Webhook URL'
+    webhook_secret:
+      type: string
+      label: 'Webhook signing secret (deprecated; migrated to webhook_secret_key)'
+    webhook_secret_key:
+      type: string
+      label: 'Webhook signing secret — Key entity ID'
+    agent_oauth_clients:
+      type: sequence
+      label: 'Agent OAuth client IDs (consumer client_id values)'
+      sequence:
+        type: string
+    agent_scopes:
+      type: sequence
+      label: 'Scopes that mark the agent channel'
+      sequence:
+        type: string
+    governed_role_fallback:
+      type: boolean
+      label: 'Treat governed roles as governed even without an OAuth agent token (local dev)'
+
+mcp_sentinel.mcp_policy_profile.*:
+  type: config_entity
+  label: 'MCP policy profile'
+  mapping:
+    id:
+      type: machine_name
+      label: 'ID'
+    label:
+      type: required_label
+      label: 'Label'
+    weight:
+      type: integer
+      label: 'Weight'
+    roles:
+      type: sequence
+      label: 'Roles'
+      sequence:
+        type: string
+    allow_read:
+      type: boolean
+      label: 'Allow read'
+    allow_write:
+      type: boolean
+      label: 'Allow write'
+    allow_delete:
+      type: boolean
+      label: 'Allow delete'
+    allow_graphql_mutations:
+      type: boolean
+      label: 'Allow GraphQL mutations'
+    allowed_entity_types:
+      type: sequence
+      label: 'Allowed entity types'
+      sequence:
+        type: string
+    denied_entity_types:
+      type: sequence
+      label: 'Denied entity types'
+      sequence:
+        type: string
+    redacted_fields:
+      type: sequence
+      label: 'Redacted fields'
+      sequence:
+        type: string

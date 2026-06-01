@@ -1,0 +1,5 @@
+mcp_sentinel.profiles:
+  title: 'MCP policy profiles'
+  description: 'Per-agent MCP Sentinel governance profiles.'
+  route_name: entity.mcp_policy_profile.collection
+  parent: system.admin_config_services

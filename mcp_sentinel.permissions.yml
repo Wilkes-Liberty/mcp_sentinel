@@ -1,0 +1,13 @@
+administer mcp sentinel:
+  title: 'Administer MCP Sentinel settings'
+  description: 'Configure MCP access, audit logs, and webhook settings.'
+  restrict access: true
+
+view mcp sentinel audit log:
+  title: 'View MCP Sentinel audit log'
+  description: 'View the log of all operations performed by AI agents via MCP.'
+
+access mcp sentinel context:
+  title: 'Access MCP Sentinel context endpoint'
+  description: 'Access /drupal-mcp/context. Grant to the MCP API user only.'
+  restrict access: true

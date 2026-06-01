@@ -1,0 +1,36 @@
+{
+  "name": "drupal/mcp_sentinel",
+  "description": "Enterprise security presets, audit logging, content locks, and HMAC webhooks for MCP-connected Drupal sites.",
+  "type": "drupal-module",
+  "license": "GPL-2.0-or-later",
+  "homepage": "https://www.drupal.org/project/mcp_sentinel",
+  "authors": [
+    {
+      "name": "Wilkes & Liberty",
+      "homepage": "https://github.com/wilkes-liberty",
+      "role": "Maintainer"
+    }
+  ],
+  "support": {
+    "issues": "https://www.drupal.org/project/issues/mcp_sentinel",
+    "source": "https://git.drupalcode.org/project/mcp_sentinel"
+  },
+  "require": {
+    "drupal/core": "^10.3 || ^11",
+    "drupal/tool": "*",
+    "drupal/key": "^1.20",
+    "drupal/simple_oauth": "^6.1",
+    "drupal/consumers": "^1.18"
+  },
+  "require-dev": {
+    "drupal/graphql_compose": "^2.4",
+    "drupal/mcp_server": "^2.0@dev"
+  },
+  "suggest": {
+    "drupal/mcp_server":     "Exposes MCP Sentinel Tool plugins to MCP clients (via the mcp_sentinel_server submodule). Strongly recommended.",
+    "drupal/graphql_compose": "Enables the mcp_sentinel_graphql submodule: mutation gating, field redaction, and audit for the GraphQL endpoint.",
+    "drupal/mcp_tools":      "222 additional site-building tools via the Tool API."
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true
+}

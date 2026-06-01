@@ -1,0 +1,18 @@
+################
+# Drupal GitLabCI template for contrib modules.
+#
+# Replicates DrupalCI testing via the centrally maintained include files.
+# https://www.drupal.org/docs/develop/git/using-gitlab-to-contribute-to-drupal
+################
+
+include:
+  - project: $_GITLAB_TEMPLATES_REPO
+    ref: $_GITLAB_TEMPLATES_REF
+    file:
+      - '/includes/include.drupalci.main.yml'
+      - '/includes/include.drupalci.variables.yml'
+      - '/includes/include.drupalci.workflows.yml'
+
+variables:
+  _GITLAB_TEMPLATES_REPO: project/gitlab_templates
+  _GITLAB_TEMPLATES_REF: main

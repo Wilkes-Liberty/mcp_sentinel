@@ -1,0 +1,13 @@
+vendor/
+node_modules/
+*.orig
+*.rej
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local development notes — not published.
+AGENTS.md
+ROADMAP.md
+docs/.notes/

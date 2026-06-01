@@ -1,0 +1,5 @@
+mcp_sentinel.profile_add:
+  title: 'Add policy profile'
+  route_name: entity.mcp_policy_profile.add_form
+  appears_on:
+    - entity.mcp_policy_profile.collection

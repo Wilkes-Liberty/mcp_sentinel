@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="mcp_sentinel">
+  <description>Drupal coding standards for MCP Sentinel.</description>
+
+  <file>.</file>
+  <arg name="extensions" value="php,module,inc,install,test,info.yml,yml"/>
+  <arg name="colors"/>
+  <arg value="sp"/>
+
+  <exclude-pattern>*/vendor/*</exclude-pattern>
+  <exclude-pattern>*/node_modules/*</exclude-pattern>
+
+  <rule ref="Drupal"/>
+  <rule ref="DrupalPractice"/>
+</ruleset>

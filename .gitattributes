@@ -1,0 +1,21 @@
+# Normalize line endings and improve diffs.
+* text=auto eol=lf
+*.php text diff=php
+*.module text diff=php
+*.install text diff=php
+*.inc text diff=php
+*.yml text
+*.md  text diff=markdown
+
+# Exclude development, CI, and internal docs from the packaged release tarball.
+/tests              export-ignore
+/.gitattributes     export-ignore
+/.gitignore         export-ignore
+/.gitlab-ci.yml     export-ignore
+/phpcs.xml.dist     export-ignore
+/phpstan.neon.dist  export-ignore
+/.cspell.json       export-ignore
+/.cspell-project-words.txt export-ignore
+/AGENTS.md          export-ignore
+/ROADMAP.md         export-ignore
+/PROJECT_PAGE.md    export-ignore

@@ -1,0 +1,35 @@
+mcp_sentinel.settings:
+  path: '/admin/config/services/mcp-sentinel'
+  defaults:
+    _form: '\Drupal\mcp_sentinel\Form\McpSettingsForm'
+    _title: 'MCP Sentinel Settings'
+  requirements:
+    _permission: 'administer mcp sentinel'
+
+mcp_sentinel.audit_log:
+  path: '/admin/reports/mcp-sentinel'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpAuditController::listing'
+    _title: 'MCP Sentinel Audit Log'
+  requirements:
+    _permission: 'view mcp sentinel audit log'
+
+mcp_sentinel.context:
+  path: '/drupal-mcp/context'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpContextController::context'
+    _title: 'MCP Context'
+  requirements:
+    _permission: 'access mcp sentinel context'
+  options:
+    _auth:
+      - oauth2
+
+mcp_sentinel.health:
+  path: '/drupal-mcp/health'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpContextController::health'
+  requirements:
+    # Public, unauthenticated uptime probe: returns only an ok/disabled status
+    # and the module name (no data), so it is intentionally left unrestricted.
+    _access: 'TRUE'

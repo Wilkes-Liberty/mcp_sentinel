@@ -1,0 +1,21 @@
+name: 'MCP Sentinel'
+type: module
+description: 'Enterprise security presets, audit logging, content locks, and HMAC webhooks for MCP-connected Drupal sites.'
+package: 'AI / MCP'
+core_version_requirement: ^10.3 || ^11
+
+# Hard dependencies — modules whose APIs we call directly in PHP.
+dependencies:
+  - drupal:user
+  - drupal:node
+  - drupal:jsonapi
+  - tool:tool
+  - key:key
+  - simple_oauth:simple_oauth
+  - consumers:consumers
+
+# drupal/mcp_server: strongly recommended (exposes Tool plugins to MCP clients)
+# but NOT required — security, audit, content locks, and webhooks all work without it.
+# drupal/ai: NOT a dependency. Different problem space.
+
+configure: mcp_sentinel.settings

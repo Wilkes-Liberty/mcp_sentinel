@@ -1,0 +1,162 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for MCP Sentinel.
+ */
+
+use Drupal\Core\Url;
+use Drupal\key\Entity\Key;
+use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\user\Entity\Role;
+
+/**
+ * Implements hook_schema().
+ */
+function mcp_sentinel_schema(): array {
+  $schema['mcp_sentinel_audit_log'] = [
+    'description' => 'Audit log for all MCP agent operations.',
+    'fields' => [
+      'id'           => ['type' => 'serial', 'unsigned' => TRUE, 'not null' => TRUE],
+      'timestamp'    => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'uid'          => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+      'operation'    => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'entity_type'  => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
+      'bundle'       => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
+      'entity_id'    => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
+      'entity_label' => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
+      'ip_address'   => ['type' => 'varchar', 'length' => 45, 'not null' => FALSE],
+      'user_agent'   => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
+      'metadata'     => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'timestamp'   => ['timestamp'],
+      'uid'         => ['uid'],
+      'operation'   => ['operation'],
+      'entity_type' => ['entity_type'],
+    ],
+  ];
+
+  $schema['mcp_sentinel_content_locks'] = [
+    'description' => 'Content items locked against MCP writes.',
+    'fields' => [
+      'entity_type' => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
+      'entity_id'   => ['type' => 'varchar', 'length' => 255, 'not null' => TRUE],
+      'locked_by'   => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'locked_at'   => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'expires_at'  => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+      'reason'      => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
+    ],
+    'primary key' => ['entity_type', 'entity_id'],
+    'indexes' => ['expires_at' => ['expires_at']],
+  ];
+
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function mcp_sentinel_install(): void {
+  if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
+    Role::create(['id' => 'mcp_api', 'label' => 'MCP API', 'weight' => 10])->save();
+    user_role_grant_permissions('mcp_api', [
+      'access content',
+      'access user profiles',
+      'view media',
+      'access mcp sentinel context',
+    ]);
+    \Drupal::messenger()->addStatus(t('MCP API role created. Assign it to your API user in /admin/people.'));
+  }
+  \Drupal::messenger()->addStatus(
+    t('MCP Sentinel installed. Configure at <a href=":url">Configuration → MCP Sentinel</a>.', [
+      ':url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
+    ])
+  );
+}
+
+/**
+ * Move the plaintext webhook secret into a Key entity.
+ */
+function mcp_sentinel_update_10001(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $legacy = (string) $config->get('webhook_secret');
+
+  if ($legacy === '' || $config->get('webhook_secret_key')) {
+    // Nothing to migrate, or already migrated.
+    $config->set('webhook_secret_key', $config->get('webhook_secret_key') ?? '')
+      ->clear('webhook_secret')->save();
+    return 'No plaintext webhook secret to migrate.';
+  }
+
+  $key_id = 'mcp_sentinel_webhook';
+  if (!Key::load($key_id)) {
+    Key::create([
+      'id' => $key_id,
+      'label' => 'MCP Sentinel webhook secret',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => $legacy],
+    ])->save();
+  }
+
+  $config->set('webhook_secret_key', $key_id)->clear('webhook_secret')->save();
+
+  return "Migrated the webhook secret into Key '$key_id'. For stronger security, "
+    . 'switch that key to a File or Environment provider so the value leaves '
+    . 'exported configuration.';
+}
+
+/**
+ * Migrate access/redaction settings into the default policy profile.
+ */
+function mcp_sentinel_update_10002(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+
+  if (!McpPolicyProfile::load('default')) {
+    McpPolicyProfile::create([
+      'id' => 'default',
+      'label' => 'Default',
+      'weight' => 0,
+      'roles' => [],
+      'allow_read' => (bool) ($config->get('allow_read') ?? TRUE),
+      'allow_write' => (bool) ($config->get('allow_write') ?? TRUE),
+      'allow_delete' => (bool) ($config->get('allow_delete') ?? FALSE),
+      'allow_graphql_mutations' => (bool) ($config->get('allow_graphql_mutations') ?? FALSE),
+      'allowed_entity_types' => $config->get('allowed_entity_types') ?? [],
+      'denied_entity_types' => $config->get('denied_entity_types') ?? ['user'],
+      'redacted_fields' => $config->get('redacted_fields') ?? ['pass', 'mail'],
+    ])->save();
+  }
+
+  if (!$config->get('governed_roles')) {
+    $config->set('governed_roles', ['mcp_api']);
+  }
+  foreach ([
+    'allow_read',
+    'allow_write',
+    'allow_delete',
+    'allow_graphql_mutations',
+    'allowed_entity_types',
+    'denied_entity_types',
+    'redacted_fields',
+  ] as $key) {
+    $config->clear($key);
+  }
+  $config->save();
+
+  return 'Migrated MCP access/redaction settings into the default policy profile.';
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function mcp_sentinel_uninstall(): void {
+  \Drupal::configFactory()->getEditable('mcp_sentinel.settings')->delete();
+  // Remove the mcp_api role created on install.
+  $role = \Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api');
+  if ($role) {
+    $role->delete();
+  }
+}

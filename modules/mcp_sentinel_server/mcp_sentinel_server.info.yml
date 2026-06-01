@@ -1,0 +1,13 @@
+name: 'MCP Sentinel Server'
+type: module
+description: 'Registers MCP Sentinel Tool plugins with mcp_server and wires OAuth scopes.'
+package: 'AI / MCP'
+core_version_requirement: ^10.3 || ^11
+
+# Depends on the mcp_server Tool API bridge (which pulls in mcp_server itself).
+dependencies:
+  - mcp_sentinel:mcp_sentinel
+  - mcp_server:mcp_server_tool_bridge
+
+# mcp_server:mcp_server_oauth is optional — when enabled, `drush mcp-sentinel:setup`
+# also tags each registered tool with an OAuth scope and authentication mode.

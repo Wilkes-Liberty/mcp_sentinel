@@ -1,0 +1,9 @@
+services:
+  mcp_sentinel_graphql.governance_subscriber:
+    class: Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.audit_logger'
+      - '@config.factory'
+    tags:
+      - { name: event_subscriber }
