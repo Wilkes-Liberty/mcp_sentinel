@@ -7,6 +7,27 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added
+- **DLP value-pattern redaction + partial masking (opt-in):** a new
+  `McpDlp` service scans governed field values against configurable PII
+  patterns (email, US phone, SSN, 16-digit credit card, plus unlimited
+  site-defined custom patterns) and either fully redacts matches
+  (`[REDACTED]`) or applies partial masking (last-4 chars kept, rest
+  replaced with `*`). Scanning is **off by default** (`dlp_enabled: false`);
+  enable and configure under *Configuration → Web services → MCP Sentinel →
+  Data Loss Prevention*. `update_10005` adds the three new settings to
+  existing installs.
+  - **V1 wired output paths:** (a) GraphQL Compose field output (via
+    `mcp_sentinel_graphql_graphql_compose_field_results_alter` in the
+    `mcp_sentinel_graphql` submodule) and (b) the audit change-diff capture
+    (`McpAuditLogger::computeChangeDiff`). JSON:API/REST per-value scanning
+    is deferred to a future release (no stable per-value normalizer alter
+    hook exists in Drupal core).
+  - **Regex convention:** patterns store the PCRE body WITHOUT delimiters
+    (e.g. `[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}`). The service wraps
+    each pattern in `#...#i` delimiters at runtime. Invalid patterns are
+    silently skipped with a warning logged to the `mcp_sentinel` channel.
+
 ### Security
 - **Optional at-rest encryption of audit metadata:** when `audit_encryption_profile`
   is set to an Encryption Profile entity ID (from drupal/encrypt), the `metadata`

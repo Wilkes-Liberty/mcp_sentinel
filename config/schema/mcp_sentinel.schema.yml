@@ -53,6 +53,28 @@ mcp_sentinel.settings:
     audit_encryption_profile:
       type: string
       label: 'Audit encryption profile — Encryption Profile entity ID'
+    dlp_enabled:
+      type: boolean
+      label: 'DLP value-pattern scanning enabled'
+    dlp_mask_mode:
+      type: string
+      label: 'DLP masking mode (redact or partial)'
+    dlp_patterns:
+      type: sequence
+      label: 'DLP PII patterns'
+      sequence:
+        type: mapping
+        label: 'DLP pattern'
+        mapping:
+          label:
+            type: string
+            label: 'Pattern label'
+          regex:
+            type: string
+            label: 'PCRE regex body (no delimiters)'
+          mask:
+            type: string
+            label: 'Mask character'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

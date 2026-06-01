@@ -22,6 +22,7 @@ services:
       - '@logger.channel.mcp_sentinel_audit'
       - '@encryption'
       - '@entity_type.manager'
+      - '@mcp_sentinel.dlp'
 
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver
@@ -51,6 +52,13 @@ services:
     arguments:
       - '@current_user'
       - '@config.factory'
+
+  mcp_sentinel.dlp:
+    class: Drupal\mcp_sentinel\Service\McpDlp
+    factory: 'Drupal\mcp_sentinel\Service\McpDlp::createFromConfig'
+    arguments:
+      - '@config.factory'
+      - '@logger.channel.mcp_sentinel'
 
   mcp_sentinel.content_lock:
     class: Drupal\mcp_sentinel\Service\McpContentLock

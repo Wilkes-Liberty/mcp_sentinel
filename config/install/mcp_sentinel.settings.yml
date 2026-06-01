@@ -16,3 +16,22 @@ governed_role_fallback: false
 audit_hash_key: ''
 siem_enabled: false
 audit_encryption_profile: ''
+dlp_enabled: false
+dlp_mask_mode: redact
+dlp_patterns:
+  -
+    label: email
+    regex: '[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}'
+    mask: '*'
+  -
+    label: us_phone
+    regex: '\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}'
+    mask: '*'
+  -
+    label: ssn
+    regex: '\d{3}-\d{2}-\d{4}'
+    mask: '*'
+  -
+    label: credit_card
+    regex: '\b\d{4}[\s\-]\d{4}[\s\-]\d{4}[\s\-]\d{4}\b'
+    mask: '*'

@@ -175,6 +175,69 @@ file or sending it to a remote aggregator — use
 for the `mcp_sentinel_audit` channel in your `monolog.services.yml` and route
 it to syslog, Logstash, or any other Monolog handler.
 
+## DLP value-pattern redaction (opt-in)
+
+Beyond field-name redaction, MCP Sentinel can scan the **values** of governed
+field output for PII patterns and either fully redact or partially mask matches.
+DLP scanning is **off by default** and must be explicitly enabled.
+
+### Setup
+
+1. Go to **Configuration → Web services → MCP Sentinel** and open the
+   *Data Loss Prevention (DLP)* fieldset.
+2. Check *Enable DLP value-pattern scanning*.
+3. Choose the *Mask mode*:
+   - **Redact** — replaces the full match with `[REDACTED]`.
+   - **Partial** — keeps the last 4 characters of the match and replaces the
+     rest with `*` (e.g. `************4567` for a 16-digit credit-card number).
+4. Save. DLP takes effect immediately for new governed requests.
+
+### Built-in patterns
+
+Four patterns are pre-configured (all disabled by default via `dlp_enabled:
+false`):
+
+| Label | Matches |
+|-------|---------|
+| `email` | RFC-5321 email addresses |
+| `us_phone` | US phone numbers (dashes, dots, spaces, parentheses) |
+| `ssn` | US Social Security Numbers (`NNN-NN-NNNN`) |
+| `credit_card` | 16-digit card numbers in 4-group format (dashes or spaces) |
+
+### Adding custom patterns
+
+Custom patterns are stored in the `dlp_patterns` config sequence. Each entry
+has three keys:
+
+```yaml
+dlp_patterns:
+  - label: my_pattern
+    regex: 'CUST-\d{8}'
+    mask: '*'
+```
+
+**Regex convention:** store the PCRE pattern body **without** delimiters. The
+service wraps each pattern in `#...#i` at runtime (case-insensitive, `#`
+delimiter avoids escaping `/` in URLs). Do **not** include leading or trailing
+`/` or `#` characters in the `regex` value. Invalid patterns are silently
+skipped with a warning logged to the `mcp_sentinel` logger channel so a
+badly-formed custom regex cannot cause a fatal error.
+
+### V1 scope
+
+DLP scanning is wired into two output paths:
+
+1. **GraphQL Compose field output** (`mcp_sentinel_graphql` submodule): string
+   field values returned by `hook_graphql_compose_field_results_alter` are
+   scanned before delivery to the agent.
+2. **Audit change-diff capture** (`McpAuditLogger::computeChangeDiff`): field
+   values in the `changes` diff stored in audit log metadata are masked before
+   storage, so PII never appears in the audit trail in plaintext.
+
+JSON:API and REST per-field value scanning is deferred to a future release.
+Drupal core's normalizer stack has no stable per-value alter hook, so a clean
+wiring point does not yet exist.
+
 ## Configuration
 
 **Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)

@@ -195,6 +195,29 @@ function mcp_sentinel_update_10004(): string {
 }
 
 /**
+ * Add DLP settings: dlp_enabled, dlp_mask_mode, dlp_patterns.
+ */
+function mcp_sentinel_update_10005(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  if ($config->get('dlp_enabled') === NULL) {
+    $config->set('dlp_enabled', FALSE);
+  }
+  if ($config->get('dlp_mask_mode') === NULL) {
+    $config->set('dlp_mask_mode', 'redact');
+  }
+  if ($config->get('dlp_patterns') === NULL) {
+    $config->set('dlp_patterns', [
+      ['label' => 'email', 'regex' => '[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}', 'mask' => '*'],
+      ['label' => 'us_phone', 'regex' => '\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}', 'mask' => '*'],
+      ['label' => 'ssn', 'regex' => '\d{3}-\d{2}-\d{4}', 'mask' => '*'],
+      ['label' => 'credit_card', 'regex' => '\b\d{4}[\s\-]\d{4}[\s\-]\d{4}[\s\-]\d{4}\b', 'mask' => '*'],
+    ]);
+  }
+  $config->save();
+  return 'Added DLP settings (dlp_enabled=FALSE, dlp_mask_mode=redact, four built-in patterns). Enable DLP at Configuration → Web services → MCP Sentinel.';
+}
+
+/**
  * Implements hook_uninstall().
  */
 function mcp_sentinel_uninstall(): void {

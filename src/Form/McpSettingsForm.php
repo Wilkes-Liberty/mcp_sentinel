@@ -164,6 +164,29 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
 
+    $form['dlp'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Data Loss Prevention (DLP)'),
+      '#description' => $this->t('Value-pattern scanning for PII in governed field output. Off by default — opt in by enabling below.'),
+    ];
+    $form['dlp']['dlp_enabled'] = [
+      '#type'          => 'checkbox',
+      '#title'         => $this->t('Enable DLP value-pattern scanning'),
+      '#description'   => $this->t('When enabled, outbound governed field values are scanned against the configured patterns and masked before delivery. V1 scope: GraphQL field output and audit change-diff capture. JSON:API/REST per-value scanning is deferred.'),
+      '#default_value' => $config->get('dlp_enabled') ?? FALSE,
+    ];
+    $form['dlp']['dlp_mask_mode'] = [
+      '#type'          => 'select',
+      '#title'         => $this->t('Mask mode'),
+      '#description'   => $this->t('<strong>Redact:</strong> replace the full PII match with <code>[REDACTED]</code>. <strong>Partial:</strong> keep the last 4 characters and mask the rest with <code>*</code> (e.g. <code>************4567</code> for a credit-card number).'),
+      '#options'       => [
+        'redact'  => $this->t('Redact (replace with [REDACTED])'),
+        'partial' => $this->t('Partial (keep last 4 chars, mask the rest with *)'),
+      ],
+      '#default_value' => $config->get('dlp_mask_mode') ?? 'redact',
+      '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
+    ];
+
     $form['webhooks'] = ['#type' => 'fieldset', '#title' => $this->t('HTTPS Webhooks')];
     $form['webhooks']['webhook_enabled'] = [
       '#type'          => 'checkbox',
@@ -219,6 +242,8 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_hash_key', $form_state->getValue('audit_hash_key'))
       ->set('siem_enabled', (bool) $form_state->getValue('siem_enabled'))
       ->set('audit_encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
+      ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
+      ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
       ->set('webhook_enabled', (bool) $form_state->getValue('webhook_enabled'))
       ->set('webhook_url', $form_state->getValue('webhook_url'))
       ->set('webhook_secret_key', $form_state->getValue('webhook_secret_key'))

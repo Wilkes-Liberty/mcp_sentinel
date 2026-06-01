@@ -79,6 +79,11 @@ class McpAuditLogger {
    *   metadata payloads are encrypted before storage and decrypted on read.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   The entity type manager (used to load EncryptionProfile config entities).
+   * @param \Drupal\mcp_sentinel\Service\McpDlp|null $dlp
+   *   The DLP service. When provided, non-redacted field values in the change
+   *   diff are passed through DLP scanning before storage in the audit log.
+   *   NULL is accepted so existing kernel tests that construct the logger
+   *   without this argument continue to work.
    */
   public function __construct(
     private readonly Connection $database,
@@ -91,6 +96,7 @@ class McpAuditLogger {
     private readonly LoggerInterface $auditChannel,
     private readonly EncryptServiceInterface $encryptService,
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    private readonly ?McpDlp $dlp = NULL,
   ) {}
 
   /**
@@ -471,6 +477,15 @@ class McpAuditLogger {
       $old_str = $this->stringifyFieldValue($old_value);
       if ($new_str === $old_str) {
         continue;
+      }
+
+      // Apply DLP scanning to non-redacted values before storing in the diff.
+      // This masks PII patterns (email, phone, SSN, CC, custom) even for fields
+      // not in the redaction list, so sensitive values cannot leak through the
+      // audit log in plaintext. DLP is a no-op when disabled in settings.
+      if ($this->dlp !== NULL) {
+        $old_str = $this->dlp->scan($old_str);
+        $new_str = $this->dlp->scan($new_str);
       }
 
       $diff[$field_name] = ['old' => $old_str, 'new' => $new_str];

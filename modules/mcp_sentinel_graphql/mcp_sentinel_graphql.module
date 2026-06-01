@@ -4,9 +4,10 @@
  * @file
  * MCP Sentinel GraphQL governance.
  *
- * Applies field-level redaction to GraphQL Compose responses for MCP requests.
- * Operation gating and audit live in GraphqlGovernanceSubscriber; entity
- * allow/deny is handled by hook_entity_access in mcp_sentinel.module.
+ * Applies field-level redaction and DLP value-pattern masking to GraphQL
+ * Compose responses for MCP requests. Operation gating and audit live in
+ * GraphqlGovernanceSubscriber; entity allow/deny is handled by
+ * hook_entity_access in mcp_sentinel.module.
  */
 
 declare(strict_types=1);
@@ -17,15 +18,22 @@ use Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterfac
 /**
  * Implements hook_graphql_compose_field_results_alter().
  *
- * Replaces the resolved value of any profile-redacted field with a redaction
- * marker when the current request is identified as a governed MCP agent.
- * Values are replaced (never emptied) so required single-value fields keep a
- * value and do not trip GraphQL Compose's non-null guard.
+ * For governed MCP agents, this hook applies two passes in order:
  *
- * The 'user.roles' cache context is added regardless of whether the current
- * user is a governed agent, so the GraphQL response cache stores variants
- * separately per role-set. Without this, a redacted value cached for an MCP
- * agent could be served to a non-agent user (or vice versa).
+ * 1. Field-name redaction: fields listed in the resolved policy profile's
+ *    redacted_fields list are replaced with '[REDACTED]'. A non-empty result
+ *    is always preserved (even if the original was empty) so required
+ *    single-value fields keep a value and do not trip GraphQL Compose's
+ *    non-null guard.
+ *
+ * 2. DLP value-pattern masking (V1 scope): for fields that pass the name-
+ *    redaction step, string values are scanned by the McpDlp service for
+ *    configured PII patterns (email, phone, SSN, credit-card, custom). Matches
+ *    are either fully redacted or partially masked depending on the
+ *    dlp_mask_mode setting. DLP is a no-op when dlp_enabled is FALSE (opt-in).
+ *
+ * The 'user.roles' and 'oauth2_scopes' cache contexts are added so governed and
+ * non-governed responses are cached separately.
  */
 function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$results, mixed $entity, GraphQLComposeFieldTypeInterface $plugin, FieldContext $context): void {
   /** @var \Drupal\mcp_sentinel\Service\McpPolicyResolver $resolver */
@@ -33,25 +41,36 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
   $profile = $resolver->resolve();
   $redacted = $profile ? $profile->getRedactedFields() : [];
 
-  // This field's output varies by the governed OAuth agent channel — vary the
-  // cache by both user.roles and oauth2_scopes so a redacted agent-channel
-  // value is never served to a cookie-session request for the same user (or
-  // vice versa). Mirrors hook_entity_field_access in the base module.
+  // Responses vary by the governed OAuth agent channel — add both contexts so
+  // a redacted/masked agent-channel value is never served to a cookie-session
+  // request for the same user.
   $context->addCacheContexts(['user.roles', 'oauth2_scopes']);
 
   if (!$profile) {
     return;
   }
 
-  if (!$redacted || !in_array($plugin->getFieldName(), $redacted, TRUE)) {
+  // Pass 1: field-name redaction (existing behaviour).
+  if ($redacted && in_array($plugin->getFieldName(), $redacted, TRUE)) {
+    if ($results === []) {
+      $results = ['[REDACTED]'];
+      return;
+    }
+    foreach ($results as $delta => $value) {
+      $results[$delta] = '[REDACTED]';
+    }
     return;
   }
 
-  if ($results === []) {
-    $results = ['[REDACTED]'];
-    return;
-  }
+  // Pass 2: DLP value-pattern masking (V1: GraphQL output only).
+  // Only applies when DLP is enabled and there are string values to scan.
+  // Non-string deltas (objects, arrays, booleans) are skipped — they are
+  // complex types that DLP cannot meaningfully scan as a flat string.
+  /** @var \Drupal\mcp_sentinel\Service\McpDlp $dlp */
+  $dlp = \Drupal::service('mcp_sentinel.dlp');
   foreach ($results as $delta => $value) {
-    $results[$delta] = '[REDACTED]';
+    if (is_string($value)) {
+      $results[$delta] = $dlp->scan($value);
+    }
   }
 }
