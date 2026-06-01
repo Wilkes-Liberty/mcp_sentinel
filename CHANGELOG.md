@@ -53,6 +53,14 @@ stable release is tagged.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
 ### Added
+- **Filterable audit log UI with CSV/JSON export:** the
+  `/admin/reports/mcp-sentinel` listing now exposes a GET-based filter form
+  (operation, entity type, UID, date range). A new
+  `/admin/reports/mcp-sentinel/export` route (permission
+  `view mcp sentinel audit log`) streams the filtered log as a CSV download by
+  default or a JSON array when `?format=json` is requested. All metadata reads
+  in the controller flow through `McpAuditLogger::decodeMetadata()` — the
+  accessor seam that Feature 5 will swap to transparently decrypt.
 - **Redaction-aware change diffs in the audit log:** governed entity updates now
   include a `changes` map (`{field: {old, new}}`) in the audit metadata,
   capturing exactly what changed. Fields listed in the resolved policy profile's

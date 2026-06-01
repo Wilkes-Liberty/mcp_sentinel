@@ -14,6 +14,14 @@ mcp_sentinel.audit_log:
   requirements:
     _permission: 'view mcp sentinel audit log'
 
+mcp_sentinel.audit_export:
+  path: '/admin/reports/mcp-sentinel/export'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpAuditController::export'
+    _title: 'MCP Sentinel Audit Export'
+  requirements:
+    _permission: 'view mcp sentinel audit log'
+
 mcp_sentinel.context:
   path: '/drupal-mcp/context'
   defaults:
