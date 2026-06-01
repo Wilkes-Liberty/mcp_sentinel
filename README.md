@@ -118,6 +118,33 @@ broken row id) if tampering is detected. Run `update_10003` (via
 New rows written after the update are automatically chained; rows written before
 the update have NULL hashes and are skipped by the verifier.
 
+## SIEM streaming
+
+When the *Enable SIEM streaming* checkbox is checked in the Audit Logging
+settings, every successful audit write emits an `info`-level record to the
+dedicated `mcp_sentinel_audit` logger channel. The structured context array
+contains: `operation`, `uid`, `entity_type`, `bundle`, `entity_id`,
+`timestamp`, and `row_hash` (which ties the SIEM record back to the hash-chain
+entry in the database).
+
+To route this channel to a SIEM, enable syslog output via the **core Syslog
+module** (no additional composer packages required):
+
+```yaml
+# Example: enable the Syslog module and configure the facility.
+drush en syslog -y
+```
+
+With Syslog enabled, all Drupal log channels (including `mcp_sentinel_audit`)
+are written to the system log; your log-shipping agent (Filebeat, Fluentd,
+etc.) can then forward them to your SIEM.
+
+For finer-grained control — e.g. writing only the audit channel to a dedicated
+file or sending it to a remote aggregator — use
+[`drupal/monolog`](https://www.drupal.org/project/monolog). Define a handler
+for the `mcp_sentinel_audit` channel in your `monolog.services.yml` and route
+it to syslog, Logstash, or any other Monolog handler.
+
 ## Configuration
 
 **Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)

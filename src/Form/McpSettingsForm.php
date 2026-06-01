@@ -133,6 +133,13 @@ class McpSettingsForm extends ConfigFormBase {
       '#empty_option'  => $this->t('- None (plain SHA-256) -'),
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
+    $form['audit']['siem_enabled'] = [
+      '#type'          => 'checkbox',
+      '#title'         => $this->t('Enable SIEM streaming'),
+      '#description'   => $this->t('When enabled, each audit write is also emitted to the <code>mcp_sentinel_audit</code> logger channel as a structured JSON record. Route this channel to syslog or Monolog to stream events to a SIEM without DB polling.'),
+      '#default_value' => $config->get('siem_enabled') ?? FALSE,
+      '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
+    ];
 
     $form['webhooks'] = ['#type' => 'fieldset', '#title' => $this->t('HTTPS Webhooks')];
     $form['webhooks']['webhook_enabled'] = [
@@ -187,6 +194,7 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_log_reads', (bool) $form_state->getValue('audit_log_reads'))
       ->set('audit_retention_days', (int) $form_state->getValue('audit_retention_days'))
       ->set('audit_hash_key', $form_state->getValue('audit_hash_key'))
+      ->set('siem_enabled', (bool) $form_state->getValue('siem_enabled'))
       ->set('webhook_enabled', (bool) $form_state->getValue('webhook_enabled'))
       ->set('webhook_url', $form_state->getValue('webhook_url'))
       ->set('webhook_secret_key', $form_state->getValue('webhook_secret_key'))

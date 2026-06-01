@@ -53,6 +53,15 @@ stable release is tagged.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
 ### Added
+- **SIEM streaming via a dedicated logger channel:** when the new *Enable SIEM
+  streaming* setting (`siem_enabled`) is turned on, every successful audit write
+  also emits an `info`-level record to the dedicated `mcp_sentinel_audit`
+  logger channel. The message is the stable string `mcp_sentinel_audit_event`
+  (suitable for log-aggregator grouping); all variable data is in a structured
+  context array: `operation`, `uid`, `entity_type`, `bundle`, `entity_id`,
+  `timestamp`, `row_hash`. Route the channel to syslog (via the core Syslog
+  module or Monolog) to stream structured audit events to a SIEM without
+  database polling. See the README for configuration details.
 - **Filterable audit log UI with CSV/JSON export:** the
   `/admin/reports/mcp-sentinel` listing now exposes a GET-based filter form
   (operation, entity type, UID, date range). A new

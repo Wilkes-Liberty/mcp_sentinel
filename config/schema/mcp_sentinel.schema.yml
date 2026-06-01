@@ -47,6 +47,9 @@ mcp_sentinel.settings:
     audit_hash_key:
       type: string
       label: 'Audit hash signing key — Key entity ID (HMAC-SHA256)'
+    siem_enabled:
+      type: boolean
+      label: 'SIEM streaming enabled'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

@@ -11,6 +11,7 @@ use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\key\KeyRepositoryInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -64,6 +65,11 @@ class McpAuditLogger {
    * @param \Drupal\Core\Lock\LockBackendInterface $lock
    *   The lock backend (serializes the read-latest-then-insert critical
    *   section to prevent hash-chain races under concurrent writes).
+   * @param \Psr\Log\LoggerInterface $auditChannel
+   *   The dedicated audit logger channel (mcp_sentinel_audit). When SIEM
+   *   streaming is enabled, every successful audit write is also emitted to
+   *   this channel as a structured record so operators can route it to syslog
+   *   or Monolog and stream events to a SIEM without DB polling.
    */
   public function __construct(
     private readonly Connection $database,
@@ -73,6 +79,7 @@ class McpAuditLogger {
     private readonly TimeInterface $time,
     private readonly KeyRepositoryInterface $keyRepository,
     private readonly LockBackendInterface $lock,
+    private readonly LoggerInterface $auditChannel,
   ) {}
 
   /**
@@ -152,6 +159,23 @@ class McpAuditLogger {
           'row_hash'     => $row_hash,
         ])
         ->execute();
+
+      // Optionally stream a structured record to the dedicated SIEM channel.
+      // The message string is intentionally stable (no per-row interpolation)
+      // so log aggregators can group/count by message template. All variable
+      // data is in the context array which Monolog / syslog handlers serialize
+      // as structured JSON.
+      if ($config->get('siem_enabled')) {
+        $this->auditChannel->info('mcp_sentinel_audit_event', [
+          'operation'   => $op,
+          'uid'         => $uid,
+          'entity_type' => $entity_type,
+          'bundle'      => $bundle,
+          'entity_id'   => $entity_id,
+          'timestamp'   => $timestamp,
+          'row_hash'    => $row_hash,
+        ]);
+      }
     }
     finally {
       if ($locked) {

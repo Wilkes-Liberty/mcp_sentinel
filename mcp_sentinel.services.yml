@@ -4,6 +4,11 @@ services:
     arguments:
       - 'mcp_sentinel'
 
+  logger.channel.mcp_sentinel_audit:
+    parent: logger.channel_base
+    arguments:
+      - 'mcp_sentinel_audit'
+
   mcp_sentinel.audit_logger:
     class: Drupal\mcp_sentinel\Service\McpAuditLogger
     arguments:
@@ -14,6 +19,7 @@ services:
       - '@datetime.time'
       - '@key.repository'
       - '@lock'
+      - '@logger.channel.mcp_sentinel_audit'
 
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver
