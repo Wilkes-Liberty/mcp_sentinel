@@ -7,6 +7,9 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added
+- Reusable in-form multi-row list editor trait.
+
 ### Changed
 - Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.
 
