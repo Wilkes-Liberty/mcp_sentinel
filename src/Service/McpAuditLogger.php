@@ -125,7 +125,7 @@ class McpAuditLogger {
     $bundle = $metadata['bundle'] ?? NULL;
     $entity_id = (string) ($metadata['id'] ?? '');
     $entity_label = isset($metadata['label'])
-      ? substr($metadata['label'], 0, 255)
+      ? substr((string) $metadata['label'], 0, 255)
       : NULL;
     $ip_address = $request?->getClientIp();
     $user_agent = $request

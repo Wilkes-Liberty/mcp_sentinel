@@ -14,12 +14,16 @@ did, and protects content humans are editing. It is an ecosystem module for
 
 ## Trust model
 
-Governance triggers on the **authenticated account's roles**, never on a request
-header. A request is "governed" when its user holds one of the configured
-*governed roles* (default: the `mcp_api` role created on install) or a role bound
-to a policy profile. The `X-MCP-Client` header is at most a log hint — an agent
-cannot bypass policy by omitting it, and a non-agent user cannot be governed by
-adding it. The `anonymous` and `authenticated` roles can never be governed.
+Governance triggers on the **validated OAuth agent channel** — the consumer and
+token scopes on the request's access token, as resolved by Simple OAuth — never
+on a request header. A request is "governed" when it arrives on a configured
+agent OAuth client/scope, or (as a configurable local-dev fallback,
+`governed_role_fallback`, default `false`) when its authenticated account holds
+one of the configured *governed roles* (default: the `mcp_api` role created on
+install). An admin's direct cookie-session Drupal UI is never governed. The
+`X-MCP-Client` header is at most a log hint — an agent cannot bypass policy by
+omitting it, and a non-agent user cannot be governed by adding it. The
+`anonymous` and `authenticated` roles can never be governed.
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight
 enabled profile whose roles it holds, else the shipped `default` profile), which
@@ -125,9 +129,13 @@ discover available types, queries, and mutations.
 
 ## Tamper-evident audit log
 
-Every audit row stores a `prev_hash` and a `row_hash` (SHA-256 of the prior
-row's hash concatenated with a canonical JSON of this row's content). Inserting,
-deleting, or editing any historical row breaks the cryptographic chain.
+Every audit row stores a `prev_hash` and a `row_hash` (a hash of the prior row's
+hash concatenated with a canonical JSON of this row's content). The hash is
+HMAC-SHA256 when `audit_hash_key` is set to a Key entity ID (use a File or
+Environment key provider so the secret never appears in exported config), and
+plain SHA-256 as a zero-config fallback. The canonical also covers the forensic
+columns `entity_label`, `ip_address`, and `user_agent`, so inserting, deleting,
+or editing any historical row — including those columns — breaks the chain.
 
 Verify the chain at any time:
 

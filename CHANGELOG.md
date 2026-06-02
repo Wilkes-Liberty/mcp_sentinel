@@ -7,53 +7,62 @@ stable release is tagged.
 
 ## [Unreleased]
 
-### Fixed
-- **Approval executor hardening (`mcp_sentinel_approval`):** several replay and
-  identity-safety guards on `McpApprovalExecutor`.
-  - `approve()`/`deny()` now throw if the request is not pending, so a direct
-    service caller cannot re-decide an already-decided request (no double
-    execute, no duplicate audit row).
-  - `approve()` validates the stored target entity type via `hasDefinition()`
-    before loading storage; an unknown/uninstalled type is recorded as
-    approved-but-not-executed (with a `reason`) instead of throwing a fatal and
-    stranding the request pending.
-  - When the approver lacks delete access on a still-present target, the request
-    now **stays pending** and the UI shows an error so an authorized approver can
-    retry — it is no longer mislabelled as approved. Genuinely unexecutable
-    cases (target already gone, unknown type, UUID mismatch) are recorded as
-    approved with `executed=false` plus a truthful `reason`/`note`. Audit
-    metadata now always includes `executed` and `decided_by`.
-  - The queued target is bound by **UUID** as well as its integer id: if the id
-    was reused by a different entity before approval, execution is blocked
-    (`reason: uuid_mismatch`) rather than deleting the wrong entity.
-- **Bulk tool fail-closed dispatch:** in `McpBulkOperationsTool`, a throwable
-  from the destructive-op event dispatch is now treated as a veto (the id is
-  reported as *queued*), so a dispatcher-level error can never let a gated
-  delete proceed or be miscounted as failed.
-- **DLP fail-open on PCRE runtime error:** `McpDlp::replaceMatches()` now
-  detects a NULL return from `preg_replace`/`preg_replace_callback` (e.g. on
-  a backtrack-limit hit) and returns the **original value unchanged** instead of
-  silently coercing NULL to `''`. A warning is logged to the `mcp_sentinel`
-  channel. Previously a PCRE error would blank the field value.
-- **DLP partial mode fully masks short matches:** in partial masking mode, a
-  match whose length is ≤ 4 characters (equal to `PARTIAL_KEEP`) is now
-  **fully replaced with `*` characters** instead of being returned verbatim.
-  The previous behaviour exposed the entire matched value — e.g. a 4-digit PIN
-  matched by a custom pattern would pass through unmasked. Matches longer than
-  4 characters are unaffected (last-4 semantics preserved).
-- **DLP custom-pattern UI (spec T6.1):** the settings form now exposes a
-  *Custom DLP patterns* textarea in the DLP fieldset. Operators enter one
-  pattern per line as `label|regex|mask` (mask is optional). The form validates
-  each regex using `McpDlp::wrapPattern()` before saving and rejects malformed
-  lines with a clear error message. Saving an empty textarea clears to `[]` and
-  falls back to the built-in defaults at runtime. A new `McpDlp::wrapPattern()`
-  public static helper ensures the form and the service always agree on the
-  exact delimiter convention.
-- **DLP `us_phone` regex matches no-separator format:** `(555)123-4567`
-  (closing area-code paren with no following space or separator) was previously
-  not matched. The separator after `)` is now optional (`[\s.\-]?`).
-
 ### Added
+- **Tamper-evident audit log with HMAC hash chain + `audit-verify`:** every
+  audit row stores a `prev_hash` (the preceding row's hash) and `row_hash`
+  (HMAC-SHA256 of `prev_hash | canonical-JSON` when `audit_hash_key` is set to a
+  Key entity ID, plain SHA-256 as a zero-config fallback). Any insertion,
+  deletion, or modification of a historical row breaks the chain; run
+  `drush mcp-sentinel:audit-verify` to detect it (exits non-zero if broken). The
+  canonical includes the forensic columns `entity_label`, `ip_address`, and
+  `user_agent` in fixed key order, and the read-latest-then-insert critical
+  section is serialized via Drupal's lock service to prevent races under
+  concurrent writes. `update_10003` adds the two columns; `update_10004` adds the
+  `audit_hash_key` setting.
+- **Redaction-aware change diffs in the audit log:** governed entity updates now
+  include a `changes` map (`{field: {old, new}}`) in the audit metadata,
+  capturing exactly what changed. Fields listed in the resolved policy profile's
+  `redacted_fields` are stored as `[REDACTED]` (both old and new values), so
+  sensitive field values never appear in the audit trail. Unchanged fields and
+  internal revision-bookkeeping fields are omitted. Values are capped at 255
+  characters and at most 50 fields are recorded per event.
+- **Filterable audit log UI with CSV/JSON export:** the
+  `/admin/reports/mcp-sentinel` listing now exposes a GET-based filter form
+  (operation, entity type, UID, date range). A new
+  `/admin/reports/mcp-sentinel/export` route (permission
+  `view mcp sentinel audit log`) streams the filtered log as a CSV download by
+  default or a JSON array when `?format=json` is requested. All metadata reads
+  in the controller flow through `McpAuditLogger::decodeMetadata()`, the accessor
+  seam that transparently decrypts at-rest-encrypted rows.
+- **SIEM streaming via a dedicated logger channel:** when the *Enable SIEM
+  streaming* setting (`siem_enabled`) is turned on, every successful audit write
+  also emits an `info`-level record to the dedicated `mcp_sentinel_audit`
+  logger channel. The message is the stable string `mcp_sentinel_audit_event`
+  (suitable for log-aggregator grouping); all variable data is in a structured
+  context array: `operation`, `uid`, `entity_type`, `bundle`, `entity_id`,
+  `timestamp`, `row_hash`. Route the channel to syslog (via the core Syslog
+  module or Monolog) to stream structured audit events to a SIEM without
+  database polling. See the README for configuration details.
+- **DLP value-pattern redaction + partial masking (opt-in):** a new
+  `McpDlp` service scans governed field values against configurable PII
+  patterns (email, US phone, SSN, 16-digit credit card, plus unlimited
+  site-defined custom patterns) and either fully redacts matches
+  (`[REDACTED]`) or applies partial masking (last-4 chars kept, rest
+  replaced with `*`). Scanning is **off by default** (`dlp_enabled: false`);
+  enable and configure under *Configuration → Web services → MCP Sentinel →
+  Data Loss Prevention*, including a *Custom DLP patterns* textarea
+  (`label|regex|mask` per line, validated on save). `update_10005` adds the new
+  settings to existing installs.
+  - **V1 wired output paths:** (a) GraphQL Compose field output (via
+    `mcp_sentinel_graphql_graphql_compose_field_results_alter` in the
+    `mcp_sentinel_graphql` submodule) and (b) the audit change-diff capture
+    (`McpAuditLogger::computeChangeDiff`). JSON:API/REST per-value scanning
+    is deferred to a future release (no stable per-value normalizer alter
+    hook exists in Drupal core).
+  - **Regex convention:** patterns store the PCRE body WITHOUT delimiters
+    (e.g. `[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}`). The service wraps
+    each pattern in `#...#i` delimiters at runtime. Invalid patterns are
+    silently skipped with a warning logged to the `mcp_sentinel` channel.
 - **Approval-workflow submodule (`mcp_sentinel_approval`, optional):** an
   opt-in human-approval gate for governed destructive operations. When enabled,
   the base bulk-operations tool dispatches a veto-capable `McpDestructiveOpEvent`
@@ -67,105 +76,6 @@ stable release is tagged.
   (`gated_operations`, default `[delete]`). The base module has no dependency on
   the submodule — when it is absent the event is never vetoed and destructive
   operations proceed unchanged.
-- **DLP value-pattern redaction + partial masking (opt-in):** a new
-  `McpDlp` service scans governed field values against configurable PII
-  patterns (email, US phone, SSN, 16-digit credit card, plus unlimited
-  site-defined custom patterns) and either fully redacts matches
-  (`[REDACTED]`) or applies partial masking (last-4 chars kept, rest
-  replaced with `*`). Scanning is **off by default** (`dlp_enabled: false`);
-  enable and configure under *Configuration → Web services → MCP Sentinel →
-  Data Loss Prevention*. `update_10005` adds the three new settings to
-  existing installs.
-  - **V1 wired output paths:** (a) GraphQL Compose field output (via
-    `mcp_sentinel_graphql_graphql_compose_field_results_alter` in the
-    `mcp_sentinel_graphql` submodule) and (b) the audit change-diff capture
-    (`McpAuditLogger::computeChangeDiff`). JSON:API/REST per-value scanning
-    is deferred to a future release (no stable per-value normalizer alter
-    hook exists in Drupal core).
-  - **Regex convention:** patterns store the PCRE body WITHOUT delimiters
-    (e.g. `[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}`). The service wraps
-    each pattern in `#...#i` delimiters at runtime. Invalid patterns are
-    silently skipped with a warning logged to the `mcp_sentinel` channel.
-
-### Security
-- **Optional at-rest encryption of audit metadata:** when `audit_encryption_profile`
-  is set to an Encryption Profile entity ID (from drupal/encrypt), the `metadata`
-  column of every new audit row is encrypted at rest. Reads transparently decrypt
-  via the `decodeMetadata()` accessor with graceful fallback to plain JSON for
-  pre-encryption rows, so no data migration is required when enabling encryption
-  on an existing install. The hash chain continues to hash plaintext canonical
-  content (encryption only affects storage), so `drush mcp-sentinel:audit-verify`
-  remains reliable across key rotations. drupal/encrypt is now a required
-  dependency.
-- **HMAC-keyed audit hash chain:** the audit hash chain now uses
-  HMAC-SHA256 when `audit_hash_key` is set to a Key entity ID (plain SHA-256
-  is retained as a zero-config fallback). Set the key to a File or Environment
-  provider so the signing secret never appears in exported configuration.
-  `update_10004` adds the `audit_hash_key` setting to existing installs.
-- **Tamper-evident audit log (hash chain):** every audit row now stores a
-  `prev_hash` (the preceding row's hash) and `row_hash` (HMAC-SHA256 or
-  SHA-256 of `prev_hash | canonical-JSON`). Any insertion, deletion, or
-  modification of a historical row breaks the chain; run
-  `drush mcp-sentinel:audit-verify` to detect it. `update_10003` adds the two
-  columns to existing installs.
-- **Full-column canonical:** the audit chain canonical now includes
-  `entity_label`, `ip_address`, and `user_agent` in fixed key order, so
-  post-hoc alteration of forensic columns also breaks the chain.
-- **Serialized chain writes:** the read-latest-then-insert critical section
-  in the audit logger is protected by Drupal's lock service to prevent
-  hash-chain races under concurrent writes.
-- MCP governance triggers on the **validated OAuth agent channel**
-  (consumer/scope on the request's access token), not on role alone. An admin's
-  direct cookie-session Drupal UI is never governed; only token-bearing agent
-  traffic is governed and audited.
-- Per-tool `mcp:read`/`mcp:write` scope enforcement is now active via
-  `mcp_server_oauth` third-party settings on each `mcp_tool_config`. Run
-  `drush mcp-sentinel:setup --require-oauth` to apply.
-- Governed redaction and entity-access decisions vary by both `user.roles` and
-  `oauth2_scopes` cache contexts, preventing agent-channel responses from being
-  served to cookie-session requests for the same user.
-- Governance now triggers on the agent's **authenticated roles** as a
-  configurable local-dev fallback (`governed_role_fallback`, default `false`),
-  not the spoofable `X-MCP-Client` header. An agent cannot bypass policy by
-  omitting the header; a non-agent user cannot be governed by adding it.
-- The HMAC webhook signing secret is now resolved from a **Key** entity
-  (`webhook_secret_key`) instead of being stored as plaintext in exported
-  configuration. `update_10001` migrates any existing plaintext secret into a
-  Key. drupal/key is now a required dependency.
-- The `/drupal-mcp/context` endpoint no longer discloses the Drupal version.
-
-### Fixed
-- `allow_read` is now enforced on JSON:API/REST reads (the `view` operation was
-  previously ungated outside GraphQL).
-- `McpContentLock::isLocked()` no longer writes (deletes expired rows) on every
-  read; expired locks are excluded by a query condition and reaped by cron.
-- Uninstalling the module now removes the `mcp_api` role it creates on install.
-
-### Added
-- **SIEM streaming via a dedicated logger channel:** when the new *Enable SIEM
-  streaming* setting (`siem_enabled`) is turned on, every successful audit write
-  also emits an `info`-level record to the dedicated `mcp_sentinel_audit`
-  logger channel. The message is the stable string `mcp_sentinel_audit_event`
-  (suitable for log-aggregator grouping); all variable data is in a structured
-  context array: `operation`, `uid`, `entity_type`, `bundle`, `entity_id`,
-  `timestamp`, `row_hash`. Route the channel to syslog (via the core Syslog
-  module or Monolog) to stream structured audit events to a SIEM without
-  database polling. See the README for configuration details.
-- **Filterable audit log UI with CSV/JSON export:** the
-  `/admin/reports/mcp-sentinel` listing now exposes a GET-based filter form
-  (operation, entity type, UID, date range). A new
-  `/admin/reports/mcp-sentinel/export` route (permission
-  `view mcp sentinel audit log`) streams the filtered log as a CSV download by
-  default or a JSON array when `?format=json` is requested. All metadata reads
-  in the controller flow through `McpAuditLogger::decodeMetadata()` — the
-  accessor seam that Feature 5 will swap to transparently decrypt.
-- **Redaction-aware change diffs in the audit log:** governed entity updates now
-  include a `changes` map (`{field: {old, new}}`) in the audit metadata,
-  capturing exactly what changed. Fields listed in the resolved policy profile's
-  `redacted_fields` are stored as `[REDACTED]` (both old and new values), so
-  sensitive field values never appear in the audit trail. Unchanged fields and
-  internal revision-bookkeeping fields are omitted. Values are capped at 255
-  characters and at most 50 fields are recorded per event.
 - `McpOauthContext` service (`mcp_sentinel.oauth_context`) — reads the
   server-validated OAuth agent channel (consumer `client_id` + token scopes)
   for the current request. Single seam between MCP Sentinel and simple_oauth.
@@ -198,6 +108,78 @@ stable release is tagged.
   `:audit-verify` (verifies the hash chain; exits non-zero if broken).
 - `phpcs.xml.dist`, `phpstan.neon.dist` (level 6), and unit/kernel/functional
   test coverage.
+
+### Security
+- **Optional at-rest encryption of audit metadata:** when
+  `audit_encryption_profile` is set to an Encryption Profile entity ID (from
+  drupal/encrypt), the `metadata` column of every new audit row is encrypted at
+  rest. Reads transparently decrypt via the `decodeMetadata()` accessor with
+  graceful fallback to plain JSON for pre-encryption rows, so no data migration
+  is required when enabling encryption on an existing install. The hash chain
+  continues to hash plaintext canonical content (encryption only affects
+  storage), so `drush mcp-sentinel:audit-verify` remains reliable. An encryption
+  failure at runtime logs a warning and falls back to storing plaintext for that
+  row (audit entries are never dropped). drupal/encrypt is now a required
+  dependency.
+- MCP governance triggers on the **validated OAuth agent channel**
+  (consumer/scope on the request's access token), not on role alone. An admin's
+  direct cookie-session Drupal UI is never governed; only token-bearing agent
+  traffic is governed and audited.
+- Per-tool `mcp:read`/`mcp:write` scope enforcement is now active via
+  `mcp_server_oauth` third-party settings on each `mcp_tool_config`. Run
+  `drush mcp-sentinel:setup --require-oauth` to apply.
+- Governed redaction and entity-access decisions vary by both `user.roles` and
+  `oauth2_scopes` cache contexts, preventing agent-channel responses from being
+  served to cookie-session requests for the same user.
+- Governance triggers on the agent's **authenticated roles** as a configurable
+  local-dev fallback (`governed_role_fallback`, default `false`), not the
+  spoofable `X-MCP-Client` header. An agent cannot bypass policy by omitting the
+  header; a non-agent user cannot be governed by adding it.
+- The HMAC webhook signing secret is now resolved from a **Key** entity
+  (`webhook_secret_key`) instead of being stored as plaintext in exported
+  configuration. `update_10001` migrates any existing plaintext secret into a
+  Key. drupal/key is now a required dependency.
+- The `/drupal-mcp/context` endpoint no longer discloses the Drupal version.
+
+### Fixed
+- **Non-string entity labels no longer fatal the audit logger:** for config
+  entities (and some content entities) `$entity->label()` returns a
+  `TranslatableMarkup` object rather than a string. The audit logger passed it
+  straight to `substr()`, which throws a `TypeError` under PHP 8.x — turning a
+  legitimate governed save/delete into a fatal inside
+  `hook_entity_presave()`/`hook_entity_delete()`. The label is now cast to a
+  string before truncation.
+- **Approval executor hardening (`mcp_sentinel_approval`):** replay and
+  identity-safety guards on `McpApprovalExecutor`. `approve()`/`deny()` throw if
+  the request is not pending (no double execute / duplicate audit row);
+  `approve()` validates the stored target entity type via `hasDefinition()`
+  before loading storage; a missing approver delete-access on a still-present
+  target leaves the request **pending** (no longer mislabelled approved) while
+  genuinely unexecutable cases (target gone, unknown type, UUID mismatch) are
+  recorded approved with `executed=false` plus a truthful `reason`; and the
+  queued target is bound by **UUID** as well as id so a reused id cannot delete
+  the wrong entity.
+- **Bulk tool fail-closed dispatch:** in `McpBulkOperationsTool`, a throwable
+  from the destructive-op event dispatch is now treated as a veto (the id is
+  reported as *queued*), so a dispatcher-level error can never let a gated
+  delete proceed or be miscounted as failed.
+- **DLP fail-open on PCRE runtime error:** `McpDlp::replaceMatches()` detects a
+  NULL return from `preg_replace`/`preg_replace_callback` (e.g. on a
+  backtrack-limit hit) and returns the **original value unchanged** instead of
+  silently coercing NULL to `''`, logging a warning. Previously a PCRE error
+  would blank the field value.
+- **DLP partial mode fully masks short matches:** in partial masking mode a
+  match whose length is ≤ 4 characters (equal to `PARTIAL_KEEP`) is now
+  **fully replaced with `*`** instead of returned verbatim; longer matches keep
+  last-4 semantics.
+- **DLP `us_phone` regex matches no-separator format:** `(555)123-4567` (closing
+  area-code paren with no following separator) is now matched (the separator
+  after `)` is optional).
+- `allow_read` is now enforced on JSON:API/REST reads (the `view` operation was
+  previously ungated outside GraphQL).
+- `McpContentLock::isLocked()` no longer writes (deletes expired rows) on every
+  read; expired locks are excluded by a query condition and reaped by cron.
+- Uninstalling the module now removes the `mcp_api` role it creates on install.
 
 ### Notes
 - Pre-1.0 and in active development. See `ROADMAP.md` for the enterprise
