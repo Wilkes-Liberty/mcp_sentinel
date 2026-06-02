@@ -26,3 +26,8 @@ parameters:
     -
       identifier: method.internal
       path: modules/mcp_sentinel_graphql/tests/src/Kernel/GraphqlGovernanceSubscriberTest.php
+    # McpGovernedRequestTrait is a reusable harness for W1-T5/T6/T7 functional
+    # tests (not yet implemented); phpstan flags it as unused until consumed.
+    -
+      identifier: trait.unused
+      path: tests/src/Traits/McpGovernedRequestTrait.php

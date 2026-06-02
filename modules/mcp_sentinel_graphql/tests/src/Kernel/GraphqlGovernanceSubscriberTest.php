@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_graphql\Kernel;
 
+use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\graphql\Event\OperationEvent;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
 use Drupal\KernelTests\KernelTestBase;
@@ -16,12 +17,18 @@ use GraphQL\Server\OperationParams;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * Regression: onOperation must never fatal on the removed isMcpRequest().
+ * Kernel tests for GraphqlGovernanceSubscriber::onOperation().
  *
- * The original bug (fixed in commit 9750e38) was that onOperation() called
- * $this->auditLogger->isMcpRequest(), which no longer exists on McpAuditLogger.
- * These tests exercise onOperation() directly so that regression is caught
- * immediately should it be reintroduced.
+ * Original scope (regression guard):
+ *  - onOperation() must never fatal on the removed isMcpRequest().
+ *  - onOperation() throws a GraphQL Error when the master switch is off.
+ *
+ * W1-T2 additions (G2 gap closure):
+ *  - Mutation blocked when allow_graphql_mutations = FALSE.
+ *  - Query allowed when allow_read = TRUE.
+ *  - Query blocked when allow_read = FALSE.
+ *  - A blocked mutation still produces an audit row (audit-before-throw).
+ *  - Subscriptions and unknown operation types are left untouched.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber
  * @group mcp_sentinel
@@ -61,6 +68,10 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
+    $this->installSchema('mcp_sentinel', [
+      'mcp_sentinel_audit_log',
+      'mcp_sentinel_content_locks',
+    ]);
     $this->installConfig(['mcp_sentinel']);
   }
 
@@ -137,6 +148,108 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   }
 
   /**
+   * A governed agent cannot run a GraphQL mutation when write gate is off.
+   *
+   * The profile has allow_write = FALSE and allow_graphql_mutations = FALSE.
+   * onOperation() must throw a GraphQL Error with the mutation-gate message.
+   *
+   * @covers ::onOperation
+   */
+  public function testMutationBlockedWhenWriteGateOff(): void {
+    $this->setUpGovernedAgent(['allow_write' => FALSE, 'allow_graphql_mutations' => FALSE]);
+
+    $this->expectException(Error::class);
+    $this->expectExceptionMessage('GraphQL mutations are disabled by MCP Sentinel.');
+
+    $this->subscriber()->onOperation($this->makeEvent('mutation'));
+  }
+
+  /**
+   * A governed agent can run a GraphQL query when the read gate is on.
+   *
+   * The profile has allow_read = TRUE. onOperation() must not throw for a
+   * 'query' operation type, and no GraphQL Error must propagate.
+   *
+   * @covers ::onOperation
+   */
+  public function testQueryAllowedWhenReadGateOn(): void {
+    $this->setUpGovernedAgent(['allow_read' => TRUE]);
+
+    // No exception expected — reaching the assertion proves success.
+    $this->subscriber()->onOperation($this->makeEvent('query'));
+    $this->addToAssertionCount(1);
+  }
+
+  /**
+   * A governed agent is blocked from running a query when the read gate is off.
+   *
+   * The profile has allow_read = FALSE. onOperation() must throw a GraphQL
+   * Error with the read-access-disabled message.
+   *
+   * @covers ::onOperation
+   */
+  public function testQueryBlockedWhenReadGateOff(): void {
+    $this->setUpGovernedAgent(['allow_read' => FALSE]);
+
+    $this->expectException(Error::class);
+    $this->expectExceptionMessage('GraphQL read access is disabled by MCP Sentinel.');
+
+    $this->subscriber()->onOperation($this->makeEvent('query'));
+  }
+
+  /**
+   * A blocked mutation still produces an audit row (audit-before-throw).
+   *
+   * The subscriber audits the attempt BEFORE throwing so that blocked
+   * operations are still recorded. A 'graphql_mutation' row must appear in
+   * mcp_sentinel_audit_log even though the mutation was denied.
+   *
+   * @covers ::onOperation
+   */
+  public function testBlockedMutationStillAudited(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', TRUE)
+      ->save();
+    $this->setUpGovernedAgent(['allow_write' => FALSE, 'allow_graphql_mutations' => FALSE]);
+
+    try {
+      $this->subscriber()->onOperation($this->makeEvent('mutation'));
+    }
+    catch (Error $e) {
+      // Expected — we only care about the audit row.
+    }
+
+    $rows = $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->fields('l', ['operation'])
+      ->execute()
+      ->fetchAll(FetchAs::Associative);
+
+    $operations = array_column($rows, 'operation');
+    $this->assertContains(
+      'graphql_mutation',
+      $operations,
+      "A 'graphql_mutation' audit row must be written even for a blocked mutation.",
+    );
+  }
+
+  /**
+   * A subscription operation is left untouched by the governance subscriber.
+   *
+   * The subscriber only gates 'query' and 'mutation' types; 'subscription'
+   * must not throw or produce an unexpected side effect for a governed user.
+   *
+   * @covers ::onOperation
+   */
+  public function testSubscriptionUntouched(): void {
+    $this->setUpGovernedAgent(['allow_read' => FALSE, 'allow_write' => FALSE]);
+
+    // No exception expected — the subscriber must return without gating.
+    $this->subscriber()->onOperation($this->makeEvent('subscription'));
+    $this->addToAssertionCount(1);
+  }
+
+  /**
    * Returns a fresh GraphqlGovernanceSubscriber from real container services.
    */
   private function subscriber(): GraphqlGovernanceSubscriber {
@@ -165,6 +278,46 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $context->method('getOperation')->willReturn($params);
 
     return new OperationEvent($context);
+  }
+
+  /**
+   * Sets up a governed agent as the current user with a policy profile.
+   *
+   * Enables governed_role_fallback and creates the mcp_api role, a matching
+   * profile, and sets a governed user as the current user. The master switch
+   * is kept ON (enabled = TRUE) so gating tests exercise the gate logic rather
+   * than the master-off path.
+   *
+   * @param array<string, mixed> $profileOverrides
+   *   Profile field values to override. Supported keys: allow_read,
+   *   allow_write, allow_graphql_mutations. All default to TRUE/FALSE as
+   *   appropriate for the profile to resolve correctly.
+   */
+  private function setUpGovernedAgent(array $profileOverrides = []): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('governed_roles', ['mcp_api'])
+      ->set('governed_role_fallback', TRUE)
+      ->set('enabled', TRUE)
+      ->save();
+
+    if (!Role::load('mcp_api')) {
+      Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
+    }
+
+    $defaults = [
+      'id' => 'w1t2_profile',
+      'label' => 'W1-T2 profile',
+      'roles' => ['mcp_api'],
+      'weight' => 10,
+      'allow_read' => TRUE,
+      'allow_write' => TRUE,
+      'allow_graphql_mutations' => TRUE,
+    ];
+
+    McpPolicyProfile::create(array_merge($defaults, $profileOverrides))->save();
+
+    $agent = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
+    $this->container->get('current_user')->setAccount($agent);
   }
 
 }
