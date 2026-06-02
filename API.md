@@ -143,6 +143,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks |
 | `mcp_sentinel.metrics` | `McpMetrics` | governance-dashboard data; reads existing stores only, every audit/webhook query window-bounded |
+| `mcp_sentinel.urgent_conditions` | `McpUrgentConditions` | `evaluate()` → critical/warning/info conditions + operator broadcast for the dashboard banner (pure read) |
 
 ### `McpMetrics` — governance-dashboard data
 
@@ -163,6 +164,26 @@ Methods: `statusSummary()`, `auditCounts($window)`, `auditTimeSeries($window)`,
 `anomalySummary($window)`, `chainIntegrity()` (reads the stored last-verify
 result from `@state`; never re-runs `verifyChain()` on the hot path), and
 `activeControls()`.
+
+### `McpUrgentConditions` — dashboard banner conditions
+
+`mcp_sentinel.urgent_conditions` is a pure read-only evaluator. `evaluate()`
+returns a list of `['severity', 'key', 'message', 'url']` entries for the
+governance dashboard banner:
+
+- `chain_broken` (critical) — the stored last-verify result in `@state`
+  (`mcp_sentinel.last_verify`) is FALSE.
+- `encryption_unresolvable` (critical) — an `audit_encryption_profile` is set
+  but its EncryptionProfile or its Key cannot be resolved.
+- `master_switch_off` (warning) — governance is OFF yet an agent audit row was
+  written within the last 24 hours.
+- `endpoint_key_unresolvable` (critical) — an enabled webhook endpoint's
+  `secret_key` does not resolve via the Key repository.
+- `operator_broadcast` (config severity) — the `dashboard_broadcast` message is
+  non-empty.
+
+`severity` is one of `info`/`warning`/`critical`; `url` is an internal path to
+the relevant settings/audit route (or NULL). It performs no writes.
 
 ### Resolving governance in your own code
 

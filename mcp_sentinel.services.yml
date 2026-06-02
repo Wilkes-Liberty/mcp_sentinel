@@ -118,3 +118,13 @@ services:
       - '@entity_type.manager'
       - '@mcp_sentinel.audit_logger'
       - '@logger.channel.mcp_sentinel'
+
+  mcp_sentinel.urgent_conditions:
+    class: Drupal\mcp_sentinel\Service\McpUrgentConditions
+    arguments:
+      - '@config.factory'
+      - '@state'
+      - '@database'
+      - '@datetime.time'
+      - '@entity_type.manager'
+      - '@key.repository'
