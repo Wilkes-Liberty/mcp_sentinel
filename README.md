@@ -385,7 +385,9 @@ single canonical implementation used by all governed paths. Enforcement covers:
 
 | Path | Gate |
 |---|---|
-| **Entity access** (`hook_entity_access`) | `McpAccessChecker::checkEntityAccess()` — first check after the global enabled flag, before entity-type / operation gates. Covers all JSON:API, GraphQL, and REST entity reads/writes. |
+| **Entity access** (`hook_entity_access`) | `McpAccessChecker::checkEntityAccess()` — first check after the global enabled flag, before entity-type / operation gates. Covers JSON:API, GraphQL, and REST entity reads and writes on **existing** entities (view/update/delete). |
+| **Entity create access** (`hook_entity_create_access`) | `McpAccessChecker::checkCreateAccess()` — `hook_entity_access` does not fire for CREATE, so JSON:API `POST` (new entity) is gated here. Enforces the master switch, IP allowlist, entity-type allow/deny policy, and the write gate, matching the existing-entity semantics. |
+| **JSON:API request seam** (`McpJsonApiPageLimitSubscriber`) | Enforces the IP allowlist for **all** governed JSON:API traffic — collection (`/jsonapi/node/article`), individual, and writes — so collection enumeration from a disallowed IP is denied (403), not only individual `/{uuid}` reads. Also enforces `result_count_cap` on `page[limit]`. |
 | **`McpContentLockTool`** | `checkAccess()` — IP-denied governed accounts receive a forbidden `AccessResult` before any lock state is read or mutated. |
 | **`McpSecurityPolicyTool`** | `checkAccess()` — IP-denied governed accounts cannot read the policy profile data. |
 | **`McpSiteContextTool`** | `checkAccess()` — IP-denied governed accounts cannot read the site schema. |

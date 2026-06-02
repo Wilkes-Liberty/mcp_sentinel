@@ -4,28 +4,41 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
+use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
 
 /**
- * Enforces the profile result_count_cap on JSON:API page[limit] requests.
+ * Governs JSON:API requests: IP allowlist + the profile result_count_cap.
  *
  * Drupal 11.3 core does not expose a hook_jsonapi_resource_params_alter hook.
  * This subscriber runs at KernelEvents::REQUEST priority -20 (after routing and
  * authentication but before the JSON:API controller parses pagination params),
  * so the database never reads excess rows for governed agents.
  *
- * Enforcement only applies to requests that:
+ * Two governance gates fire here for governed (profile-resolved) JSON:API
+ * traffic:
+ * 1. IP allowlist — the request subscriber is the single seam that uniformly
+ *    covers BOTH the collection endpoint (/jsonapi/node/article) and individual
+ *    resources (/jsonapi/node/article/{uuid}) as well as writes. The individual
+ *    and write paths are ALSO IP-gated by hook_entity_access (defence in
+ *    depth); the collection (filter-access) path was NOT, so an agent from a
+ *    disallowed IP could enumerate collections. Enforcing here closes that gap
+ *    for every JSON:API shape at once. A 403 is returned when the client IP is
+ *    not in the profile's non-empty allowed_ips list. An empty allowed_ips list
+ *    imposes no restriction.
+ * 2. result_count_cap on page[limit] — a 400 Bad Request is returned when the
+ *    requested page[limit] exceeds the profile cap.
+ *
+ * Both gates only apply to requests that:
  * 1. Have a path containing '/jsonapi/' (covers both '/jsonapi/...' and
  *    language-prefixed paths like '/en/jsonapi/...')
- * 2. Are governed (policy resolver returns a non-NULL profile)
- * 3. Include a page[limit] parameter >= 1 that exceeds the cap (and cap > 0)
- *
- * A 400 Bad Request is returned to the agent with a descriptive message.
+ * 2. Are governed (policy resolver returns a non-NULL profile).
  */
 final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
 
@@ -34,9 +47,12 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *
    * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
    *   The MCP Sentinel policy resolver.
+   * @param \Drupal\mcp_sentinel\Service\McpAccessChecker $accessChecker
+   *   The MCP Sentinel access checker, used for the IP-allowlist gate.
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,
+    private readonly McpAccessChecker $accessChecker,
   ) {}
 
   /**
@@ -69,6 +85,18 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     $profile = $this->policyResolver->resolve();
     if ($profile === NULL) {
       return;
+    }
+
+    // IP allowlist: deny the whole JSON:API request (collection, individual or
+    // write) when the client IP is not permitted. An empty allowed_ips list
+    // imposes no restriction. Client IP is not a cache context, but the
+    // JSON:API controller already varies/uncaches dynamic-page responses; this
+    // 403 is an exception thrown before the controller runs, so no allowed
+    // result can be re-served across IPs from this seam.
+    if (!$this->accessChecker->isClientIpAllowed($profile)) {
+      throw new AccessDeniedHttpException(
+        'Source IP not permitted by MCP Sentinel policy.'
+      );
     }
 
     $cap = $profile->getResultCountCap();

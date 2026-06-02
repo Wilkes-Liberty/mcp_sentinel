@@ -219,6 +219,83 @@ final class McpPhase4ControlsFunctionalTest extends BrowserTestBase {
   }
 
   /**
+   * IP allowlist forbids a governed COLLECTION GET from an untrusted IP.
+   *
+   * Collection reads (GET /jsonapi/node/article) do NOT fire
+   * hook_entity_access — only hook_jsonapi_entity_filter_access, which checks
+   * entity-type allow/deny but NOT the IP allowlist. The IP gate is now
+   * enforced for ALL governed JSON:API traffic by the request subscriber
+   * (McpJsonApiPageLimitSubscriber), so a governed collection GET from a
+   * disallowed IP must be 403. Before the fix this collection GET succeeded
+   * (200) from a disallowed IP, allowing enumeration.
+   *
+   * Uses the same loopback-vs-non-loopback technique as the individual-resource
+   * test: allowed_ips = 10.0.0.0/24 excludes the loopback test client.
+   */
+  public function testIpAllowlistForbidsCollectionFromUntrustedIp(): void {
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $profile->set('allow_read', TRUE);
+    $profile->set('allow_write', FALSE);
+    $profile->set('allowed_ips', ['10.0.0.0/24']);
+    $profile->save();
+
+    $this->drupalCreateNode(['type' => 'article', 'status' => 1]);
+
+    $agent = $this->createGovernedAgentAccount(['access content']);
+
+    // GET the COLLECTION endpoint (no {uuid}). 127.0.0.1 ∉ 10.0.0.0/24.
+    $response = $this->governedJsonApiRequest(
+      'GET',
+      '/jsonapi/node/article',
+      [],
+      NULL,
+      $agent,
+    );
+
+    $this->assertSame(403, $response->getStatusCode(),
+      'A governed collection GET from an IP not in allowed_ips must be 403 '
+      . '(IP gate now covers collections, not just individual resources).');
+  }
+
+  /**
+   * A governed collection GET is allowed when allowed_ips has no restriction.
+   *
+   * The IP gate must NOT over-block: with an empty allowed_ips list the
+   * subscriber permits the request regardless of client IP, so a governed
+   * collection GET succeeds (200). This is the deterministic counterpart to the
+   * disallowed-IP test (which uses a non-loopback CIDR). An IP-match-positive
+   * assertion is not used because the test client's source IP is environment
+   * dependent (Docker/CI vs loopback); the empty-list case proves the gate is
+   * scoped to non-empty lists and does not block in-policy traffic.
+   */
+  public function testIpAllowlistPermitsCollectionWhenUnrestricted(): void {
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $profile->set('allow_read', TRUE);
+    $profile->set('allow_write', FALSE);
+    // Empty list = no IP restriction.
+    $profile->set('allowed_ips', []);
+    $profile->save();
+
+    $this->drupalCreateNode(['type' => 'article', 'status' => 1]);
+
+    $agent = $this->createGovernedAgentAccount(['access content']);
+
+    $response = $this->governedJsonApiRequest(
+      'GET',
+      '/jsonapi/node/article',
+      [],
+      NULL,
+      $agent,
+    );
+
+    $this->assertSame(200, $response->getStatusCode(),
+      'A governed collection GET must succeed when allowed_ips is empty (no '
+      . 'IP restriction).');
+  }
+
+  /**
    * Anomaly alert is dispatched after cron when audit rows exceed threshold.
    *
    * Seeds audit rows exceeding the rule threshold, enables anomaly detection

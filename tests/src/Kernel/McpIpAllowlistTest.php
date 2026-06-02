@@ -302,4 +302,41 @@ final class McpIpAllowlistTest extends KernelTestBase {
     $this->container->get('request_stack')->pop();
   }
 
+  /**
+   * The create-access path is IP-gated and its allowed result is uncacheable.
+   *
+   * Proves the create plane (hook_entity_create_access) honours the IP
+   * allowlist with the same cacheability semantics as the existing-entity
+   * path: a disallowed IP is forbidden, and an allowed result is max-age 0.
+   *
+   * @covers ::checkCreateAccess
+   * @covers ::isClientIpAllowed
+   */
+  public function testCreateAccessIsIpGated(): void {
+    $profile = $this->profileWithIps(['203.0.113.0/24']);
+
+    // Disallowed IP → forbidden.
+    $this->pushRequest('192.0.2.1');
+    $denied = $this->checker()->checkCreateAccess('node', $profile);
+    $this->assertTrue(
+      $denied->isForbidden(),
+      'Create from an IP outside the allowlist must be forbidden.'
+    );
+    $this->container->get('request_stack')->pop();
+
+    // Allowed IP → not forbidden, and uncacheable (max-age 0).
+    $this->pushRequest('203.0.113.42');
+    $allowed = $this->checker()->checkCreateAccess('node', $profile);
+    $this->assertFalse(
+      $allowed->isForbidden(),
+      'Create from an IP inside the allowlist must be permitted.'
+    );
+    $this->assertSame(
+      0,
+      $allowed->getCacheMaxAge(),
+      'Allowed create result must be uncacheable (max-age 0) when the profile has IP restrictions.'
+    );
+    $this->container->get('request_stack')->pop();
+  }
+
 }

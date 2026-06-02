@@ -148,4 +148,77 @@ final class McpAccessCheckerTest extends KernelTestBase {
     );
   }
 
+  /**
+   * Create is forbidden when the write gate is off (create is a write).
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testCreateBlockedWhenWriteGateOff(): void {
+    $this->setMaster(TRUE);
+    $off = $this->profile(['allow_write' => FALSE]);
+    $this->assertTrue(
+      $this->checker()->checkCreateAccess('node', $off)->isForbidden(),
+      'Create must be forbidden when allow_write is FALSE.'
+    );
+  }
+
+  /**
+   * Create is permitted when the write gate is on and the type is allowed.
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testCreateAllowedWhenWriteGateOn(): void {
+    $this->setMaster(TRUE);
+    $on = $this->profile(['allow_write' => TRUE]);
+    $this->assertFalse(
+      $this->checker()->checkCreateAccess('node', $on)->isForbidden(),
+      'Create must be permitted when allow_write is TRUE and the type is allowed.'
+    );
+  }
+
+  /**
+   * Create is forbidden for a denied entity type even when write is allowed.
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testCreateBlockedForDeniedType(): void {
+    $this->setMaster(TRUE);
+    $p = $this->profile(['denied_entity_types' => ['user'], 'allow_write' => TRUE]);
+    $this->assertTrue(
+      $this->checker()->checkCreateAccess('user', $p)->isForbidden(),
+      'Create of a denied entity type must be forbidden.'
+    );
+  }
+
+  /**
+   * Create is forbidden for a type outside a non-empty allowlist.
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testCreateBlockedWhenTypeNotInAllowlist(): void {
+    $this->setMaster(TRUE);
+    $p = $this->profile([
+      'allowed_entity_types' => ['taxonomy_term'],
+      'allow_write' => TRUE,
+    ]);
+    $this->assertTrue(
+      $this->checker()->checkCreateAccess('node', $p)->isForbidden(),
+      'Create of a type not in the allowlist must be forbidden.'
+    );
+  }
+
+  /**
+   * Create is forbidden when the master switch is disabled.
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testCreateBlockedWhenMasterDisabled(): void {
+    $this->setMaster(FALSE);
+    $p = $this->profile(['allow_write' => TRUE]);
+    $this->assertTrue(
+      $this->checker()->checkCreateAccess('node', $p)->isForbidden(),
+      'Create must be forbidden when the master switch is off.'
+    );
+  }
+
 }

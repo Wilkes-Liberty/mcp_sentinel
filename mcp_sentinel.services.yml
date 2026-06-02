@@ -80,6 +80,7 @@ services:
     class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber
     arguments:
       - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.access_checker'
     tags:
       - { name: event_subscriber }
 

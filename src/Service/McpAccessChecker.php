@@ -99,19 +99,9 @@ final class McpAccessChecker {
       )->addCacheTags($tags)->setCacheMaxAge(0);
     }
 
-    if (in_array($entityType, $profile->getDeniedEntityTypes(), TRUE)) {
-      $result = AccessResult::forbidden(
-        "Entity type '{$entityType}' is denied by MCP Sentinel."
-      )->addCacheTags($tags);
-      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
-    }
-
-    $allowed = $profile->getAllowedEntityTypes();
-    if ($allowed && !in_array($entityType, $allowed, TRUE)) {
-      $result = AccessResult::forbidden(
-        "Entity type '{$entityType}' is not in the MCP Sentinel allowlist."
-      )->addCacheTags($tags);
-      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    $typeResult = $this->checkEntityTypePolicy($entityType, $profile, $tags);
+    if ($typeResult !== NULL) {
+      return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
     }
 
     if ($operation === 'view' && !$profile->allowsRead()) {
@@ -135,6 +125,119 @@ final class McpAccessChecker {
 
     $result = AccessResult::neutral()->addCacheTags($tags);
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+  }
+
+  /**
+   * Checks whether creating an entity of a given type is permitted.
+   *
+   * This is the create-access counterpart to checkEntityAccess(). It exists
+   * because hook_entity_access() does NOT fire for entity CREATE — Drupal's
+   * entity create-access path (EntityAccessControlHandler::createAccess() →
+   * hook_entity_create_access) is a separate seam. JSON:API POST (new entity)
+   * routes through that seam, so without this method a governed agent could
+   * POST a new entity and bypass the write gate, the allowed/denied
+   * entity-type policy, and the IP allowlist.
+   *
+   * It enforces exactly the CREATE-relevant governance, matching the semantics
+   * of checkEntityAccess() for the same gates (no new divergence):
+   *  - the master switch (mcp_sentinel.settings:enabled),
+   *  - the IP allowlist (isClientIpAllowed()),
+   *  - the allowed/denied entity-type policy (shared with checkEntityAccess()
+   *    via checkEntityTypePolicy()),
+   *  - the write gate (allowsWrite()), since create is a write.
+   *
+   * The same cacheability rules apply: when the profile carries a non-empty
+   * allowed_ips list every result is marked uncacheable (max-age 0), because
+   * client IP is not a Drupal cache context. Callers (the hook) add the
+   * 'user.roles' and 'oauth2_scopes' cache contexts.
+   *
+   * @param string $entityTypeId
+   *   The entity type ID being created (from $context['entity_type_id']).
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile for the requesting account.
+   *
+   * @return \Drupal\Core\Access\AccessResult
+   *   Forbidden if the create is disallowed; neutral otherwise.
+   */
+  public function checkCreateAccess(
+    string $entityTypeId,
+    McpPolicyProfileInterface $profile,
+  ): AccessResult {
+    $tags = [
+      'config:mcp_sentinel.settings',
+      'config:mcp_sentinel.mcp_policy_profile.' . $profile->id(),
+    ];
+    $ipRestricted = $profile->getAllowedIps() !== [];
+
+    if (!$this->configFactory->get('mcp_sentinel.settings')->get('enabled')) {
+      $result = AccessResult::forbidden('MCP access is disabled.')->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+
+    // IP allowlist: deny before any operation gate if the client IP is not
+    // in the profile's allowlist. Empty list = all IPs permitted.
+    if ($ipRestricted && !$this->isClientIpAllowed($profile)) {
+      return AccessResult::forbidden(
+        'Source IP not permitted by MCP Sentinel policy.'
+      )->addCacheTags($tags)->setCacheMaxAge(0);
+    }
+
+    // Shared allowed/denied entity-type policy (same logic as the existing
+    // entity-access path).
+    $typeResult = $this->checkEntityTypePolicy($entityTypeId, $profile, $tags);
+    if ($typeResult !== NULL) {
+      return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
+    }
+
+    // Create is a write, so the write gate must permit it.
+    if (!$profile->allowsWrite()) {
+      $result = AccessResult::forbidden(
+        'Write operations are disabled in MCP Sentinel.'
+      )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+
+    $result = AccessResult::neutral()->addCacheTags($tags);
+    return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+  }
+
+  /**
+   * Returns a forbidden result if the entity type violates the profile policy.
+   *
+   * Shared by checkEntityAccess() and checkCreateAccess() so the allowed/denied
+   * entity-type policy has exactly ONE implementation. Returns NULL when the
+   * entity type satisfies the policy (so the caller may continue), or a
+   * forbidden AccessResult (with the supplied cache tags, but WITHOUT any
+   * max-age handling — the caller applies the IP-restriction max-age 0) when
+   * the type is denied or not in a non-empty allowlist.
+   *
+   * @param string $entityTypeId
+   *   The entity type ID to check.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile.
+   * @param string[] $tags
+   *   Cache tags to attach to any forbidden result.
+   *
+   * @return \Drupal\Core\Access\AccessResult|null
+   *   A forbidden result when the type is disallowed, NULL when permitted.
+   */
+  private function checkEntityTypePolicy(
+    string $entityTypeId,
+    McpPolicyProfileInterface $profile,
+    array $tags,
+  ): ?AccessResult {
+    if (in_array($entityTypeId, $profile->getDeniedEntityTypes(), TRUE)) {
+      return AccessResult::forbidden(
+        "Entity type '{$entityTypeId}' is denied by MCP Sentinel."
+      )->addCacheTags($tags);
+    }
+    $allowed = $profile->getAllowedEntityTypes();
+    if ($allowed && !in_array($entityTypeId, $allowed, TRUE)) {
+      return AccessResult::forbidden(
+        "Entity type '{$entityTypeId}' is not in the MCP Sentinel allowlist."
+      )->addCacheTags($tags);
+    }
+    return NULL;
   }
 
   /**

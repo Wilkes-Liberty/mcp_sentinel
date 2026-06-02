@@ -92,6 +92,42 @@ function mcp_sentinel_entity_access(
 }
 
 /**
+ * Implements hook_entity_create_access().
+ *
+ * The hook_entity_access() hook does NOT fire for entity CREATE — Drupal routes
+ * create access through EntityAccessControlHandler::createAccess() →
+ * hook_entity_create_access. JSON:API POST (new entity) goes through that seam,
+ * so without this hook a governed agent could POST a new entity and bypass the
+ * write gate, the allowed/denied entity-type policy and the IP allowlist. The
+ * existing-entity path (PATCH/DELETE) is covered by mcp_sentinel_entity_access;
+ * this hook closes the create plane with the SAME governance semantics.
+ *
+ * The target entity type is read from $context['entity_type_id'] (populated by
+ * core's createAccess(), which always sets it). $entity_bundle carries the
+ * bundle when known but is not needed here — Sentinel's create governance keys
+ * on the entity type, the write gate and the IP allowlist, matching the
+ * existing-entity checks.
+ */
+function mcp_sentinel_entity_create_access(
+  AccountInterface $account,
+  array $context,
+  ?string $entity_bundle,
+): AccessResult {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  $profile = $resolver->resolve($account);
+  if ($profile === NULL) {
+    return AccessResult::neutral()
+      ->addCacheContexts(['user.roles', 'oauth2_scopes'])
+      ->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list']);
+  }
+  /** @var \Drupal\mcp_sentinel\Service\McpAccessChecker $checker */
+  $checker = \Drupal::service('mcp_sentinel.access_checker');
+  return $checker
+    ->checkCreateAccess((string) $context['entity_type_id'], $profile)
+    ->addCacheContexts(['user.roles', 'oauth2_scopes']);
+}
+
+/**
  * Implements hook_entity_field_access().
  *
  * Redacts fields listed in the resolved policy profile from MCP responses by

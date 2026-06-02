@@ -27,19 +27,41 @@ stable release is tagged.
   HTTP Basic auth support (`$account` parameter) and `$query` parameter for correct
   JSON:API query-string handling. Removed the `trait.unused` phpstan suppression.
 
-### Findings surfaced by W1-T5/T6/T7 tests
-- **FINDING (hook_entity_create_access gap):** mcp_sentinel implements
-  `hook_entity_access` but NOT `hook_entity_create_access`. JSON:API POST (new entity
-  creation) uses `_entity_create_access` → `hook_entity_create_access` at the routing
-  layer and does NOT invoke `hook_entity_access`. This means JSON:API POST bypasses
-  the Sentinel write gate. PATCH and DELETE on existing entities are fully gated.
-  Tool-plugin creates ARE gated (McpNodeOperationsTool calls checkEntityAccess directly).
-  This gap should be addressed in a post-Phase-5 hardening pass.
-- **FINDING (hook_jsonapi_entity_filter_access does not check IP allowlist):** the
-  IP-allowlist gate fires via hook_entity_access (individual entity access). The
-  collection-level hook (hook_jsonapi_entity_filter_access) does not check the IP
-  allowlist, so a GET to the collection endpoint `/jsonapi/node/article` is not
-  IP-gated at the collection level. Individual entity GETs (`/{uuid}`) ARE gated.
+### Security
+- **JSON:API entity creation is now governed (closed a write-plane bypass).**
+  `hook_entity_access` does not fire for entity CREATE, so JSON:API `POST` (new
+  entity) — which routes through `_entity_create_access` →
+  `hook_entity_create_access` — previously bypassed the Sentinel write gate, the
+  allowed/denied entity-type policy, and the IP allowlist. A governed agent could
+  `POST` a new entity of any type (including a `denied_entity_types` type) with
+  `allow_write` off. The module now implements `mcp_sentinel_entity_create_access`,
+  delegating to a new shared `McpAccessChecker::checkCreateAccess()` that enforces
+  the master switch, the IP allowlist, the entity-type allow/deny policy (shared
+  with the existing-entity path so there is exactly one implementation), and the
+  write gate — with the same cacheability rules (`user.roles` + `oauth2_scopes`
+  contexts, profile cache tag, and `max-age 0` when `allowed_ips` is non-empty).
+  Create-access governance now matches existing-entity (PATCH/DELETE) semantics.
+- **JSON:API IP allowlist now covers collections, not just individual resources.**
+  The IP gate fired via `hook_entity_access` (individual `/{uuid}` reads) but the
+  collection endpoint (`/jsonapi/node/article`) is governed by
+  `hook_jsonapi_entity_filter_access`, which only checks entity-type allow/deny —
+  so a governed agent from a disallowed IP could still enumerate collections. The
+  IP allowlist is now enforced for ALL governed JSON:API traffic (collection,
+  individual, and writes) at the `McpJsonApiPageLimitSubscriber`
+  (`KernelEvents::REQUEST`) seam, which uniformly denies (403) when
+  `isClientIpAllowed()` fails. Empty `allowed_ips` imposes no restriction; the
+  individual-entity path remains gated by `hook_entity_access` (defence in depth).
+
+### Added (tests — Phase 5 governance-bypass fixes)
+- Kernel coverage for `McpAccessChecker::checkCreateAccess()`
+  (`McpAccessCheckerTest`): write-gate, denied-type, allowlist-exclusion, master-
+  switch, and (in `McpIpAllowlistTest`) IP-gate + max-age-0 cacheability cases.
+- Functional coverage (`McpJsonApiWriteGovernanceTest`): governed `POST` blocked
+  when `allow_write=FALSE` (403), allowed when on (201), blocked for a denied
+  type (403), blocked from a disallowed IP (403), and a non-governed `POST`
+  unaffected. Functional coverage (`McpPhase4ControlsFunctionalTest`): governed
+  collection GET denied from a disallowed IP (403) and permitted when
+  unrestricted (200).
 
 ## [1.0.0-alpha2] - 2026-06-02
 
