@@ -49,8 +49,7 @@ function mcp_sentinel_schema(): array {
       'event_name'         => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
       'payload_hash'       => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
       'payload'            => ['type' => 'text', 'size' => 'big', 'not null' => FALSE],
-      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending',
-                               'description' => 'Values: pending, in_progress, sent, failed, failed_ssrf.'],
+      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending'],
       'attempts'           => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
       'last_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
       'next_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
@@ -292,8 +291,7 @@ function mcp_sentinel_update_10007(): string {
       'event_name'         => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
       'payload_hash'       => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
       'payload'            => ['type' => 'text', 'size' => 'big', 'not null' => FALSE],
-      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending',
-                               'description' => 'Values: pending, in_progress, sent, failed, failed_ssrf.'],
+      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending'],
       'attempts'           => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
       'last_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
       'next_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
@@ -351,9 +349,9 @@ function mcp_sentinel_update_10008(): string {
   }
   unset($ep);
   $config->set('webhook_endpoints', $endpoints);
-  // The global allow_internal_webhook_urls key is superseded by the per-endpoint
-  // allow_internal flag; retain the value so it can be consulted by operators
-  // during the transition, but it is no longer read by the worker.
+  // The global allow_internal_webhook_urls key is superseded by the
+  // per-endpoint allow_internal flag; retain the value so it can be consulted
+  // by operators during the transition, but it is no longer read by the worker.
   $config->save();
   return 'Migrated legacy webhook_url/webhook_secret_key to webhook_endpoints, '
     . 'added per-endpoint allow_internal flag (default FALSE). '
@@ -383,7 +381,7 @@ function mcp_sentinel_update_10009(): string {
 }
 
 /**
- * Add allowed_ips field to all existing policy profiles (default empty = no restriction).
+ * Add allowed_ips field to existing policy profiles (empty = no restriction).
  */
 function mcp_sentinel_update_10010(): string {
   $profiles = \Drupal::entityTypeManager()
