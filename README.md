@@ -43,8 +43,10 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
   configuration
 - [Encrypt](https://www.drupal.org/project/encrypt) (`drupal/encrypt`) —
   provides Encryption Profiles for optional at-rest encryption of audit metadata
-- **Strongly recommended:** [MCP Server](https://www.drupal.org/project/mcp_server),
-  [Simple OAuth](https://www.drupal.org/project/simple_oauth)
+- [Simple OAuth](https://www.drupal.org/project/simple_oauth) (`drupal/simple_oauth`)
+  and [Consumers](https://www.drupal.org/project/consumers) (`drupal/consumers`) —
+  the validated OAuth agent channel governance triggers on
+- **Strongly recommended:** [MCP Server](https://www.drupal.org/project/mcp_server)
 
 > **Why `composer.json` keeps `minimum-stability: dev`.** Every hard runtime
 > dependency is a stable, tagged release, and `prefer-stable: true` keeps your
@@ -187,8 +189,8 @@ MCP Sentinel can encrypt the `metadata` column of every audit row using
    **Configuration → System → Encryption → Encryption Profiles**, pointing it
    at the key you just created.
 4. In the MCP Sentinel settings form (**Configuration → Web services →
-   MCP Sentinel**), open the *Audit Logging* fieldset and choose your
-   Encryption Profile from the *Audit metadata encryption profile* select.
+   MCP Sentinel**), open the *Audit Logging* tab and choose your Encryption
+   Profile from the *Audit metadata encryption profile* select.
 5. Save the form. New audit rows will be encrypted; existing plaintext rows
    remain readable (decryption failure falls back to plain JSON decode, so no
    data migration is needed).
@@ -236,7 +238,7 @@ DLP scanning is **off by default** and must be explicitly enabled.
 ### Setup
 
 1. Go to **Configuration → Web services → MCP Sentinel** and open the
-   *Data Loss Prevention (DLP)* fieldset.
+   *Data Loss Prevention (DLP)* tab.
 2. Check *Enable DLP value-pattern scanning*.
 3. Choose the *Mask mode*:
    - **Redact** — replaces the full match with `[REDACTED]`.
@@ -258,22 +260,25 @@ false`):
 
 ### Adding custom patterns
 
-Operators can configure custom patterns directly from the settings form:
+Operators can configure custom patterns directly from the settings form's
+*Data Loss Prevention (DLP)* tab:
 
-1. Go to **Configuration → Web services → MCP Sentinel**.
-2. Enable DLP and open the *Custom DLP patterns* textarea.
-3. Enter one pattern per line in the format `label|regex|mask` (`mask` is
-   optional and defaults to `*`). Example:
+1. Go to **Configuration → Web services → MCP Sentinel** and open the *Data Loss
+   Prevention (DLP)* tab.
+2. Enable DLP, then use the **Custom DLP patterns** editor. Each pattern is its
+   own row with separate **Label**, **Pattern (regex)**, and **Mask** fields
+   (`mask` is optional and defaults to `*`). Use **Add pattern** to add a row and
+   **Remove pattern N** to drop one. For example, add two rows:
 
-   ```
-   employee_id|EMP-\d{6}|*
-   internal_ref|CUST-\d{8}
-   ```
+   | Label | Pattern (regex) | Mask |
+   |-------|-----------------|------|
+   | `employee_id` | `EMP-\d{6}` | `*` |
+   | `internal_ref` | `CUST-\d{8}` | |
 
-4. Save. Invalid regex lines are rejected with a validation error before saving.
+3. Save. Invalid regex rows are rejected with a validation error before saving.
 
-Leaving the textarea empty clears any custom patterns and falls back to the
-four built-in defaults (email, US phone, SSN, credit card) at runtime.
+Leaving every row blank clears any custom patterns and falls back to the four
+built-in defaults (email, US phone, SSN, credit card) at runtime.
 
 Custom patterns can also be managed directly in `mcp_sentinel.settings.yml`:
 
@@ -317,7 +322,7 @@ server.
 
 1. Go to **Configuration → Web services → MCP Sentinel → MCP policy profiles**
    and edit the target profile.
-2. In the *Rate limits* fieldset:
+2. In the *Rate limits & quotas* tab:
    - **Max requests per window** — maximum governed tool calls allowed in the
      window. `0` means unlimited (the default on all shipped profiles).
    - **Window (seconds)** — the rolling window duration. Default is `60`.
@@ -349,7 +354,7 @@ call, preventing mass-read attacks and accidental data exfiltration.
 
 1. Go to **Configuration → Web services → MCP Sentinel → MCP policy profiles**
    and edit the target profile.
-2. In the *Exfiltration guards* fieldset:
+2. In the *Rate limits & quotas* tab:
    - **Max result items** — maximum items returned per Tool call, JSON:API page
      request, or GraphQL multi-value field result list. `0` means unlimited (the
      default on all shipped profiles). Recommended: `500`.
@@ -382,8 +387,8 @@ any source IP is permitted.
 
 1. Go to **Configuration → Web services → MCP Sentinel → MCP policy profiles**
    and edit the target profile.
-2. In the *IP allowlist* fieldset, enter one address or CIDR block per line.
-   Both IPv4 and IPv6 are supported:
+2. In the *Network / IP* tab, enter one address or CIDR block per line. Both
+   IPv4 and IPv6 are supported:
    ```
    203.0.113.0/24
    198.51.100.42
@@ -491,15 +496,20 @@ Three channels are available — mix and match:
 ### Enabling anomaly detection
 
 1. Go to **Configuration → Web services → MCP Sentinel**.
-2. In the *Anomaly detection* fieldset, check **Enable anomaly detection**.
+2. In the *Anomaly detection* tab, check **Enable anomaly detection**.
 3. Configure alert channels (log is on by default; add an email and/or enable
    webhook delivery as needed).
-4. Add rules in the textarea (one per line):
-   ```
-   denied_access_storm|Denied access storm|denied_access|300|20|3600|1
-   bulk_delete|Bulk delete spike|entity_delete|300|20|3600|1
-   entity_activity|Entity write spike|entity*|300|100|3600|0
-   ```
+4. Add rules with the **Rules** editor. Each rule is its own row with separate
+   **Machine ID**, **Label**, **Operation pattern**, **Window (s)**,
+   **Threshold**, **Debounce (s)**, and **Enabled** fields; use **Add rule** /
+   **Remove rule N** to manage rows. For example, add three rules:
+
+   | Machine ID | Label | Operation pattern | Window (s) | Threshold | Debounce (s) | Enabled |
+   |------------|-------|-------------------|------------|-----------|--------------|---------|
+   | `denied_access_storm` | Denied access storm | `denied_access` | 300 | 20 | 3600 | ✓ |
+   | `bulk_delete` | Bulk delete spike | `entity_delete` | 300 | 20 | 3600 | ✓ |
+   | `entity_activity` | Entity write spike | `entity*` | 300 | 100 | 3600 | |
+
    The first rule uses an exact pattern (`denied_access`) and fires when a
    governed agent is denied 20+ times in 5 minutes. The third rule uses the
    `*` prefix to match all `entity_*` operations.
@@ -529,8 +539,9 @@ log, and replayable.
 
 ### Endpoints
 
-Configure one or more endpoints under the *Reliable webhooks* section of the
-settings form. Each endpoint has:
+Configure one or more endpoints in the *Reliable webhooks* tab of the settings
+form. Each endpoint is its own add/remove row (use **Add endpoint** /
+**Remove endpoint N**) with these fields:
 
 | Field | Purpose |
 |-------|---------|
@@ -558,8 +569,8 @@ re-delivered, so duplicate queue items or concurrent workers cannot double-send.
 
 ### Delivery log + replay
 
-`/admin/reports/mcp-sentinel/webhooks` (permission *Administer MCP Sentinel*)
-lists recent deliveries with status, attempts, last response code, and next
+`/admin/reports/mcp-sentinel/webhooks` (permission *Administer MCP Sentinel
+settings*) lists recent deliveries with status, attempts, last response code, and next
 attempt time. Use the CSRF-protected **Replay** action — or
 `drush mcp-sentinel:webhook-replay <delivery-id>` — to reset a `failed`/`sent`
 row to `pending` and re-queue it.
@@ -570,9 +581,11 @@ All endpoints must use `https://`. A two-layer SSRF guard runs at enqueue time
 and again at send time (DNS can rebind in between): the worker resolves the
 host and blocks any address in a private, loopback, link-local, or reserved
 range (RFC1918 `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `::1`,
-`fc00::/7`, …); such deliveries are marked `failed_ssrf`. For legitimate
-internal-network targets, set `allow_internal_webhook_urls` to `TRUE` — this
-disables the resolved-IP check only; HTTPS is still enforced.
+`fc00::/7`, …); such deliveries are marked `failed_ssrf`. For a legitimate
+internal-network or VPN target, check that endpoint's **Allow internal/private
+IP** toggle — this disables the resolved-IP check for that endpoint only; HTTPS
+is still enforced. (The legacy global `allow_internal_webhook_urls` setting is
+deprecated in favour of the per-endpoint toggle.)
 
 ### Retention / prune
 
@@ -671,7 +684,7 @@ separate, optional Node.js MCP connector — not part of this module and not a
 count of Sentinel's own plugins. It exposes **66 connector tools across 9
 modules** (multi-site, GraphQL, and a Drush bridge) that an MCP client can call
 against a Drupal site. MCP Sentinel governs those calls when they reach Drupal;
-it does not provide them. For reference, this module itself ships 8 base Tool
+it does not provide them. For reference, this module itself ships 7 base Tool
 plugins plus 1 GraphQL schema tool (via `mcp_sentinel_graphql`).
 
 ## Maintainers

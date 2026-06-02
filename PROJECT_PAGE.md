@@ -125,8 +125,9 @@ drush mcp-sentinel:setup
 ```
 
 Configure at **Configuration → Web services → MCP Sentinel**
-(`/admin/config/services/mcp-sentinel`). Review activity at
-**Reports → MCP Sentinel Audit Log**.
+(`/admin/config/services/mcp-sentinel`). Review activity at the governance
+dashboard, **Reports → MCP Sentinel** (`/admin/reports/mcp-sentinel`), with the
+filterable audit log on its **Audit log** tab.
 
 ## Drush
 

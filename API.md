@@ -214,8 +214,8 @@ six charts are produced via `McpChartRenderer`, and chart/tile click-to-drill
 links target the filtered audit (and webhook) logs.
 
 `McpDashboardController::verify()` backs the route `mcp_sentinel.verify_chain`
-(`GET /admin/reports/mcp-sentinel/verify`, permission *View MCP Sentinel audit
-log*, **CSRF-protected** via `_csrf_token: TRUE`). It re-runs
+(`GET /admin/reports/mcp-sentinel/verify`, permission *Administer MCP Sentinel
+settings*, **CSRF-protected** via `_csrf_token: TRUE`). It re-runs
 `McpAuditLogger::verifyChain()`, writes the outcome to `@state`
 `mcp_sentinel.last_verify` in the SAME shape the `drush
 mcp-sentinel:audit-verify` command writes (`ok`, `broken_at`, `rows`, `time`),
@@ -247,6 +247,23 @@ For reference, MCP Sentinel governs the request stack through these core hooks
 (in `mcp_sentinel.module`): `hook_entity_presave`, `hook_entity_delete`,
 `hook_entity_access`, `hook_entity_create_access`, `hook_entity_field_access`
 (redaction), `hook_jsonapi_entity_filter_access`, `hook_cron` (prune + anomaly),
-`hook_mail` (anomaly email), and `hook_help`. The `mcp_sentinel_graphql`
-submodule adds a `graphql_compose_field_results_alter` hook for GraphQL
-redaction, DLP, and result caps.
+`hook_mail` (anomaly email), `hook_help`, `hook_theme` (the dashboard and
+urgent-banner templates), and `hook_page_top` (the site-wide critical urgent
+banner). The `mcp_sentinel_graphql` submodule adds a
+`graphql_compose_field_results_alter` hook for GraphQL redaction, DLP, and
+result caps.
+
+## Dashboard-support routes
+
+Two helper routes back the dashboard UI (neither is a public API surface, but
+both are listed here for completeness):
+
+- `mcp_sentinel.banner_dismiss` (`/admin/reports/mcp-sentinel/banner-dismiss`,
+  permission *View MCP Sentinel audit log*, CSRF-protected) — records a per-user
+  dismissal of the site-wide critical banner (`McpBannerController::dismiss()`,
+  private tempstore). The banner reappears while the condition still holds.
+- `mcp_sentinel.webhook_prune` (`/admin/reports/mcp-sentinel/webhooks/prune`,
+  permission *Administer MCP Sentinel settings*, CSRF-protected) — the inline
+  prune action on the webhook delivery log
+  (`McpWebhookDeliveryController::prune()`), equivalent to
+  `drush mcp-sentinel:webhook-prune`.
