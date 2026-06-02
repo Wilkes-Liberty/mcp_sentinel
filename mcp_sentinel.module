@@ -8,6 +8,7 @@
  * for MCP-connected Drupal sites.
  */
 
+use Drupal\mcp_sentinel\Controller\McpBannerController;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Entity\EntityInterface;
@@ -129,7 +130,7 @@ function mcp_sentinel_page_top(array &$page): void {
   }
 
   // Critical only, minus this user's dismissals.
-  $dismissed = \Drupal\mcp_sentinel\Controller\McpBannerController::dismissedKeys(
+  $dismissed = McpBannerController::dismissedKeys(
     \Drupal::service('tempstore.private')
   );
   $critical = [];
