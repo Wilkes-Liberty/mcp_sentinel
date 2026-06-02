@@ -545,6 +545,7 @@ class McpSettingsForm extends ConfigFormBase {
       '#title' => $this->t('Legacy single webhook (deprecated)'),
       '#open' => (bool) $config->get('webhook_url'),
       '#description' => $this->t('These legacy settings are superseded by the endpoints above and are no longer used for delivery. They are retained for review; configure delivery via <em>Reliable webhooks</em> instead, then clear these.'),
+      '#tree' => TRUE,
       '#group' => 'tabs',
     ];
     $form['webhooks_legacy']['webhook_enabled'] = [

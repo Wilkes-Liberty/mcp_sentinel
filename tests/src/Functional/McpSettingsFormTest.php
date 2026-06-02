@@ -199,6 +199,55 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
+   * Legacy webhook config keys survive a no-edit settings save (#tree fix).
+   *
+   * Regression: when webhooks_legacy lacked #tree => TRUE the nested
+   * getValue(['webhooks_legacy', 'webhook_*']) paths returned NULL and silently
+   * overwrote stored config with FALSE/NULL on every save.
+   */
+  public function testLegacyWebhookFieldsRoundTripUnchanged(): void {
+    // Seed the three legacy keys into config directly.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_enabled', TRUE)
+      ->set('webhook_url', 'https://legacy.example/hook')
+      ->set('webhook_secret_key', '')
+      ->save();
+
+    $admin = $this->drupalCreateUser(['administer mcp sentinel']);
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->statusCodeEquals(200);
+
+    // Submit with no edits; legacy config must be preserved byte-for-byte.
+    $this->submitForm([], 'Save configuration');
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+
+    $config = \Drupal::config('mcp_sentinel.settings');
+    $this->assertTrue((bool) $config->get('webhook_enabled'),
+      'webhook_enabled must remain TRUE after a no-edit save.');
+    $this->assertSame('https://legacy.example/hook', $config->get('webhook_url'),
+      'webhook_url must remain unchanged after a no-edit save.');
+    $this->assertSame('', (string) ($config->get('webhook_secret_key') ?? ''),
+      'webhook_secret_key must remain unchanged after a no-edit save.');
+  }
+
+  /**
+   * Legacy webhook URL is rejected when it uses http:// instead of https://.
+   */
+  public function testLegacyWebhookUrlMustBeHttps(): void {
+    $admin = $this->drupalCreateUser(['administer mcp sentinel']);
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+
+    $this->submitForm([
+      'webhooks_legacy[webhook_enabled]' => 1,
+      'webhooks_legacy[webhook_url]' => 'http://legacy.example/hook',
+    ], 'Save configuration');
+
+    $this->assertSession()->pageTextContains('Webhook URL must use HTTPS.');
+  }
+
+  /**
    * Adding and removing endpoint rows mutates the stored sequence in shape.
    */
   public function testEndpointEditorAddAndRemoveRows(): void {
