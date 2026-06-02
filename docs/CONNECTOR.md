@@ -108,6 +108,12 @@ Repeat the steps in this section for **each** environment
 | `CLIENT_ID` | Consumer `client_id` chosen during step 3.2 |
 | `CLIENT_SECRET` | Consumer client secret (store in a Key entity or vault) |
 
+> **Keep hostnames out of version control.** Real per-environment
+> `INTERNAL_BASE_URL` values are intentionally NOT recorded in this published
+> runbook. Supply them through environment variables, local (uncommitted)
+> settings, or a secrets manager. The `PLACEHOLDER-*.internal` strings here are
+> deliberate — do not replace them with real hostnames in a committed file.
+
 > **Security note:** The JSON:API write plane and the `/oauth/token` endpoint
 > must be exposed **only** on an internal VPN hostname, never on the
 > public-facing URL. Enforce this at the reverse proxy / load balancer.
