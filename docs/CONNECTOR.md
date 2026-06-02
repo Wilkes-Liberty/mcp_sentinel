@@ -49,8 +49,20 @@ Replace `<INTERNAL_BASE_URL>` with the environment-specific internal hostname
 
 `simple_oauth.settings` must be configured with:
 
-- `access_token_expiration` ≤ `3600` seconds.
-- Refresh tokens enabled (`use_refresh_tokens: true`, TTL ≥ 7 days).
+- `access_token_expiration` ≤ `3600` seconds (1 hour).
+- Refresh tokens enabled (`use_refresh_tokens: true`, TTL ≥ 7 days; this site
+  uses `refresh_token_expiration: 1209600` = 14 days).
+
+### Connector refresh behavior
+
+The connector **auto-refreshes silently** on access-token expiry using the
+refresh token — it does **not** surface a `401` for routine 1-hour expiry. A
+`401` is surfaced (and an operator must reissue / re-authorize) **only** when
+the refresh token itself is expired or revoked. Rationale: with unattended
+agent jobs and a 1-hour access token, surfacing a 401 on every expiry would
+make the connector brittle; the 14-day refresh token absorbs routine rotation,
+so a hard 401 then unambiguously means the credential genuinely needs
+re-issuing.
 
 ---
 
@@ -275,6 +287,24 @@ is **not an enforcement gate** — it is recorded in the audit log as a label
 only. Governance cannot be bypassed by omitting the header; a non-agent request
 cannot be governed by adding it. No site configuration is required for this
 header.
+
+The label value defaults to `drupal-mcp-server/<version>` and may be overridden
+per environment via the connector's `MCP_CLIENT_ID` environment variable. This
+changes only the **logged label** — it has no effect on authentication,
+scope enforcement, or governance.
+
+### Two distinct "client id" concepts — do not conflate
+
+| Concept | Source | Role |
+|---------|--------|------|
+| **`X-MCP-Client` label** | connector env var `MCP_CLIENT_ID` (default `drupal-mcp-server/<version>`) | **Cosmetic / audit-log only.** Never read for any security decision. |
+| **OAuth Consumer `client_id`** | the `consumers` Consumer entity (e.g. `mcp-agent-prod`, §3.2) | **Security-relevant.** Identifies the token's issuing client; when Sentinel's `agent_oauth_clients` allowlist is populated (§3.3) it is matched against **this** id to scope governance to a specific consumer. |
+
+Changing `MCP_CLIENT_ID` does **not** change which consumer the OAuth token is
+issued under, and must never be expected to affect governance, the
+`agent_oauth_clients` allowlist, or scope checks. To restrict governance to a
+specific client, set the **Consumer `client_id`** in `agent_oauth_clients`, not
+the header label.
 
 ---
 
