@@ -132,4 +132,30 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->assertSession()->statusCodeEquals(403);
   }
 
+  /**
+   * The settings page renders vertical tabs and round-trips config unchanged.
+   */
+  public function testVerticalTabsRenderAndConfigRoundTrips(): void {
+    $admin = $this->drupalCreateUser(['administer mcp sentinel']);
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->statusCodeEquals(200);
+    // Vertical-tabs wrapper present (server-side rendered class; JS adds
+    // .vertical-tabs but functional tests run without JavaScript).
+    $this->assertSession()->elementExists('css', '[data-vertical-tabs-panes]');
+    // Each group is now a details element (vertical_tabs converts fieldsets).
+    $this->assertSession()->pageTextContains('MCP Access');
+    $this->assertSession()->pageTextContains('OAuth agent channel');
+    $this->assertSession()->pageTextContains('Audit Logging');
+    // Operator broadcast field exists.
+    $this->assertSession()->fieldExists('dashboard_broadcast_message');
+    // Save with no edits; assert the stored list shapes are byte-identical.
+    $before = \Drupal::config('mcp_sentinel.settings')->getRawData();
+    $this->submitForm([], 'Save configuration');
+    $after = \Drupal::config('mcp_sentinel.settings')->getRawData();
+    $this->assertSame($before['dlp_patterns'], $after['dlp_patterns']);
+    $this->assertSame($before['anomaly_rules'], $after['anomaly_rules']);
+    $this->assertSame($before['webhook_endpoints'], $after['webhook_endpoints']);
+  }
+
 }

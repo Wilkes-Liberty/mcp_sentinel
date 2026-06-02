@@ -7,6 +7,9 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Changed
+- Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.
+
 ## [1.0.0-beta1] - 2026-06-02
 
 > Hardening, test-coverage, and documentation work over `1.0.0-alpha2`

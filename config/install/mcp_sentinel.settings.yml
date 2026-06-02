@@ -43,3 +43,6 @@ anomaly_alert_email: ''
 anomaly_alert_webhook: false
 anomaly_alert_log: true
 anomaly_rules: {  }
+dashboard_broadcast:
+  message: ''
+  severity: 'info'

@@ -60,7 +60,15 @@ class McpSettingsForm extends ConfigFormBase {
   public function buildForm(array $form, FormStateInterface $form_state): array {
     $config = $this->config('mcp_sentinel.settings');
 
-    $form['status'] = ['#type' => 'fieldset', '#title' => $this->t('MCP Access')];
+    $form['tabs'] = ['#type' => 'vertical_tabs', '#default_tab' => 'edit-status'];
+    $form['#attached']['library'][] = 'mcp_sentinel/admin';
+
+    $form['status'] = [
+      '#type' => 'details',
+      '#title' => $this->t('MCP Access'),
+      '#group' => 'tabs',
+      '#open' => TRUE,
+    ];
     $form['status']['enabled'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Enable MCP API access'),
@@ -86,9 +94,10 @@ class McpSettingsForm extends ConfigFormBase {
 
     $lines = static fn (array $v): string => implode("\n", $v);
     $form['oauth'] = [
-      '#type' => 'fieldset',
+      '#type' => 'details',
       '#title' => $this->t('OAuth agent channel'),
       '#description' => $this->t('Governance triggers when a request is authenticated via the OAuth agent channel (a designated consumer or an agent scope on the access token). See the connector runbook for setup.'),
+      '#group' => 'tabs',
     ];
     $form['oauth']['agent_scopes'] = [
       '#type' => 'textarea',
@@ -111,7 +120,11 @@ class McpSettingsForm extends ConfigFormBase {
       '#default_value' => $config->get('governed_role_fallback') ?? FALSE,
     ];
 
-    $form['audit'] = ['#type' => 'fieldset', '#title' => $this->t('Audit Logging')];
+    $form['audit'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Audit Logging'),
+      '#group' => 'tabs',
+    ];
     $form['audit']['audit_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable audit logging'),
@@ -166,9 +179,10 @@ class McpSettingsForm extends ConfigFormBase {
     ];
 
     $form['dlp'] = [
-      '#type' => 'fieldset',
+      '#type' => 'details',
       '#title' => $this->t('Data Loss Prevention (DLP)'),
       '#description' => $this->t('Value-pattern scanning for PII in governed field output. Off by default — opt in by enabling below.'),
+      '#group' => 'tabs',
     ];
     $form['dlp']['dlp_enabled'] = [
       '#type'          => 'checkbox',
@@ -213,12 +227,13 @@ class McpSettingsForm extends ConfigFormBase {
     ];
 
     // -----------------------------------------------------------------------
-    // Anomaly detection fieldset.
+    // Anomaly detection tab.
     // -----------------------------------------------------------------------
     $form['anomaly'] = [
-      '#type' => 'fieldset',
+      '#type' => 'details',
       '#title' => $this->t('Anomaly detection'),
       '#description' => $this->t('Evaluates thresholds over the audit log on cron. All rules ship disabled; enable and tune per-site to avoid false positives during content imports.'),
+      '#group' => 'tabs',
     ];
     $form['anomaly']['anomaly_enabled'] = [
       '#type' => 'checkbox',
@@ -273,12 +288,13 @@ class McpSettingsForm extends ConfigFormBase {
     ];
 
     $form['webhooks'] = [
-      '#type' => 'fieldset',
+      '#type' => 'details',
       '#title' => $this->t('Reliable webhooks'),
       '#description' => $this->t('Configure one or more HTTPS endpoints. Each matching event records a delivery row and is queued for delivery with HMAC-SHA256 signing, retry/backoff (5 attempts over 30 s–8 h) and an SSRF guard. Review the <a href=":url">webhook delivery log</a>.', [
         ':url' => '/admin/reports/mcp-sentinel/webhooks',
       ]),
       '#tree' => TRUE,
+      '#group' => 'tabs',
     ];
     $form['webhooks']['webhook_delivery_retention_days'] = [
       '#type'          => 'number',
@@ -368,6 +384,7 @@ class McpSettingsForm extends ConfigFormBase {
       '#title' => $this->t('Legacy single webhook (deprecated)'),
       '#open' => (bool) $config->get('webhook_url'),
       '#description' => $this->t('These legacy settings are superseded by the endpoints above and are no longer used for delivery. They are retained for review; configure delivery via <em>Reliable webhooks</em> instead, then clear these.'),
+      '#group' => 'tabs',
     ];
     $form['webhooks_legacy']['webhook_enabled'] = [
       '#type'          => 'checkbox',
@@ -387,6 +404,30 @@ class McpSettingsForm extends ConfigFormBase {
       ]),
       '#default_value' => $config->get('webhook_secret_key') ?? '',
       '#empty_option'  => $this->t('- None -'),
+    ];
+
+    $form['broadcast'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Dashboard broadcast'),
+      '#group' => 'tabs',
+    ];
+    $broadcast = (array) ($config->get('dashboard_broadcast') ?? []);
+    $form['broadcast']['dashboard_broadcast_message'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Operator broadcast message'),
+      '#description' => $this->t('Shown as a banner on the governance dashboard. Leave empty for none.'),
+      '#default_value' => (string) ($broadcast['message'] ?? ''),
+      '#maxlength' => 255,
+    ];
+    $form['broadcast']['dashboard_broadcast_severity'] = [
+      '#type' => 'select',
+      '#title' => $this->t('Broadcast severity'),
+      '#options' => [
+        'info' => $this->t('Info'),
+        'warning' => $this->t('Warning'),
+        'critical' => $this->t('Critical (also shown site-wide to admins)'),
+      ],
+      '#default_value' => (string) ($broadcast['severity'] ?? 'info'),
     ];
 
     return parent::buildForm($form, $form_state);
@@ -636,6 +677,10 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('webhook_enabled', (bool) $form_state->getValue(['webhooks_legacy', 'webhook_enabled']))
       ->set('webhook_url', $form_state->getValue(['webhooks_legacy', 'webhook_url']))
       ->set('webhook_secret_key', $form_state->getValue(['webhooks_legacy', 'webhook_secret_key']))
+      ->set('dashboard_broadcast', [
+        'message' => trim((string) $form_state->getValue('dashboard_broadcast_message')),
+        'severity' => (string) $form_state->getValue('dashboard_broadcast_severity'),
+      ])
       ->save();
 
     parent::submitForm($form, $form_state);

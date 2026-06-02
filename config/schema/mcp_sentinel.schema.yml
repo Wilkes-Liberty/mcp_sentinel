@@ -151,6 +151,16 @@ mcp_sentinel.settings:
           enabled:
             type: boolean
             label: 'Rule enabled'
+    dashboard_broadcast:
+      type: mapping
+      label: 'Operator broadcast banner'
+      mapping:
+        message:
+          type: label
+          label: 'Broadcast message (empty = none)'
+        severity:
+          type: string
+          label: 'Severity (info, warning, critical)'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

@@ -54,7 +54,7 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
 
       $output .= '<h2>' . t('Where to configure') . '</h2>';
       $output .= '<ul>';
-      $output .= '<li>' . t('<a href=":settings">MCP Sentinel settings</a> — the master switch, OAuth/role governance, audit, encryption, DLP, rate limits, anomaly rules, IP allowlists, and webhook endpoints.', [':settings' => $settings_url]) . '</li>';
+      $output .= '<li>' . t('<a href=":settings">MCP Sentinel settings</a> — settings are organized into vertical tabs: MCP Access, OAuth agent channel, Audit Logging, Data Loss Prevention, Anomaly detection, Reliable webhooks, and Dashboard broadcast. The Dashboard broadcast tab lets operators post a message (with info/warning/critical severity) that appears as a banner on the governance dashboard.', [':settings' => $settings_url]) . '</li>';
       $output .= '<li>' . t('Policy profiles are managed as configuration entities; create and edit them from the settings page.') . '</li>';
       $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records.', [':audit' => $audit_url]) . '</li>';
       $output .= '</ul>';
