@@ -14,6 +14,7 @@ stable release is tagged.
 - Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.
 - DLP patterns edited via an add/remove row table (config storage unchanged).
 - Anomaly rules edited via an add/remove row table (config storage unchanged).
+- Webhook endpoints edited via a dynamic add/remove editor (config storage unchanged).
 
 ## [1.0.0-beta1] - 2026-06-02
 

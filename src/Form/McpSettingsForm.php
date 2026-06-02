@@ -446,12 +446,19 @@ class McpSettingsForm extends ConfigFormBase {
       $key_options[$key_id] = (string) $key->label();
     }
 
-    // Render existing endpoints plus two blank slots for adding new ones.
+    // Render existing endpoints as dynamic add/remove rows. The row count is
+    // tracked in form-state storage and seeds from the stored endpoint count
+    // (plus a blank trailing slot) on first build. Field names are kept stable
+    // (webhooks[endpoints][N][...]) so validation/submit are unchanged.
     $endpoints = array_values((array) ($config->get('webhook_endpoints') ?? []));
-    $slots = count($endpoints) + 2;
+    // Seed at least one row so an empty editor still shows a blank slot (plus
+    // the trailing slot the trait always adds).
+    $slots = $this->rowCount($form_state, 'webhook_endpoints_rows', max(count($endpoints), 1));
     $form['webhooks']['endpoints'] = [
       '#type' => 'container',
       '#tree' => TRUE,
+      '#prefix' => '<div id="mcp-webhook-endpoints-wrapper">',
+      '#suffix' => '</div>',
     ];
     for ($i = 0; $i < $slots; $i++) {
       $ep = $endpoints[$i] ?? [];
@@ -503,7 +510,33 @@ class McpSettingsForm extends ConfigFormBase {
         '#description' => $this->t('Only enable for a receiver that genuinely lives on an internal network or VPN. HTTPS is still required regardless of this setting.'),
         '#default_value' => !empty($ep['allow_internal']),
       ];
+      $form['webhooks']['endpoints'][$i]['remove'] = [
+        '#type' => 'submit',
+        '#name' => 'webhook_remove_' . $i,
+        '#value' => $this->t('Remove endpoint @n', ['@n' => $i + 1]),
+        '#submit' => ['::webhookRemoveRow'],
+        '#limit_validation_errors' => [],
+        '#mcp_editor_parents' => ['webhooks', 'endpoints'],
+        '#mcp_editor_input' => ['webhooks', 'endpoints'],
+        '#mcp_editor_row' => $i,
+        '#ajax' => [
+          'callback' => '::listEditorAjax',
+          'wrapper' => 'mcp-webhook-endpoints-wrapper',
+        ],
+      ];
     }
+    $form['webhooks']['endpoints']['add'] = [
+      '#type' => 'submit',
+      '#name' => 'webhook_add',
+      '#value' => $this->t('Add endpoint'),
+      '#submit' => ['::webhookAddRow'],
+      '#limit_validation_errors' => [],
+      '#mcp_editor_parents' => ['webhooks', 'endpoints'],
+      '#ajax' => [
+        'callback' => '::listEditorAjax',
+        'wrapper' => 'mcp-webhook-endpoints-wrapper',
+      ],
+    ];
 
     // Legacy single-endpoint fields (D4.5: kept visible with a migration
     // notice; webhook_endpoints above is the going-forward mechanism).
@@ -652,6 +685,10 @@ class McpSettingsForm extends ConfigFormBase {
     $endpoints = (array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []);
     $seen_ids = [];
     foreach ($endpoints as $i => $ep) {
+      // Skip the editor's Add/Remove button values (non-array siblings).
+      if (!is_array($ep)) {
+        continue;
+      }
       $id = trim((string) ($ep['id'] ?? ''));
       $url = trim((string) ($ep['url'] ?? ''));
       // An entirely blank slot is skipped.
@@ -736,6 +773,20 @@ class McpSettingsForm extends ConfigFormBase {
   }
 
   /**
+   * Submit handler: adds a webhook endpoint row.
+   */
+  public function webhookAddRow(array &$form, FormStateInterface $form_state): void {
+    $this->addRow($form, $form_state, 'webhook_endpoints_rows');
+  }
+
+  /**
+   * Submit handler: removes a webhook endpoint row.
+   */
+  public function webhookRemoveRow(array &$form, FormStateInterface $form_state): void {
+    $this->removeRow($form, $form_state, 'webhook_endpoints_rows');
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state): void {
@@ -786,6 +837,10 @@ class McpSettingsForm extends ConfigFormBase {
     // entirely blank slots.
     $webhook_endpoints = [];
     foreach ((array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []) as $ep) {
+      // Skip the editor's Add/Remove button values (non-array siblings).
+      if (!is_array($ep)) {
+        continue;
+      }
       $id = trim((string) ($ep['id'] ?? ''));
       $url = trim((string) ($ep['url'] ?? ''));
       if ($id === '' && $url === '') {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\key\Entity\Key;
 use Drupal\Tests\BrowserTestBase;
 
 /**
@@ -156,6 +157,110 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->assertSame($before['dlp_patterns'], $after['dlp_patterns']);
     $this->assertSame($before['anomaly_rules'], $after['anomaly_rules']);
     $this->assertSame($before['webhook_endpoints'], $after['webhook_endpoints']);
+  }
+
+  /**
+   * Stored endpoints render as rows and round-trip byte-identically.
+   */
+  public function testEndpointEditorRoundTripsStoredEndpoints(): void {
+    $key = Key::create([
+      'id' => 'wh_key',
+      'label' => 'WH',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 's3cret'],
+    ]);
+    $key->save();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [[
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => 'wh_key',
+        'events' => ['mcp.entity.save'],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      ])->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->fieldValueEquals('webhooks[endpoints][0][id]', 'siem');
+    $this->submitForm([], 'Save configuration');
+    $this->assertSame([[
+      'id' => 'siem',
+      'label' => 'SIEM',
+      'url' => 'https://siem.example.com/hook',
+      'secret_key' => 'wh_key',
+      'events' => ['mcp.entity.save'],
+      'enabled' => TRUE,
+      'allow_internal' => FALSE,
+    ],
+    ], \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints'));
+  }
+
+  /**
+   * Adding and removing endpoint rows mutates the stored sequence in shape.
+   */
+  public function testEndpointEditorAddAndRemoveRows(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [[
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => '',
+        'events' => ['mcp.entity.save'],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      ])->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    // One stored endpoint + one blank trailing slot. Fill the blank slot, add a
+    // new one via AJAX, then save.
+    $this->submitForm([
+      'webhooks[endpoints][1][id]' => 'soc',
+      'webhooks[endpoints][1][label]' => 'SOC',
+      'webhooks[endpoints][1][url]' => 'https://soc.example.com/hook',
+      'webhooks[endpoints][1][events]' => 'mcp.entity.delete',
+      'webhooks[endpoints][1][enabled]' => 1,
+    ], 'Add endpoint');
+    $this->submitForm([], 'Save configuration');
+    $endpoints = \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints');
+    $this->assertSame([
+      [
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => '',
+        'events' => ['mcp.entity.save'],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      [
+        'id' => 'soc',
+        'label' => 'SOC',
+        'url' => 'https://soc.example.com/hook',
+        'secret_key' => '',
+        'events' => ['mcp.entity.delete'],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+    ], $endpoints);
+
+    // Remove the first endpoint via its own button; only "soc" remains.
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([], 'Remove endpoint 1');
+    $this->submitForm([], 'Save configuration');
+    $this->assertSame([[
+      'id' => 'soc',
+      'label' => 'SOC',
+      'url' => 'https://soc.example.com/hook',
+      'secret_key' => '',
+      'events' => ['mcp.entity.delete'],
+      'enabled' => TRUE,
+      'allow_internal' => FALSE,
+    ],
+    ], \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints'));
   }
 
 }
