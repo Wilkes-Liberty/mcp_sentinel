@@ -13,6 +13,7 @@ stable release is tagged.
 ### Changed
 - Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.
 - DLP patterns edited via an add/remove row table (config storage unchanged).
+- Anomaly rules edited via an add/remove row table (config storage unchanged).
 
 ## [1.0.0-beta1] - 2026-06-02
 

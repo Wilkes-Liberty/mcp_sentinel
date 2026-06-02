@@ -313,30 +313,106 @@ class McpSettingsForm extends ConfigFormBase {
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
     ];
 
-    // Build the rules textarea: id|label|operation_pattern|window_sec|threshold|debounce_sec|enabled(1/0).
-    $rulesLines = '';
-    foreach ((array) $config->get('anomaly_rules') as $r) {
-      if (!is_array($r)) {
-        continue;
-      }
-      $enabled = !empty($r['enabled']) ? '1' : '0';
-      $rulesLines .= implode('|', [
-        $r['id'] ?? '',
-        $r['label'] ?? '',
-        $r['operation_pattern'] ?? '',
-        $r['window_seconds'] ?? 300,
-        $r['threshold'] ?? 10,
-        $r['debounce_seconds'] ?? 3600,
-        $enabled,
-      ]) . "\n";
-    }
-    $form['anomaly']['anomaly_rules'] = [
-      '#type' => 'textarea',
+    // Build the anomaly rules multi-row editor from stored config. At least two
+    // rows are shown so an operator can add several rules without round trips.
+    $stored_rules = array_values(array_filter(
+      (array) ($config->get('anomaly_rules') ?? []),
+      'is_array',
+    ));
+    $anomaly_seed = max(count($stored_rules), 1);
+    $anomaly_count = $this->rowCount($form_state, 'anomaly_rules_rows', $anomaly_seed);
+    $form['anomaly']['anomaly_rules_help'] = [
+      '#type' => 'item',
       '#title' => $this->t('Rules'),
-      '#description' => $this->t('One rule per line: <code>id|label|operation_pattern|window_sec|threshold|debounce_sec|enabled(1/0)</code>. Example: <code>denied_access_storm|Denied access storm|denied_access|300|20|3600|0</code>. All rules ship disabled (0); set to 1 to enable. The <code>operation_pattern</code> is an <strong>exact match by default</strong> — <code>entity_delete</code> matches only <code>entity_delete</code>. Append <code>*</code> for a prefix match — <code>entity*</code> matches both <code>entity_save</code> and <code>entity_delete</code>.'),
-      '#default_value' => rtrim($rulesLines),
-      '#rows' => 8,
+      '#description' => $this->t('Each row is one rule. The <code>operation_pattern</code> is an <strong>exact match by default</strong> — <code>entity_delete</code> matches only <code>entity_delete</code>. Append <code>*</code> for a prefix match — <code>entity*</code> matches both <code>entity_save</code> and <code>entity_delete</code>. All rules ship disabled; tick <em>Enabled</em> per rule.'),
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['anomaly']['anomaly_rules_rows'] = [
+      '#type' => 'container',
+      '#tree' => TRUE,
+      '#prefix' => '<div id="mcp-anomaly-rows-wrapper">',
+      '#suffix' => '</div>',
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    for ($i = 0; $i < $anomaly_count; $i++) {
+      $rule = $stored_rules[$i] ?? [];
+      $form['anomaly']['anomaly_rules_rows'][$i] = [
+        '#type' => 'fieldset',
+        '#title' => $this->t('Rule @n', ['@n' => $i + 1]),
+        '#attributes' => ['class' => ['mcp-sentinel-row']],
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['id'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Machine ID'),
+        '#default_value' => (string) ($rule['id'] ?? ''),
+        '#size' => 24,
+        '#maxlength' => 64,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['label'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Label'),
+        '#default_value' => (string) ($rule['label'] ?? ''),
+        '#size' => 24,
+        '#maxlength' => 128,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['operation_pattern'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Operation pattern'),
+        '#default_value' => (string) ($rule['operation_pattern'] ?? ''),
+        '#size' => 24,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['window_seconds'] = [
+        '#type' => 'number',
+        '#title' => $this->t('Window (s)'),
+        '#default_value' => (int) ($rule['window_seconds'] ?? 300),
+        '#min' => 1,
+        '#size' => 8,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['threshold'] = [
+        '#type' => 'number',
+        '#title' => $this->t('Threshold'),
+        '#default_value' => (int) ($rule['threshold'] ?? 10),
+        '#min' => 1,
+        '#size' => 8,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['debounce_seconds'] = [
+        '#type' => 'number',
+        '#title' => $this->t('Debounce (s)'),
+        '#default_value' => (int) ($rule['debounce_seconds'] ?? 3600),
+        '#min' => 0,
+        '#size' => 8,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['enabled'] = [
+        '#type' => 'checkbox',
+        '#title' => $this->t('Enabled'),
+        '#default_value' => !empty($rule['enabled']),
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['remove'] = [
+        '#type' => 'submit',
+        '#name' => 'anomaly_remove_' . $i,
+        '#value' => $this->t('Remove rule @n', ['@n' => $i + 1]),
+        '#submit' => ['::anomalyRemoveRow'],
+        '#limit_validation_errors' => [],
+        '#mcp_editor_parents' => ['anomaly', 'anomaly_rules_rows'],
+        '#mcp_editor_input' => ['anomaly_rules_rows'],
+        '#mcp_editor_row' => $i,
+        '#ajax' => [
+          'callback' => '::listEditorAjax',
+          'wrapper' => 'mcp-anomaly-rows-wrapper',
+        ],
+      ];
+    }
+    $form['anomaly']['anomaly_rules_rows']['add'] = [
+      '#type' => 'submit',
+      '#name' => 'anomaly_add',
+      '#value' => $this->t('Add rule'),
+      '#submit' => ['::anomalyAddRow'],
+      '#limit_validation_errors' => [],
+      '#mcp_editor_parents' => ['anomaly', 'anomaly_rules_rows'],
+      '#ajax' => [
+        'callback' => '::listEditorAjax',
+        'wrapper' => 'mcp-anomaly-rows-wrapper',
+      ],
     ];
 
     $form['webhooks'] = [
@@ -527,45 +603,40 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
-    // Validate anomaly rules textarea.
+    // Validate the anomaly rules multi-row editor.
     if ($form_state->getValue('anomaly_enabled')) {
-      $rawRules = (string) ($form_state->getValue('anomaly_rules') ?? '');
-      $ruleLines = array_filter(array_map('trim', explode("\n", $rawRules)));
+      $rule_rows = (array) ($form_state->getValue('anomaly_rules_rows') ?? []);
       $seenRuleIds = [];
-      foreach ($ruleLines as $lineNum => $line) {
-        $parts = explode('|', $line, 7);
-        if (count($parts) < 5) {
-          $form_state->setErrorByName(
-            'anomaly_rules',
-            $this->t(
-              'Anomaly rule line @n is invalid: expected at least <code>id|label|operation_pattern|window_sec|threshold</code>.',
-              ['@n' => (int) $lineNum + 1],
-            ),
-          );
+      foreach ($rule_rows as $i => $row) {
+        if (!is_array($row)) {
           continue;
         }
-        $rId = trim($parts[0]);
-        $rOp = trim($parts[2]);
-        $rWin = (int) trim($parts[3]);
-        $rThr = (int) trim($parts[4]);
+        $rId = trim((string) ($row['id'] ?? ''));
+        $rOp = trim((string) ($row['operation_pattern'] ?? ''));
+        $rWin = (int) ($row['window_seconds'] ?? 0);
+        $rThr = (int) ($row['threshold'] ?? 0);
+        // An entirely blank row is skipped.
+        if ($rId === '' && $rOp === '') {
+          continue;
+        }
         if ($rId === '') {
-          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: id must not be empty.', ['@n' => (int) $lineNum + 1]));
+          $form_state->setErrorByName("anomaly][anomaly_rules_rows][$i][id", $this->t('Anomaly rule @n: id must not be empty.', ['@n' => (int) $i + 1]));
         }
         elseif (!preg_match('/^[a-z0-9_]+$/', $rId)) {
-          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: id must be lowercase letters, numbers and underscores only.', ['@n' => (int) $lineNum + 1]));
+          $form_state->setErrorByName("anomaly][anomaly_rules_rows][$i][id", $this->t('Anomaly rule @n: id must be lowercase letters, numbers and underscores only.', ['@n' => (int) $i + 1]));
         }
         elseif (isset($seenRuleIds[$rId])) {
-          $form_state->setErrorByName('anomaly_rules', $this->t('Duplicate anomaly rule id "@id".', ['@id' => $rId]));
+          $form_state->setErrorByName("anomaly][anomaly_rules_rows][$i][id", $this->t('Duplicate anomaly rule id "@id".', ['@id' => $rId]));
         }
         $seenRuleIds[$rId] = TRUE;
         if ($rOp === '') {
-          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: operation_pattern must not be empty.', ['@n' => (int) $lineNum + 1]));
+          $form_state->setErrorByName("anomaly][anomaly_rules_rows][$i][operation_pattern", $this->t('Anomaly rule @n: operation_pattern must not be empty.', ['@n' => (int) $i + 1]));
         }
         if ($rWin <= 0) {
-          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: window_sec must be a positive integer.', ['@n' => (int) $lineNum + 1]));
+          $form_state->setErrorByName("anomaly][anomaly_rules_rows][$i][window_seconds", $this->t('Anomaly rule @n: window must be a positive integer.', ['@n' => (int) $i + 1]));
         }
         if ($rThr <= 0) {
-          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: threshold must be a positive integer.', ['@n' => (int) $lineNum + 1]));
+          $form_state->setErrorByName("anomaly][anomaly_rules_rows][$i][threshold", $this->t('Anomaly rule @n: threshold must be a positive integer.', ['@n' => (int) $i + 1]));
         }
       }
     }
@@ -651,6 +722,20 @@ class McpSettingsForm extends ConfigFormBase {
   }
 
   /**
+   * Submit handler: adds an anomaly rule row.
+   */
+  public function anomalyAddRow(array &$form, FormStateInterface $form_state): void {
+    $this->addRow($form, $form_state, 'anomaly_rules_rows');
+  }
+
+  /**
+   * Submit handler: removes an anomaly rule row.
+   */
+  public function anomalyRemoveRow(array &$form, FormStateInterface $form_state): void {
+    $this->removeRow($form, $form_state, 'anomaly_rules_rows');
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state): void {
@@ -674,28 +759,26 @@ class McpSettingsForm extends ConfigFormBase {
         ];
       }
     }
-    // Parse the anomaly rules textarea into the sequence-of-maps config shape.
-    $rawRules = (string) ($form_state->getValue('anomaly_rules') ?? '');
-    $ruleLines = array_filter(array_map('trim', explode("\n", $rawRules)));
+    // Assemble the anomaly rules sequence-of-maps from the row editor, dropping
+    // rows that lack an id or operation pattern.
     $anomaly_rules = [];
-    foreach ($ruleLines as $line) {
-      $parts = explode('|', $line, 7);
-      if (count($parts) < 5) {
+    foreach ((array) ($form_state->getValue('anomaly_rules_rows') ?? []) as $row) {
+      if (!is_array($row)) {
         continue;
       }
-      $rId = trim($parts[0]);
-      $rOp = trim($parts[2]);
+      $rId = trim((string) ($row['id'] ?? ''));
+      $rOp = trim((string) ($row['operation_pattern'] ?? ''));
       if ($rId === '' || $rOp === '') {
         continue;
       }
       $anomaly_rules[] = [
         'id'                => $rId,
-        'label'             => trim($parts[1]),
+        'label'             => trim((string) ($row['label'] ?? '')),
         'operation_pattern' => $rOp,
-        'window_seconds'    => max(1, (int) trim($parts[3])),
-        'threshold'         => max(1, (int) trim($parts[4])),
-        'debounce_seconds'  => isset($parts[5]) ? max(0, (int) trim($parts[5])) : 3600,
-        'enabled'           => isset($parts[6]) && trim($parts[6]) === '1',
+        'window_seconds'    => max(1, (int) ($row['window_seconds'] ?? 300)),
+        'threshold'         => max(1, (int) ($row['threshold'] ?? 10)),
+        'debounce_seconds'  => max(0, (int) ($row['debounce_seconds'] ?? 3600)),
+        'enabled'           => !empty($row['enabled']),
       ];
     }
 
