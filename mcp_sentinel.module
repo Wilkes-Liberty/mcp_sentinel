@@ -57,7 +57,7 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
       $output .= '<ul>';
       $output .= '<li>' . t('<a href=":settings">MCP Sentinel settings</a> — settings are organized into vertical tabs: MCP Access, OAuth agent channel, Audit Logging, Data Loss Prevention, Anomaly detection, Reliable webhooks, and Dashboard broadcast. The Dashboard broadcast tab lets operators post a message (with info/warning/critical severity) that appears as a banner on the governance dashboard. The DLP patterns, anomaly rules, and webhook endpoints lists are now edited as dynamic add/remove rows instead of fixed slots or pipe-delimited textareas.', [':settings' => $settings_url]) . '</li>';
       $output .= '<li>' . t('Policy profiles are managed as configuration entities; create and edit them from the settings page. The profile edit form is organized into vertical tabs — Identity, Allowed operations, Entity scope, Redaction, Rate limits &amp; quotas, and Network / IP — and shows a live plain-language policy summary that updates when key fields change.') . '</li>';
-      $output .= '<li>' . t('<a href=":dashboard">MCP Sentinel governance dashboard</a> — the landing page at <code>/admin/reports/mcp-sentinel</code>. A read-only operations console showing an urgent-conditions banner, a posture rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy panels, six charts, quick actions, and an active-controls strip. A time-window toggle (24h/7d/30d) re-scopes the counts and charts, and charts/tiles click through to the filtered audit log. The <em>Verify chain now</em> quick action re-runs the audit hash-chain check on demand. Local-task tabs lead to the audit log, webhook deliveries, and (when the approval submodule is enabled) approvals.', [':dashboard' => $dashboard_url]) . '</li>';
+      $output .= '<li>' . t('<a href=":dashboard">MCP Sentinel governance dashboard</a> — the landing page at <code>/admin/reports/mcp-sentinel</code>. A read-only operations console showing an urgent-conditions banner, a posture rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy panels, six charts, quick actions, and an active-controls strip. A time-window toggle (24h/7d/30d) re-scopes the counts and charts, and charts/tiles click through to the filtered audit log. The <em>Verify chain now</em> quick action re-runs the audit hash-chain check on demand. Critical conditions (such as a broken hash chain) also appear as a dismissible banner on every admin page, so they are seen even off the dashboard. Local-task tabs lead to the audit log, webhook deliveries, and (when the approval submodule is enabled) approvals.', [':dashboard' => $dashboard_url]) . '</li>';
       $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records (now at <code>/admin/reports/mcp-sentinel/audit</code>, reachable from the dashboard "Audit log" tab).', [':audit' => $audit_url]) . '</li>';
       $output .= '</ul>';
 
@@ -89,6 +89,87 @@ function mcp_sentinel_theme(): array {
     ],
     'mcp_sentinel_urgent_banner' => [
       'variables' => ['conditions' => []],
+    ],
+  ];
+}
+
+/**
+ * Implements hook_page_top().
+ *
+ * Surfaces CRITICAL urgent conditions (only) site-wide on admin pages so a
+ * broken hash chain or unresolvable signing key is seen even off the governance
+ * dashboard. Warning/info severities are dashboard-only. Gated to users with
+ * 'view mcp sentinel audit log'; the dashboard route is skipped to avoid a
+ * duplicate banner. Per-user dismissals (private tempstore) are subtracted, and
+ * the banner reappears while the condition still holds.
+ */
+function mcp_sentinel_page_top(array &$page): void {
+  // Only on admin routes (cheap check before any service work).
+  if (!\Drupal::service('router.admin_context')->isAdminRoute()) {
+    return;
+  }
+  // Permission gate: only operators who can view the audit log see the banner.
+  if (!\Drupal::currentUser()->hasPermission('view mcp sentinel audit log')) {
+    return;
+  }
+  // Avoid a second banner on the dashboard, which renders its own.
+  $route_name = \Drupal::routeMatch()->getRouteName();
+  if ($route_name === 'mcp_sentinel.dashboard') {
+    return;
+  }
+
+  try {
+    $conditions = \Drupal::service('mcp_sentinel.urgent_conditions')->evaluate();
+  }
+  catch (\Throwable $e) {
+    \Drupal::logger('mcp_sentinel')->error('Site-wide banner evaluation failed: @message', [
+      '@message' => $e->getMessage(),
+    ]);
+    return;
+  }
+
+  // Critical only, minus this user's dismissals.
+  $dismissed = \Drupal\mcp_sentinel\Controller\McpBannerController::dismissedKeys(
+    \Drupal::service('tempstore.private')
+  );
+  $critical = [];
+  foreach ($conditions as $condition) {
+    if ($condition['severity'] !== 'critical') {
+      continue;
+    }
+    if (!empty($dismissed[$condition['key']])) {
+      continue;
+    }
+    $critical[] = $condition;
+  }
+  if ($critical === []) {
+    return;
+  }
+
+  // Build the dismissal URL with an explicit, session-valid CSRF token. The
+  // token seed is the route path without the leading slash (matching
+  // \Drupal\Core\Access\CsrfAccessCheck). Generating the URL from the internal
+  // path (not the route name) avoids the outbound CSRF processor's lazy
+  // placeholder token, which is not resolved by a bare toString().
+  $dismiss_base = Url::fromUri('base:admin/reports/mcp-sentinel/banner-dismiss')->toString();
+  $token = \Drupal::csrfToken()->get('admin/reports/mcp-sentinel/banner-dismiss');
+  $dismiss_url = $dismiss_base . '?token=' . $token;
+  $page['mcp_sentinel_urgent_banner'] = [
+    '#theme' => 'mcp_sentinel_urgent_banner',
+    '#conditions' => $critical,
+    '#attached' => [
+      'library' => ['mcp_sentinel/dashboard'],
+      'drupalSettings' => [
+        'mcpSentinel' => [
+          'dismissUrl' => $dismiss_url,
+        ],
+      ],
+    ],
+    // The banner is per-user and reflects volatile state; never cache it across
+    // users or persist a dismissed/undismissed snapshot.
+    '#cache' => [
+      'contexts' => ['user', 'url.path'],
+      'max-age' => 0,
     ],
   ];
 }

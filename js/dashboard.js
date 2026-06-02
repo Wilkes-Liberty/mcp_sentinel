@@ -21,13 +21,11 @@
             const key = banner.getAttribute('data-mcp-banner-key');
             const settings = drupalSettings.mcpSentinel || {};
             const url = settings.dismissUrl;
-            const token = settings.dismissToken;
+            // The dismiss URL already carries the per-session CSRF token; only
+            // the condition key is sent in the request body.
             if (url && key) {
               const body = new URLSearchParams();
               body.append('key', key);
-              if (token) {
-                body.append('token', token);
-              }
               fetch(url, {
                 method: 'POST',
                 headers: {

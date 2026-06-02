@@ -644,6 +644,13 @@ guard, so a single failing metric degrades to an empty/"—" widget rather than
 breaking the page. The dashboard renders even when the approval submodule is
 absent and when `drupal/charts` is not installed.
 
+**Critical** urgent conditions (a broken hash chain, an unresolvable encryption
+profile, or an unresolvable webhook signing key) also appear as a dismissible
+banner on every admin page — not just the dashboard — for users with *View MCP
+Sentinel audit log*, so they are noticed promptly. Warning/info conditions are
+shown on the dashboard only. Dismissal is per-user and the banner reappears
+while the condition still holds.
+
 ### Drush commands
 
 | Command | Purpose |

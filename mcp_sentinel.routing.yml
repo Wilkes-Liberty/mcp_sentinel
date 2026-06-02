@@ -14,6 +14,15 @@ mcp_sentinel.dashboard:
   requirements:
     _permission: 'view mcp sentinel audit log'
 
+mcp_sentinel.banner_dismiss:
+  path: '/admin/reports/mcp-sentinel/banner-dismiss'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpBannerController::dismiss'
+  methods: [GET, POST]
+  requirements:
+    _permission: 'view mcp sentinel audit log'
+    _csrf_token: 'TRUE'
+
 mcp_sentinel.verify_chain:
   path: '/admin/reports/mcp-sentinel/verify'
   defaults:
