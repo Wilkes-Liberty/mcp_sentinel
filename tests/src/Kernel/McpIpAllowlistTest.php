@@ -258,4 +258,48 @@ final class McpIpAllowlistTest extends KernelTestBase {
     );
   }
 
+  /**
+   * Proves the "allowed" result is uncacheable when allowed_ips is non-empty.
+   *
+   * Cache bypass scenario: if the allowed result were cacheable, Drupal's
+   * entity-access cache could re-serve it to a later request from the same
+   * account/roles but a DIFFERENT, disallowed IP — bypassing the gate entirely.
+   * Client IP is not a Drupal cache context, so the only safe answer is
+   * max-age 0 on every result returned when a profile has IP restrictions.
+   *
+   * Test steps:
+   *  A) Allowed IP (203.0.113.42 in /24): result must be NOT forbidden AND
+   *     getCacheMaxAge() === 0.
+   *  B) Disallowed IP (192.0.2.1): result must be forbidden (gate re-applies).
+   *
+   * @covers ::checkEntityAccess
+   * @covers ::isClientIpAllowed
+   */
+  public function testCachedAllowedResultDoesNotServeDeniedIp(): void {
+    $profile = $this->profileWithIps(['203.0.113.0/24']);
+
+    // Step A: request from an allowed IP.
+    $this->pushRequest('203.0.113.42');
+    $allowed = $this->checker()->checkEntityAccess($this->node, 'view', $profile);
+    $this->assertFalse(
+      $allowed->isForbidden(),
+      'IP 203.0.113.42 inside /24 must not be forbidden.'
+    );
+    $this->assertSame(
+      0,
+      $allowed->getCacheMaxAge(),
+      'Allowed result must be uncacheable (max-age 0) when profile has IP restrictions — a cached allowed result could bypass the gate for a different IP.'
+    );
+    $this->container->get('request_stack')->pop();
+
+    // Step B: request from a disallowed IP — gate must re-evaluate and deny.
+    $this->pushRequest('192.0.2.1');
+    $denied = $this->checker()->checkEntityAccess($this->node, 'view', $profile);
+    $this->assertTrue(
+      $denied->isForbidden(),
+      'IP 192.0.2.1 must be forbidden even after a prior allowed result.'
+    );
+    $this->container->get('request_stack')->pop();
+  }
+
 }

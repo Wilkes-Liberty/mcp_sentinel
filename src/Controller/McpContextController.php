@@ -6,6 +6,8 @@ namespace Drupal\mcp_sentinel\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
+use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -20,6 +22,8 @@ class McpContextController extends ControllerBase {
 
   public function __construct(
     private readonly EntityFieldManagerInterface $entityFieldManager,
+    private readonly McpPolicyResolver $policyResolver,
+    private readonly McpAccessChecker $accessChecker,
   ) {}
 
   /**
@@ -28,16 +32,34 @@ class McpContextController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get('entity_field.manager'),
+      $container->get('mcp_sentinel.policy_resolver'),
+      $container->get('mcp_sentinel.access_checker'),
     );
   }
 
   /**
    * Returns full site schema.
+   *
+   * IP allowlist enforcement: when the requesting account is governed by a
+   * policy profile that carries an IP restriction, and the client IP is not
+   * in the allowlist, a 403 response is returned immediately before any
+   * schema data is emitted. The response carries no-store / no-cache headers
+   * so it cannot be served to a later request from a different IP.
    */
   public function context(): JsonResponse {
     $config = $this->config('mcp_sentinel.settings');
     if (!$config->get('enabled')) {
       return new JsonResponse(['error' => 'MCP access is disabled.'], 403);
+    }
+
+    // IP allowlist gate — governed requests only.
+    $profile = $this->policyResolver->resolve();
+    if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
+      return new JsonResponse(
+        ['error' => 'Source IP not permitted by MCP Sentinel policy.'],
+        403,
+        ['Cache-Control' => 'no-store', 'X-Content-Type-Options' => 'nosniff'],
+      );
     }
 
     return new JsonResponse([

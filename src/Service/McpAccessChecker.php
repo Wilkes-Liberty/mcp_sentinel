@@ -52,6 +52,13 @@ final class McpAccessChecker {
    * settings are absent, getClientIp() returns the proxy's IP. Operators
    * MUST configure trusted proxies; see README for details.
    *
+   * Cache safety: when the profile has a non-empty allowed_ips list, EVERY
+   * AccessResult returned by this method is marked uncacheable (max-age 0).
+   * Client IP is not a Drupal cache context, so a cached "allowed" result
+   * would be re-served to a later request from the same account/roles but a
+   * different, disallowed IP — bypassing the gate. Callers must not add their
+   * own cache max-age when a profile carries IP restrictions.
+   *
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The entity being accessed.
    * @param string $operation
@@ -73,53 +80,90 @@ final class McpAccessChecker {
       'config:mcp_sentinel.mcp_policy_profile.' . $profile->id(),
     ];
 
+    // When the profile carries an IP restriction, every result returned by
+    // this method must be uncacheable: client IP is not a Drupal cache context,
+    // so a cached "allowed" result could be re-served to a later request from
+    // the same account but a different, disallowed IP.
+    $ipRestricted = $profile->getAllowedIps() !== [];
+
     if (!$this->configFactory->get('mcp_sentinel.settings')->get('enabled')) {
-      return AccessResult::forbidden('MCP access is disabled.')->addCacheTags($tags);
+      $result = AccessResult::forbidden('MCP access is disabled.')->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
     // IP allowlist: deny before any operation gate if the client IP is not
     // in the profile's allowlist. Empty list = all IPs permitted.
-    $allowedIps = $profile->getAllowedIps();
-    if ($allowedIps !== []) {
-      $request = $this->requestStack->getCurrentRequest();
-      $clientIp = $request !== NULL ? (string) $request->getClientIp() : '';
-      if ($clientIp === '' || !IpUtils::checkIp($clientIp, $allowedIps)) {
-        return AccessResult::forbidden(
-          'Source IP not permitted by MCP Sentinel policy.'
-        )->addCacheTags($tags)->setCacheMaxAge(0);
-      }
+    if ($ipRestricted && !$this->isClientIpAllowed($profile)) {
+      return AccessResult::forbidden(
+        'Source IP not permitted by MCP Sentinel policy.'
+      )->addCacheTags($tags)->setCacheMaxAge(0);
     }
 
     if (in_array($entityType, $profile->getDeniedEntityTypes(), TRUE)) {
-      return AccessResult::forbidden(
+      $result = AccessResult::forbidden(
         "Entity type '{$entityType}' is denied by MCP Sentinel."
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
     $allowed = $profile->getAllowedEntityTypes();
     if ($allowed && !in_array($entityType, $allowed, TRUE)) {
-      return AccessResult::forbidden(
+      $result = AccessResult::forbidden(
         "Entity type '{$entityType}' is not in the MCP Sentinel allowlist."
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
     if ($operation === 'view' && !$profile->allowsRead()) {
-      return AccessResult::forbidden(
+      $result = AccessResult::forbidden(
         'Read operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
     if (in_array($operation, ['update', 'create'], TRUE) && !$profile->allowsWrite()) {
-      return AccessResult::forbidden(
+      $result = AccessResult::forbidden(
         'Write operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
     if ($operation === 'delete' && !$profile->allowsDelete()) {
-      return AccessResult::forbidden(
+      $result = AccessResult::forbidden(
         'Delete operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
-    return AccessResult::neutral()->addCacheTags($tags);
+    $result = AccessResult::neutral()->addCacheTags($tags);
+    return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+  }
+
+  /**
+   * Returns TRUE if the current client IP is permitted by the IP allowlist.
+   *
+   * An empty allowlist (allowed_ips = []) means no restriction — all IPs are
+   * permitted. When the list is non-empty, the client IP obtained via Symfony's
+   * trusted-proxy-aware Request::getClientIp() must match at least one entry.
+   *
+   * This is the single canonical IP-check implementation. All code paths that
+   * need IP-gate enforcement (checkEntityAccess(), governed tool plugins, the
+   * context controller) must call this method rather than re-implementing the
+   * check inline.
+   *
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile for the requesting account.
+   *
+   * @return bool
+   *   TRUE when the client IP is permitted (or no IP restriction is set),
+   *   FALSE when the client IP is absent or not in the allowlist.
+   */
+  public function isClientIpAllowed(McpPolicyProfileInterface $profile): bool {
+    $allowedIps = $profile->getAllowedIps();
+    if ($allowedIps === []) {
+      return TRUE;
+    }
+    $request = $this->requestStack->getCurrentRequest();
+    $clientIp = $request !== NULL ? (string) $request->getClientIp() : '';
+    return $clientIp !== '' && IpUtils::checkIp($clientIp, $allowedIps);
   }
 
   /**

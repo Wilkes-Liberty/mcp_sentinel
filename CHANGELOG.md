@@ -33,10 +33,20 @@ stable release is tagged.
     real client's. The README documents this prominently. An empty `allowed_ips`
     list (the default) disables IP enforcement and is always safe to leave in place
     if trusted proxies are not configured.
-  - Scope: enforcement is at the entity-access level (`McpAccessChecker`), which
-    covers all MCP-governed operations including Tools, JSON:API, and GraphQL. The
-    result of a denied IP check is never cached (`setCacheMaxAge(0)`) because
-    request IPs are not a Drupal cache context.
+  - Scope: enforcement covers the entity-access layer (`McpAccessChecker`,
+    `hook_entity_access`) as well as `McpContentLockTool`, `McpSecurityPolicyTool`,
+    `McpSiteContextTool`, and the `/drupal-mcp/context` endpoint. All governed
+    paths enforce the same IP gate via a shared
+    `McpAccessChecker::isClientIpAllowed()` helper — a single canonical
+    implementation.
+  - **Cache safety:** when a profile has a non-empty `allowed_ips` list, EVERY
+    `AccessResult` returned by `checkEntityAccess()` is marked `max-age 0`
+    (uncacheable). Client IP is not a Drupal cache context; a cached "allowed"
+    result could be re-served to a later request from the same account but a
+    different, disallowed IP. The `/drupal-mcp/context` response carries
+    `Cache-Control: no-store` for the same reason.
+  - The IP gate is applied strictly to governed requests (accounts for which a
+    policy profile resolves). Ungoverned cookie-session traffic is never affected.
   - `update_10010` backfills `allowed_ips: []` on all existing profiles during a
     `drush updb` run.
 - **Anomaly detection & alerting — F10 hardening:**

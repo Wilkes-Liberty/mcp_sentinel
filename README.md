@@ -374,15 +374,32 @@ any source IP is permitted.
 
 ### How it works
 
-Enforcement is applied in `McpAccessChecker::checkEntityAccess()` as the first
-check after the global enabled flag — before entity-type gates, operation gates,
-or any business logic. A denied request returns a "Source IP not permitted"
-forbidden result. CIDR matching (including IPv6) is performed by
+The IP check is centralized in `McpAccessChecker::isClientIpAllowed()` — a
+single canonical implementation used by all governed paths. Enforcement covers:
+
+| Path | Gate |
+|---|---|
+| **Entity access** (`hook_entity_access`) | `McpAccessChecker::checkEntityAccess()` — first check after the global enabled flag, before entity-type / operation gates. Covers all JSON:API, GraphQL, and REST entity reads/writes. |
+| **`McpContentLockTool`** | `checkAccess()` — IP-denied governed accounts receive a forbidden `AccessResult` before any lock state is read or mutated. |
+| **`McpSecurityPolicyTool`** | `checkAccess()` — IP-denied governed accounts cannot read the policy profile data. |
+| **`McpSiteContextTool`** | `checkAccess()` — IP-denied governed accounts cannot read the site schema. |
+| **`/drupal-mcp/context` endpoint** | `McpContextController::context()` — returns 403 with a `no-store` response header before any schema data is serialized. |
+
+A denied request returns a "Source IP not permitted by MCP Sentinel policy."
+message. CIDR matching (including IPv6) is performed by
 `Symfony\Component\HttpFoundation\IpUtils::checkIp()`, which is bundled with
 Drupal core.
 
-Because the check is at the entity-access layer, it applies uniformly to all
-MCP-governed access paths: Tool plugins, JSON:API, and GraphQL.
+**Cache safety:** when a profile has a non-empty `allowed_ips` list, every
+`AccessResult` returned by `checkEntityAccess()` is marked `max-age 0`
+(uncacheable). Client IP is not a Drupal cache context, so a cached "allowed"
+result would be re-served to a later request from the same account but a
+different, disallowed IP — bypassing the gate. The `no-store` header on
+`McpContextController` responses provides the same protection for the HTTP layer.
+
+The gate is applied **only to governed requests** (requests where a policy
+profile resolves for the account). Ungoverned cookie-session traffic is never
+affected.
 
 ### IMPORTANT — Reverse-proxy / trusted-proxy requirement
 
