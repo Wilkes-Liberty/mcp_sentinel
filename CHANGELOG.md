@@ -18,14 +18,24 @@ stable release is tagged.
     list to `result_count_cap` before returning `ExecutableResult::success()`.
     When truncation occurs, `_result_truncated: true` and `_result_cap: <n>` are
     added to the result data so the agent is never silently misled. The
-    `response_size_cap` is also checked at this seam; oversized payloads are
-    denied with a clear message before the response is returned.
+    `response_size_cap` is also enforced at this seam: because all write
+    operations have already executed, the payload is **truncated** (not
+    rejected) to fit under the cap — returning failure after a completed write
+    batch would misreport success as failure and could trigger agent retries that
+    toggle publish/unpublish state. When size truncation occurs, `_size_truncated:
+    true` and `_size_cap: <n>` are added; the success message notes the
+    truncation. Pure-read tools may still use `checkResponseSizeCap()` which
+    returns `ExecutableResult::failure()` before any data is materialised.
   - **JSON:API page ceiling** — a `KernelEvents::REQUEST` subscriber
     (`McpJsonApiPageLimitSubscriber`, priority -20) intercepts `page[limit]`
-    parameters for `/jsonapi/*` requests from governed agents, throwing HTTP 400
-    before the query runs. Note: `hook_jsonapi_resource_params_alter` does NOT
-    exist in Drupal 11.3 core; this subscriber is the correct implementation
-    path.
+    parameters for governed agents, throwing HTTP 400 before the query runs.
+    Path matching uses `str_contains('/jsonapi/')` rather than
+    `str_starts_with('/jsonapi/')` so that URL-language-negotiated paths such as
+    `/en/jsonapi/node/article` are correctly governed. Non-positive `page[limit]`
+    values (0, negative, non-numeric) are passed through without a cap comparison
+    and left for JSON:API's own parameter validation. Note:
+    `hook_jsonapi_resource_params_alter` does NOT exist in Drupal 11.3 core;
+    this subscriber is the correct implementation path.
   - **GraphQL multi-value field lists** — `hook_graphql_compose_field_results_alter`
     in `mcp_sentinel_graphql.module` truncates field result lists to
     `result_count_cap` as a third pass after field-name redaction and DLP

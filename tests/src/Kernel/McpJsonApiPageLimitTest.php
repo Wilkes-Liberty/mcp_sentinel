@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
-use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
-use Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\Group;
@@ -23,7 +21,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
  *  - governed requests with page[limit] above the cap throw a 400
  *  - governed requests at/below the cap pass through
  *  - ungoverned requests are not affected
- *  - cap = 0 (unlimited) passes any limit
+ *  - cap = 0 (unlimited) passes any limit.
  *
  * @group mcp_sentinel
  */
@@ -105,7 +103,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
   private function switchToGovernedUser(): void {
     // Ensure the mcp_api role exists.
     if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
-      \Drupal\user\Entity\Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
+      Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
     }
 
     // Add mcp_api to governed_roles and enable the role-fallback path.
@@ -210,6 +208,98 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber->onRequest($event);
     $this->assertSame(50000, (int) $event->getRequest()->query->all('page')['limit'],
       'Non-JSON:API paths must not be affected by the subscriber.');
+  }
+
+  /**
+   * An /admin path with page[limit] is not affected by the subscriber.
+   */
+  public function testAdminPathIgnored(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('result_count_cap', 10)->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/admin/content', ['limit' => 50000]);
+    $subscriber->onRequest($event);
+    $this->assertSame(50000, (int) $event->getRequest()->query->all('page')['limit'],
+      '/admin path must not be affected by the JSON:API page-limit subscriber.');
+  }
+
+  /**
+   * Language-prefixed /en/jsonapi/... path is still capped (Fix 2: i18n).
+   *
+   * URL language negotiation prepends a language code, producing paths like
+   * /en/jsonapi/node/article. The original str_starts_with('/jsonapi/') check
+   * silently missed these paths. str_contains('/jsonapi/') matches them.
+   */
+  public function testLanguagePrefixedJsonApiPathIsCapped(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('result_count_cap', 10)->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/en/jsonapi/node/article', ['limit' => 500]);
+    $this->expectException(BadRequestHttpException::class);
+    $this->expectExceptionMessageMatches('/500.*10|cap.*10/i');
+    $subscriber->onRequest($event);
+  }
+
+  /**
+   * Language-prefixed /en/jsonapi/... path at cap passes through.
+   */
+  public function testLanguagePrefixedJsonApiAtCapPassesThrough(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('result_count_cap', 10)->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/en/jsonapi/node/article', ['limit' => 10]);
+    $subscriber->onRequest($event);
+    $this->assertSame(10, (int) $event->getRequest()->query->all('page')['limit'],
+      'Language-prefixed request at the cap must pass through.');
+  }
+
+  /**
+   * A page[limit]=0 value is ignored (left for JSON:API's own validation).
+   *
+   * Fix 3: non-positive limits must not trigger a cap comparison.
+   */
+  public function testZeroPageLimitIsIgnored(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('result_count_cap', 10)->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/jsonapi/node/article', ['limit' => 0]);
+    // Must not throw — page[limit]=0 is for JSON:API to validate.
+    $subscriber->onRequest($event);
+    $this->assertSame(0, (int) $event->getRequest()->query->all('page')['limit'],
+      'page[limit]=0 must be passed through without a cap exception.');
+  }
+
+  /**
+   * A negative page[limit] is ignored (left for JSON:API's own validation).
+   */
+  public function testNegativePageLimitIsIgnored(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('result_count_cap', 10)->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/jsonapi/node/article', ['limit' => -5]);
+    // Must not throw.
+    $subscriber->onRequest($event);
+    $this->assertSame(-5, (int) $event->getRequest()->query->all('page')['limit'],
+      'Negative page[limit] must be passed through without a cap exception.');
   }
 
 }

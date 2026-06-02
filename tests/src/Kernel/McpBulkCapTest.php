@@ -8,6 +8,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\user\Traits\UserCreationTrait;
+use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -66,7 +67,7 @@ final class McpBulkCapTest extends KernelTestBase {
     // it has node-update access so bulk operations actually succeed.
     $role = \Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api');
     if (!$role) {
-      $role = \Drupal\user\Entity\Role::create([
+      $role = Role::create([
         'id' => 'mcp_api',
         'label' => 'MCP API',
         'weight' => 10,
@@ -205,9 +206,15 @@ final class McpBulkCapTest extends KernelTestBase {
   }
 
   /**
-   * When response_size_cap is very small, a governed bulk result is denied.
+   * When response_size_cap is tiny the bulk write SUCCEEDS with truncation.
+   *
+   * The operations are already performed before the size check runs.
+   * Returning failure here would misreport a completed write batch and could
+   * cause an agent to retry, toggling entity state. Instead, the reported
+   * result lists are truncated to fit under the cap and '_size_truncated:
+   * true' is set.
    */
-  public function testResponseSizeCapDeniesOversizedResult(): void {
+  public function testResponseSizeCapTruncatesSucceededRatherThanFailing(): void {
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('result_count_cap', 0)
@@ -226,12 +233,23 @@ final class McpBulkCapTest extends KernelTestBase {
     $tool->setInputValue('confirm', TRUE);
     $tool->execute();
 
-    // The result message must indicate the response-size cap was exceeded.
-    $this->assertFalse($tool->getResultStatus(),
-      'Tool must fail when response size cap is exceeded.');
+    // The tool must SUCCEED — the unpublish operations were performed.
+    $this->assertTrue($tool->getResultStatus(),
+      'Bulk write must report success even when the response-size cap is exceeded; '
+      . 'message: ' . (string) $tool->getResultMessage());
+    $data = $tool->getResult()->getContextValues();
+    $this->assertIsArray($data);
+    // The truncation signal must be present so the agent knows it was cut.
+    $this->assertTrue($data['_size_truncated'] ?? FALSE,
+      '_size_truncated must be TRUE when payload was truncated to honour the size cap.');
+    $this->assertArrayHasKey('_size_cap', $data,
+      '_size_cap must be set to the profile cap value when size truncation occurs.');
+    $this->assertSame(10, $data['_size_cap'],
+      '_size_cap must match the configured response_size_cap.');
+    // The result message must note the size truncation.
     $message = (string) $tool->getResultMessage();
-    $this->assertStringContainsStringIgnoringCase('cap', $message,
-      'Error message must mention the cap when response size is exceeded.');
+    $this->assertStringContainsStringIgnoringCase('truncated', $message,
+      'Success message must mention truncation when size cap was applied.');
   }
 
 }

@@ -20,9 +20,10 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * so the database never reads excess rows for governed agents.
  *
  * Enforcement only applies to requests that:
- * 1. Have a '_jsonapi_' route attribute or a path starting with '/jsonapi/'
+ * 1. Have a path containing '/jsonapi/' (covers both '/jsonapi/...' and
+ *    language-prefixed paths like '/en/jsonapi/...')
  * 2. Are governed (policy resolver returns a non-NULL profile)
- * 3. Include a page[limit] parameter that exceeds the cap (and cap > 0)
+ * 3. Include a page[limit] parameter >= 1 that exceeds the cap (and cap > 0)
  *
  * A 400 Bad Request is returned to the agent with a descriptive message.
  */
@@ -82,6 +83,12 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     }
 
     $limit = (int) $page['limit'];
+    // A zero, negative, or non-numeric value (cast to 0) is invalid on its own
+    // terms — leave it for JSON:API's own parameter validation rather than
+    // treating it as a cap violation.
+    if ($limit < 1) {
+      return;
+    }
     if ($limit > $cap) {
       throw new BadRequestHttpException(
         sprintf(
@@ -97,14 +104,17 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   /**
    * Returns TRUE when the request targets a JSON:API endpoint.
    *
-   * Detects by path prefix (/jsonapi/) since routing attributes may not be
-   * populated at KernelEvents::REQUEST priority -20.
+   * Detects by the presence of the '/jsonapi/' segment anywhere in the path,
+   * rather than as a strict prefix, so that language-prefixed URLs such as
+   * '/en/jsonapi/node/article' (URL language negotiation) are also matched.
+   * Routing attributes may not be populated at KernelEvents::REQUEST
+   * priority -20, so path matching is the reliable detection strategy here.
    *
    * @param \Symfony\Component\HttpFoundation\Request $request
    *   The incoming request.
    */
   private function isJsonApiRequest(Request $request): bool {
-    return str_starts_with($request->getPathInfo(), '/jsonapi/');
+    return str_contains($request->getPathInfo(), '/jsonapi/');
   }
 
 }

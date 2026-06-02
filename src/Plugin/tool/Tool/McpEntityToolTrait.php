@@ -111,6 +111,11 @@ trait McpEntityToolTrait {
    *
    * Returns a failure result when over-cap, NULL when within limits.
    *
+   * This is appropriate for PURE-READ tools that want to refuse-with-failure
+   * before materialising any response. For write tools (where operations have
+   * already been executed), use truncateBulkResultsToSizeCap() instead so that
+   * completed work is never misreported as failed.
+   *
    * @param string $serialized
    *   The serialized response string whose byte length will be measured.
    * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
@@ -138,6 +143,62 @@ trait McpEntityToolTrait {
       );
     }
     return NULL;
+  }
+
+  /**
+   * Truncates a completed bulk-write results array to honour the size cap.
+   *
+   * This method is intended for bulk WRITE tools only. Because the operations
+   * have already been executed, returning ExecutableResult::failure() would
+   * misreport a completed write batch — an agent seeing "failure" may retry,
+   * toggling publish/unpublish state or re-deleting entities.
+   *
+   * Instead, when the serialised payload exceeds the cap, the 'succeeded' (and
+   * if needed 'failed') lists are truncated enough to fit under the limit, and
+   * '_size_truncated: true' plus '_size_cap' are added to the results array.
+   * The method always returns the (possibly truncated) results array unchanged
+   * when the cap is 0 (unlimited) or is not exceeded.
+   *
+   * @param array $results
+   *   The results array with 'succeeded', 'failed', and 'queued' keys.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The active governance profile supplying the cap.
+   *
+   * @return array
+   *   The (possibly truncated) results array with '_size_truncated' and
+   *   '_size_cap' keys added when truncation was necessary.
+   */
+  protected function truncateBulkResultsToSizeCap(
+    array $results,
+    McpPolicyProfileInterface $profile,
+  ): array {
+    $cap = $profile->getResponseSizeCap();
+    if ($cap <= 0) {
+      return $results;
+    }
+
+    $serialized = json_encode($results) ?: '';
+    if (strlen($serialized) <= $cap) {
+      return $results;
+    }
+
+    // Truncate 'succeeded' first — that list is the largest and already
+    // subject to result_count_cap truncation. We remove items one-by-one from
+    // the tail until the payload fits, rather than guessing a proportion.
+    while (!empty($results['succeeded']) && strlen(json_encode($results) ?: '') > $cap) {
+      array_pop($results['succeeded']);
+    }
+
+    // If 'succeeded' is now empty and the payload still exceeds the cap
+    // (unlikely but theoretically possible when 'failed' is very large),
+    // truncate 'failed' as well.
+    while (!empty($results['failed']) && strlen(json_encode($results) ?: '') > $cap) {
+      array_pop($results['failed']);
+    }
+
+    $results['_size_truncated'] = TRUE;
+    $results['_size_cap'] = $cap;
+    return $results;
   }
 
 }

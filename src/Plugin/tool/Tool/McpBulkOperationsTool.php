@@ -200,10 +200,20 @@ final class McpBulkOperationsTool extends ToolBase {
     // returning. 'failed' and 'queued' are always fully returned.
     $results = $this->applyResultCap($results, $profileForRateLimit);
 
-    // Apply response-size cap: measure the serialized payload and deny if over.
-    $serialized = json_encode($results) ?: '';
-    if ($sizeFailure = $this->checkResponseSizeCap($serialized, $profileForRateLimit)) {
-      return $sizeFailure;
+    // Apply response-size cap: because all writes have already been performed,
+    // returning failure here would misreport a completed batch — an agent
+    // seeing "failure" may retry and toggle publish/unpublish state again.
+    // Instead,
+    // truncate the reported lists to fit under the cap and signal truncation
+    // via '_size_truncated' / '_size_cap' keys. The operation WAS performed.
+    $results = $this->truncateBulkResultsToSizeCap($results, $profileForRateLimit);
+
+    $truncationNote = '';
+    if (!empty($results['_result_truncated'])) {
+      $truncationNote .= ' (result list truncated to cap of ' . $results['_result_cap'] . ')';
+    }
+    if (!empty($results['_size_truncated'])) {
+      $truncationNote .= ' (response truncated to size cap of ' . $results['_size_cap'] . ' bytes)';
     }
 
     return ExecutableResult::success(
@@ -212,9 +222,7 @@ final class McpBulkOperationsTool extends ToolBase {
         '@ok' => count($results['succeeded']),
         '@fail' => count($results['failed']),
         '@queued' => count($results['queued']),
-        '@trunc' => !empty($results['_result_truncated'])
-          ? ' (result list truncated to cap of ' . $results['_result_cap'] . ')'
-          : '',
+        '@trunc' => $truncationNote,
       ]),
       $results,
     );
