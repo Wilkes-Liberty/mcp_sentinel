@@ -265,6 +265,37 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
   }
 
   /**
+   * D1: Audit rows show status badges and an expandable metadata detail block.
+   */
+  public function testRowsShowBadgesAndExpandableMetadata(): void {
+    $this->seedRow('denied_access');
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
+    $this->assertSession()->elementExists('css', '.mcp-badge');
+    $this->assertSession()->elementExists('css', 'details.mcp-audit-detail');
+    $this->assertSession()->pageTextContains('seed');
+  }
+
+  /**
+   * D1: Prominent CSV and JSON export button links are present on the listing.
+   */
+  public function testProminentExportButtonsPresent(): void {
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
+    $this->assertSession()->linkByHrefExists('/admin/reports/mcp-sentinel/export');
+    $this->assertSession()->linkByHrefExists('format=json');
+  }
+
+  /**
+   * D1: Empty state message shown when the log has no rows.
+   */
+  public function testEmptyStateShownWhenNoRows(): void {
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
+    $this->assertSession()->pageTextContains('No audit log entries');
+  }
+
+  /**
    * T3.3: Metadata in the listing passes through decodeMetadata (no crash).
    *
    * Verifies the listing page loads even when metadata contains valid JSON.

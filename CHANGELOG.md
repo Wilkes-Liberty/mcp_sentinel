@@ -25,6 +25,7 @@ stable release is tagged.
 - Anomaly rules edited via an add/remove row table (config storage unchanged).
 - Webhook endpoints edited via a dynamic add/remove editor (config storage unchanged).
 - Policy-profile form grouped into vertical tabs (Identity · Allowed operations · Entity scope · Redaction · Rate limits &amp; quotas · Network/IP).
+- Audit log listing: colored status/operation badges, per-row expandable metadata (`<details>`), prominent CSV/JSON export buttons, and a mini volume/allowed-vs-denied chart strip at the top (reusing `McpChartRenderer` + `McpMetrics`).
 
 ## [1.0.0-beta1] - 2026-06-02
 
