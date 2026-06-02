@@ -73,4 +73,24 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function getRedactedFields(): array;
 
+  /**
+   * Maximum requests per rate-limit window (0 = unlimited).
+   */
+  public function getRateLimitRequests(): int;
+
+  /**
+   * Rate-limit window duration in seconds.
+   */
+  public function getRateLimitWindow(): int;
+
+  /**
+   * Maximum result items returned per tool/API call (0 = unlimited).
+   */
+  public function getResultCountCap(): int;
+
+  /**
+   * Maximum response size in bytes (0 = unlimited).
+   */
+  public function getResponseSizeCap(): int;
+
 }

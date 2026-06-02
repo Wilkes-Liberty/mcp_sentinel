@@ -123,6 +123,9 @@ final class McpMediaUploadTool extends ToolBase {
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
+    if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_media_create')) {
+      return $rateLimited;
+    }
     $policyResult = $this->accessChecker->checkEntityAccess($media, 'create', $profile);
     if ($reason = $this->denyReason($policyResult)) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied media creation: @reason', ['@reason' => $reason]));

@@ -60,6 +60,11 @@ services:
       - '@config.factory'
       - '@logger.channel.mcp_sentinel'
 
+  mcp_sentinel.rate_limiter:
+    class: Drupal\mcp_sentinel\Service\McpRateLimiter
+    arguments:
+      - '@flood'
+
   mcp_sentinel.content_lock:
     class: Drupal\mcp_sentinel\Service\McpContentLock
     arguments:

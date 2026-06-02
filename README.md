@@ -288,6 +288,40 @@ JSON:API and REST per-field value scanning is deferred to a future release.
 Drupal core's normalizer stack has no stable per-value alter hook, so a clean
 wiring point does not yet exist.
 
+## Rate limiting & quotas
+
+MCP Sentinel can throttle governed agent traffic on a per-profile basis using
+Drupal's core flood service. Limits apply per authenticated user account within
+each policy profile window, so a single compromised token cannot saturate the
+server.
+
+### Setup
+
+1. Go to **Configuration → Web services → MCP Sentinel → MCP policy profiles**
+   and edit the target profile.
+2. In the *Rate limits* fieldset:
+   - **Max requests per window** — maximum governed tool calls allowed in the
+     window. `0` means unlimited (the default on all shipped profiles).
+   - **Window (seconds)** — the rolling window duration. Default is `60`.
+3. Save. The limit takes effect immediately for new requests.
+
+### Recommended starting point for production
+
+`300` requests per `60` second window is a reasonable baseline for most sites.
+Adjust based on observed agent traffic patterns.
+
+### How it works
+
+- The flood key is `mcp_sentinel.profile.{profile_id}.{uid}` where `{uid}` is
+  the server-resolved authenticated user ID — never an agent-supplied value.
+  This prevents key-cycling bypass attacks.
+- A limit of `0` short-circuits before touching the flood service, so an
+  unconfigured profile never incurs unnecessary flood writes.
+- When the limit is exceeded, governed tool calls return a "rate limit exceeded"
+  failure and an audit row is written with operation `rate_limit_exceeded`.
+  Enforcement is applied at the top of each governed tool's execution, before
+  any business logic.
+
 ## Configuration
 
 **Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)

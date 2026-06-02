@@ -9,6 +9,7 @@ use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
@@ -111,15 +112,32 @@ final class McpNodeOperationsTool extends ToolBase {
    * {@inheritdoc}
    */
   protected function doExecute(array $values): ExecutableResult {
+    // Resolve the profile and enforce the rate limit before any business logic
+    // so throttled agents are blocked regardless of input validity.
+    $profile = $this->policyResolver->resolve($this->currentUser);
+    if ($profile === NULL) {
+      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+    }
+    if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_node_operations')) {
+      return $rateLimited;
+    }
     return ($values['action'] ?? '') === 'create'
-      ? $this->createNode($values)
-      : $this->updateNode($values);
+      ? $this->createNode($values, $profile)
+      : $this->updateNode($values, $profile);
   }
 
   /**
    * Creates a node.
+   *
+   * @param array $values
+   *   Tool input values.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The already-resolved policy profile.
+   *
+   * @return \Drupal\tool\ExecutableResult
+   *   The execution result.
    */
-  private function createNode(array $values): ExecutableResult {
+  private function createNode(array $values, McpPolicyProfileInterface $profile): ExecutableResult {
     $bundle = $values['bundle'] ?? '';
     if ($bundle === '') {
       return ExecutableResult::failure($this->t('A bundle (content type) is required to create a node.'));
@@ -133,10 +151,6 @@ final class McpNodeOperationsTool extends ToolBase {
       'uid' => $this->currentUser->id(),
     ]);
 
-    $profile = $this->policyResolver->resolve($this->currentUser);
-    if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
-    }
     $policyResult = $this->accessChecker->checkEntityAccess($node, 'create', $profile);
     if ($policy = $this->denyReason($policyResult)) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied node creation: @reason', ['@reason' => $policy]));
@@ -151,18 +165,22 @@ final class McpNodeOperationsTool extends ToolBase {
 
   /**
    * Updates a node.
+   *
+   * @param array $values
+   *   Tool input values.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The already-resolved policy profile.
+   *
+   * @return \Drupal\tool\ExecutableResult
+   *   The execution result.
    */
-  private function updateNode(array $values): ExecutableResult {
+  private function updateNode(array $values, McpPolicyProfileInterface $profile): ExecutableResult {
     $node = $this->loadNode((string) ($values['id'] ?? ''));
     if (!$node instanceof NodeInterface) {
       return ExecutableResult::failure($this->t('Node "@id" not found.', ['@id' => $values['id'] ?? '']));
     }
     if ($this->contentLock->isLocked('node', (string) $node->id())) {
       return ExecutableResult::failure($this->t('Node @id is locked against MCP writes (a human may be editing it).', ['@id' => $node->id()]));
-    }
-    $profile = $this->policyResolver->resolve($this->currentUser);
-    if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
     $policyResult = $this->accessChecker->checkEntityAccess($node, 'update', $profile);
     if ($policy = $this->denyReason($policyResult)) {

@@ -138,6 +138,9 @@ final class McpWorkflowTransitionTool extends ToolBase {
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
+    if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_workflow_transition')) {
+      return $rateLimited;
+    }
     $policyResult = $this->accessChecker->checkEntityAccess($entity, 'update', $profile);
     if ($reason = $this->denyReason($policyResult)) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied the transition: @reason', ['@reason' => $reason]));

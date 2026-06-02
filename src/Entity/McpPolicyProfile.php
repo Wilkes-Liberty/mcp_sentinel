@@ -58,6 +58,10 @@ use Drupal\mcp_sentinel\McpPolicyProfileListBuilder;
     'allowed_entity_types',
     'denied_entity_types',
     'redacted_fields',
+    'rate_limit_requests',
+    'rate_limit_window',
+    'result_count_cap',
+    'response_size_cap',
   ],
 )]
 final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfileInterface {
@@ -126,6 +130,26 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   protected array $redacted_fields = [];
 
   /**
+   * Maximum requests per rate-limit window (0 = unlimited).
+   */
+  protected int $rate_limit_requests = 0;
+
+  /**
+   * Rate-limit window duration in seconds.
+   */
+  protected int $rate_limit_window = 60;
+
+  /**
+   * Maximum result items returned per tool/API call (0 = unlimited).
+   */
+  protected int $result_count_cap = 0;
+
+  /**
+   * Maximum response size in bytes (0 = unlimited).
+   */
+  protected int $response_size_cap = 0;
+
+  /**
    * {@inheritdoc}
    */
   public function getRoles(): array {
@@ -186,6 +210,34 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function getRedactedFields(): array {
     return array_values(array_filter($this->redacted_fields));
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getRateLimitRequests(): int {
+    return (int) $this->rate_limit_requests;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getRateLimitWindow(): int {
+    return (int) $this->rate_limit_window;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getResultCountCap(): int {
+    return (int) $this->result_count_cap;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getResponseSizeCap(): int {
+    return (int) $this->response_size_cap;
   }
 
 }

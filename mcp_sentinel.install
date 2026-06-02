@@ -218,6 +218,33 @@ function mcp_sentinel_update_10005(): string {
 }
 
 /**
+ * Add rate limit, result cap, and response size cap fields to policy profiles.
+ */
+function mcp_sentinel_update_10006(): string {
+  $keys = [
+    'rate_limit_requests',
+    'rate_limit_window',
+    'result_count_cap',
+    'response_size_cap',
+  ];
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    foreach ($keys as $k) {
+      if ($e->get($k) === NULL) {
+        $e->set($k, 0);
+      }
+    }
+    $e->save();
+  }
+  return 'Added rate_limit_requests, rate_limit_window, result_count_cap, '
+    . 'response_size_cap to all policy profiles (default 0 = unlimited).';
+}
+
+/**
  * Implements hook_uninstall().
  */
 function mcp_sentinel_uninstall(): void {

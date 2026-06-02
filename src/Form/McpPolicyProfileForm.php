@@ -107,6 +107,29 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 3,
     ];
 
+    $form['rate_limits'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Rate limits'),
+      '#description' => $this->t('Throttle governed agent traffic per account. 0 = unlimited. Recommended starting values: 300 requests / 60 s window.'),
+    ];
+    $form['rate_limits']['rate_limit_requests'] = [
+      '#type' => 'number',
+      '#min' => 0,
+      '#title' => $this->t('Max requests per window (0 = unlimited)'),
+      '#default_value' => $profile->getRateLimitRequests(),
+    ];
+    $form['rate_limits']['rate_limit_window'] = [
+      '#type' => 'number',
+      '#min' => 1,
+      '#title' => $this->t('Window (seconds)'),
+      '#default_value' => $profile->getRateLimitWindow() ?: 60,
+      '#states' => [
+        'visible' => [
+          ':input[name="rate_limit_requests"]' => ['!value' => '0'],
+        ],
+      ],
+    ];
+
     return $form;
   }
 
@@ -134,6 +157,8 @@ final class McpPolicyProfileForm extends EntityForm {
       'allow_write',
       'allow_delete',
       'allow_graphql_mutations',
+      'rate_limit_requests',
+      'rate_limit_window',
     ];
     assert($entity instanceof ConfigEntityBase);
     foreach ($form_state->getValues() as $key => $value) {
@@ -178,6 +203,8 @@ final class McpPolicyProfileForm extends EntityForm {
       'redacted_fields',
       $split($form_state->getValue('redacted_fields'))
     );
+    $profile->set('rate_limit_requests', (int) $form_state->getValue('rate_limit_requests'));
+    $profile->set('rate_limit_window', (int) $form_state->getValue('rate_limit_window'));
 
     $status = $profile->save();
     $this->messenger()->addStatus(

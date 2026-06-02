@@ -7,6 +7,8 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\tool\ExecutableResult;
 
 /**
  * Shared helpers for MCP Sentinel content tool plugins.
@@ -37,6 +39,40 @@ trait McpEntityToolTrait {
       $messages[] = $violation->getPropertyPath() . ': ' . strip_tags((string) $violation->getMessage());
     }
     return $messages;
+  }
+
+  /**
+   * Checks the rate limit and returns a failure result on breach, NULL otherwise.
+   *
+   * Registers a hit on success. Call this after resolving $profile and before
+   * any business logic. The audit log entry ensures over-limit traffic is
+   * visible in reports.
+   *
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile.
+   * @param string $toolId
+   *   The tool plugin ID used as part of the flood key.
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when throttled, NULL when within limits.
+   */
+  protected function checkRateLimit(
+    McpPolicyProfileInterface $profile,
+    string $toolId,
+  ): ?ExecutableResult {
+    /** @var \Drupal\mcp_sentinel\Service\McpRateLimiter $limiter */
+    $limiter = \Drupal::service('mcp_sentinel.rate_limiter');
+    $uid = (int) $this->currentUser->id();
+    if (!$limiter->check($profile, $uid, $toolId)) {
+      \Drupal::service('mcp_sentinel.audit_logger')->log(
+        'rate_limit_exceeded', ['tool' => $toolId],
+      );
+      return ExecutableResult::failure(
+        $this->t('Rate limit exceeded. Retry after the current window expires.')
+      );
+    }
+    $limiter->register($profile, $uid, $toolId);
+    return NULL;
   }
 
 }

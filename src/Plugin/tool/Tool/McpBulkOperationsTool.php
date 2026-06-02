@@ -131,6 +131,15 @@ final class McpBulkOperationsTool extends ToolBase {
     $storage = $this->entityTypeManager->getStorage($entity_type);
     $results = ['succeeded' => [], 'failed' => [], 'queued' => []];
 
+    // Rate-limit check: resolve once for the current user before processing
+    // any items. A throttled agent is blocked before touching the entity loop.
+    $profileForRateLimit = $this->policyResolver->resolve($this->currentUser);
+    if ($profileForRateLimit !== NULL) {
+      if ($rateLimited = $this->checkRateLimit($profileForRateLimit, 'mcp_sentinel_bulk_operations')) {
+        return $rateLimited;
+      }
+    }
+
     foreach ($ids as $id) {
       $entity = $storage->load($id);
       if ($entity === NULL) {

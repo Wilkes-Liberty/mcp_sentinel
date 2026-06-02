@@ -121,3 +121,15 @@ mcp_sentinel.mcp_policy_profile.*:
       label: 'Redacted fields'
       sequence:
         type: string
+    rate_limit_requests:
+      type: integer
+      label: 'Rate limit: max requests per window (0 = unlimited)'
+    rate_limit_window:
+      type: integer
+      label: 'Rate limit: window in seconds'
+    result_count_cap:
+      type: integer
+      label: 'Exfiltration guard: max result items (0 = unlimited)'
+    response_size_cap:
+      type: integer
+      label: 'Exfiltration guard: max response bytes (0 = unlimited)'
