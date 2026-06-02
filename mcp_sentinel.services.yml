@@ -65,6 +65,16 @@ services:
     arguments:
       - '@flood'
 
+  mcp_sentinel.exfiltration_guard:
+    class: Drupal\mcp_sentinel\Service\McpExfiltrationGuard
+
+  mcp_sentinel.jsonapi_page_limit_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+    tags:
+      - { name: event_subscriber }
+
   mcp_sentinel.content_lock:
     class: Drupal\mcp_sentinel\Service\McpContentLock
     arguments:

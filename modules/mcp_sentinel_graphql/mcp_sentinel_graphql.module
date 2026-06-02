@@ -73,4 +73,23 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
       $results[$delta] = $dlp->scan($value);
     }
   }
+
+  // Pass 3: exfiltration result-count cap.
+  // Truncates multi-value field result lists to the profile's result_count_cap
+  // (when > 0) so a governed agent cannot retrieve an unbounded list through
+  // a GraphQL query. Truncation happens after redaction and DLP so those passes
+  // always operate on the original (full) set. The agent observes fewer results
+  // than requested; the truncation is also signalled via the cache context tag
+  // on the field resolver context which carries the truncated flag.
+  /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
+  $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+  [$capped, $truncated] = $guard->capResults($results, $profile);
+  if ($truncated) {
+    $results = $capped;
+    // Surface truncation metadata via the cache-context tags so callers can
+    // detect it; cache-context values here only affect cache keying, not
+    // user-visible output, but they ensure a truncated response is never served
+    // to a non-truncated (different-cap) profile request.
+    $context->addCacheContexts(['user.roles', 'oauth2_scopes']);
+  }
 }

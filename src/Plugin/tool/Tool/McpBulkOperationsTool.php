@@ -196,12 +196,25 @@ final class McpBulkOperationsTool extends ToolBase {
       }
     }
 
+    // Apply exfiltration result-count cap to the succeeded list before
+    // returning. 'failed' and 'queued' are always fully returned.
+    $results = $this->applyResultCap($results, $profileForRateLimit);
+
+    // Apply response-size cap: measure the serialized payload and deny if over.
+    $serialized = json_encode($results) ?: '';
+    if ($sizeFailure = $this->checkResponseSizeCap($serialized, $profileForRateLimit)) {
+      return $sizeFailure;
+    }
+
     return ExecutableResult::success(
-      $this->t('@op complete: @ok succeeded, @fail failed, @queued queued for approval.', [
+      $this->t('@op complete: @ok succeeded, @fail failed, @queued queued for approval.@trunc', [
         '@op' => $operation,
         '@ok' => count($results['succeeded']),
         '@fail' => count($results['failed']),
         '@queued' => count($results['queued']),
+        '@trunc' => !empty($results['_result_truncated'])
+          ? ' (result list truncated to cap of ' . $results['_result_cap'] . ')'
+          : '',
       ]),
       $results,
     );

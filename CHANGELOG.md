@@ -8,6 +8,32 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- **Per-profile exfiltration guards (result-count, response-size, JSON:API page
+  ceiling):** each `mcp_policy_profile` now carries `result_count_cap` (default
+  `0` = unlimited) and `response_size_cap` (default `0` = unlimited) fields. A
+  cap of `0` short-circuits the guard; no overhead on unlimited profiles. The
+  new `McpExfiltrationGuard` service (`mcp_sentinel.exfiltration_guard`) enforces
+  both caps at three seams:
+  - **Tool output** — `McpBulkOperationsTool` truncates the `succeeded` result
+    list to `result_count_cap` before returning `ExecutableResult::success()`.
+    When truncation occurs, `_result_truncated: true` and `_result_cap: <n>` are
+    added to the result data so the agent is never silently misled. The
+    `response_size_cap` is also checked at this seam; oversized payloads are
+    denied with a clear message before the response is returned.
+  - **JSON:API page ceiling** — a `KernelEvents::REQUEST` subscriber
+    (`McpJsonApiPageLimitSubscriber`, priority -20) intercepts `page[limit]`
+    parameters for `/jsonapi/*` requests from governed agents, throwing HTTP 400
+    before the query runs. Note: `hook_jsonapi_resource_params_alter` does NOT
+    exist in Drupal 11.3 core; this subscriber is the correct implementation
+    path.
+  - **GraphQL multi-value field lists** — `hook_graphql_compose_field_results_alter`
+    in `mcp_sentinel_graphql.module` truncates field result lists to
+    `result_count_cap` as a third pass after field-name redaction and DLP
+    masking. Non-governed requests are unaffected.
+  The profile add/edit form gains an *Exfiltration guards* fieldset exposing both
+  cap fields. Recommended starting values: 500 result items / 2 097 152 bytes
+  (2 MB). `update_10006` (added in F8a) backfills both fields on existing
+  profiles to `0` (unlimited). Ungoverned requests are never capped.
 - **Per-profile rate limiting & quotas via core flood:** each `mcp_policy_profile`
   now carries `rate_limit_requests` (default `0` = unlimited) and
   `rate_limit_window` (default `60` seconds) fields. When `rate_limit_requests`

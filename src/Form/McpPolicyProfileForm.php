@@ -130,6 +130,29 @@ final class McpPolicyProfileForm extends EntityForm {
       ],
     ];
 
+    $form['quotas'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Exfiltration guards'),
+      // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
+      '#description' => $this->t('Caps applied to governed reads before results leave the server. 0 = unlimited. Recommended starting values: 500 result items / 2 MB response size. Applies to Tool output (succeeded lists), GraphQL multi-value field results, and JSON:API page[limit] requests.'),
+    ];
+    $form['quotas']['result_count_cap'] = [
+      '#type' => 'number',
+      '#min' => 0,
+      '#title' => $this->t('Max result items (0 = unlimited)'),
+      // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
+      '#description' => $this->t('Maximum items returned per Tool call, JSON:API page request, or GraphQL field result list. Recommended: 500.'),
+      '#default_value' => $profile->getResultCountCap(),
+    ];
+    $form['quotas']['response_size_cap'] = [
+      '#type' => 'number',
+      '#min' => 0,
+      '#title' => $this->t('Max response size in bytes (0 = unlimited)'),
+      // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
+      '#description' => $this->t('Maximum serialized response size in bytes for governed Tool calls. Responses exceeding this cap are denied. Recommended: 2097152 (2 MB).'),
+      '#default_value' => $profile->getResponseSizeCap(),
+    ];
+
     return $form;
   }
 
@@ -159,6 +182,8 @@ final class McpPolicyProfileForm extends EntityForm {
       'allow_graphql_mutations',
       'rate_limit_requests',
       'rate_limit_window',
+      'result_count_cap',
+      'response_size_cap',
     ];
     assert($entity instanceof ConfigEntityBase);
     foreach ($form_state->getValues() as $key => $value) {
@@ -205,6 +230,8 @@ final class McpPolicyProfileForm extends EntityForm {
     );
     $profile->set('rate_limit_requests', (int) $form_state->getValue('rate_limit_requests'));
     $profile->set('rate_limit_window', (int) $form_state->getValue('rate_limit_window'));
+    $profile->set('result_count_cap', (int) $form_state->getValue('result_count_cap'));
+    $profile->set('response_size_cap', (int) $form_state->getValue('response_size_cap'));
 
     $status = $profile->save();
     $this->messenger()->addStatus(

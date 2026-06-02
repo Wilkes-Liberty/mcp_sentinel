@@ -42,7 +42,7 @@ trait McpEntityToolTrait {
   }
 
   /**
-   * Checks the rate limit and returns a failure result on breach, NULL otherwise.
+   * Checks the rate limit; returns a failure result on breach, NULL otherwise.
    *
    * Registers a hit on success. Call this after resolving $profile and before
    * any business logic. The audit log entry ensures over-limit traffic is
@@ -72,6 +72,71 @@ trait McpEntityToolTrait {
       );
     }
     $limiter->register($profile, $uid, $toolId);
+    return NULL;
+  }
+
+  /**
+   * Applies the profile's result_count_cap to a bulk-results array.
+   *
+   * Only 'succeeded' is truncated — 'failed' and 'queued' are always fully
+   * returned so the caller can retry failed items correctly. When truncation
+   * occurs, '_result_truncated' (TRUE) and '_result_cap' (int) are added to
+   * the results array so the agent is never silently misled.
+   *
+   * @param array $results
+   *   The results array with 'succeeded', 'failed', and 'queued' keys.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The active governance profile supplying the cap.
+   *
+   * @return array
+   *   The (possibly truncated) results array.
+   */
+  protected function applyResultCap(
+    array $results,
+    McpPolicyProfileInterface $profile,
+  ): array {
+    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
+    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    [$capped, $truncated] = $guard->capResults($results['succeeded'] ?? [], $profile);
+    $results['succeeded'] = $capped;
+    if ($truncated) {
+      $results['_result_truncated'] = TRUE;
+      $results['_result_cap'] = $profile->getResultCountCap();
+    }
+    return $results;
+  }
+
+  /**
+   * Checks if a serialized payload exceeds the profile's response_size_cap.
+   *
+   * Returns a failure result when over-cap, NULL when within limits.
+   *
+   * @param string $serialized
+   *   The serialized response string whose byte length will be measured.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The active governance profile.
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when over the cap, NULL when within limits.
+   */
+  protected function checkResponseSizeCap(
+    string $serialized,
+    McpPolicyProfileInterface $profile,
+  ): ?ExecutableResult {
+    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
+    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    $bytes = strlen($serialized);
+    if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
+      return ExecutableResult::failure(
+        $this->t(
+          'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
+          [
+            '@bytes' => $bytes,
+            '@cap'   => $profile->getResponseSizeCap(),
+          ]
+        )
+      );
+    }
     return NULL;
   }
 

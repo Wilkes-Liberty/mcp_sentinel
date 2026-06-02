@@ -322,6 +322,36 @@ Adjust based on observed agent traffic patterns.
   Enforcement is applied at the top of each governed tool's execution, before
   any business logic.
 
+## Exfiltration guards / quotas
+
+MCP Sentinel caps the volume of data a governed agent can retrieve in a single
+call, preventing mass-read attacks and accidental data exfiltration.
+
+### Setup
+
+1. Go to **Configuration → Web services → MCP Sentinel → MCP policy profiles**
+   and edit the target profile.
+2. In the *Exfiltration guards* fieldset:
+   - **Max result items** — maximum items returned per Tool call, JSON:API page
+     request, or GraphQL multi-value field result list. `0` means unlimited (the
+     default on all shipped profiles). Recommended: `500`.
+   - **Max response size in bytes** — maximum serialized response size for
+     governed Tool calls. Responses exceeding this limit are denied. `0` means
+     unlimited. Recommended: `2097152` (2 MB).
+3. Save. Limits take effect immediately.
+
+### Enforcement seams
+
+| Seam | How caps are applied |
+|------|----------------------|
+| **Tool output** | `McpBulkOperationsTool` truncates `succeeded` list to `result_count_cap`; adds `_result_truncated: true` + `_result_cap` to the result data. Response-size cap is measured on the serialized payload. |
+| **JSON:API** | A `KernelEvents::REQUEST` subscriber blocks `page[limit]` values above `result_count_cap` for governed requests with HTTP 400 before the DB query runs. (`hook_jsonapi_resource_params_alter` does not exist in Drupal 11.3; the subscriber is the correct implementation.) |
+| **GraphQL** | `hook_graphql_compose_field_results_alter` in `mcp_sentinel_graphql` truncates multi-value field result lists to `result_count_cap` as a third pass after redaction and DLP masking. |
+
+Ungoverned requests and profiles with `result_count_cap = 0` are never capped.
+The response-size cap applies to Tool output only (JSON:API and GraphQL
+response-size enforcement is deferred to a future pass).
+
 ## Configuration
 
 **Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)
