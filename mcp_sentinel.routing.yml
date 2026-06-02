@@ -66,6 +66,15 @@ mcp_sentinel.webhook_replay:
     _csrf_token: 'TRUE'
     delivery: \d+
 
+mcp_sentinel.webhook_prune:
+  path: '/admin/reports/mcp-sentinel/webhooks/prune'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpWebhookDeliveryController::prune'
+    _title: 'Prune webhook delivery log'
+  requirements:
+    _permission: 'administer mcp sentinel'
+    _csrf_token: 'TRUE'
+
 mcp_sentinel.context:
   path: '/drupal-mcp/context'
   defaults:
