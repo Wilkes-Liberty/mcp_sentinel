@@ -229,8 +229,8 @@ class McpSettingsForm extends ConfigFormBase {
     ];
     $form['webhooks']['allow_internal_webhook_urls'] = [
       '#type'          => 'checkbox',
-      '#title'         => $this->t('Allow internal/private endpoint URLs (disables SSRF DNS guard)'),
-      '#description'   => $this->t('Only enable for legitimate internal-network deployments. HTTPS is always required; this option disables the send-time DNS resolution check that blocks private/loopback/link-local addresses.'),
+      '#title'         => $this->t('Allow internal/private endpoint URLs — global (deprecated)'),
+      '#description'   => $this->t('Deprecated. Use the per-endpoint <em>Allow internal/VPN destination</em> checkbox instead, which scopes the opt-out to a single endpoint. This global flag is no longer read by the worker.'),
       '#default_value' => $config->get('allow_internal_webhook_urls') ?? FALSE,
     ];
 
@@ -292,6 +292,12 @@ class McpSettingsForm extends ConfigFormBase {
         '#type' => 'checkbox',
         '#title' => $this->t('Enabled'),
         '#default_value' => !empty($ep['enabled']),
+      ];
+      $form['webhooks']['endpoints'][$i]['allow_internal'] = [
+        '#type' => 'checkbox',
+        '#title' => $this->t('Allow internal/VPN destination (disables SSRF DNS guard for this endpoint only)'),
+        '#description' => $this->t('Only enable for a receiver that genuinely lives on an internal network or VPN. HTTPS is still required regardless of this setting.'),
+        '#default_value' => !empty($ep['allow_internal']),
       ];
     }
 
@@ -456,12 +462,13 @@ class McpSettingsForm extends ConfigFormBase {
         continue;
       }
       $webhook_endpoints[] = [
-        'id'         => $id,
-        'label'      => trim((string) ($ep['label'] ?? '')),
-        'url'        => $url,
-        'secret_key' => trim((string) ($ep['secret_key'] ?? '')),
-        'events'     => $split((string) ($ep['events'] ?? '')),
-        'enabled'    => (bool) ($ep['enabled'] ?? FALSE),
+        'id'             => $id,
+        'label'          => trim((string) ($ep['label'] ?? '')),
+        'url'            => $url,
+        'secret_key'     => trim((string) ($ep['secret_key'] ?? '')),
+        'events'         => $split((string) ($ep['events'] ?? '')),
+        'enabled'        => (bool) ($ep['enabled'] ?? FALSE),
+        'allow_internal' => (bool) ($ep['allow_internal'] ?? FALSE),
       ];
     }
 

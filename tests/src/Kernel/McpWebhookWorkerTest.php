@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\Core\Queue\RequeueException;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\key\Entity\Key;
@@ -82,14 +81,20 @@ final class McpWebhookWorkerTest extends KernelTestBase {
 
   /**
    * Inserts a pending delivery row and returns its ID.
+   *
+   * @param int $attempts
+   *   Initial attempt count.
+   * @param string $payload
+   *   Optional payload JSON to store in the row.
    */
-  private function seedRow(int $attempts = 0): int {
+  private function seedRow(int $attempts = 0, string $payload = '{}'): int {
     return (int) $this->container->get('database')
       ->insert('mcp_sentinel_webhook_delivery')
       ->fields([
         'endpoint_id'  => 'ep1',
         'event_name'   => 'mcp.entity.presave',
-        'payload_hash' => hash('sha256', '{}'),
+        'payload_hash' => hash('sha256', $payload),
+        'payload'      => $payload,
         'status'       => 'pending',
         'attempts'     => $attempts,
         'created'      => \Drupal::time()->getRequestTime(),
@@ -237,6 +242,96 @@ final class McpWebhookWorkerTest extends KernelTestBase {
   }
 
   /**
+   * Fix 1: a plain-HTTP URL is blocked at the worker (sender).
+   *
+   * Not just at enqueue — the worker enforces HTTPS independently.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerBlocksHttpUrl(): void {
+    $id = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200)], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'http://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+    $row = $this->loadRow($id);
+    $this->assertSame('failed_ssrf', $row['status'],
+      'HTTP (non-HTTPS) URL must be blocked at the worker with failed_ssrf status.');
+    $this->assertCount(0, $history, 'No HTTP request is made for a plain-HTTP URL.');
+  }
+
+  /**
+   * Fix 3: a row already claimed as in_progress is not re-sent.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerSkipsInProgressRow(): void {
+    $id = $this->seedRow();
+    // Simulate another worker claiming the row.
+    $this->container->get('database')
+      ->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $id)
+      ->fields(['status' => 'in_progress'])
+      ->execute();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200)], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+    $this->assertCount(0, $history,
+      'No HTTP request is made for an in_progress row (already claimed).');
+    // Status must remain in_progress (the claiming worker will resolve it).
+    $row = $this->loadRow($id);
+    $this->assertSame('in_progress', $row['status']);
+  }
+
+  /**
+   * Fix 4: the worker re-sends the stored payload byte-for-byte.
+   *
+   * Not a synthetic envelope — the stored row payload is used.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerSendsStoredPayload(): void {
+    $originalPayload = '{"event":"mcp.entity.presave",'
+      . '"entity_type":"node","entity_id":"42"}';
+    $id = $this->seedRow(0, $originalPayload);
+    $history = [];
+    $worker = $this->buildWorker([new Response(200)], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      // Intentionally pass a DIFFERENT payload in the queue item to confirm
+      // the worker uses the stored row payload, not the queue item value.
+      'payload' => '{"different":"envelope"}',
+    ]);
+    $this->assertCount(1, $history);
+    $sentBody = (string) $history[0]['request']->getBody();
+    $this->assertSame($originalPayload, $sentBody,
+      'Worker must send the stored row payload byte-for-byte, ignoring the queue-item envelope.');
+  }
+
+  /**
    * The HMAC signature header is set when a Key-backed secret is configured.
    *
    * @covers ::processItem
@@ -249,7 +344,7 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       'key_provider' => 'config',
       'key_provider_settings' => ['key_value' => 'topsecret'],
     ])->save();
-    $id = $this->seedRow();
+    $id = $this->seedRow(0, '{"a":1}');
     $history = [];
     $worker = $this->buildWorker([new Response(200)], $history);
     $worker->processItem([
@@ -264,40 +359,40 @@ final class McpWebhookWorkerTest extends KernelTestBase {
     ]);
     $this->assertCount(1, $history);
     $request = $history[0]['request'];
+    // HMAC is over the STORED payload ('{"a":1}'), not the queue item value.
     $expected = 'sha256=' . hash_hmac('sha256', '{"a":1}', 'topsecret');
     $this->assertSame($expected, $request->getHeaderLine('X-MCP-Signature'));
   }
 
   /**
-   * A network exception below max attempts requeues the item.
+   * A network exception schedules a retry without re-queuing (no busy-loop).
    *
    * @covers ::processItem
    */
-  public function testWorkerRequeuesOnNetworkException(): void {
+  public function testWorkerSchedulesRetryOnNetworkException(): void {
     $id = $this->seedRow();
     $history = [];
     $worker = $this->buildWorker(
       [new \RuntimeException('connection refused')],
       $history
     );
-    $this->expectException(RequeueException::class);
-    try {
-      $worker->processItem([
-        'delivery_id' => $id,
-        'endpoint' => [
-          'id' => 'ep1',
-          'url' => 'https://example.com/hook',
-          'secret_key' => '',
-        ],
-        'event_name' => 'mcp.entity.presave',
-        'payload' => '{}',
-      ]);
-    }
-    finally {
-      $row = $this->loadRow($id);
-      $this->assertSame('pending', $row['status']);
-      $this->assertSame('1', (string) $row['attempts']);
-    }
+    // Fix 6: no RequeueException is thrown; the row goes back to pending with
+    // a backoff timestamp so the cron scan picks it up when due.
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+    $row = $this->loadRow($id);
+    $this->assertSame('pending', $row['status']);
+    $this->assertSame('1', (string) $row['attempts']);
+    $this->assertNotNull($row['next_attempt'],
+      'next_attempt must be set so cron can re-enqueue when due.');
   }
 
 }

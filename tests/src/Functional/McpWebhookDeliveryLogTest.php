@@ -33,6 +33,7 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
         'endpoint_id'        => 'ep1',
         'event_name'         => 'mcp.entity.presave',
         'payload_hash'       => hash('sha256', '{}'),
+        'payload'            => '{}',
         'status'             => $status,
         'attempts'           => $attempts,
         'last_response_code' => 500,
@@ -72,12 +73,13 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
       ->set('webhook_endpoints', [
         [
-          'id' => 'ep1',
-          'label' => 'EP1',
-          'url' => 'https://example.com/hook',
-          'secret_key' => '',
-          'events' => [],
-          'enabled' => TRUE,
+          'id'             => 'ep1',
+          'label'          => 'EP1',
+          'url'            => 'https://example.com/hook',
+          'secret_key'     => '',
+          'events'         => [],
+          'enabled'        => TRUE,
+          'allow_internal' => FALSE,
         ],
       ])->save();
     $id = $this->seedRow('failed', 5);

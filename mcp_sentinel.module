@@ -164,4 +164,17 @@ function mcp_sentinel_cron(): void {
       ['@count' => $prunedWebhooks]
     );
   }
+
+  // Re-enqueue pending webhook delivery rows whose backoff has elapsed, and
+  // recover rows that were inserted but never successfully enqueued (e.g. if
+  // the queue backend was unavailable at dispatch time). This replaces the
+  // RequeueException busy-loop: the worker returns without re-queuing for
+  // not-yet-due items; this cron scan enqueues them when they are due.
+  $requeued = \Drupal::service('mcp_sentinel.webhook_queue_manager')->requeueDuePendingRows();
+  if ($requeued > 0) {
+    \Drupal::logger('mcp_sentinel')->info(
+      'Re-enqueued @count due webhook delivery rows.',
+      ['@count' => $requeued]
+    );
+  }
 }

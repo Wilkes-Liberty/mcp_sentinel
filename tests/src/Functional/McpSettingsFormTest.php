@@ -91,9 +91,36 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->assertSame('ep1', $endpoints[0]['id']);
     $this->assertSame('https://one.example.com/hook', $endpoints[0]['url']);
     $this->assertTrue($endpoints[0]['enabled']);
+    // Fix 5: allow_internal must default to FALSE when not checked.
+    $this->assertFalse($endpoints[0]['allow_internal'],
+      'allow_internal must default to FALSE.');
     $this->assertSame('ep2', $endpoints[1]['id']);
     $this->assertSame(['mcp.entity.delete'], $endpoints[1]['events']);
     $this->assertFalse($endpoints[1]['enabled']);
+  }
+
+  /**
+   * Fix 5: per-endpoint allow_internal is saved when checked.
+   */
+  public function testPerEndpointAllowInternalSaves(): void {
+    $admin = $this->drupalCreateUser(['administer mcp sentinel']);
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+
+    $this->submitForm([
+      'webhooks[endpoints][0][id]'             => 'internal_ep',
+      'webhooks[endpoints][0][label]'          => 'Internal VPN',
+      'webhooks[endpoints][0][url]'            => 'https://internal.corp/hook',
+      'webhooks[endpoints][0][enabled]'        => 1,
+      'webhooks[endpoints][0][allow_internal]' => 1,
+    ], 'Save configuration');
+
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+    $endpoints = $this->config('mcp_sentinel.settings')->get('webhook_endpoints');
+    $this->assertCount(1, $endpoints);
+    $this->assertSame('internal_ep', $endpoints[0]['id']);
+    $this->assertTrue($endpoints[0]['allow_internal'],
+      'allow_internal must be TRUE when the checkbox is checked.');
   }
 
   /**

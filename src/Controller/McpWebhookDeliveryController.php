@@ -78,6 +78,8 @@ class McpWebhookDeliveryController extends ControllerBase {
     $tableRows = [];
     foreach ($rows as $row) {
       $operations = [];
+      // Replay is available for terminal states only (failed, failed_ssrf,
+      // sent). Rows still pending or in_progress are not replayed.
       if (in_array($row->status, ['failed', 'failed_ssrf', 'sent'], TRUE)) {
         $operations['replay'] = [
           'title' => $this->t('Replay'),

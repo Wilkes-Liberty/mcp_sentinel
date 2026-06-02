@@ -64,6 +64,16 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
+   * The delivery log table has the payload column (Fix 4).
+   */
+  public function testDeliveryLogTableHasPayloadColumn(): void {
+    $this->assertTrue(
+      \Drupal::database()->schema()->fieldExists('mcp_sentinel_webhook_delivery', 'payload'),
+      'The payload column must exist for faithful replay.'
+    );
+  }
+
+  /**
    * The webhook_endpoints setting exists and defaults to an array.
    */
   public function testWebhookEndpointsSettingExists(): void {
@@ -74,6 +84,8 @@ final class McpWebhookQueueTest extends KernelTestBase {
 
   /**
    * Dispatch enqueues a pending delivery for an enabled, matching endpoint.
+   *
+   * Also verifies the payload is stored in the delivery row (Fix 4).
    *
    * @covers ::enqueueForEvent
    */
@@ -87,6 +99,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
           'secret_key' => '',
           'events' => [],
           'enabled' => TRUE,
+          'allow_internal' => FALSE,
         ],
       ])->save();
 
@@ -102,6 +115,15 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $this->assertSame('pending', $row['status']);
     $this->assertSame('ep1', $row['endpoint_id']);
     $this->assertSame('mcp.entity.presave', $row['event_name']);
+    // Fix 4: the payload column must contain valid JSON, not be empty.
+    $this->assertNotEmpty($row['payload'],
+      'Payload must be stored in the delivery row for faithful replay.');
+    $decoded = json_decode($row['payload'], TRUE);
+    $this->assertIsArray($decoded,
+      'Stored payload must be valid JSON.');
+    // payload_hash must match the stored payload.
+    $this->assertSame(hash('sha256', $row['payload']), $row['payload_hash'],
+      'payload_hash must match hash of stored payload.');
   }
 
   /**
@@ -119,6 +141,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
           'secret_key' => '',
           'events' => [],
           'enabled' => FALSE,
+          'allow_internal' => FALSE,
         ],
       ])->save();
 
@@ -147,6 +170,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
           'secret_key' => '',
           'events' => ['mcp.entity.delete'],
           'enabled' => TRUE,
+          'allow_internal' => FALSE,
         ],
         [
           'id' => 'all_events',
@@ -155,6 +179,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
           'secret_key' => '',
           'events' => [],
           'enabled' => TRUE,
+          'allow_internal' => FALSE,
         ],
       ])->save();
 
@@ -187,6 +212,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
           'secret_key' => '',
           'events' => [],
           'enabled' => TRUE,
+          'allow_internal' => FALSE,
         ],
       ])->save();
 
@@ -202,6 +228,8 @@ final class McpWebhookQueueTest extends KernelTestBase {
 
   /**
    * Update_10008 migrates a legacy single webhook into webhook_endpoints.
+   *
+   * Also verifies that the migrated endpoint has allow_internal=FALSE (Fix 5).
    */
   public function testUpdate10008MigratesLegacyEndpoint(): void {
     $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
@@ -226,6 +254,9 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $this->assertTrue($endpoints[0]['enabled']);
     $this->assertSame([], $endpoints[0]['events']);
     $this->assertSame(30, $reloaded->get('webhook_delivery_retention_days'));
+    // Fix 5: migrated endpoint must have allow_internal=FALSE by default.
+    $this->assertFalse($endpoints[0]['allow_internal'],
+      'Migrated endpoint must default allow_internal to FALSE.');
     // Legacy keys are retained.
     $this->assertSame('https://legacy.example.com/hook', $reloaded->get('webhook_url'));
   }
@@ -245,6 +276,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
       'endpoint_id' => 'ep',
       'event_name' => 'e',
       'payload_hash' => 'h',
+      'payload' => '{}',
       'status' => 'sent',
       'attempts' => 1,
       'created' => $now - (40 * 86400),
@@ -253,6 +285,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
       'endpoint_id' => 'ep',
       'event_name' => 'e',
       'payload_hash' => 'h',
+      'payload' => '{}',
       'status' => 'sent',
       'attempts' => 1,
       'created' => $now - (5 * 86400),
@@ -266,6 +299,130 @@ final class McpWebhookQueueTest extends KernelTestBase {
       (int) $db->select('mcp_sentinel_webhook_delivery')->countQuery()
         ->execute()->fetchField()
     );
+  }
+
+  /**
+   * Fix 6: requeueDuePendingRows re-enqueues due pending rows only.
+   *
+   * @covers ::requeueDuePendingRows
+   */
+  public function testRequeueDuePendingRowsEnqueuesDueRows(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'ep1',
+          'label' => 'Test',
+          'url' => 'https://example.com/hook',
+          'secret_key' => '',
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])->save();
+
+    $now = \Drupal::time()->getRequestTime();
+    $db = \Drupal::database();
+
+    // Row 1: due now (next_attempt in the past).
+    $dueId = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
+      'endpoint_id'  => 'ep1',
+      'event_name'   => 'mcp.entity.presave',
+      'payload_hash' => hash('sha256', '{}'),
+      'payload'      => '{}',
+      'status'       => 'pending',
+      'attempts'     => 1,
+      'next_attempt' => $now - 10,
+      'created'      => $now,
+    ])->execute();
+
+    // Row 2: not yet due (next_attempt in the future).
+    $notDueId = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
+      'endpoint_id'  => 'ep1',
+      'event_name'   => 'mcp.entity.presave',
+      'payload_hash' => hash('sha256', '{}'),
+      'payload'      => '{}',
+      'status'       => 'pending',
+      'attempts'     => 1,
+      'next_attempt' => $now + 3600,
+      'created'      => $now,
+    ])->execute();
+
+    // Row 3: fresh (no next_attempt — needs first delivery).
+    $freshId = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
+      'endpoint_id'  => 'ep1',
+      'event_name'   => 'mcp.entity.presave',
+      'payload_hash' => hash('sha256', '{}'),
+      'payload'      => '{}',
+      'status'       => 'pending',
+      'attempts'     => 0,
+      'created'      => $now,
+    ])->execute();
+
+    $requeued = \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->requeueDuePendingRows();
+
+    // Only the due row and the fresh row should be re-enqueued.
+    $this->assertSame(2, $requeued,
+      'Only due and fresh (no next_attempt) pending rows are re-enqueued.');
+    $this->assertSame(
+      2,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems()
+    );
+
+    // Verify item_id updated for due and fresh rows, not for not-due.
+    $dueRow = $db->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('d.id', $dueId)->execute()->fetchAssoc();
+    $notDueRow = $db->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('d.id', $notDueId)->execute()->fetchAssoc();
+    $freshRow = $db->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('d.id', $freshId)->execute()->fetchAssoc();
+
+    $this->assertNotNull($dueRow['item_id'], 'Due row must have item_id set.');
+    $this->assertNull($notDueRow['item_id'], 'Not-due row must NOT be re-enqueued.');
+    $this->assertNotNull($freshRow['item_id'], 'Fresh row must have item_id set.');
+  }
+
+  /**
+   * Fix 4: replayDelivery re-uses the stored payload byte-for-byte.
+   *
+   * @covers ::replayDelivery
+   */
+  public function testReplayUsesStoredPayload(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'ep1',
+          'label' => 'Test',
+          'url' => 'https://example.com/hook',
+          'secret_key' => '',
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])->save();
+
+    $originalPayload = '{"event":"mcp.entity.presave","entity_type":"node","entity_id":"99"}';
+    $db = \Drupal::database();
+    $id = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
+      'endpoint_id'  => 'ep1',
+      'event_name'   => 'mcp.entity.presave',
+      'payload_hash' => hash('sha256', $originalPayload),
+      'payload'      => $originalPayload,
+      'status'       => 'failed',
+      'attempts'     => 5,
+      'created'      => \Drupal::time()->getRequestTime(),
+    ])->execute();
+
+    $replayed = \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->replayDelivery($id);
+    $this->assertTrue($replayed);
+
+    // The queue item must carry the original payload.
+    $queue = \Drupal::queue('mcp_sentinel_webhook_delivery');
+    $item = $queue->claimItem();
+    $this->assertNotFalse($item, 'A queue item must be created by replay.');
+    $this->assertSame($originalPayload, $item->data['payload'],
+      'Replay must enqueue the stored payload byte-for-byte.');
   }
 
 }

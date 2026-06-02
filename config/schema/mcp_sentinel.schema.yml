@@ -36,7 +36,7 @@ mcp_sentinel.settings:
       label: 'Webhook delivery log retention in days (0 = forever)'
     allow_internal_webhook_urls:
       type: boolean
-      label: 'Allow webhook URLs resolving to internal IP ranges (disables SSRF DNS guard)'
+      label: 'Allow webhook URLs resolving to internal IP ranges (deprecated — use per-endpoint allow_internal)'
     webhook_endpoints:
       type: sequence
       label: 'Webhook endpoints'
@@ -64,6 +64,9 @@ mcp_sentinel.settings:
           enabled:
             type: boolean
             label: 'Endpoint enabled'
+          allow_internal:
+            type: boolean
+            label: 'Allow internal/private IP (internal or VPN endpoints only; HTTPS still required)'
     agent_oauth_clients:
       type: sequence
       label: 'Agent OAuth client IDs (consumer client_id values)'

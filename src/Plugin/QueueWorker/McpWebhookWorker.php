@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Plugin\QueueWorker;
 
 use Drupal\Component\Datetime\TimeInterface;
-use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\Core\Queue\Attribute\QueueWorker;
 use Drupal\Core\Queue\QueueWorkerBase;
-use Drupal\Core\Queue\RequeueException;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\key\KeyRepositoryInterface;
 use GuzzleHttp\ClientInterface;
@@ -21,15 +19,13 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * Processes MCP webhook deliveries with retry, backoff and an SSRF guard.
  *
  * Each queue item references a row in mcp_sentinel_webhook_delivery. The worker
- * loads the row, re-validates the destination against the SSRF guard at send
- * time (DNS can rebind between enqueue and delivery), signs the body with
- * HMAC-SHA256 when a Key-backed secret is configured, and POSTs it over HTTPS.
- *
- * Claim-safety / idempotency: the delivery row status is the single source of
- * truth. A row already marked 'sent' short-circuits with no HTTP call, so a
- * duplicate queue item (or a concurrent worker that already delivered) can
- * never double-send. The row is only advanced to 'sent'/'failed'/'failed_ssrf'
- * after the attempt resolves.
+ * atomically claims the row via an in_progress status update before POSTing
+ * (preventing double-send on concurrent workers). It enforces HTTPS at send
+ * time, resolves the hostname ONCE, validates resolved IPs against the SSRF
+ * guard, then pins the validated IP via CURLOPT_RESOLVE so the TCP connection
+ * goes to the exact IP that passed the check (defeating DNS-rebind TOCTOU).
+ * Payloads are stored in the delivery row at enqueue time and re-sent byte-
+ * for-byte on replay.
  */
 #[QueueWorker(
   id: 'mcp_sentinel_webhook_delivery',
@@ -101,8 +97,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The time service.
    * @param \Psr\Log\LoggerInterface $logger
    *   The MCP Sentinel logger channel.
-   * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
-   *   The configuration factory.
    */
   public function __construct(
     array $configuration,
@@ -113,7 +107,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     private readonly KeyRepositoryInterface $keyRepository,
     private readonly TimeInterface $time,
     private readonly LoggerInterface $logger,
-    private readonly ConfigFactoryInterface $configFactory,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }
@@ -136,7 +129,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $container->get('key.repository'),
       $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
-      $container->get('config.factory'),
     );
   }
 
@@ -146,11 +138,15 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   public function processItem(mixed $data): void {
     $deliveryId = (int) ($data['delivery_id'] ?? 0);
     $row = $this->loadRow($deliveryId);
-    if ($row === NULL || $row['status'] === 'sent') {
-      // Already delivered, terminal-failed elsewhere, or row missing.
+    if ($row === NULL) {
       return;
     }
-    if (in_array($row['status'], ['failed', 'failed_ssrf'], TRUE)) {
+    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf'], TRUE)) {
+      // Terminal states: already delivered or permanently failed.
+      return;
+    }
+    // in_progress rows were claimed by another worker; skip without re-sending.
+    if ($row['status'] === 'in_progress') {
       return;
     }
 
@@ -160,16 +156,37 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    // A row whose next_attempt has not yet arrived is requeued unchanged so a
-    // backed-off delivery is not sent early.
+    // A row whose next_attempt has not yet arrived is not-yet-due; return
+    // without re-queuing. The hook_cron scan re-enqueues when due so there is
+    // no busy-loop from RequeueException.
     $next = $row['next_attempt'] !== NULL ? (int) $row['next_attempt'] : 0;
     if ($next > $this->time->getRequestTime()) {
-      throw new RequeueException('Webhook delivery not yet due.');
+      return;
     }
 
     $url = (string) ($data['endpoint']['url'] ?? '');
-    // Layer-2 SSRF: DNS-resolve and block internal addresses at send time.
-    if ($this->isInternalAfterDns($url)) {
+
+    // Fix 1: Enforce HTTPS at the worker (sender) level, not just at enqueue.
+    // A row can be replayed or directly inserted after an operator edits an
+    // endpoint — catching it here prevents cleartext sends.
+    if (!str_starts_with($url, 'https://')) {
+      $this->updateRow($deliveryId, 'failed_ssrf', NULL,
+        'HTTPS required: URL scheme is not https.', $attempts);
+      $this->logger->error(
+        'Webhook blocked for delivery @id: URL must use HTTPS (got @url).',
+        ['@id' => $deliveryId, '@url' => $url],
+      );
+      return;
+    }
+
+    // Fix 2: Resolve the host ONCE, validate the IP(s), then pin via
+    // CURLOPT_RESOLVE so the TCP connect uses the validated IP, not a
+    // subsequent DNS resolution (defeats DNS-rebind TOCTOU).
+    $endpoint = (array) ($data['endpoint'] ?? []);
+    $allowInternal = !empty($endpoint['allow_internal']);
+    $resolvedIp = $this->validateAndResolveHost($url, $allowInternal);
+    if ($resolvedIp === NULL) {
+      // NULL means SSRF-blocked (internal/unresolvable literal).
       $this->updateRow($deliveryId, 'failed_ssrf', NULL,
         'SSRF blocked: hostname resolves to an internal address.', $attempts);
       $this->logger->error(
@@ -178,9 +195,44 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       );
       return;
     }
+    // FALSE means unresolvable hostname — let the HTTP layer fail it normally.
+    $curlResolvePin = [];
+    if ($resolvedIp !== FALSE) {
+      $host = (string) parse_url($url, PHP_URL_HOST);
+      $port = (int) (parse_url($url, PHP_URL_PORT) ?: 443);
+      // Pin the validated IP to the host:port so libcurl skips a second DNS
+      // lookup and connects to the exact address we checked.
+      $curlResolvePin = [CURLOPT_RESOLVE => ["{$host}:{$port}:{$resolvedIp}"]];
+    }
 
-    $payload = (string) ($data['payload'] ?? '');
-    $secret = $this->resolveSecret((array) ($data['endpoint'] ?? []));
+    // Fix 3: Atomic claim — update status from 'pending' to 'in_progress'
+    // only if status is still 'pending'. A return value of 0 means another
+    // worker already claimed or delivered the row.
+    $now = $this->time->getRequestTime();
+    $claimed = $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $deliveryId)
+      ->condition('status', 'pending')
+      ->fields(['status' => 'in_progress', 'last_attempt' => $now])
+      ->execute();
+    if (!$claimed) {
+      // Another worker already claimed or sent this delivery.
+      return;
+    }
+
+    // Fix 4: Use the stored payload for byte-identical delivery and replay.
+    // Fall back to the queue-item payload if the column is empty (legacy rows).
+    $storedPayload = (string) ($row['payload'] ?? '');
+    if ($storedPayload === '') {
+      $storedPayload = (string) ($data['payload'] ?? '');
+      if ($storedPayload === '') {
+        $this->logger->warning(
+          'Webhook delivery @id has no stored payload; sending empty body.',
+          ['@id' => $deliveryId],
+        );
+      }
+    }
+    $payload = $storedPayload;
+    $secret = $this->resolveSecret($endpoint);
     $headers = [
       'Content-Type' => 'application/json',
       'User-Agent'   => 'mcp-sentinel-webhook/1.0',
@@ -190,14 +242,19 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     }
 
     $newAttempts = $attempts + 1;
+    $requestOptions = [
+      'headers' => $headers,
+      'body'    => $payload,
+      'timeout' => 10,
+      'verify'  => TRUE,
+      'http_errors' => FALSE,
+    ];
+    if ($curlResolvePin !== []) {
+      $requestOptions['curl'] = $curlResolvePin;
+    }
+
     try {
-      $response = $this->httpClient->request('POST', $url, [
-        'headers' => $headers,
-        'body'    => $payload,
-        'timeout' => 10,
-        'verify'  => TRUE,
-        'http_errors' => FALSE,
-      ]);
+      $response = $this->httpClient->request('POST', $url, $requestOptions);
       $code = $response->getStatusCode();
       $body = substr($response->getBody()->getContents(), 0, 512);
       if ($code >= 200 && $code < 300) {
@@ -209,9 +266,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     catch (\Throwable $e) {
       $this->scheduleRetry($deliveryId, $newAttempts, NULL,
         substr($e->getMessage(), 0, 512));
-      if ($newAttempts < self::MAX_ATTEMPTS) {
-        throw new RequeueException($e->getMessage());
-      }
     }
   }
 
@@ -236,6 +290,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // uses the backoff slot for the upcoming attempt.
     $backoff = self::backoffSeconds($attempts);
     $now = $this->time->getRequestTime();
+    // Reset to 'pending' so the next cron scan can re-enqueue when due.
     $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $id)
       ->fields([
@@ -290,53 +345,75 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   }
 
   /**
-   * SSRF Layer-2: resolves the host and blocks internal/reserved addresses.
+   * SSRF Layer-2: resolves the host ONCE and validates all resolved IPs.
    *
-   * Literal IPs are validated directly. Hostnames are resolved via DNS at send
-   * time so a rebind after enqueue is still caught. Honours the global
-   * allow_internal_webhook_urls opt-out for legitimate internal deployments.
+   * Returns the first validated (public) IP to use for CURLOPT_RESOLVE
+   * pinning, FALSE when the host is unresolvable (let the HTTP layer handle
+   * it), or NULL when the destination is blocked as SSRF.
+   *
+   * Literal IPs are validated directly; hostnames are resolved via DNS. Each
+   * resolved IP is checked; the first one that passes the public-IP guard is
+   * returned so the caller can pin it. If ANY IP is internal the whole
+   * resolution is blocked (NULL).
    *
    * @param string $url
    *   The endpoint URL.
+   * @param bool $allowInternal
+   *   Per-endpoint opt-out of the private-IP guard (e.g. internal/VPN targets).
+   *   HTTPS is always enforced regardless of this flag.
    *
-   * @return bool
-   *   TRUE if the destination is internal and must be blocked.
+   * @return string|false|null
+   *   The validated public IP string to pin, FALSE if unresolvable, or NULL if
+   *   SSRF-blocked.
    */
-  private function isInternalAfterDns(string $url): bool {
-    if ($this->configFactory->get('mcp_sentinel.settings')->get('allow_internal_webhook_urls')) {
+  private function validateAndResolveHost(string $url, bool $allowInternal): string|false|null {
+    if ($allowInternal) {
+      // The operator has explicitly opted this endpoint in for internal
+      // delivery (e.g. an internal webhook receiver on a VPN). Skip IP checks
+      // but return a sentinel so the caller does not attempt to pin (the host
+      // may itself be a hostname pointing to an internal address).
       return FALSE;
     }
     $host = strtolower((string) parse_url($url, PHP_URL_HOST));
     $host = trim($host, '[]');
     if ($host === '') {
-      return TRUE;
+      return NULL;
     }
     if (in_array($host, ['localhost', '::1'], TRUE)) {
-      return TRUE;
+      return NULL;
     }
 
-    // A literal IP (v4 or v6) is validated directly — no DNS lookup.
+    // A literal IP (v4 or v6) is validated directly — no DNS lookup needed.
     if (filter_var($host, FILTER_VALIDATE_IP) !== FALSE) {
-      return self::ipIsInternal($host);
+      return self::ipIsInternal($host) ? NULL : $host;
     }
 
-    // Resolve all A records for the hostname; block if any is internal.
+    // Resolve all A records for the hostname. Block if ANY resolved IP is
+    // internal (an attacker returning a mix of public and private IPs must not
+    // bypass the guard).
     $records = @gethostbynamel($host);
     if ($records === FALSE || $records === []) {
       $ip = @gethostbyname($host);
-      // Unresolvable: treat as a network error, not SSRF — let the HTTP layer
-      // fail it and schedule a normal retry.
+      // Unresolvable: the host value equals the input when lookup fails.
       if ($ip === $host) {
+        // Return FALSE so the HTTP layer generates a normal network error and
+        // the delivery can be retried.
         return FALSE;
       }
       $records = [$ip];
     }
+    $validatedIp = FALSE;
     foreach ($records as $ip) {
       if (self::ipIsInternal($ip)) {
-        return TRUE;
+        // Any internal IP in the result set blocks the whole request.
+        return NULL;
+      }
+      if ($validatedIp === FALSE) {
+        // Capture the first public IP to pin via CURLOPT_RESOLVE.
+        $validatedIp = $ip;
       }
     }
-    return FALSE;
+    return $validatedIp;
   }
 
   /**

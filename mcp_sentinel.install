@@ -48,7 +48,9 @@ function mcp_sentinel_schema(): array {
       'endpoint_id'        => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
       'event_name'         => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
       'payload_hash'       => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
-      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending'],
+      'payload'            => ['type' => 'text', 'size' => 'big', 'not null' => FALSE],
+      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending',
+                               'description' => 'Values: pending, in_progress, sent, failed, failed_ssrf.'],
       'attempts'           => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
       'last_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
       'next_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
@@ -289,7 +291,9 @@ function mcp_sentinel_update_10007(): string {
       'endpoint_id'        => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
       'event_name'         => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
       'payload_hash'       => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
-      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending'],
+      'payload'            => ['type' => 'text', 'size' => 'big', 'not null' => FALSE],
+      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending',
+                               'description' => 'Values: pending, in_progress, sent, failed, failed_ssrf.'],
       'attempts'           => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
       'last_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
       'next_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
@@ -318,27 +322,41 @@ function mcp_sentinel_update_10008(): string {
   if ($config->get('webhook_delivery_retention_days') === NULL) {
     $config->set('webhook_delivery_retention_days', 30);
   }
-  if ($config->get('allow_internal_webhook_urls') === NULL) {
-    $config->set('allow_internal_webhook_urls', FALSE);
-  }
   if ($config->get('webhook_endpoints') === NULL) {
     $config->set('webhook_endpoints', []);
   }
   $legacy_url = (string) ($config->get('webhook_url') ?? '');
   if ($legacy_url !== '' && $config->get('webhook_endpoints') === []) {
+    // allow_internal defaults FALSE for the migrated endpoint; operators can
+    // opt-in per endpoint after migration if they need internal delivery.
     $config->set('webhook_endpoints', [
       [
-        'id'         => 'default',
-        'label'      => 'Default (migrated from legacy settings)',
-        'url'        => $legacy_url,
-        'secret_key' => (string) ($config->get('webhook_secret_key') ?? ''),
-        'events'     => [],
-        'enabled'    => (bool) $config->get('webhook_enabled'),
+        'id'             => 'default',
+        'label'          => 'Default (migrated from legacy settings)',
+        'url'            => $legacy_url,
+        'secret_key'     => (string) ($config->get('webhook_secret_key') ?? ''),
+        'events'         => [],
+        'enabled'        => (bool) $config->get('webhook_enabled'),
+        'allow_internal' => FALSE,
       ],
     ]);
   }
+  // Backfill allow_internal=FALSE on any existing endpoints that predate this
+  // migration (they will not have the key yet).
+  $endpoints = (array) ($config->get('webhook_endpoints') ?? []);
+  foreach ($endpoints as &$ep) {
+    if (!array_key_exists('allow_internal', $ep)) {
+      $ep['allow_internal'] = FALSE;
+    }
+  }
+  unset($ep);
+  $config->set('webhook_endpoints', $endpoints);
+  // The global allow_internal_webhook_urls key is superseded by the per-endpoint
+  // allow_internal flag; retain the value so it can be consulted by operators
+  // during the transition, but it is no longer read by the worker.
   $config->save();
-  return 'Migrated legacy webhook_url/webhook_secret_key to webhook_endpoints. '
+  return 'Migrated legacy webhook_url/webhook_secret_key to webhook_endpoints, '
+    . 'added per-endpoint allow_internal flag (default FALSE). '
     . 'Legacy keys retained for review.';
 }
 
