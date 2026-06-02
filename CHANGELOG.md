@@ -27,6 +27,7 @@ stable release is tagged.
 - Policy-profile form grouped into vertical tabs (Identity · Allowed operations · Entity scope · Redaction · Rate limits &amp; quotas · Network/IP).
 - Audit log listing: colored status/operation badges, per-row expandable metadata (`<details>`), prominent CSV/JSON export buttons, and a mini volume/allowed-vs-denied chart strip at the top (reusing `McpChartRenderer` + `McpMetrics`).
 - Webhook delivery log: colored status badges (sent/failed/pending/failed_ssrf), per-row expandable payload/response (`<details>`), a status + endpoint filter form (`McpWebhookFilterForm`), and a CSRF-protected prune action.
+- Approval queue: age and reason columns, a status filter, and a conditional "Approvals" dashboard tab (shown when `mcp_sentinel_approval` is enabled).
 
 ## [1.0.0-beta1] - 2026-06-02
 

@@ -30,6 +30,7 @@ final class McpApprovalUiTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
+    'block',
     'node',
     'tool',
     'key',
@@ -39,6 +40,39 @@ final class McpApprovalUiTest extends BrowserTestBase {
     'mcp_sentinel',
     'mcp_sentinel_approval',
   ];
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function setUp(): void {
+    parent::setUp();
+    // Surface local-task tabs so they can be asserted in tests.
+    $this->drupalPlaceBlock('local_tasks_block');
+  }
+
+  /**
+   * D3: The Approvals tab is present on the dashboard for an eligible user.
+   */
+  public function testApprovalsTabPresentOnDashboard(): void {
+    $this->drupalLogin($this->drupalCreateUser([
+      'view mcp sentinel audit log',
+      'approve mcp sentinel operations',
+    ]));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->linkExists('Approvals');
+  }
+
+  /**
+   * D3: The approval list shows Age and Reason columns.
+   */
+  public function testListShowsAgeAndReasonColumns(): void {
+    $this->drupalLogin(
+      $this->drupalCreateUser(['approve mcp sentinel operations'])
+    );
+    $this->drupalGet('/admin/reports/mcp-sentinel/approvals');
+    $this->assertSession()->pageTextContains('Age');
+    $this->assertSession()->pageTextContains('Reason');
+  }
 
   /**
    * Tests approving a pending request through the admin UI.
