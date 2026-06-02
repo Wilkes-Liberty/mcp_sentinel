@@ -9,6 +9,7 @@ stable release is tagged.
 
 ### Added
 - Reusable in-form multi-row list editor trait.
+- Live policy-preview summary on the profile form; refreshes via AJAX when gate or cap fields change.
 
 ### Changed
 - Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.

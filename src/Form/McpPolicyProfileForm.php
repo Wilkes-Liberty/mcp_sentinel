@@ -98,6 +98,13 @@ final class McpPolicyProfileForm extends EntityForm {
       '#title' => $this->t('Allowed operations'),
       '#group' => 'tabs',
     ];
+    // The AJAX attributes shared by all gate checkboxes: on change, refresh the
+    // policy-preview wrapper in the Identity tab.
+    $preview_ajax = [
+      'callback' => '::previewAjax',
+      'wrapper' => 'mcp-policy-preview-wrapper',
+      'event' => 'change',
+    ];
     foreach ([
       'allow_read' => $this->t('Allow read'),
       'allow_write' => $this->t('Allow write (create, update)'),
@@ -108,6 +115,7 @@ final class McpPolicyProfileForm extends EntityForm {
         '#type' => 'checkbox',
         '#title' => $label,
         '#default_value' => $profile->get($key),
+        '#ajax' => $preview_ajax,
       ];
     }
 
@@ -159,6 +167,7 @@ final class McpPolicyProfileForm extends EntityForm {
       '#title' => $this->t('Max requests per window (0 = unlimited)'),
       '#description' => $this->t('Throttle governed agent traffic per account. 0 = unlimited. Recommended: 300.'),
       '#default_value' => $profile->getRateLimitRequests(),
+      '#ajax' => $preview_ajax,
     ];
     $form['limits']['rate_limit_window'] = [
       '#type' => 'number',
@@ -171,6 +180,7 @@ final class McpPolicyProfileForm extends EntityForm {
           ':input[name="rate_limit_requests"]' => ['!value' => '0'],
         ],
       ],
+      '#ajax' => $preview_ajax,
     ];
     $form['limits']['result_count_cap'] = [
       '#type' => 'number',
@@ -179,6 +189,7 @@ final class McpPolicyProfileForm extends EntityForm {
       // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
       '#description' => $this->t('Maximum items returned per Tool call, JSON:API page request, or GraphQL field result list. Recommended: 500.'),
       '#default_value' => $profile->getResultCountCap(),
+      '#ajax' => $preview_ajax,
     ];
     $form['limits']['response_size_cap'] = [
       '#type' => 'number',
@@ -187,6 +198,7 @@ final class McpPolicyProfileForm extends EntityForm {
       // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
       '#description' => $this->t('Maximum serialized response size in bytes for governed Tool calls. Responses exceeding this cap are denied. Recommended: 2097152 (2 MB).'),
       '#default_value' => $profile->getResponseSizeCap(),
+      '#ajax' => $preview_ajax,
     ];
 
     // --- Network / IP tab ----------------------------------------------------
@@ -298,6 +310,24 @@ final class McpPolicyProfileForm extends EntityForm {
       '#items' => $items,
       '#title' => $this->t('Effective policy summary (preview)'),
     ];
+  }
+
+  /**
+   * AJAX callback: refresh the policy-preview element.
+   *
+   * Called when a gate checkbox or a cap/rate-limit number field changes.
+   * Returns the preview render sub-array; Drupal replaces the wrapper.
+   *
+   * @param array $form
+   *   The form render array.
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *   The current form state.
+   *
+   * @return array
+   *   The preview render array (includes its own prefix/suffix wrapper).
+   */
+  public function previewAjax(array &$form, FormStateInterface $form_state): array {
+    return $form['identity']['preview'];
   }
 
   /**
