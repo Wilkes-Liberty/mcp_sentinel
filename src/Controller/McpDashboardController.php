@@ -376,23 +376,29 @@ class McpDashboardController extends ControllerBase {
   /**
    * Builds the quick-actions bar.
    *
+   * The "Verify chain now" action is expensive (walks the full audit table
+   * computing HMACs) and is therefore only rendered for users with
+   * 'administer mcp sentinel'. Read-only viewers still see chain-integrity
+   * status in the chain card; they simply cannot trigger a re-verify.
+   *
    * @return array<int, array{title: string, url: string}>
    *   Quick-action links.
    */
   private function buildQuickActions(): array {
-    $actions = [
-      [
+    $actions = [];
+    if ($this->currentUser()->hasPermission('administer mcp sentinel')) {
+      $actions[] = [
         'title' => (string) $this->t('Verify chain now'),
         'url' => $this->verifyUrl(),
-      ],
-      [
-        'title' => (string) $this->t('Audit log'),
-        'url' => Url::fromRoute('mcp_sentinel.audit_log')->toString(),
-      ],
-      [
-        'title' => (string) $this->t('Settings'),
-        'url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
-      ],
+      ];
+    }
+    $actions[] = [
+      'title' => (string) $this->t('Audit log'),
+      'url' => Url::fromRoute('mcp_sentinel.audit_log')->toString(),
+    ];
+    $actions[] = [
+      'title' => (string) $this->t('Settings'),
+      'url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
     ];
     return array_values(array_filter($actions, static fn(array $a): bool => $a['url'] !== ''));
   }

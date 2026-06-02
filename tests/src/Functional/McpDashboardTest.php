@@ -110,6 +110,11 @@ final class McpDashboardTest extends BrowserTestBase {
 
   /**
    * Verify-now runs, writes last_verify state, redirects, and shows a message.
+   *
+   * The acting user must have 'administer mcp sentinel' to hit the verify
+   * route (and 'view mcp sentinel audit log' to view the dashboard from which
+   * the link is rendered); the view-only permission alone is no longer
+   * sufficient to reach the verify route.
    */
   public function testVerifyNowWritesStateAndRedirects(): void {
     $admin = $this->drupalCreateUser(['administer mcp sentinel', 'view mcp sentinel audit log']);
@@ -129,10 +134,32 @@ final class McpDashboardTest extends BrowserTestBase {
   }
 
   /**
+   * A view-only user gets 403 on the verify route and sees no Verify-now link.
+   *
+   * 'view mcp sentinel audit log' alone is insufficient to trigger the
+   * expensive hash-chain walk; only 'administer mcp sentinel' may reach that
+   * route, and the dashboard omits the Verify-now quick-action for view-only
+   * users.
+   */
+  public function testVerifyNowForbiddenForAuditLogViewerOnly(): void {
+    $viewer = $this->drupalCreateUser(['view mcp sentinel audit log']);
+    $this->drupalLogin($viewer);
+    // Direct hit on the verify route → 403 (permission denied).
+    $this->drupalGet('/admin/reports/mcp-sentinel/verify');
+    $this->assertSession()->statusCodeEquals(403);
+    // The dashboard is visible but the Verify-now link must be absent.
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->linkNotExists('Verify chain now');
+  }
+
+  /**
    * The Verify-now action is CSRF-protected (no token → access denied).
+   *
+   * An admin with the correct permission but no CSRF token still gets 403.
    */
   public function testVerifyNowRequiresCsrfToken(): void {
-    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
     $this->drupalGet('/admin/reports/mcp-sentinel/verify');
     $this->assertSession()->statusCodeEquals(403);
   }

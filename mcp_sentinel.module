@@ -146,14 +146,21 @@ function mcp_sentinel_page_top(array &$page): void {
     return;
   }
 
-  // Build the dismissal URL with an explicit, session-valid CSRF token. The
-  // token seed is the route path without the leading slash (matching
-  // \Drupal\Core\Access\CsrfAccessCheck). Generating the URL from the internal
-  // path (not the route name) avoids the outbound CSRF processor's lazy
-  // placeholder token, which is not resolved by a bare toString().
-  $dismiss_base = Url::fromUri('base:admin/reports/mcp-sentinel/banner-dismiss')->toString();
-  $token = \Drupal::csrfToken()->get('admin/reports/mcp-sentinel/banner-dismiss');
-  $dismiss_url = $dismiss_base . '?token=' . $token;
+  // Build the dismissal URL with a valid CSRF token. The token seed is the
+  // route path without the leading slash, matching CsrfAccessCheck exactly
+  // (see \Drupal\Core\Access\CsrfAccessCheck::access()). The path is derived
+  // from the route definition via getInternalPath() rather than being
+  // hardcoded, so it stays correct if the route path is ever changed.
+  // The base URL is assembled with Url::fromUri('base:…') which resolves the
+  // Drupal base path without going through the outbound CSRF route processor
+  // (avoiding any session-seed timing ambiguity during page assembly).
+  $dismiss_token_seed = ltrim(
+    Url::fromRoute('mcp_sentinel.banner_dismiss')->getInternalPath(),
+    '/'
+  );
+  $dismiss_url = Url::fromUri('base:' . $dismiss_token_seed)->toString()
+    . '?token='
+    . \Drupal::csrfToken()->get($dismiss_token_seed);
   $page['mcp_sentinel_urgent_banner'] = [
     '#theme' => 'mcp_sentinel_urgent_banner',
     '#conditions' => $critical,

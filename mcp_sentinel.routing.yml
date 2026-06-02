@@ -29,7 +29,7 @@ mcp_sentinel.verify_chain:
     _controller: '\Drupal\mcp_sentinel\Controller\McpDashboardController::verify'
     _title: 'Verify audit chain'
   requirements:
-    _permission: 'view mcp sentinel audit log'
+    _permission: 'administer mcp sentinel'
     _csrf_token: 'TRUE'
 
 mcp_sentinel.audit_log:
