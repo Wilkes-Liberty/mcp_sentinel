@@ -120,6 +120,41 @@ final class McpDestructiveOpEventTest extends KernelTestBase {
   }
 
   /**
+   * Bulk operations returns a failure when the current user has no profile.
+   *
+   * Regression guard for the Fix 2 null-profile guard: an ungoverned account
+   * must be rejected up-front rather than falling through the entity loop.
+   */
+  public function testBulkOperationsFailsForUngovernedAccount(): void {
+    // Create a user without the mcp_agent role — no profile will resolve.
+    $account = $this->createUser(['delete any article content', 'access mcp sentinel context']);
+    $this->container->get('current_user')->setAccount($account);
+
+    $node = Node::create(['type' => 'article', 'title' => 'Should survive']);
+    $node->save();
+    $nid = (int) $node->id();
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_bulk_operations');
+    $tool->setInputValue('operation', 'delete');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('ids', [(string) $nid]);
+    $tool->setInputValue('confirm', TRUE);
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus(),
+      'Bulk operations must fail when no governance profile applies.');
+    $this->assertStringContainsString(
+      'no governance profile',
+      (string) $tool->getResultMessage(),
+    );
+    $this->assertNotNull(
+      $this->container->get('entity_type.manager')->getStorage('node')->load($nid),
+      'Node must not be deleted when the account is ungoverned.',
+    );
+  }
+
+  /**
    * With no veto subscriber the bulk delete proceeds (regression guard).
    */
   public function testBulkDeleteProceedsWhenNotVetoed(): void {

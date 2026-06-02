@@ -9,20 +9,24 @@ stable release is tagged.
 
 ### Added
 - **Per-profile rate limiting & quotas via core flood:** each `mcp_policy_profile`
-  now carries `rate_limit_requests` and `rate_limit_window` fields (integers,
-  default `0` = unlimited). When non-zero, the `McpRateLimiter` service
-  (`mcp_sentinel.rate_limiter`) enforces the limit using Drupal's core `@flood`
-  service. The flood key is `mcp_sentinel.profile.{profile_id}.{uid}` — keyed
-  on the server-resolved authenticated UID only, preventing key-cycling bypass
-  attacks. A `0` limit short-circuits before touching flood. Enforcement is
-  wired at the top of all four governed Tool plugins: `mcp_sentinel_node_operations`,
+  now carries `rate_limit_requests` (default `0` = unlimited) and
+  `rate_limit_window` (default `60` seconds) fields. When `rate_limit_requests`
+  is non-zero, the `McpRateLimiter` service (`mcp_sentinel.rate_limiter`)
+  enforces the limit using Drupal's core `@flood` service. The flood key is
+  `mcp_sentinel.profile.{profile_id}.{uid}` — keyed on the server-resolved
+  authenticated UID only, preventing key-cycling bypass attacks. A `0` request
+  limit short-circuits before touching flood. Enforcement fires at the top of
+  all four governed Tool plugins: `mcp_sentinel_node_operations`,
   `mcp_sentinel_bulk_operations`, `mcp_sentinel_media_create`, and
   `mcp_sentinel_workflow_transition`. Over-limit calls log an audit row with
   operation `rate_limit_exceeded` and return a failure result equivalent to
   HTTP 429. The profile add/edit form gains a *Rate limits* fieldset with the
-  two new fields. `update_10006` backfills the fields (and future F8b cap
-  fields `result_count_cap`, `response_size_cap`) on existing profiles.
-  Recommended prod starting point: 300 requests / 60 s window.
+  two new fields. `update_10006` backfills the fields on existing profiles:
+  `rate_limit_window` defaults to `60` (so that setting
+  `rate_limit_requests > 0` on an upgraded profile takes effect immediately);
+  `rate_limit_requests`, `result_count_cap`, and `response_size_cap` default
+  to `0` (unlimited). Recommended prod starting point: 300 requests / 60 s
+  window.
 - **Tamper-evident audit log with HMAC hash chain + `audit-verify`:** every
   audit row stores a `prev_hash` (the preceding row's hash) and `row_hash`
   (HMAC-SHA256 of `prev_hash | canonical-JSON` when `audit_hash_key` is set to a

@@ -124,6 +124,15 @@ final class McpWorkflowTransitionTool extends ToolBase {
     if (!$this->entityTypeManager->hasDefinition($entity_type)) {
       return ExecutableResult::failure($this->t('Unknown entity type "@type".', ['@type' => $entity_type]));
     }
+    // Resolve profile and enforce rate limit before any DB reads so that an
+    // over-limit agent is throttled without paying the entity-load cost.
+    $profile = $this->policyResolver->resolve($this->currentUser);
+    if ($profile === NULL) {
+      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+    }
+    if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_workflow_transition')) {
+      return $rateLimited;
+    }
     $entity = $this->entityTypeManager->getStorage($entity_type)->load($id);
     if (!$entity instanceof ContentEntityInterface) {
       return ExecutableResult::failure($this->t('@type "@id" not found.', ['@type' => $entity_type, '@id' => $id]));
@@ -133,13 +142,6 @@ final class McpWorkflowTransitionTool extends ToolBase {
     }
     if ($this->contentLock->isLocked($entity_type, $id)) {
       return ExecutableResult::failure($this->t('Entity @id is locked against MCP writes.', ['@id' => $id]));
-    }
-    $profile = $this->policyResolver->resolve($this->currentUser);
-    if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
-    }
-    if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_workflow_transition')) {
-      return $rateLimited;
     }
     $policyResult = $this->accessChecker->checkEntityAccess($entity, 'update', $profile);
     if ($reason = $this->denyReason($policyResult)) {

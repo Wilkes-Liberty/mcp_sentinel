@@ -221,11 +221,15 @@ function mcp_sentinel_update_10005(): string {
  * Add rate limit, result cap, and response size cap fields to policy profiles.
  */
 function mcp_sentinel_update_10006(): string {
-  $keys = [
-    'rate_limit_requests',
-    'rate_limit_window',
-    'result_count_cap',
-    'response_size_cap',
+  // Backfill per-key defaults: rate_limit_window defaults to 60 so that setting
+  // rate_limit_requests > 0 on an upgraded profile immediately takes effect.
+  // The cap fields (result_count_cap, response_size_cap) and the request count
+  // field default to 0 which means "unlimited / not enforced".
+  $defaults = [
+    'rate_limit_requests' => 0,
+    'rate_limit_window'   => 60,
+    'result_count_cap'    => 0,
+    'response_size_cap'   => 0,
   ];
   $profiles = \Drupal::entityTypeManager()
     ->getStorage('mcp_policy_profile')
@@ -233,15 +237,16 @@ function mcp_sentinel_update_10006(): string {
   foreach ($profiles as $profile) {
     $e = \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
-    foreach ($keys as $k) {
+    foreach ($defaults as $k => $default) {
       if ($e->get($k) === NULL) {
-        $e->set($k, 0);
+        $e->set($k, $default);
       }
     }
     $e->save();
   }
-  return 'Added rate_limit_requests, rate_limit_window, result_count_cap, '
-    . 'response_size_cap to all policy profiles (default 0 = unlimited).';
+  return 'Added rate_limit_requests (default 0 = unlimited), '
+    . 'rate_limit_window (default 60 s), result_count_cap, '
+    . 'response_size_cap to all policy profiles.';
 }
 
 /**

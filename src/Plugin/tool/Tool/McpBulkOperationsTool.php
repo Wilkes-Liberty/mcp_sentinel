@@ -131,13 +131,16 @@ final class McpBulkOperationsTool extends ToolBase {
     $storage = $this->entityTypeManager->getStorage($entity_type);
     $results = ['succeeded' => [], 'failed' => [], 'queued' => []];
 
-    // Rate-limit check: resolve once for the current user before processing
-    // any items. A throttled agent is blocked before touching the entity loop.
+    // Resolve the governance profile once. An ungoverned account must be
+    // rejected before any entity work — this is the most destructive tool.
     $profileForRateLimit = $this->policyResolver->resolve($this->currentUser);
-    if ($profileForRateLimit !== NULL) {
-      if ($rateLimited = $this->checkRateLimit($profileForRateLimit, 'mcp_sentinel_bulk_operations')) {
-        return $rateLimited;
-      }
+    if ($profileForRateLimit === NULL) {
+      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+    }
+    // Rate-limit check: a throttled agent is blocked before touching the entity
+    // loop.
+    if ($rateLimited = $this->checkRateLimit($profileForRateLimit, 'mcp_sentinel_bulk_operations')) {
+      return $rateLimited;
     }
 
     foreach ($ids as $id) {
@@ -146,11 +149,7 @@ final class McpBulkOperationsTool extends ToolBase {
         $results['failed'][$id] = (string) $this->t('not found');
         continue;
       }
-      $profile = $this->policyResolver->resolve($this->currentUser);
-      if ($profile === NULL) {
-        $results['failed'][$id] = (string) $this->t('MCP Sentinel denied: no governance profile applies to this account.');
-        continue;
-      }
+      $profile = $profileForRateLimit;
       $policyResult = $this->accessChecker->checkEntityAccess($entity, $entity_op, $profile);
       if ($reason = $this->denyReason($policyResult)) {
         $results['failed'][$id] = $reason;
