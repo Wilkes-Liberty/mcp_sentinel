@@ -14,7 +14,57 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_help().
+ */
+function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match): string {
+  switch ($route_name) {
+    case 'help.page.mcp_sentinel':
+      $settings_url = Url::fromRoute('mcp_sentinel.settings')->toString();
+      $audit_url = Url::fromRoute('mcp_sentinel.audit_log')->toString();
+      $output = '';
+      $output .= '<h2>' . t('About') . '</h2>';
+      $output .= '<p>' . t('MCP Sentinel is a governance layer for Drupal sites exposed to AI agents over the Model Context Protocol (MCP), JSON:API, and GraphQL. It does not connect any agent itself; it sits in front of the request stack and enforces what an agent may read, write, or delete, records a tamper-evident audit trail of every governed change, and adds operational controls (rate limits, exfiltration caps, anomaly alerts, IP allowlisting, and reliable webhooks) on top of Drupal core access.') . '</p>';
+
+      $output .= '<h2>' . t('Trust model') . '</h2>';
+      $output .= '<p>' . t('Governance is decided server-side and never from an agent-supplied header. A request is governed when it arrives over the OAuth agent channel (a <code>simple_oauth</code> bearer token carrying the agent scope), with an optional authenticated-role floor as a fallback. The resolved <em>policy profile</em> then decides the read/write/delete gates, the allowed and denied entity types, redacted fields, rate and quota limits, and the IP allowlist. The <code>X-MCP-Client</code> header is recorded for audit only and is never an enforcement gate; quota, flood, and IP keys derive solely from the server-resolved user and profile, so header manipulation cannot bypass a gate. Cookie-session administrators are ungoverned and unaffected.') . '</p>';
+
+      $output .= '<h2>' . t('Capabilities') . '</h2>';
+      $output .= '<ul>';
+      $output .= '<li>' . t('<strong>Access governance</strong> — per-profile read/write/delete gates, entity-type allow/deny lists, and field redaction across the MCP Tool, JSON:API, and GraphQL read and write planes.') . '</li>';
+      $output .= '<li>' . t('<strong>Tamper-evident audit log</strong> — every governed change is recorded in a hash-chained log, optionally HMAC-keyed, with at-rest metadata encryption (via <code>drupal/encrypt</code>) and SIEM streaming.') . '</li>';
+      $output .= '<li>' . t('<strong>DLP redaction</strong> — opt-in value-pattern masking (email, phone, SSN, credit card, and custom patterns) applied to audit diffs and read responses.') . '</li>';
+      $output .= '<li>' . t('<strong>Rate limiting and quotas</strong> — per-profile request-rate limits and exfiltration caps that bound how much an agent can read or change in one call.') . '</li>';
+      $output .= '<li>' . t('<strong>Anomaly detection</strong> — cron-evaluated rules over the audit stream that raise log, email, or webhook alerts.') . '</li>';
+      $output .= '<li>' . t('<strong>IP allowlisting</strong> — per-profile CIDR allowlists. This requires a correctly configured reverse-proxy / trusted-proxy setup; see the project README.') . '</li>';
+      $output .= '<li>' . t('<strong>Reliable HMAC webhooks</strong> — signed, retrying webhook deliveries with an SSRF guard, a delivery log, and replay.') . '</li>';
+      $output .= '<li>' . t('<strong>Content locks</strong> — short-lived locks that prevent concurrent agent edits to the same entity.') . '</li>';
+      $output .= '</ul>';
+
+      $output .= '<h2>' . t('Submodules') . '</h2>';
+      $output .= '<ul>';
+      $output .= '<li>' . t('<strong>MCP Sentinel Approval</strong> — queues governed destructive operations (bulk delete) for human approval before they execute.') . '</li>';
+      $output .= '<li>' . t('<strong>MCP Sentinel GraphQL</strong> — extends mutation gating, field redaction, result caps, and audit to a GraphQL Compose endpoint.') . '</li>';
+      $output .= '<li>' . t('<strong>MCP Sentinel Server</strong> — registers the Sentinel Tool plugins with <code>mcp_server</code> and wires OAuth scopes.') . '</li>';
+      $output .= '</ul>';
+
+      $output .= '<h2>' . t('Where to configure') . '</h2>';
+      $output .= '<ul>';
+      $output .= '<li>' . t('<a href=":settings">MCP Sentinel settings</a> — the master switch, OAuth/role governance, audit, encryption, DLP, rate limits, anomaly rules, IP allowlists, and webhook endpoints.', [':settings' => $settings_url]) . '</li>';
+      $output .= '<li>' . t('Policy profiles are managed as configuration entities; create and edit them from the settings page.') . '</li>';
+      $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records.', [':audit' => $audit_url]) . '</li>';
+      $output .= '</ul>';
+
+      $output .= '<p>' . t('For full setup, the trust model in depth, and Drush commands, see the project <code>README.md</code>, <code>INSTALL.md</code>, and <code>API.md</code> shipped with the module.') . '</p>';
+      return $output;
+  }
+
+  return '';
+}
 
 /**
  * Implements hook_entity_presave().

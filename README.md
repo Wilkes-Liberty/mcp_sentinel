@@ -12,6 +12,10 @@ did, and protects content humans are editing. It is an ecosystem module for
 [MCP Server](https://www.drupal.org/project/mcp_server) and the
 [Tool API](https://www.drupal.org/project/tool).
 
+See also: [`INSTALL.md`](INSTALL.md) for step-by-step installation, dependency,
+and reverse-proxy setup; [`API.md`](API.md) for the events, Tool plugin
+contract, policy-profile entity, and services other modules can extend.
+
 ## Trust model
 
 Governance triggers on the **validated OAuth agent channel** — the consumer and
@@ -41,6 +45,16 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
   provides Encryption Profiles for optional at-rest encryption of audit metadata
 - **Strongly recommended:** [MCP Server](https://www.drupal.org/project/mcp_server),
   [Simple OAuth](https://www.drupal.org/project/simple_oauth)
+
+> **Why `composer.json` keeps `minimum-stability: dev`.** Every hard runtime
+> dependency is a stable, tagged release, and `prefer-stable: true` keeps your
+> install on stable wherever one exists. The single exception is the
+> *development-only* dependency `drupal/mcp_server`, which has **no tagged stable
+> release** yet (`^2.0@dev`). Pulling it for the `mcp_sentinel_server`
+> integration tests therefore requires `minimum-stability: dev`. This does not
+> loosen production installs — `mcp_server` is in `require-dev`, never `require`.
+> When `mcp_server` ships a stable tag, the dev constraint can be pinned and
+> `minimum-stability` dropped.
 
 ## Installation
 
@@ -577,10 +591,39 @@ clear them once the migrated endpoint is verified.
 
 **Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)
 
+Admin routes:
+
+- `/admin/config/services/mcp-sentinel` — settings form (master switch,
+  governance model, audit, encryption, DLP, rate limits, anomaly rules, IP
+  allowlists, webhook endpoints).
+- `/admin/reports/mcp-sentinel` — audit log listing, with filters and CSV/JSON
+  export.
+- `/admin/reports/mcp-sentinel/webhooks` — webhook delivery log + replay.
+- `/admin/help/mcp_sentinel` — module help overview (requires the core Help
+  module).
+
+### Drush commands
+
+| Command | Purpose |
+|---------|---------|
+| `drush mcp-sentinel:status` | Print the active policy plus audit and lock counts. |
+| `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
+| `drush mcp-sentinel:audit-purge` | Delete audit entries past the retention window (also runs on cron). |
+| `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |
+| `drush mcp-sentinel:webhook-prune` | Delete webhook delivery rows past retention (also runs on cron). |
+| `drush mcp-sentinel:webhook-replay <id>` | Reset a delivery row to pending and re-queue it. |
+| `drush mcp-sentinel:setup [--require-oauth]` | (submodule) Register Sentinel Tool plugins with mcp_server. |
+| `drush mcp-sentinel:teardown` | (submodule) Unregister all Sentinel tools from mcp_server. |
+
 ## Companion Node.js Connector
 
-[drupal-mcp-server](https://github.com/wilkes-liberty/drupal-mcp-server) —
-external MCP connector with 66 tools, multi-site, GraphQL, and Drush bridge.
+[drupal-mcp-server](https://github.com/wilkes-liberty/drupal-mcp-server) is a
+separate, optional Node.js MCP connector — not part of this module and not a
+count of Sentinel's own plugins. It exposes **66 connector tools across 9
+modules** (multi-site, GraphQL, and a Drush bridge) that an MCP client can call
+against a Drupal site. MCP Sentinel governs those calls when they reach Drupal;
+it does not provide them. For reference, this module itself ships 8 base Tool
+plugins plus 1 GraphQL schema tool (via `mcp_sentinel_graphql`).
 
 ## Maintainers
 

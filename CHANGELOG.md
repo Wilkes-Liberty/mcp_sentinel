@@ -7,144 +7,118 @@ stable release is tagged.
 
 ## [Unreleased]
 
-### Security (P5-W2 holistic review — F15/F16/F17)
-- **F15 — IP allowlist now enforced at the write tools' `checkAccess()`.** The
-  three read tools gated the IP allowlist in `checkAccess()`, but the four write
-  tools (`McpNodeOperationsTool`, `McpBulkOperationsTool`, `McpMediaUploadTool`,
-  `McpWorkflowTransitionTool`) only checked the permission. An IP-blocked governed
-  agent could therefore probe tool availability, and the write tools' early-return
-  error paths (e.g. bulk with `confirm=false` or empty `ids`) skipped the
-  per-entity IP gate entirely. Each write tool's `checkAccess()` now resolves the
-  account's profile and, when governed and `isClientIpAllowed()` fails, returns
-  `AccessResult::forbidden()` with `max-age 0` — matching the canonical
-  `McpContentLockTool` pattern. Ungoverned accounts are unaffected.
-- **F16 — JSON:API filter-access denials now carry cache contexts (cache-bleed
-  fix).** `McpAccessChecker::getJsonApiFilterAccess()` returned forbidden results
-  WITHOUT the `user.roles` + `oauth2_scopes` cache contexts that every other
-  governed access result attaches. JSON:API's filter-access cache could therefore
-  serve a governed deny-result to a non-governed account (or vice-versa) sharing
-  the cache bin. The forbidden results now add those contexts plus the
-  settings/profile cache tags, and are marked `max-age 0` when the profile carries
-  a non-empty `allowed_ips` list (client IP is not a cache context).
-- **F17 — Webhook SSRF guard now covers IPv6-only (AAAA) hosts.**
-  `McpWebhookWorker::validateAndResolveHost()` resolved only IPv4 A records via
-  `gethostbynamel()`/`gethostbyname()`, so a hostname with ONLY an AAAA record
-  (e.g. resolving to `::1` or `fd00::/8`) returned no IPv4 and slipped through
-  unpinned — letting cURL connect to the private IPv6 at send time (SSRF bypass).
-  The worker now also resolves AAAA records via `dns_get_record($host, DNS_AAAA)`,
-  runs every resolved IP (v4 and v6) through the internal-range guard, and blocks
-  fail-closed if ANY resolved address is internal. A public IPv6 is pinned via
-  `CURLOPT_RESOLVE` using the bracketed `host:port:[ipv6]` format, the same way
-  the IPv4 path pins its address. HTTPS enforcement is unchanged.
-
-### Added (tests — P5-W2 holistic review F15/F16/F17)
-- **F15** — IP-gate `checkAccess()` coverage for each write tool: deny from a
-  disallowed IP (with `max-age 0`), allow from an allowed IP, and (node) neutral
-  when `allowed_ips` is empty — added to `McpNodeOperationsToolTest`,
-  `McpBulkCapTest`, `McpMediaUploadToolTest`, `McpWorkflowTransitionToolTest`.
-- **F16** — `McpAccessCheckerTest`: filter-access denial carries `user.roles` +
-  `oauth2_scopes` contexts (denied-type and not-in-allowlist cases), and is
-  `max-age 0` when `allowed_ips` is set.
-- **F17** — `McpWebhookWorkerTest` (Unit): the resolution policy was extracted
-  into the pure, DNS-free `classifyResolvedIps()` so it is testable — an internal
-  IPv6 result is blocked, a mixed public+internal result is blocked fail-closed, a
-  public resolution returns the first IP, and `curlResolveEntry()` brackets IPv6
-  but not IPv4.
-
-### Added (tests — P5-W1 task T8 + cache-invariant addition)
-- **W1-T8 / G10 — Server submodule registration** (`McpServerRegistrationTest`):
-  4 kernel tests verifying that every base Tool plugin is discoverable by
-  `plugin.manager.tool`, that each instantiates without error, that the
-  `McpSentinelServerCommands::TOOLS` constant covers all base plugin IDs, and
-  that each scope value follows the `mcp:*` namespace convention.
-- **W1-T8 / G12 — Drush commands** (`McpDrushCommandsTest`): 10 kernel tests
-  exercising all six command behaviors directly via the command class:
-  `audit-verify` (clean chain → EXIT_SUCCESS, tampered → EXIT_FAILURE),
-  `webhook-prune` (old rows deleted, fresh rows retained), `lock-clear`
-  (expired locks released, active locks kept), `audit-purge` (rows deleted when
-  retention > 0; no-op when retention = 0), `webhook-replay` (EXIT_FAILURE on
-  bad ID, EXIT_SUCCESS with valid delivery + status reset to pending), and
-  `status` data paths (count queries + config reads all succeed).
-- **W1-T8 / G13 — Update-hook chain 10001–10010** (`McpUpdateHookChainTest`):
-  17 kernel tests covering each update hook individually (idempotency, schema
-  end-state, config end-state) plus a full-chain integration test that applies
-  10001 → 10010 in sequence and then verifies that the audit hash chain remains
-  intact. Confirms all schema and config mutations land safely and the chain
-  cannot be corrupted by the update path.
-- **W1-T8 / G14 — Uninstall cleanliness** (extended `McpUninstallTest`): 3 new
-  functional tests: `testUninstallDropsDatabaseTables` (all three
-  `mcp_sentinel_*` tables removed), `testUninstallRemovesModuleConfig` (settings
-  + all profile config objects deleted), `testUninstallLeavesNoOrphanedFootprint`
-  (composite check including a second profile; confirms zero Sentinel footprint
-  post-uninstall). Plus the original role-removal test.
-- **W1-T8 / G15 — Field-access redaction** (`McpFieldAccessRedactionTest`): 6
-  kernel tests for `hook_entity_field_access`: governed agent on a redacted field
-  → `AccessResultForbidden`; non-governed user → `AccessResultNeutral`; governed
-  agent on a non-redacted field → neutral; hook result always carries
-  `user.roles` + `oauth2_scopes` cache contexts; non-view operations (edit,
-  create, delete) are not redacted; ungoverned account (no profile) is unaffected.
-- **Cache-invariant addition** (`McpIpAllowlistTest`): 2 new kernel tests locking
-  the invariant that `checkCreateAccess()` results are `max-age 0` on ALL
-  forbidden branches when the profile has a non-empty `allowed_ips` list —
-  specifically the write-gate-off forbidden (`testWriteGateOffForbiddenIsUncacheable
-  WhenIpRestricted`) and the type-denied forbidden
-  (`testTypeDeniedForbiddenIsUncacheableWhenIpRestricted`).
-
-### Added (tests — P5-W1 tasks T5/T6/T7)
-- **W1-T5 — OAuth agent-channel end-to-end** (`McpOauthChannelTest`): 5 functional
-  tests proving that the role-fallback governed path (governed_role_fallback=TRUE)
-  enforces write gates over real HTTP, that a non-governed user is unaffected, that
-  successful governed writes are audited, and that the OAuth-primary model correctly
-  ignores the mcp_api role when the fallback is disabled.
-- **W1-T6 — JSON:API write governance** (`McpJsonApiWriteGovernanceTest`,
-  `McpContentToolGovernanceTest`): 6 functional tests covering governed PATCH blocked
-  (allow_write=FALSE → 403) and allowed (→ 200/204), read gate enforcement
-  (allow_read=FALSE → 403), page[limit] cap via the live McpJsonApiPageLimitSubscriber
-  (→ 400), and non-governed admin bypassing Sentinel gates.
-- **W1-T7 — Phase 4 controls functional** (`McpPhase4ControlsFunctionalTest`): 4
-  functional tests: (a) rate-limit gate blocks after threshold in the live Drupal
-  kernel; (b) exfiltration page-cap returns 400 over a real HTTP request; (c) IP
-  allowlist denies access when client IP is not in the CIDR; (d) anomaly detector
-  fires on seeded audit rows and the alert dispatcher runs cleanly.
-- **Governed-request harness trait** (`McpGovernedRequestTrait`): extended with
-  HTTP Basic auth support (`$account` parameter) and `$query` parameter for correct
-  JSON:API query-string handling. Removed the `trait.unused` phpstan suppression.
+> Phase 5 (hardening & release readiness). The next tagged release is the
+> maintainer's decision at tag time; on promotion, rename this heading to the
+> chosen version + date (likely `1.0.0-beta1`) and start a fresh empty
+> `[Unreleased]` above it. No breaking changes — this is additive hardening,
+> test, and documentation work over `1.0.0-alpha2`.
 
 ### Security
+- **Webhook SSRF guard now covers IPv6-only (AAAA) hosts (F17).**
+  `McpWebhookWorker::validateAndResolveHost()` resolved only IPv4 A records, so a
+  hostname with ONLY an AAAA record (e.g. resolving to `::1` or `fd00::/8`)
+  slipped through unpinned and let cURL connect to a private IPv6 at send time.
+  The worker now also resolves AAAA records, runs every resolved IP (v4 and v6)
+  through the internal-range guard, blocks fail-closed if ANY resolved address is
+  internal, and pins a public IPv6 via `CURLOPT_RESOLVE` using the bracketed
+  `host:port:[ipv6]` format. HTTPS enforcement is unchanged.
+- **IP allowlist now enforced at the write tools' `checkAccess()` (F15).** The
+  three read tools gated the IP allowlist in `checkAccess()`, but the four write
+  tools (`McpNodeOperationsTool`, `McpBulkOperationsTool`, `McpMediaUploadTool`,
+  `McpWorkflowTransitionTool`) only checked the permission, so an IP-blocked
+  governed agent could probe tool availability and the early-return error paths
+  skipped the per-entity IP gate. Each write tool's `checkAccess()` now resolves
+  the profile and, when governed and `isClientIpAllowed()` fails, returns
+  `AccessResult::forbidden()` with `max-age 0`. Ungoverned accounts are unaffected.
+- **JSON:API filter-access denials now carry cache contexts (cache-bleed fix,
+  F16).** `McpAccessChecker::getJsonApiFilterAccess()` returned forbidden results
+  without the `user.roles` + `oauth2_scopes` cache contexts every other governed
+  result attaches, so the filter-access cache could serve a governed deny to a
+  non-governed account (or vice-versa). Forbidden results now add those contexts
+  plus the settings/profile cache tags, and are `max-age 0` when the profile has a
+  non-empty `allowed_ips` list.
 - **JSON:API entity creation is now governed (closed a write-plane bypass).**
   `hook_entity_access` does not fire for entity CREATE, so JSON:API `POST` (new
-  entity) — which routes through `_entity_create_access` →
-  `hook_entity_create_access` — previously bypassed the Sentinel write gate, the
-  allowed/denied entity-type policy, and the IP allowlist. A governed agent could
-  `POST` a new entity of any type (including a `denied_entity_types` type) with
-  `allow_write` off. The module now implements `mcp_sentinel_entity_create_access`,
-  delegating to a new shared `McpAccessChecker::checkCreateAccess()` that enforces
-  the master switch, the IP allowlist, the entity-type allow/deny policy (shared
-  with the existing-entity path so there is exactly one implementation), and the
-  write gate — with the same cacheability rules (`user.roles` + `oauth2_scopes`
-  contexts, profile cache tag, and `max-age 0` when `allowed_ips` is non-empty).
-  Create-access governance now matches existing-entity (PATCH/DELETE) semantics.
+  entity) — routed through `_entity_create_access` → `hook_entity_create_access` —
+  previously bypassed the write gate, the allowed/denied entity-type policy, and
+  the IP allowlist. The module now implements `mcp_sentinel_entity_create_access`,
+  delegating to a shared `McpAccessChecker::checkCreateAccess()` that enforces the
+  master switch, IP allowlist, entity-type allow/deny policy, and write gate with
+  the same cacheability rules. Create-access governance now matches existing-entity
+  (PATCH/DELETE) semantics.
 - **JSON:API IP allowlist now covers collections, not just individual resources.**
   The IP gate fired via `hook_entity_access` (individual `/{uuid}` reads) but the
-  collection endpoint (`/jsonapi/node/article`) is governed by
-  `hook_jsonapi_entity_filter_access`, which only checks entity-type allow/deny —
-  so a governed agent from a disallowed IP could still enumerate collections. The
-  IP allowlist is now enforced for ALL governed JSON:API traffic (collection,
-  individual, and writes) at the `McpJsonApiPageLimitSubscriber`
-  (`KernelEvents::REQUEST`) seam, which uniformly denies (403) when
-  `isClientIpAllowed()` fails. Empty `allowed_ips` imposes no restriction; the
-  individual-entity path remains gated by `hook_entity_access` (defence in depth).
+  collection endpoint is governed by `hook_jsonapi_entity_filter_access`, which
+  only checked entity-type allow/deny — so a governed agent from a disallowed IP
+  could still enumerate collections. The IP allowlist is now enforced for ALL
+  governed JSON:API traffic (collection, individual, and writes) at the
+  `McpJsonApiPageLimitSubscriber` (`KernelEvents::REQUEST`) seam, which denies
+  (403) when `isClientIpAllowed()` fails. Empty `allowed_ips` imposes no
+  restriction; the individual-entity path remains gated by `hook_entity_access`
+  (defence in depth).
 
-### Added (tests — Phase 5 governance-bypass fixes)
-- Kernel coverage for `McpAccessChecker::checkCreateAccess()`
-  (`McpAccessCheckerTest`): write-gate, denied-type, allowlist-exclusion, master-
-  switch, and (in `McpIpAllowlistTest`) IP-gate + max-age-0 cacheability cases.
-- Functional coverage (`McpJsonApiWriteGovernanceTest`): governed `POST` blocked
-  when `allow_write=FALSE` (403), allowed when on (201), blocked for a denied
-  type (403), blocked from a disallowed IP (403), and a non-governed `POST`
-  unaffected. Functional coverage (`McpPhase4ControlsFunctionalTest`): governed
-  collection GET denied from a disallowed IP (403) and permitted when
-  unrestricted (200).
+### Added (tests)
+- **GraphQL governance** (`mcp_sentinel_graphql`): redaction, DLP masking, and
+  result-cap coverage for the field-results-alter hook, plus mutation/query
+  gating and blocked-operation auditing.
+- **Content tools**: behavioral kernel coverage for the node-operations,
+  media-upload, and workflow-transition tools, and the content-lock, security-
+  policy, and site-context tools.
+- **OAuth agent-channel end-to-end** (`McpOauthChannelTest`): the role-fallback
+  governed path enforces write gates over real HTTP, non-governed users are
+  unaffected, successful governed writes are audited, and the OAuth-primary model
+  ignores the `mcp_api` role when the fallback is disabled.
+- **JSON:API write governance** (`McpJsonApiWriteGovernanceTest`,
+  `McpContentToolGovernanceTest`): governed `POST`/`PATCH` blocked when
+  `allow_write=FALSE` (403) and allowed when on, read-gate enforcement,
+  denied-type and disallowed-IP blocks, the `page[limit]` cap via the live
+  subscriber (400), and a non-governed admin bypassing Sentinel gates.
+- **Phase 4 controls, functional** (`McpPhase4ControlsFunctionalTest`):
+  rate-limit blocks after threshold; exfiltration page-cap returns 400 over real
+  HTTP; IP allowlist denies an out-of-CIDR client (and permits when unrestricted);
+  the anomaly detector fires on seeded audit rows and the dispatcher runs cleanly.
+- **Governed-request harness trait** (`McpGovernedRequestTrait`): HTTP Basic auth
+  and query-string support for the functional suite.
+- **Server submodule registration** (`McpServerRegistrationTest`): every base
+  Tool plugin is discoverable by `plugin.manager.tool`, instantiates without
+  error, is covered by the `McpSentinelServerCommands::TOOLS` constant, and uses
+  an `mcp:*` scope.
+- **Drush commands** (`McpDrushCommandsTest`): all six base commands exercised
+  directly — `audit-verify` (clean → success, tampered → failure), `webhook-prune`,
+  `lock-clear`, `audit-purge`, `webhook-replay`, and `status`.
+- **Update-hook chain 10001–10010** (`McpUpdateHookChainTest`): each hook
+  individually (idempotency, schema and config end-state) plus a full-chain
+  integration test that confirms the audit hash chain stays intact across the
+  whole update path.
+- **Uninstall cleanliness** (`McpUninstallTest`): the `mcp_sentinel_*` tables,
+  module config (settings + all profiles), and `mcp_api` role are all removed,
+  leaving no orphaned footprint.
+- **Field-access redaction** (`McpFieldAccessRedactionTest`): governed agent on a
+  redacted field is forbidden, non-governed users are neutral, non-view
+  operations are not redacted, and results always carry the `user.roles` +
+  `oauth2_scopes` cache contexts.
+- **Create-access + cache invariants** (`McpAccessCheckerTest`,
+  `McpIpAllowlistTest`): `checkCreateAccess()` write-gate, denied-type, allowlist,
+  and master-switch cases, and `max-age 0` on all forbidden branches when
+  `allowed_ips` is non-empty.
+
+### Documentation
+- Added `mcp_sentinel_help()` (`hook_help`) — a routed overview page at
+  `/admin/help/mcp_sentinel` covering the trust model, capabilities, submodules,
+  and links to the settings and audit routes.
+- Added `INSTALL.md` (install steps, dependencies, submodule enablement, the
+  OAuth/connector pointers, and the reverse-proxy requirement for IP allowlisting)
+  and `API.md` (the `McpDestructiveOpEvent` veto seam, the `McpEntityEvent`
+  audit/webhook seam, the Tool plugin contract, the policy-profile entity, and
+  the public services).
+- README: added a consolidated admin-routes and Drush-command reference, pointers
+  to `INSTALL.md`/`API.md`, and a note explaining why `composer.json` keeps
+  `minimum-stability: dev` (the dev-only `drupal/mcp_server` has no stable tag).
+- Clarified the external tool-count claims: the README "66 tools" now
+  unambiguously refers to the external `drupal-mcp-server` Node connector (66
+  connector tools across 9 modules), not Sentinel's own plugins; the
+  `composer.json` suggest for `drupal/mcp_tools` cites that project's own count
+  (222 tools across 34 submodules).
 
 ## [1.0.0-alpha2] - 2026-06-02
 
