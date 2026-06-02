@@ -120,10 +120,16 @@ discover available types, queries, and mutations.
 | Security presets (read-only, auditor, etc.) | ❌ | ✅ |
 | Entity type allow/deny lists | ❌ | ✅ |
 | Field-level PII redaction | ❌ | ✅ |
+| DLP value-pattern redaction / masking | ❌ | ✅ |
 | Audit log | ❌ | ✅ |
+| Filterable audit UI + CSV/JSON export | ❌ | ✅ |
+| Redaction-aware change diffs | ❌ | ✅ |
 | Tamper-evident audit hash chain | ❌ | ✅ |
+| At-rest audit metadata encryption | ❌ | ✅ |
+| SIEM streaming | ❌ | ✅ |
 | Content locks | ❌ | ✅ |
 | HMAC webhooks | ❌ | ✅ |
+| Human approval workflow (submodule) | ❌ | ✅ |
 | Rich context endpoint | ❌ | ✅ |
 | mcp_api role | ❌ | ✅ |
 

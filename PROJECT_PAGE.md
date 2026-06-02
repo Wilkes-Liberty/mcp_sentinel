@@ -30,7 +30,24 @@ the governance layer those projects intentionally leave to site builders.
   responses cached separately, so redacted data never leaks across the boundary.
 - **Audit logging** — every MCP entity operation and GraphQL query/mutation is
   written to a dedicated, query-optimised log with user, IP, timestamp, and
-  payload metadata. Configurable retention with automatic pruning.
+  payload metadata. Configurable retention with automatic pruning. The admin
+  listing is filterable (operation, entity type, UID, date range) and exports
+  to CSV or JSON.
+- **Tamper-evident audit hash chain** — every audit row is chained with a
+  `prev_hash`/`row_hash` (HMAC-SHA256 when keyed via a Key entity, SHA-256
+  otherwise); `drush mcp-sentinel:audit-verify` detects any insertion,
+  deletion, or modification of historical rows.
+- **Redaction-aware change diffs** — governed updates record exactly which
+  fields changed (`{field: {old, new}}`); redacted fields are stored as
+  `[REDACTED]` so sensitive values never enter the audit trail.
+- **At-rest audit encryption** — optionally encrypt the audit `metadata` column
+  via a drupal/encrypt Encryption Profile; reads decrypt transparently.
+- **SIEM streaming** — optionally emit each audit write to a dedicated
+  `mcp_sentinel_audit` logger channel for forwarding to a SIEM via Syslog or
+  Monolog.
+- **DLP value-pattern redaction (opt-in)** — scan governed field values for PII
+  patterns (email, US phone, SSN, credit card, plus custom patterns) and fully
+  redact or partially mask matches.
 - **Content locks** — prevent agents from overwriting content a human is
   editing, with TTL-based expiry.
 - **HMAC-signed webhooks** — fire HTTPS-only, HMAC-SHA256-signed notifications
@@ -51,14 +68,24 @@ the governance layer those projects intentionally leave to site builders.
 - **MCP Sentinel GraphQL** (`mcp_sentinel_graphql`) — extends governance to the
   GraphQL Compose endpoint: gates mutations and reads, audits operations, and
   applies field redaction for MCP requests.
+- **MCP Sentinel Approval** (`mcp_sentinel_approval`) — optional human-approval
+  gate: queues governed destructive operations (bulk delete) as approval
+  requests for an authorized human to approve or deny instead of executing
+  them immediately.
 
 ## Requirements
 
 - Drupal 10.3+ or 11
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
+- [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
+  signing secret (and optional audit encryption key) outside exported config
+- [Simple OAuth](https://www.drupal.org/project/simple_oauth) (`drupal/simple_oauth`)
+  and [Consumers](https://www.drupal.org/project/consumers) (`drupal/consumers`) —
+  the validated OAuth agent channel governance triggers on
+- [Encrypt](https://www.drupal.org/project/encrypt) (`drupal/encrypt`) —
+  Encryption Profiles for optional at-rest encryption of audit metadata
 - **Strongly recommended:** [MCP Server](https://www.drupal.org/project/mcp_server)
-  (exposes the tools to MCP clients) and
-  [Simple OAuth](https://www.drupal.org/project/simple_oauth) for production auth
+  (exposes the tools to MCP clients)
 - **Optional:** [GraphQL Compose](https://www.drupal.org/project/graphql_compose)
   for the GraphQL governance submodule
 
@@ -83,6 +110,7 @@ Configure at **Configuration → Web services → MCP Sentinel**
 - `drush mcp-sentinel:setup` — register all tools with `mcp_server`
 - `drush mcp-sentinel:audit-purge` — prune audit entries past retention
 - `drush mcp-sentinel:lock-clear` — release expired content locks
+- `drush mcp-sentinel:audit-verify` — verify the tamper-evident audit hash chain
 
 ## Companion connector
 
