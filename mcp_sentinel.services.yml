@@ -36,6 +36,7 @@ services:
     class: Drupal\mcp_sentinel\Service\McpAccessChecker
     arguments:
       - '@config.factory'
+      - '@request_stack'
 
   mcp_sentinel.webhook_queue_manager:
     class: Drupal\mcp_sentinel\Service\McpWebhookQueueManager

@@ -19,3 +19,4 @@ rate_limit_requests: 0
 rate_limit_window: 60
 result_count_cap: 0
 response_size_cap: 0
+allowed_ips: {  }

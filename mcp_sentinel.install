@@ -383,6 +383,24 @@ function mcp_sentinel_update_10009(): string {
 }
 
 /**
+ * Add allowed_ips field to all existing policy profiles (default empty = no restriction).
+ */
+function mcp_sentinel_update_10010(): string {
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    if ($e->get('allowed_ips') === NULL) {
+      $e->set('allowed_ips', []);
+      $e->save();
+    }
+  }
+  return 'Added allowed_ips (default [] = no IP restriction) to all policy profiles.';
+}
+
+/**
  * Implements hook_uninstall().
  */
 function mcp_sentinel_uninstall(): void {

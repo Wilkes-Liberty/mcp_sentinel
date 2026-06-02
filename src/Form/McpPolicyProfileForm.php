@@ -153,7 +153,83 @@ final class McpPolicyProfileForm extends EntityForm {
       '#default_value' => $profile->getResponseSizeCap(),
     ];
 
+    $form['ip_allowlist'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('IP allowlist'),
+    ];
+    // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
+    $ipDesc = $this->t('Enter one IPv4/IPv6 address or CIDR block per line (e.g. 203.0.113.0/24 or 2001:db8::/32). Leave empty to allow all source IPs (no restriction). IMPORTANT: IP enforcement reads the client IP via Symfony trusted-proxy-aware getClientIp(), which only honors X-Forwarded-For when the connecting proxy is listed in Drupal reverse_proxy_addresses. If your site sits behind a load balancer or CDN you MUST configure reverse_proxy = TRUE and reverse_proxy_addresses in settings.php; otherwise all requests will appear to come from the proxy IP.');
+    $form['ip_allowlist']['allowed_ips'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Allowed IPs / CIDRs (one per line, empty = all IPs allowed)'),
+      '#description' => $ipDesc,
+      '#default_value' => implode("\n", $profile->getAllowedIps()),
+      '#rows' => 5,
+    ];
+
     return $form;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function validateForm(array &$form, FormStateInterface $form_state): void {
+    parent::validateForm($form, $form_state);
+    $raw = (string) $form_state->getValue('allowed_ips');
+    $lines = array_values(array_filter(array_map('trim', explode("\n", $raw))));
+    foreach ($lines as $line) {
+      if (!$this->isValidIpOrCidr($line)) {
+        $form_state->setErrorByName(
+          'allowed_ips',
+          $this->t(
+            'Invalid IP address or CIDR block: %value',
+            ['%value' => $line]
+          )
+        );
+      }
+    }
+  }
+
+  /**
+   * Validates a single IP address or CIDR notation entry.
+   *
+   * Accepts IPv4 addresses, IPv4 CIDR blocks, IPv6 addresses, and IPv6 CIDR
+   * blocks. Uses filter_var for plain IP validation; parses the prefix host
+   * for CIDR notation.
+   *
+   * @param string $value
+   *   The IP or CIDR string to validate.
+   *
+   * @return bool
+   *   TRUE if valid; FALSE otherwise.
+   */
+  private function isValidIpOrCidr(string $value): bool {
+    if ($value === '') {
+      return FALSE;
+    }
+    // Check plain IP address first.
+    if (filter_var($value, FILTER_VALIDATE_IP) !== FALSE) {
+      return TRUE;
+    }
+    // Check CIDR notation: split on '/' and validate host + prefix length.
+    if (str_contains($value, '/')) {
+      [$host, $prefix] = explode('/', $value, 2);
+      if (filter_var($host, FILTER_VALIDATE_IP) === FALSE) {
+        return FALSE;
+      }
+      if (!ctype_digit($prefix)) {
+        return FALSE;
+      }
+      $prefixInt = (int) $prefix;
+      // IPv4 prefix: 0-32; IPv6 prefix: 0-128.
+      if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== FALSE) {
+        return $prefixInt >= 0 && $prefixInt <= 32;
+      }
+      if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== FALSE) {
+        return $prefixInt >= 0 && $prefixInt <= 128;
+      }
+    }
+    return FALSE;
   }
 
   /**
@@ -184,6 +260,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'rate_limit_window',
       'result_count_cap',
       'response_size_cap',
+      'allowed_ips',
     ];
     assert($entity instanceof ConfigEntityBase);
     foreach ($form_state->getValues() as $key => $value) {
@@ -232,6 +309,10 @@ final class McpPolicyProfileForm extends EntityForm {
     $profile->set('rate_limit_window', (int) $form_state->getValue('rate_limit_window'));
     $profile->set('result_count_cap', (int) $form_state->getValue('result_count_cap'));
     $profile->set('response_size_cap', (int) $form_state->getValue('response_size_cap'));
+    $profile->set(
+      'allowed_ips',
+      $split($form_state->getValue('allowed_ips'))
+    );
 
     $status = $profile->save();
     $this->messenger()->addStatus(

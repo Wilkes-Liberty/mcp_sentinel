@@ -8,6 +8,37 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- **Per-profile IP allowlisting — F11:**
+  - A new `allowed_ips` field on every `mcp_policy_profile` config entity accepts
+    a sequence of IPv4/IPv6 addresses and CIDR blocks. An empty list means no
+    restriction (any IP permitted); this is the safe default and the value set by
+    `update_10010` on all existing profiles.
+  - `McpAccessChecker::checkEntityAccess()` now enforces the allowlist as an
+    early-return check before operation gates. The client IP is obtained via
+    Symfony's trusted-proxy-aware `Request::getClientIp()` — never from raw
+    `X-Forwarded-For`/`X-Real-IP` headers — so an attacker who forges an allowed
+    IP in a header cannot bypass the allowlist unless the connecting proxy is
+    already in Drupal's `reverse_proxy_addresses` list.
+  - IPv4/IPv6 single-address and CIDR matching is done by
+    `Symfony\Component\HttpFoundation\IpUtils::checkIp()`, which is bundled with
+    Drupal and handles both address families and prefix notation correctly.
+  - The policy profile add/edit form gains an *IP allowlist* fieldset with a
+    validated textarea (one IP or CIDR per line). Each line is validated on save
+    with `filter_var()` plus CIDR prefix-length range checks; malformed entries
+    are rejected. The field description documents the reverse-proxy requirement.
+  - **Trusted-proxy requirement (IMPORTANT):** IP allowlisting requires Drupal's
+    reverse-proxy settings to be correctly configured in `settings.php`
+    (`$settings['reverse_proxy'] = TRUE` and `$settings['reverse_proxy_addresses']`).
+    Without those settings, `getClientIp()` returns the proxy's IP rather than the
+    real client's. The README documents this prominently. An empty `allowed_ips`
+    list (the default) disables IP enforcement and is always safe to leave in place
+    if trusted proxies are not configured.
+  - Scope: enforcement is at the entity-access level (`McpAccessChecker`), which
+    covers all MCP-governed operations including Tools, JSON:API, and GraphQL. The
+    result of a denied IP check is never cached (`setCacheMaxAge(0)`) because
+    request IPs are not a Drupal cache context.
+  - `update_10010` backfills `allowed_ips: []` on all existing profiles during a
+    `drush updb` run.
 - **Anomaly detection & alerting — F10 hardening:**
   - **Governed-tool denied_access auditing (Fix 1):** all governed Tool plugins
     (`McpBulkOperationsTool`, `McpNodeOperationsTool`, `McpWorkflowTransitionTool`,

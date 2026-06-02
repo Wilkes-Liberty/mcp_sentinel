@@ -209,3 +209,9 @@ mcp_sentinel.mcp_policy_profile.*:
     response_size_cap:
       type: integer
       label: 'Exfiltration guard: max response bytes (0 = unlimited)'
+    allowed_ips:
+      type: sequence
+      label: 'IP allowlist (empty = all IPs allowed)'
+      sequence:
+        type: string
+        label: 'IP address or CIDR'

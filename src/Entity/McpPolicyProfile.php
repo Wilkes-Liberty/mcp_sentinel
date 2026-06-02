@@ -62,6 +62,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileListBuilder;
     'rate_limit_window',
     'result_count_cap',
     'response_size_cap',
+    'allowed_ips',
   ],
 )]
 final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfileInterface {
@@ -148,6 +149,13 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * Maximum response size in bytes (0 = unlimited).
    */
   protected int $response_size_cap = 0;
+
+  /**
+   * Allowed client IP addresses and CIDR ranges (empty = all IPs allowed).
+   *
+   * @var string[]
+   */
+  protected array $allowed_ips = [];
 
   /**
    * {@inheritdoc}
@@ -238,6 +246,13 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function getResponseSizeCap(): int {
     return (int) $this->response_size_cap;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getAllowedIps(): array {
+    return array_values(array_filter($this->allowed_ips));
   }
 
 }

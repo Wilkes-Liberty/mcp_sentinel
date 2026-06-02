@@ -93,4 +93,25 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function getResponseSizeCap(): int;
 
+  /**
+   * Allowed client IP addresses and CIDR ranges (empty = all IPs allowed).
+   *
+   * An empty list means no IP restriction is applied. Each entry is either a
+   * single IP address (IPv4 or IPv6) or a CIDR block (e.g. 203.0.113.0/24 or
+   * 2001:db8::/32). Matching is performed by Symfony IpUtils, which handles
+   * both address families and CIDR notation correctly.
+   *
+   * IMPORTANT: IP allowlisting is only as trustworthy as the IP the site
+   * resolves. When the site runs behind a reverse proxy, Drupal's trusted-proxy
+   * settings ($settings['reverse_proxy'] and reverse_proxy_addresses in
+   * settings.php) MUST be configured so that getClientIp() returns the real
+   * client IP rather than the proxy's IP. Without those settings, all requests
+   * appear to originate from the proxy and the allowlist will either lock out
+   * legitimate agents or allow all of them.
+   *
+   * @return string[]
+   *   IP addresses and/or CIDR ranges.
+   */
+  public function getAllowedIps(): array;
+
 }

@@ -352,6 +352,70 @@ Ungoverned requests and profiles with `result_count_cap = 0` are never capped.
 The response-size cap applies to Tool output only (JSON:API and GraphQL
 response-size enforcement is deferred to a future pass).
 
+## IP allowlisting per profile
+
+Each policy profile can restrict governed agent connections to a specific set of
+IPv4/IPv6 addresses and CIDR blocks. An **empty list** means *no restriction* —
+any source IP is permitted.
+
+### Setup
+
+1. Go to **Configuration → Web services → MCP Sentinel → MCP policy profiles**
+   and edit the target profile.
+2. In the *IP allowlist* fieldset, enter one address or CIDR block per line.
+   Both IPv4 and IPv6 are supported:
+   ```
+   203.0.113.0/24
+   198.51.100.42
+   2001:db8::/32
+   ```
+3. Save. The allowlist takes effect immediately for new governed requests. To
+   remove all IP restrictions, clear the textarea.
+
+### How it works
+
+Enforcement is applied in `McpAccessChecker::checkEntityAccess()` as the first
+check after the global enabled flag — before entity-type gates, operation gates,
+or any business logic. A denied request returns a "Source IP not permitted"
+forbidden result. CIDR matching (including IPv6) is performed by
+`Symfony\Component\HttpFoundation\IpUtils::checkIp()`, which is bundled with
+Drupal core.
+
+Because the check is at the entity-access layer, it applies uniformly to all
+MCP-governed access paths: Tool plugins, JSON:API, and GraphQL.
+
+### IMPORTANT — Reverse-proxy / trusted-proxy requirement
+
+The client IP is read via **Symfony's trusted-proxy-aware `Request::getClientIp()`**,
+which honors `X-Forwarded-For` *only* when the connecting proxy's own IP is
+listed in Drupal's trusted-proxy configuration. If your site sits behind a load
+balancer or CDN you **MUST** configure the following in `settings.php`:
+
+```php
+$settings['reverse_proxy'] = TRUE;
+$settings['reverse_proxy_addresses'] = ['10.0.0.0/8', '172.16.0.0/12'];
+// Use the real proxy/LB address ranges for your environment.
+```
+
+**Without these settings** every request appears to originate from the proxy's
+IP regardless of the real client, which means:
+
+- **Lockout risk:** a correct allowlist will deny all agents because their real
+  IPs are never seen.
+- **Bypass risk:** if you add the proxy IP to the allowlist to work around the
+  above, all agents pass the check regardless of their actual source IP.
+
+The empty-list default (`allowed_ips: []`) disables IP enforcement entirely and
+is always safe to leave in place if you are not ready to configure trusted
+proxies.
+
+### Spoofing protection
+
+An attacker cannot bypass the allowlist by forging an `X-Forwarded-For` header.
+Symfony only trusts that header when the *socket-level* connecting IP (`REMOTE_ADDR`)
+matches a configured trusted proxy. A request arriving from an untrusted IP is
+evaluated against `REMOTE_ADDR` directly — the forged header is ignored.
+
 ## Anomaly detection & alerting
 
 MCP Sentinel can evaluate threshold rules over the audit log on each cron run
