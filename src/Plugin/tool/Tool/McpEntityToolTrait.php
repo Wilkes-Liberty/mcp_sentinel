@@ -28,6 +28,43 @@ trait McpEntityToolTrait {
   }
 
   /**
+   * Writes a denied_access audit row for a governed-tool policy denial.
+   *
+   * Only called from explicit Tool execution paths (not from entity access
+   * hooks) so volume is bounded to the requests an agent explicitly sends.
+   * The audit_log_reads toggle is intentionally ignored; denied_access is a
+   * security event that must always be recorded when audit_enabled is true.
+   *
+   * JSON:API / GraphQL denial logging is a future enhancement (F10 v2).
+   *
+   * @param string $toolId
+   *   The plugin ID of the tool handling the denial.
+   * @param string $entityType
+   *   The entity type being operated on.
+   * @param string $entityId
+   *   The entity ID, or '(new)' for create operations.
+   * @param string $operation
+   *   The attempted operation (e.g. 'create', 'update', 'delete').
+   * @param string $reason
+   *   Human-readable denial reason (from denyReason() or inline text).
+   */
+  protected function logDeniedAccess(
+    string $toolId,
+    string $entityType,
+    string $entityId,
+    string $operation,
+    string $reason,
+  ): void {
+    \Drupal::service('mcp_sentinel.audit_logger')->log('denied_access', [
+      'tool'        => $toolId,
+      'entity_type' => $entityType,
+      'id'          => $entityId,
+      'operation'   => $operation,
+      'reason'      => $reason,
+    ]);
+  }
+
+  /**
    * Validates an entity and returns human-readable violation messages.
    *
    * @return string[]

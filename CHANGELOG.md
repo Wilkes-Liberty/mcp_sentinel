@@ -8,10 +8,28 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- **Anomaly detection & alerting — F10 hardening:**
+  - **Governed-tool denied_access auditing (Fix 1):** all governed Tool plugins
+    (`McpBulkOperationsTool`, `McpNodeOperationsTool`, `McpWorkflowTransitionTool`,
+    `McpMediaUploadTool`) now write a `denied_access` audit row whenever a
+    governed agent is denied by policy (`McpAccessChecker`) or core entity
+    access. In `McpBulkOperationsTool`, one row is written per denied entity ID
+    so that an agent hammering N forbidden deletes produces N rows — the correct
+    input for a `denied_access_storm` count-threshold rule. The
+    `audit_log_reads` toggle is intentionally ignored; `denied_access` is a
+    security event logged whenever `audit_enabled` is true. Scope is limited to
+    the explicit Tool execution path; JSON:API/GraphQL denial-logging is a
+    future enhancement (F10 v2). Each row carries `tool`, `entity_type`, `id`,
+    `operation`, and `reason` in its metadata.
+  - **Exact operation_pattern match by default (Fix 3):** `McpAnomalyDetector`
+    now uses an exact `=` comparison by default, so a pattern like `entity` no
+    longer silently matches both `entity_save` and `entity_delete`. Append `*`
+    to opt in to prefix matching — `entity*` matches everything starting with
+    `entity`. The settings-form description is updated to explain the semantics.
 - **Anomaly detection & alerting:** cron-evaluated rules over the MCP audit log
   stream. The new `McpAnomalyDetector` service (`mcp_sentinel.anomaly_detector`)
   evaluates all enabled anomaly rules on each cron run. Each rule specifies an
-  `operation_pattern` (prefix match against the `operation` column), a
+  `operation_pattern` (exact match by default; append `*` for prefix), a
   `window_seconds` lookback, and a `count threshold`. When the count of matching
   rows within the window meets or exceeds the threshold, the rule fires. Alerts
   are dispatched through up to three channels via the new `McpAlertDispatcher`

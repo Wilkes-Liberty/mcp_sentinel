@@ -366,7 +366,7 @@ Each rule specifies:
 |---|---|
 | `id` | Unique machine name (lowercase letters, numbers, underscores). |
 | `label` | Human-readable name shown in alerts. |
-| `operation_pattern` | Prefix match against the audit log `operation` column. `entity_delete` matches `entity_delete`, `entity_delete_bulk`, etc. |
+| `operation_pattern` | Match against the audit log `operation` column. **Exact match by default** — `entity_delete` matches only `entity_delete`. Append `*` for prefix matching — `entity*` matches `entity_save`, `entity_delete`, etc. The `denied_access` operation is written by governed Tool plugins when an agent is denied by policy or core access. |
 | `window_seconds` | Look-back window. Only rows newer than `now - window_seconds` are counted. |
 | `threshold` | Minimum row count to trigger the rule. |
 | `debounce_seconds` | Minimum seconds between alerts for this rule (default 3600). Prevents alert storms. |
@@ -393,9 +393,13 @@ Three channels are available — mix and match:
    webhook delivery as needed).
 4. Add rules in the textarea (one per line):
    ```
+   denied_access_storm|Denied access storm|denied_access|300|20|3600|1
    bulk_delete|Bulk delete spike|entity_delete|300|20|3600|1
-   denied_storm|Access denial storm|denied_access|300|50|3600|1
+   entity_activity|Entity write spike|entity*|300|100|3600|0
    ```
+   The first rule uses an exact pattern (`denied_access`) and fires when a
+   governed agent is denied 20+ times in 5 minutes. The third rule uses the
+   `*` prefix to match all `entity_*` operations.
 5. Save. Alerts will fire on the next cron run where a rule is tripped.
 
 ### Debounce (alert-storm suppression)

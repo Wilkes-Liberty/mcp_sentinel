@@ -145,9 +145,11 @@ final class McpWorkflowTransitionTool extends ToolBase {
     }
     $policyResult = $this->accessChecker->checkEntityAccess($entity, 'update', $profile);
     if ($reason = $this->denyReason($policyResult)) {
+      $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entity_type, $id, 'update', $reason);
       return ExecutableResult::failure($this->t('MCP Sentinel denied the transition: @reason', ['@reason' => $reason]));
     }
     if (!$entity->access('update', $this->currentUser)) {
+      $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entity_type, $id, 'update', 'core access denied');
       return ExecutableResult::failure($this->t('You do not have permission to update this entity.'));
     }
 

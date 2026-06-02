@@ -266,7 +266,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['anomaly']['anomaly_rules'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Rules'),
-      '#description' => $this->t('One rule per line: <code>id|label|operation_pattern|window_sec|threshold|debounce_sec|enabled(1/0)</code>. Example: <code>bulk_delete|Bulk delete spike|entity_delete|300|20|3600|0</code>. All rules ship disabled (0); set to 1 to enable. The operation_pattern is matched as a prefix.'),
+      '#description' => $this->t('One rule per line: <code>id|label|operation_pattern|window_sec|threshold|debounce_sec|enabled(1/0)</code>. Example: <code>denied_access_storm|Denied access storm|denied_access|300|20|3600|0</code>. All rules ship disabled (0); set to 1 to enable. The <code>operation_pattern</code> is an <strong>exact match by default</strong> — <code>entity_delete</code> matches only <code>entity_delete</code>. Append <code>*</code> for a prefix match — <code>entity*</code> matches both <code>entity_save</code> and <code>entity_delete</code>.'),
       '#default_value' => rtrim($rulesLines),
       '#rows' => 8,
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],

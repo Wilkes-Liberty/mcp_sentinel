@@ -260,6 +260,154 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   }
 
   /**
+   * Tests that an exact operation_pattern (no star) does NOT match related ops.
+   *
+   * 'entity' must not match 'entity_delete'. Without the trailing '*' the
+   * pattern is compared with = so only the identical string is counted.
+   */
+  public function testExactMatchDoesNotMatchRelatedOp(): void {
+    $now = \Drupal::time()->getRequestTime();
+    for ($i = 0; $i < 5; $i++) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp'   => $now,
+        'uid'         => 1,
+        'operation'   => 'entity_delete',
+        'entity_type' => 'node',
+        'bundle'      => 'article',
+        'entity_id'   => (string) $i,
+        'prev_hash'   => NULL,
+        'row_hash'    => NULL,
+      ])->execute();
+    }
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id'                => 'exact_no_star',
+        'label'             => 'Exact no star',
+        'operation_pattern' => 'entity',
+        'window_seconds'    => 300,
+        'threshold'         => 1,
+        'debounce_seconds'  => 0,
+        'enabled'           => TRUE,
+      ],
+      ])->save();
+
+    $fired = $this->container->get('mcp_sentinel.anomaly_detector')->evaluate();
+    $this->assertCount(0, $fired, '"entity" (no star) must NOT match "entity_delete" rows.');
+  }
+
+  /**
+   * Tests that 'entity_delete' (no star) matches only entity_delete rows.
+   */
+  public function testExactMatchMatchesExactOp(): void {
+    $now = \Drupal::time()->getRequestTime();
+    for ($i = 0; $i < 5; $i++) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp'   => $now,
+        'uid'         => 1,
+        'operation'   => 'entity_delete',
+        'entity_type' => 'node',
+        'bundle'      => 'article',
+        'entity_id'   => (string) $i,
+        'prev_hash'   => NULL,
+        'row_hash'    => NULL,
+      ])->execute();
+    }
+    // Also insert rows for a different operation to confirm no cross-match.
+    for ($i = 0; $i < 5; $i++) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp'   => $now,
+        'uid'         => 1,
+        'operation'   => 'entity_save',
+        'entity_type' => 'node',
+        'bundle'      => 'article',
+        'entity_id'   => (string) ($i + 100),
+        'prev_hash'   => NULL,
+        'row_hash'    => NULL,
+      ])->execute();
+    }
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id'                => 'exact_delete',
+        'label'             => 'Exact delete',
+        'operation_pattern' => 'entity_delete',
+        'window_seconds'    => 300,
+        'threshold'         => 3,
+        'debounce_seconds'  => 0,
+        'enabled'           => TRUE,
+      ],
+      ])->save();
+
+    $fired = $this->container->get('mcp_sentinel.anomaly_detector')->evaluate();
+    $this->assertCount(1, $fired, '"entity_delete" (exact) must match the 5 entity_delete rows.');
+    $this->assertSame(5, $fired[0]['count'], 'Count must equal the 5 entity_delete rows (not 10).');
+  }
+
+  /**
+   * Tests that 'entity*' (star prefix) matches entity_save and entity_delete.
+   */
+  public function testPrefixMatchWithStarMatchesBothOps(): void {
+    $now = \Drupal::time()->getRequestTime();
+    // Insert 3 entity_save rows.
+    for ($i = 0; $i < 3; $i++) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp'   => $now,
+        'uid'         => 1,
+        'operation'   => 'entity_save',
+        'entity_type' => 'node',
+        'bundle'      => 'article',
+        'entity_id'   => (string) $i,
+        'prev_hash'   => NULL,
+        'row_hash'    => NULL,
+      ])->execute();
+    }
+    // Insert 4 entity_delete rows.
+    for ($i = 0; $i < 4; $i++) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp'   => $now,
+        'uid'         => 1,
+        'operation'   => 'entity_delete',
+        'entity_type' => 'node',
+        'bundle'      => 'article',
+        'entity_id'   => (string) ($i + 10),
+        'prev_hash'   => NULL,
+        'row_hash'    => NULL,
+      ])->execute();
+    }
+    // Insert 2 denied_access rows (must NOT be counted).
+    for ($i = 0; $i < 2; $i++) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp'   => $now,
+        'uid'         => 1,
+        'operation'   => 'denied_access',
+        'entity_type' => 'node',
+        'bundle'      => 'article',
+        'entity_id'   => (string) ($i + 20),
+        'prev_hash'   => NULL,
+        'row_hash'    => NULL,
+      ])->execute();
+    }
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id'                => 'prefix_entity',
+        'label'             => 'Entity prefix',
+        'operation_pattern' => 'entity*',
+        'window_seconds'    => 300,
+        'threshold'         => 5,
+        'debounce_seconds'  => 0,
+        'enabled'           => TRUE,
+      ],
+      ])->save();
+
+    $fired = $this->container->get('mcp_sentinel.anomaly_detector')->evaluate();
+    $this->assertCount(1, $fired, '"entity*" must fire because entity_save + entity_delete = 7 >= 5.');
+    $this->assertSame(7, $fired[0]['count'],
+      '"entity*" must count entity_save (3) + entity_delete (4) = 7, not denied_access rows.');
+  }
+
+  /**
    * Tests that debounce state key is set after a rule fires.
    */
   public function testDebounceStateUpdatedOnFire(): void {

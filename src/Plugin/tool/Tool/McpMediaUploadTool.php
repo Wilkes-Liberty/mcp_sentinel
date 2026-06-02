@@ -128,10 +128,12 @@ final class McpMediaUploadTool extends ToolBase {
     }
     $policyResult = $this->accessChecker->checkEntityAccess($media, 'create', $profile);
     if ($reason = $this->denyReason($policyResult)) {
+      $this->logDeniedAccess('mcp_sentinel_media_create', 'media', '(new)', 'create', $reason);
       return ExecutableResult::failure($this->t('MCP Sentinel denied media creation: @reason', ['@reason' => $reason]));
     }
     $core = $this->entityTypeManager->getAccessControlHandler('media')->createAccess($bundle, $this->currentUser, [], TRUE);
     if (!$core->isAllowed()) {
+      $this->logDeniedAccess('mcp_sentinel_media_create', 'media', '(new)', 'create', 'core access denied');
       return ExecutableResult::failure($this->t('You do not have permission to create @bundle media.', ['@bundle' => $bundle]));
     }
 

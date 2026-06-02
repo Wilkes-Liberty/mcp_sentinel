@@ -153,10 +153,12 @@ final class McpNodeOperationsTool extends ToolBase {
 
     $policyResult = $this->accessChecker->checkEntityAccess($node, 'create', $profile);
     if ($policy = $this->denyReason($policyResult)) {
+      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', '(new)', 'create', $policy);
       return ExecutableResult::failure($this->t('MCP Sentinel denied node creation: @reason', ['@reason' => $policy]));
     }
     $core = $this->entityTypeManager->getAccessControlHandler('node')->createAccess($bundle, $this->currentUser, [], TRUE);
     if (!$core->isAllowed()) {
+      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', '(new)', 'create', 'core access denied');
       return ExecutableResult::failure($this->t('You do not have permission to create @bundle nodes.', ['@bundle' => $bundle]));
     }
 
@@ -184,9 +186,11 @@ final class McpNodeOperationsTool extends ToolBase {
     }
     $policyResult = $this->accessChecker->checkEntityAccess($node, 'update', $profile);
     if ($policy = $this->denyReason($policyResult)) {
+      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', (string) $node->id(), 'update', $policy);
       return ExecutableResult::failure($this->t('MCP Sentinel denied the update: @reason', ['@reason' => $policy]));
     }
     if (!$node->access('update', $this->currentUser)) {
+      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', (string) $node->id(), 'update', 'core access denied');
       return ExecutableResult::failure($this->t('You do not have permission to edit this node.'));
     }
     if (isset($values['title'])) {

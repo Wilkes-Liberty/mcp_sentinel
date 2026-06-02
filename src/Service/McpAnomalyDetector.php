@@ -108,12 +108,19 @@ final class McpAnomalyDetector {
    * Counts audit log rows matching an operation pattern within a time window.
    *
    * Queries only the indexed 'operation' and 'timestamp' columns to stay cheap
-   * on large audit tables. Uses a LIKE match so that operation prefixes work
-   * (e.g. 'entity_delete' matches 'entity_delete', 'entity_delete_bulk', etc.).
+   * on large audit tables.
+   *
+   * Match semantics (set via the rule's operation_pattern field):
+   *   - Exact match (default): the pattern is compared with = so that 'entity'
+   *     matches only 'entity' and NOT 'entity_save' or 'entity_delete'. This is
+   *     the safe default; short patterns never silently swallow unrelated ops.
+   *   - Prefix match (opt-in): append a trailing '*' to use LIKE with a '%'
+   *     wildcard. For example, 'entity*' matches 'entity_save' and
+   *     'entity_delete'. The '*' is stripped before the SQL comparison.
    *
    * @param string $pattern
-   *   The operation pattern (exact value or prefix; a trailing wildcard is
-   *   applied automatically).
+   *   The operation pattern. A trailing '*' enables prefix matching; without it
+   *   an exact = comparison is used.
    * @param int $since
    *   Unix timestamp; only rows newer than this time are counted.
    *
@@ -121,13 +128,21 @@ final class McpAnomalyDetector {
    *   Number of matching rows.
    */
   private function countOps(string $pattern, int $since): int {
-    return (int) $this->database
+    $query = $this->database
       ->select('mcp_sentinel_audit_log', 'l')
-      ->condition('l.operation', $this->database->escapeLike($pattern) . '%', 'LIKE')
-      ->condition('l.timestamp', $since, '>')
-      ->countQuery()
-      ->execute()
-      ->fetchField();
+      ->condition('l.timestamp', $since, '>');
+
+    if (str_ends_with($pattern, '*')) {
+      // Prefix match: strip the trailing '*' and use LIKE with '%'.
+      $prefix = substr($pattern, 0, -1);
+      $query->condition('l.operation', $this->database->escapeLike($prefix) . '%', 'LIKE');
+    }
+    else {
+      // Exact match (default): no LIKE, no implicit wildcard expansion.
+      $query->condition('l.operation', $pattern);
+    }
+
+    return (int) $query->countQuery()->execute()->fetchField();
   }
 
 }

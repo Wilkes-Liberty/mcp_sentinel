@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use ColinODell\PsrTestLogger\TestLogger;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -68,6 +69,11 @@ class McpAlertDispatcherTest extends KernelTestBase {
 
   /**
    * Tests that the log channel receives a warning when anomaly_alert_log=TRUE.
+   *
+   * Injects a TestLogger spy as logger.channel.mcp_sentinel and asserts:
+   *   - exactly one warning-level record is emitted for the fired rule.
+   *   - the record's message contains the rule ID.
+   *   - no email is sent (log-only channel).
    */
   public function testAlertLogsToChannel(): void {
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
@@ -76,7 +82,11 @@ class McpAlertDispatcherTest extends KernelTestBase {
       ->set('anomaly_alert_webhook', FALSE)
       ->save();
 
-    // Verify no exception is thrown and no email is sent (log-only channel).
+    // Inject a capturing spy logger so the warning assertion is concrete.
+    $spy = new TestLogger();
+    $this->container->set('logger.channel.mcp_sentinel', $spy);
+
+    // Verify no email is sent (log-only channel).
     $this->config('system.mail')
       ->set('interface.default', 'test_mail_collector')
       ->save();
@@ -94,6 +104,25 @@ class McpAlertDispatcherTest extends KernelTestBase {
       'count' => 15,
     ],
     ]);
+
+    // The logger channel must have received exactly one warning for the rule.
+    $warnings = array_filter(
+      $spy->records,
+      static fn(array $r) => $r['level'] === 'warning',
+    );
+    $this->assertCount(1, $warnings, 'Exactly one warning must be emitted for a single fired rule.');
+    $record = reset($warnings);
+    // The PSR-3 message is a template string; the rule ID is in the context.
+    $this->assertStringContainsString(
+      'mcp_sentinel_anomaly_alert',
+      (string) $record['message'],
+      'Warning message template must contain the sentinel prefix.',
+    );
+    $this->assertSame(
+      'test_rule',
+      (string) ($record['context']['@rule'] ?? ''),
+      'Warning context must carry the rule ID under the @rule key.',
+    );
 
     // Log-only channel: no email should be sent.
     $captured = \Drupal::state()->get('system.test_mail_collector') ?? [];
