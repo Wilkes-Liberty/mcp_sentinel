@@ -20,6 +20,8 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  */
 class McpSettingsForm extends ConfigFormBase {
 
+  use McpListEditorTrait;
+
   /**
    * The entity type manager.
    */
@@ -202,28 +204,78 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
 
-    // Build the patterns textarea default value from stored config.
-    $stored_patterns = $config->get('dlp_patterns');
-    $patterns_lines = '';
-    if (is_array($stored_patterns) && $stored_patterns !== []) {
-      $pattern_rows = [];
-      foreach ($stored_patterns as $p) {
-        $label = (string) ($p['label'] ?? '');
-        $regex = (string) ($p['regex'] ?? '');
-        $mask = (string) ($p['mask'] ?? '');
-        if ($label !== '' && $regex !== '') {
-          $pattern_rows[] = $mask !== '' ? "$label|$regex|$mask" : "$label|$regex";
-        }
-      }
-      $patterns_lines = implode("\n", $pattern_rows);
+    // Build the DLP patterns multi-row editor from stored config.
+    $stored_patterns = array_values(array_filter(
+      (array) ($config->get('dlp_patterns') ?? []),
+      'is_array',
+    ));
+    $dlp_count = $this->rowCount($form_state, 'dlp_patterns_rows', count($stored_patterns));
+    $form['dlp']['dlp_patterns_help'] = [
+      '#type' => 'item',
+      '#title' => $this->t('Custom DLP patterns'),
+      '#description' => $this->t('Each row is a pattern: <code>label</code>, <code>regex</code> and an optional <code>mask</code> (defaults to <code>*</code>). The <code>regex</code> is a PCRE body WITHOUT delimiters — wrapped in <code>#…#i</code> automatically (example: <code>EMP-\d{6}</code>). Leave all rows blank to fall back to the four built-in defaults (email, US phone, SSN, credit card). Invalid regular expressions are rejected.'),
+      '#states' => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['dlp']['dlp_patterns_rows'] = [
+      '#type' => 'container',
+      '#tree' => TRUE,
+      '#prefix' => '<div id="mcp-dlp-rows-wrapper">',
+      '#suffix' => '</div>',
+      '#states' => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
+    ];
+    for ($i = 0; $i < $dlp_count; $i++) {
+      $row = $stored_patterns[$i] ?? [];
+      $form['dlp']['dlp_patterns_rows'][$i] = [
+        '#type' => 'fieldset',
+        '#title' => $this->t('Pattern @n', ['@n' => $i + 1]),
+        '#attributes' => ['class' => ['mcp-sentinel-row']],
+      ];
+      $form['dlp']['dlp_patterns_rows'][$i]['label'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Label'),
+        '#default_value' => (string) ($row['label'] ?? ''),
+        '#size' => 24,
+        '#maxlength' => 128,
+      ];
+      $form['dlp']['dlp_patterns_rows'][$i]['regex'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Pattern (regex)'),
+        '#default_value' => (string) ($row['regex'] ?? ''),
+        '#size' => 40,
+      ];
+      $form['dlp']['dlp_patterns_rows'][$i]['mask'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Mask'),
+        '#default_value' => (string) ($row['mask'] ?? ''),
+        '#size' => 6,
+        '#maxlength' => 16,
+      ];
+      $form['dlp']['dlp_patterns_rows'][$i]['remove'] = [
+        '#type' => 'submit',
+        '#name' => 'dlp_remove_' . $i,
+        '#value' => $this->t('Remove pattern @n', ['@n' => $i + 1]),
+        '#submit' => ['::dlpRemoveRow'],
+        '#limit_validation_errors' => [],
+        '#mcp_editor_parents' => ['dlp', 'dlp_patterns_rows'],
+        '#mcp_editor_input' => ['dlp_patterns_rows'],
+        '#mcp_editor_row' => $i,
+        '#ajax' => [
+          'callback' => '::listEditorAjax',
+          'wrapper' => 'mcp-dlp-rows-wrapper',
+        ],
+      ];
     }
-    $form['dlp']['dlp_patterns'] = [
-      '#type'          => 'textarea',
-      '#title'         => $this->t('Custom DLP patterns'),
-      '#description'   => $this->t('One pattern per line: <code>label|regex|mask</code> (<code>mask</code> is optional, defaults to <code>*</code>). The <code>regex</code> is a PCRE body WITHOUT delimiters — wrapped in <code>#…#i</code> automatically. Example: <code>employee_id|EMP-\d{6}|*</code>. An empty field falls back to the four built-in defaults (email, US phone, SSN, credit card). Invalid regex lines are rejected.'),
-      '#default_value' => $patterns_lines,
-      '#rows'          => 6,
-      '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
+    $form['dlp']['dlp_patterns_rows']['add'] = [
+      '#type' => 'submit',
+      '#name' => 'dlp_add',
+      '#value' => $this->t('Add pattern'),
+      '#submit' => ['::dlpAddRow'],
+      '#limit_validation_errors' => [],
+      '#mcp_editor_parents' => ['dlp', 'dlp_patterns_rows'],
+      '#ajax' => [
+        'callback' => '::listEditorAjax',
+        'wrapper' => 'mcp-dlp-rows-wrapper',
+      ],
     ];
 
     // -----------------------------------------------------------------------
@@ -439,19 +491,24 @@ class McpSettingsForm extends ConfigFormBase {
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     parent::validateForm($form, $form_state);
 
-    // Validate the DLP patterns textarea.
-    $raw_patterns = (string) ($form_state->getValue('dlp_patterns') ?? '');
-    $lines = array_filter(array_map('trim', explode("\n", $raw_patterns)));
-    foreach ($lines as $line_number => $line) {
-      $parts = explode('|', $line, 3);
-      $label = trim($parts[0]);
-      $regex = trim($parts[1] ?? '');
+    // Validate the DLP patterns multi-row editor.
+    $dlp_rows = (array) ($form_state->getValue('dlp_patterns_rows') ?? []);
+    foreach ($dlp_rows as $i => $row) {
+      if (!is_array($row)) {
+        continue;
+      }
+      $label = trim((string) ($row['label'] ?? ''));
+      $regex = trim((string) ($row['regex'] ?? ''));
+      // A fully blank row is skipped.
+      if ($label === '' && $regex === '') {
+        continue;
+      }
       if ($label === '' || $regex === '') {
         $form_state->setErrorByName(
-          'dlp_patterns',
+          "dlp][dlp_patterns_rows][$i][label",
           $this->t(
-            'DLP pattern line @n is invalid: each line must contain at least <code>label|regex</code>.',
-            ['@n' => (int) $line_number + 1],
+            'DLP pattern @n is invalid: it must contain both a label and a pattern.',
+            ['@n' => (int) $i + 1],
           ),
         );
         continue;
@@ -461,7 +518,7 @@ class McpSettingsForm extends ConfigFormBase {
       $wrapped = McpDlp::wrapPattern($regex);
       if (@preg_match($wrapped, '') === FALSE) {
         $form_state->setErrorByName(
-          'dlp_patterns',
+          "dlp][dlp_patterns_rows][$i][regex",
           $this->t(
             'DLP pattern "@label" has an invalid regular expression: <code>@regex</code>.',
             ['@label' => $label, '@regex' => $regex],
@@ -580,20 +637,35 @@ class McpSettingsForm extends ConfigFormBase {
   }
 
   /**
+   * Submit handler: adds a DLP pattern row.
+   */
+  public function dlpAddRow(array &$form, FormStateInterface $form_state): void {
+    $this->addRow($form, $form_state, 'dlp_patterns_rows');
+  }
+
+  /**
+   * Submit handler: removes a DLP pattern row.
+   */
+  public function dlpRemoveRow(array &$form, FormStateInterface $form_state): void {
+    $this->removeRow($form, $form_state, 'dlp_patterns_rows');
+  }
+
+  /**
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state): void {
     $split = static fn (string $v): array => array_values(array_filter(array_map('trim', explode("\n", $v))));
 
-    // Parse the DLP patterns textarea into the sequence-of-maps config shape.
-    $raw_patterns = (string) ($form_state->getValue('dlp_patterns') ?? '');
-    $lines = array_filter(array_map('trim', explode("\n", $raw_patterns)));
+    // Assemble the DLP patterns sequence-of-maps from the row editor, dropping
+    // rows that lack a label or pattern.
     $dlp_patterns = [];
-    foreach ($lines as $line) {
-      $parts = explode('|', $line, 3);
-      $label = trim($parts[0]);
-      $regex = trim($parts[1] ?? '');
-      $mask  = trim($parts[2] ?? '*');
+    foreach ((array) ($form_state->getValue('dlp_patterns_rows') ?? []) as $row) {
+      if (!is_array($row)) {
+        continue;
+      }
+      $label = trim((string) ($row['label'] ?? ''));
+      $regex = trim((string) ($row['regex'] ?? ''));
+      $mask  = trim((string) ($row['mask'] ?? ''));
       if ($label !== '' && $regex !== '') {
         $dlp_patterns[] = [
           'label' => $label,

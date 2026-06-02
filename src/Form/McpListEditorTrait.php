@@ -57,7 +57,13 @@ trait McpListEditorTrait {
   }
 
   /**
-   * Decrements the row count for an editor (the "Remove row" AJAX submit).
+   * Removes a row for an editor (the "Remove row" AJAX submit).
+   *
+   * Decrements the editor's row count and, when the triggering button carries a
+   * concrete row index in #mcp_editor_row, removes that specific row from the
+   * submitted user input and re-indexes the remaining rows so the clicked row
+   * (not merely the last one) disappears. The render parents to the input are
+   * taken from the button's #mcp_editor_parents.
    *
    * @param array $form
    *   The form render array.
@@ -70,7 +76,76 @@ trait McpListEditorTrait {
     $storage = $form_state->getStorage();
     $storage['mcp_list_rows'][$key] = max(($storage['mcp_list_rows'][$key] ?? 1) - 1, 1);
     $form_state->setStorage($storage);
+
+    $trigger = $form_state->getTriggeringElement();
+    $index = $trigger['#mcp_editor_row'] ?? NULL;
+    // The user-input path mirrors the rendered field names, which may differ
+    // from the render-array path when the editor sits under a non-#tree parent.
+    $parents = $trigger['#mcp_editor_input'] ?? $trigger['#mcp_editor_parents'] ?? [];
+    if ($index !== NULL && $parents !== []) {
+      $input = $form_state->getUserInput();
+      $rows = $this->nestedGet($input, $parents);
+      if (is_array($rows)) {
+        unset($rows[$index]);
+        // Re-index the data rows so there are no gaps; preserve any non-numeric
+        // sibling keys (e.g. the trailing "add" button) untouched.
+        $reindexed = [];
+        foreach ($rows as $row_key => $row_value) {
+          if (is_int($row_key) || ctype_digit((string) $row_key)) {
+            $reindexed[] = $row_value;
+          }
+          else {
+            $reindexed[$row_key] = $row_value;
+          }
+        }
+        $this->nestedSet($input, $parents, $reindexed);
+        $form_state->setUserInput($input);
+      }
+    }
     $form_state->setRebuild();
+  }
+
+  /**
+   * Reads a nested value from an array by a list of parent keys.
+   *
+   * @param array $array
+   *   The source array.
+   * @param array $parents
+   *   The parent key path.
+   *
+   * @return mixed
+   *   The value at the path, or NULL when absent.
+   */
+  private function nestedGet(array $array, array $parents): mixed {
+    $ref = $array;
+    foreach ($parents as $parent) {
+      if (!is_array($ref) || !array_key_exists($parent, $ref)) {
+        return NULL;
+      }
+      $ref = $ref[$parent];
+    }
+    return $ref;
+  }
+
+  /**
+   * Writes a nested value into an array by a list of parent keys.
+   *
+   * @param array $array
+   *   The array to mutate, by reference.
+   * @param array $parents
+   *   The parent key path.
+   * @param mixed $value
+   *   The value to set.
+   */
+  private function nestedSet(array &$array, array $parents, mixed $value): void {
+    $ref = &$array;
+    foreach ($parents as $parent) {
+      if (!isset($ref[$parent]) || !is_array($ref[$parent])) {
+        $ref[$parent] = [];
+      }
+      $ref = &$ref[$parent];
+    }
+    $ref = $value;
   }
 
   /**
