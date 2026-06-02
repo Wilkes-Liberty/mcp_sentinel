@@ -7,6 +7,40 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added (tests — P5-W1 tasks T5/T6/T7)
+- **W1-T5 — OAuth agent-channel end-to-end** (`McpOauthChannelTest`): 5 functional
+  tests proving that the role-fallback governed path (governed_role_fallback=TRUE)
+  enforces write gates over real HTTP, that a non-governed user is unaffected, that
+  successful governed writes are audited, and that the OAuth-primary model correctly
+  ignores the mcp_api role when the fallback is disabled.
+- **W1-T6 — JSON:API write governance** (`McpJsonApiWriteGovernanceTest`,
+  `McpContentToolGovernanceTest`): 6 functional tests covering governed PATCH blocked
+  (allow_write=FALSE → 403) and allowed (→ 200/204), read gate enforcement
+  (allow_read=FALSE → 403), page[limit] cap via the live McpJsonApiPageLimitSubscriber
+  (→ 400), and non-governed admin bypassing Sentinel gates.
+- **W1-T7 — Phase 4 controls functional** (`McpPhase4ControlsFunctionalTest`): 4
+  functional tests: (a) rate-limit gate blocks after threshold in the live Drupal
+  kernel; (b) exfiltration page-cap returns 400 over a real HTTP request; (c) IP
+  allowlist denies access when client IP is not in the CIDR; (d) anomaly detector
+  fires on seeded audit rows and the alert dispatcher runs cleanly.
+- **Governed-request harness trait** (`McpGovernedRequestTrait`): extended with
+  HTTP Basic auth support (`$account` parameter) and `$query` parameter for correct
+  JSON:API query-string handling. Removed the `trait.unused` phpstan suppression.
+
+### Findings surfaced by W1-T5/T6/T7 tests
+- **FINDING (hook_entity_create_access gap):** mcp_sentinel implements
+  `hook_entity_access` but NOT `hook_entity_create_access`. JSON:API POST (new entity
+  creation) uses `_entity_create_access` → `hook_entity_create_access` at the routing
+  layer and does NOT invoke `hook_entity_access`. This means JSON:API POST bypasses
+  the Sentinel write gate. PATCH and DELETE on existing entities are fully gated.
+  Tool-plugin creates ARE gated (McpNodeOperationsTool calls checkEntityAccess directly).
+  This gap should be addressed in a post-Phase-5 hardening pass.
+- **FINDING (hook_jsonapi_entity_filter_access does not check IP allowlist):** the
+  IP-allowlist gate fires via hook_entity_access (individual entity access). The
+  collection-level hook (hook_jsonapi_entity_filter_access) does not check the IP
+  allowlist, so a GET to the collection endpoint `/jsonapi/node/article` is not
+  IP-gated at the collection level. Individual entity GETs (`/{uuid}`) ARE gated.
+
 ## [1.0.0-alpha2] - 2026-06-02
 
 ### Added

@@ -152,20 +152,39 @@ trait McpGovernedRequestTrait {
   }
 
   /**
-   * Issues a JSON:API HTTP request with an optional Bearer token header.
+   * Issues a JSON:API HTTP request with optional Bearer or Basic auth.
    *
    * Uses the BrowserTestBase Guzzle client so the request travels through
    * the real Drupal request stack (middlewares, subscribers, hooks). Only
    * available in Functional tests.
    *
+   * Authentication strategy:
+   *  - When $token is non-NULL, an Authorization: Bearer header is sent.
+   *  - When $account is non-NULL (and $token is NULL), HTTP Basic auth is
+   *    used via the account's name and pass_raw. Basic auth avoids the CSRF
+   *    token requirement imposed by Drupal's cookie session on write requests
+   *    (POST/PATCH/DELETE). The basic_auth module must be enabled for this.
+   *  - When both are NULL, the current Mink session cookies are used (suitable
+   *    for GET-only requests; write requests via cookie need CSRF tokens).
+   *
+   * Query parameters must be passed via $query rather than embedded in $path.
+   * buildUrl() URL-encodes the path, so embedding '?page[limit]=50' in $path
+   * would encode '?' and '[', producing a 404. Pass them as
+   * $query = ['page' => ['limit' => 50]] to let Guzzle append them correctly.
+   *
    * @param string $method
    *   HTTP method ('GET', 'POST', 'PATCH', 'DELETE').
    * @param string $path
-   *   The request path (e.g. '/jsonapi/node/article').
+   *   The request path without query string (e.g. '/jsonapi/node/article').
    * @param array<string, mixed> $body
    *   Optional request body (JSON:API document; will be JSON-encoded).
    * @param string|null $token
-   *   Bearer token string, or NULL to use the current Mink session cookies.
+   *   Bearer token string, or NULL to skip Bearer auth.
+   * @param \Drupal\user\Entity\User|null $account
+   *   User account to authenticate with via HTTP Basic auth; requires the
+   *   basic_auth module to be enabled. Ignored when $token is non-NULL.
+   * @param array<string, mixed> $query
+   *   Optional query parameters appended to the URL by Guzzle (not path).
    *
    * @return \Psr\Http\Message\ResponseInterface
    *   The HTTP response from the Guzzle client.
@@ -175,6 +194,8 @@ trait McpGovernedRequestTrait {
     string $path,
     array $body = [],
     ?string $token = NULL,
+    ?User $account = NULL,
+    array $query = [],
   ): ResponseInterface {
     /** @var \GuzzleHttp\ClientInterface $client */
     // @phpstan-ignore-next-line
@@ -192,8 +213,22 @@ trait McpGovernedRequestTrait {
       RequestOptions::HEADERS => $headers,
       RequestOptions::HTTP_ERRORS => FALSE,
     ];
+
+    // Use HTTP Basic auth when a user account is provided (no CSRF needed).
+    if ($token === NULL && $account !== NULL) {
+      $options[RequestOptions::AUTH] = [
+        $account->getAccountName(),
+        // @phpstan-ignore-next-line (pass_raw is set by drupalCreateUser)
+        $account->passRaw,
+      ];
+    }
+
     if ($body !== []) {
       $options[RequestOptions::BODY] = json_encode($body, JSON_THROW_ON_ERROR);
+    }
+
+    if ($query !== []) {
+      $options[RequestOptions::QUERY] = $query;
     }
 
     // @phpstan-ignore-next-line
