@@ -67,8 +67,11 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $this->installEntitySchema('node');
     $this->installConfig(['mcp_sentinel']);
 
-    // Load update.inc so all update hook functions are available.
-    require_once DRUPAL_ROOT . '/modules/contrib/mcp_sentinel/mcp_sentinel.install';
+    // Load the .install file so all update hook functions are available.
+    // Resolve the module path dynamically — the module is not always at
+    // modules/contrib/ (e.g. on Drupal.org CI it lives at the project root).
+    require_once \Drupal::root() . '/' . \Drupal::service('extension.list.module')
+      ->getPath('mcp_sentinel') . '/mcp_sentinel.install';
   }
 
   /**
