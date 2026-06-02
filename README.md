@@ -128,7 +128,11 @@ discover available types, queries, and mutations.
 | At-rest audit metadata encryption | ❌ | ✅ |
 | SIEM streaming | ❌ | ✅ |
 | Content locks | ❌ | ✅ |
-| HMAC webhooks | ❌ | ✅ |
+| Per-profile rate limiting & quotas | ❌ | ✅ |
+| Exfiltration guards (result/size/page caps) | ❌ | ✅ |
+| Per-profile IP allowlisting | ❌ | ✅ |
+| Anomaly detection & alerting | ❌ | ✅ |
+| Reliable queued webhooks (retry/replay/SSRF guard) | ❌ | ✅ |
 | Human approval workflow (submodule) | ❌ | ✅ |
 | Rich context endpoint | ❌ | ✅ |
 | mcp_api role | ❌ | ✅ |
@@ -336,15 +340,17 @@ call, preventing mass-read attacks and accidental data exfiltration.
      request, or GraphQL multi-value field result list. `0` means unlimited (the
      default on all shipped profiles). Recommended: `500`.
    - **Max response size in bytes** — maximum serialized response size for
-     governed Tool calls. Responses exceeding this limit are denied. `0` means
-     unlimited. Recommended: `2097152` (2 MB).
+     governed Tool calls. Bulk-write output exceeding this limit is truncated
+     after the writes complete (with `_size_truncated: true` flagged); pure-read
+     tools fail before materializing data. `0` means unlimited. Recommended:
+     `2097152` (2 MB).
 3. Save. Limits take effect immediately.
 
 ### Enforcement seams
 
 | Seam | How caps are applied |
 |------|----------------------|
-| **Tool output** | `McpBulkOperationsTool` truncates `succeeded` list to `result_count_cap`; adds `_result_truncated: true` + `_result_cap` to the result data. Response-size cap is measured on the serialized payload. |
+| **Tool output** | `McpBulkOperationsTool` truncates `succeeded` list to `result_count_cap`; adds `_result_truncated: true` + `_result_cap` to the result data. The response-size cap is measured on the serialized payload and truncates post-write output (`_size_truncated: true`) rather than failing a completed batch. |
 | **JSON:API** | A `KernelEvents::REQUEST` subscriber blocks `page[limit]` values above `result_count_cap` for governed requests with HTTP 400 before the DB query runs. (`hook_jsonapi_resource_params_alter` does not exist in Drupal 11.3; the subscriber is the correct implementation.) |
 | **GraphQL** | `hook_graphql_compose_field_results_alter` in `mcp_sentinel_graphql` truncates multi-value field result lists to `result_count_cap` as a third pass after redaction and DLP masking. |
 
@@ -453,8 +459,8 @@ Each rule specifies:
 | `debounce_seconds` | Minimum seconds between alerts for this rule (default 3600). Prevents alert storms. |
 | `enabled` | `1` to enable; `0` to disable. |
 
-Rules are evaluated on cron. All rules ship **disabled by default** (D4.7) to
-avoid false positives during content imports. Enable and tune rules per-site.
+Rules are evaluated on cron. All rules ship **disabled by default** to avoid
+false positives during content imports. Enable and tune rules per-site.
 
 ### Alert channels
 
@@ -464,7 +470,7 @@ Three channels are available — mix and match:
 |---|---|---|
 | **Log** | `anomaly_alert_log` (default `true`) | Writes a `warning` to the `mcp_sentinel` logger channel. Route this channel to syslog/SIEM for monitoring. |
 | **Email** | `anomaly_alert_email` | Sends an email to the configured address when non-empty; empty = disabled. Requires a working mail setup. |
-| **Webhook** | `anomaly_alert_webhook` | Enqueues an `mcp.anomaly.alert` event through the F9 webhook queue manager. Endpoints whose event filter includes `mcp.anomaly.alert` (or an empty filter) receive it, with retry/backoff/HMAC inherited. |
+| **Webhook** | `anomaly_alert_webhook` | Enqueues an `mcp.anomaly.alert` event through the reliable webhook queue manager. Endpoints whose event filter includes `mcp.anomaly.alert` (or an empty filter) receive it, with retry/backoff/HMAC inherited. |
 
 ### Enabling anomaly detection
 

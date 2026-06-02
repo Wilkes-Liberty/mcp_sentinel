@@ -48,10 +48,29 @@ the governance layer those projects intentionally leave to site builders.
 - **DLP value-pattern redaction (opt-in)** — scan governed field values for PII
   patterns (email, US phone, SSN, credit card, plus custom patterns) and fully
   redact or partially mask matches.
+- **Per-profile rate limiting & quotas** — throttle governed agent traffic with
+  Drupal's core flood service (max requests per rolling window), keyed on the
+  server-resolved user ID so a single compromised token cannot saturate the
+  server. `0` = unlimited.
+- **Exfiltration guards** — cap how much data a governed agent can pull in one
+  call: a per-profile result-item cap (Tool output, JSON:API `page[limit]`, and
+  GraphQL multi-value field lists) and a response-size cap on Tool output. Blocks
+  mass-read and accidental data exfiltration.
+- **Per-profile IP allowlisting** — restrict governed connections to specific
+  IPv4/IPv6 addresses and CIDR blocks. Trusted-proxy-aware (reads the real client
+  IP via Symfony, never a spoofable header) and enforced across entity access,
+  the governed Tool plugins, and the context endpoint. Empty list = no
+  restriction.
+- **Anomaly detection & alerting** — cron-evaluated rules over the audit log
+  (operation pattern, time window, count threshold) that fire alerts via log,
+  email, or webhook channels, with per-rule debounce to prevent alert storms.
+  Includes governed `denied_access` auditing as a detection signal. Ships with no
+  rules enabled.
 - **Content locks** — prevent agents from overwriting content a human is
   editing, with TTL-based expiry.
-- **HMAC-signed webhooks** — fire HTTPS-only, HMAC-SHA256-signed notifications
-  to your own systems on MCP-driven entity changes.
+- **Reliable webhooks** — queue-backed, HTTPS-only, HMAC-SHA256-signed delivery
+  to multiple endpoints with per-event filtering, retry with exponential backoff,
+  a two-layer SSRF guard, and a delivery log with one-click replay.
 - **Rich context endpoint** — `/drupal-mcp/context` exposes a full site schema
   (content types with fields, vocabularies, media types) so agents can discover
   your model before acting; `/drupal-mcp/health` provides a status probe.
@@ -111,6 +130,8 @@ Configure at **Configuration → Web services → MCP Sentinel**
 - `drush mcp-sentinel:audit-purge` — prune audit entries past retention
 - `drush mcp-sentinel:lock-clear` — release expired content locks
 - `drush mcp-sentinel:audit-verify` — verify the tamper-evident audit hash chain
+- `drush mcp-sentinel:webhook-replay <id>` — re-queue a webhook delivery
+- `drush mcp-sentinel:webhook-prune` — prune webhook delivery rows past retention
 
 ## Companion connector
 

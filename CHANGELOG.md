@@ -8,7 +8,7 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
-- **Per-profile IP allowlisting — F11:**
+- **Per-profile IP allowlisting:**
   - A new `allowed_ips` field on every `mcp_policy_profile` config entity accepts
     a sequence of IPv4/IPv6 addresses and CIDR blocks. An empty list means no
     restriction (any IP permitted); this is the safe default and the value set by
@@ -49,43 +49,39 @@ stable release is tagged.
     policy profile resolves). Ungoverned cookie-session traffic is never affected.
   - `update_10010` backfills `allowed_ips: []` on all existing profiles during a
     `drush updb` run.
-- **Anomaly detection & alerting — F10 hardening:**
-  - **Governed-tool denied_access auditing (Fix 1):** all governed Tool plugins
-    (`McpBulkOperationsTool`, `McpNodeOperationsTool`, `McpWorkflowTransitionTool`,
-    `McpMediaUploadTool`) now write a `denied_access` audit row whenever a
-    governed agent is denied by policy (`McpAccessChecker`) or core entity
-    access. In `McpBulkOperationsTool`, one row is written per denied entity ID
-    so that an agent hammering N forbidden deletes produces N rows — the correct
-    input for a `denied_access_storm` count-threshold rule. The
-    `audit_log_reads` toggle is intentionally ignored; `denied_access` is a
-    security event logged whenever `audit_enabled` is true. Scope is limited to
-    the explicit Tool execution path; JSON:API/GraphQL denial-logging is a
-    future enhancement (F10 v2). Each row carries `tool`, `entity_type`, `id`,
-    `operation`, and `reason` in its metadata.
-  - **Exact operation_pattern match by default (Fix 3):** `McpAnomalyDetector`
-    now uses an exact `=` comparison by default, so a pattern like `entity` no
-    longer silently matches both `entity_save` and `entity_delete`. Append `*`
-    to opt in to prefix matching — `entity*` matches everything starting with
-    `entity`. The settings-form description is updated to explain the semantics.
 - **Anomaly detection & alerting:** cron-evaluated rules over the MCP audit log
   stream. The new `McpAnomalyDetector` service (`mcp_sentinel.anomaly_detector`)
   evaluates all enabled anomaly rules on each cron run. Each rule specifies an
-  `operation_pattern` (exact match by default; append `*` for prefix), a
-  `window_seconds` lookback, and a `count threshold`. When the count of matching
-  rows within the window meets or exceeds the threshold, the rule fires. Alerts
-  are dispatched through up to three channels via the new `McpAlertDispatcher`
-  service (`mcp_sentinel.anomaly_alert_dispatcher`): the `mcp_sentinel` logger
-  channel (warning-level; on by default), email (configured via
-  `anomaly_alert_email`; disabled when empty), and webhook (enqueues an
-  `mcp.anomaly.alert` event through the F9 `McpWebhookQueueManager`, inheriting
+  `operation_pattern`, a `window_seconds` lookback, and a `count threshold`. When
+  the count of matching rows within the window meets or exceeds the threshold,
+  the rule fires. Patterns use an exact `=` match by default, so a pattern like
+  `entity` does not silently match both `entity_save` and `entity_delete`; append
+  `*` to opt in to prefix matching (`entity*` matches everything starting with
+  `entity`). Alerts are dispatched through up to three channels via the new
+  `McpAlertDispatcher` service (`mcp_sentinel.anomaly_alert_dispatcher`): the
+  `mcp_sentinel` logger channel (warning-level; on by default), email (configured
+  via `anomaly_alert_email`; disabled when empty), and webhook (enqueues an
+  `mcp.anomaly.alert` event through the `McpWebhookQueueManager`, inheriting
   retry/SSRF/HMAC — enabled via `anomaly_alert_webhook`). Alert storms are
   prevented by mandatory debounce: a rule fires at most once per
   `debounce_seconds` (default 3600), stored in `@state` under
   `mcp_sentinel.anomaly_last_alert.{rule_id}`. Zero enabled rules ship by
-  default (D4.7) — operators opt in per-site to avoid false positives during
-  content imports. `update_10009` seeds the anomaly settings on existing installs.
-  The settings form gains an *Anomaly detection* fieldset for enabling detection,
+  default — operators opt in per-site to avoid false positives during content
+  imports. `update_10009` seeds the anomaly settings on existing installs. The
+  settings form gains an *Anomaly detection* fieldset for enabling detection,
   configuring alert channels, and managing rules via a pipe-delimited textarea.
+  - **Governed denied_access auditing:** to give the detector a reliable signal,
+    all governed Tool plugins (`McpBulkOperationsTool`, `McpNodeOperationsTool`,
+    `McpWorkflowTransitionTool`, `McpMediaUploadTool`) now write a `denied_access`
+    audit row whenever a governed agent is denied by policy (`McpAccessChecker`)
+    or core entity access. In `McpBulkOperationsTool`, one row is written per
+    denied entity ID, so an agent hammering N forbidden deletes produces N rows —
+    the correct input for a `denied_access_storm` count-threshold rule. The
+    `audit_log_reads` toggle is intentionally ignored; `denied_access` is a
+    security event logged whenever `audit_enabled` is true. Each row carries
+    `tool`, `entity_type`, `id`, `operation`, and `reason` in its metadata. Scope
+    is the explicit Tool execution path; JSON:API/GraphQL denial-logging is a
+    future enhancement.
 - **Reliable webhooks — queued delivery with retry/backoff, multiple endpoints,
   per-event filtering, delivery log + replay, and an SSRF guard:** webhook
   delivery moved off the old fire-and-forget `httpClient->requestAsync()` path
@@ -170,7 +166,7 @@ stable release is tagged.
     masking. Non-governed requests are unaffected.
   The profile add/edit form gains an *Exfiltration guards* fieldset exposing both
   cap fields. Recommended starting values: 500 result items / 2 097 152 bytes
-  (2 MB). `update_10006` (added in F8a) backfills both fields on existing
+  (2 MB). `update_10006` backfills both fields on existing
   profiles to `0` (unlimited). Ungoverned requests are never capped.
 - **Per-profile rate limiting & quotas via core flood:** each `mcp_policy_profile`
   now carries `rate_limit_requests` (default `0` = unlimited) and
