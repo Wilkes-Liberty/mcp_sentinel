@@ -26,3 +26,14 @@ parameters:
     -
       identifier: method.internal
       path: modules/mcp_sentinel_graphql/tests/src/Kernel/GraphqlGovernanceSubscriberTest.php
+    # Update-hook tests call assertIsString() on hook return values that
+    # phpstan narrows to string from the function signature; the assertion
+    # is intentional (it documents the contract) and harmless.
+    -
+      identifier: method.alreadyNarrowedType
+      path: tests/src/Kernel/McpUpdateHookChainTest.php
+    # Server registration test calls assertNotNull() on plugin instances that
+    # phpstan considers non-null from the createInstance() @return type.
+    -
+      identifier: method.alreadyNarrowedType
+      path: modules/mcp_sentinel_server/tests/src/Kernel/McpServerRegistrationTest.php

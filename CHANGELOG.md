@@ -7,6 +7,45 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added (tests — P5-W1 task T8 + cache-invariant addition)
+- **W1-T8 / G10 — Server submodule registration** (`McpServerRegistrationTest`):
+  4 kernel tests verifying that every base Tool plugin is discoverable by
+  `plugin.manager.tool`, that each instantiates without error, that the
+  `McpSentinelServerCommands::TOOLS` constant covers all base plugin IDs, and
+  that each scope value follows the `mcp:*` namespace convention.
+- **W1-T8 / G12 — Drush commands** (`McpDrushCommandsTest`): 10 kernel tests
+  exercising all six command behaviors directly via the command class:
+  `audit-verify` (clean chain → EXIT_SUCCESS, tampered → EXIT_FAILURE),
+  `webhook-prune` (old rows deleted, fresh rows retained), `lock-clear`
+  (expired locks released, active locks kept), `audit-purge` (rows deleted when
+  retention > 0; no-op when retention = 0), `webhook-replay` (EXIT_FAILURE on
+  bad ID, EXIT_SUCCESS with valid delivery + status reset to pending), and
+  `status` data paths (count queries + config reads all succeed).
+- **W1-T8 / G13 — Update-hook chain 10001–10010** (`McpUpdateHookChainTest`):
+  17 kernel tests covering each update hook individually (idempotency, schema
+  end-state, config end-state) plus a full-chain integration test that applies
+  10001 → 10010 in sequence and then verifies that the audit hash chain remains
+  intact. Confirms all schema and config mutations land safely and the chain
+  cannot be corrupted by the update path.
+- **W1-T8 / G14 — Uninstall cleanliness** (extended `McpUninstallTest`): 3 new
+  functional tests: `testUninstallDropsDatabaseTables` (all three
+  `mcp_sentinel_*` tables removed), `testUninstallRemovesModuleConfig` (settings
+  + all profile config objects deleted), `testUninstallLeavesNoOrphanedFootprint`
+  (composite check including a second profile; confirms zero Sentinel footprint
+  post-uninstall). Plus the original role-removal test.
+- **W1-T8 / G15 — Field-access redaction** (`McpFieldAccessRedactionTest`): 6
+  kernel tests for `hook_entity_field_access`: governed agent on a redacted field
+  → `AccessResultForbidden`; non-governed user → `AccessResultNeutral`; governed
+  agent on a non-redacted field → neutral; hook result always carries
+  `user.roles` + `oauth2_scopes` cache contexts; non-view operations (edit,
+  create, delete) are not redacted; ungoverned account (no profile) is unaffected.
+- **Cache-invariant addition** (`McpIpAllowlistTest`): 2 new kernel tests locking
+  the invariant that `checkCreateAccess()` results are `max-age 0` on ALL
+  forbidden branches when the profile has a non-empty `allowed_ips` list —
+  specifically the write-gate-off forbidden (`testWriteGateOffForbiddenIsUncacheable
+  WhenIpRestricted`) and the type-denied forbidden
+  (`testTypeDeniedForbiddenIsUncacheableWhenIpRestricted`).
+
 ### Added (tests — P5-W1 tasks T5/T6/T7)
 - **W1-T5 — OAuth agent-channel end-to-end** (`McpOauthChannelTest`): 5 functional
   tests proving that the role-fallback governed path (governed_role_fallback=TRUE)

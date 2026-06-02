@@ -339,4 +339,81 @@ final class McpIpAllowlistTest extends KernelTestBase {
     $this->container->get('request_stack')->pop();
   }
 
+  /**
+   * Write-gate-off forbidden result is max-age 0 when profile has allowed_ips.
+   *
+   * Security invariant: when the profile carries a non-empty allowed_ips list,
+   * EVERY AccessResult returned by checkCreateAccess() must be uncacheable
+   * (max-age 0) — including the write-gate-off forbidden branch. If that branch
+   * returned a cacheable result, a later request from the same account/roles
+   * but a different IP could receive a stale forbidden that is NOT the
+   * IP-gate denial (leaking the write-gate reason), or a later request from
+   * an allowed IP could receive a cached forbidden from a prior disallowed-IP
+   * request.
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testWriteGateOffForbiddenIsUncacheableWhenIpRestricted(): void {
+    // Profile: has IP restriction AND write gate off.
+    $profile = McpPolicyProfile::create([
+      'id' => 'ip_write_off',
+      'label' => 'IP write off',
+      'allow_write' => FALSE,
+      'allowed_ips' => ['203.0.113.0/24'],
+    ]);
+
+    $this->config('mcp_sentinel.settings')->set('enabled', TRUE)->save();
+
+    // Allowed IP, but write gate is off → forbidden AND max-age 0.
+    $this->pushRequest('203.0.113.42');
+    $result = $this->checker()->checkCreateAccess('node', $profile);
+    $this->assertTrue(
+      $result->isForbidden(),
+      'Write-gate-off must still be forbidden even for an allowed IP.'
+    );
+    $this->assertSame(
+      0,
+      $result->getCacheMaxAge(),
+      'Write-gate-off forbidden must be max-age 0 when the profile has IP restrictions — otherwise a cached forbidden could bypass the IP gate for a future request from a different IP.'
+    );
+    $this->container->get('request_stack')->pop();
+  }
+
+  /**
+   * Type-denied forbidden result is max-age 0 when profile has allowed_ips.
+   *
+   * The same invariant as above but for the entity-type-denied branch of
+   * checkCreateAccess(). If the type-denied result were cacheable, it could
+   * be re-served to a later request from the same account but a different IP —
+   * the IP gate would never re-evaluate.
+   *
+   * @covers ::checkCreateAccess
+   */
+  public function testTypeDeniedForbiddenIsUncacheableWhenIpRestricted(): void {
+    // Profile: has IP restriction AND 'node' is in denied_entity_types.
+    $profile = McpPolicyProfile::create([
+      'id' => 'ip_type_deny',
+      'label' => 'IP type deny',
+      'allow_write' => TRUE,
+      'denied_entity_types' => ['node'],
+      'allowed_ips' => ['203.0.113.0/24'],
+    ]);
+
+    $this->config('mcp_sentinel.settings')->set('enabled', TRUE)->save();
+
+    // Allowed IP, but 'node' is denied → forbidden AND max-age 0.
+    $this->pushRequest('203.0.113.42');
+    $result = $this->checker()->checkCreateAccess('node', $profile);
+    $this->assertTrue(
+      $result->isForbidden(),
+      'Type-denied must still be forbidden even for an allowed IP.'
+    );
+    $this->assertSame(
+      0,
+      $result->getCacheMaxAge(),
+      'Type-denied forbidden must be max-age 0 when the profile has IP restrictions — a cached forbidden could be served to a future allowed IP, silently bypassing the IP gate re-evaluation.'
+    );
+    $this->container->get('request_stack')->pop();
+  }
+
 }
