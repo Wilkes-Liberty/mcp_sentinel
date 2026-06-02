@@ -142,6 +142,27 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.anomaly_detector` | `McpAnomalyDetector` | evaluate anomaly rules over the audit stream |
 | `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks |
+| `mcp_sentinel.metrics` | `McpMetrics` | governance-dashboard data; reads existing stores only, every audit/webhook query window-bounded |
+
+### `McpMetrics` — governance-dashboard data
+
+`mcp_sentinel.metrics` is the single read-only source of dashboard data. It
+aggregates from existing stores only — `mcp_sentinel_audit_log`,
+`mcp_sentinel_webhook_delivery`, approval entities (NULL-safe when the
+submodule is absent), anomaly `@state`, and config. Every audit/webhook query is
+**window-bounded** via the indexed `timestamp`/`created` columns and uses the
+parameterized DB API; the `$window` argument is validated against a fixed
+allowlist (`24h`/`7d`/`30d`, mapped to seconds) and defaults to `24h` for any
+other value, so a caller can never inject an arbitrary bound. Each method is
+defensive (a failing metric logs and returns a safe zero/empty value) and
+results are statically cached per request.
+
+Methods: `statusSummary()`, `auditCounts($window)`, `auditTimeSeries($window)`,
+`allowedVsDenied($window)`, `operationMix($window)`, `topAgents($window, $limit = 5)`,
+`deniedReasons($window)`, `webhookHealth($window)`, `approvalSummary()`,
+`anomalySummary($window)`, `chainIntegrity()` (reads the stored last-verify
+result from `@state`; never re-runs `verifyChain()` on the hot path), and
+`activeControls()`.
 
 ### Resolving governance in your own code
 

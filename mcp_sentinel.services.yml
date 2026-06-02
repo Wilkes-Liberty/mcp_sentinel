@@ -107,3 +107,14 @@ services:
       - '@database'
       - '@current_user'
       - '@datetime.time'
+
+  mcp_sentinel.metrics:
+    class: Drupal\mcp_sentinel\Service\McpMetrics
+    arguments:
+      - '@database'
+      - '@config.factory'
+      - '@state'
+      - '@datetime.time'
+      - '@entity_type.manager'
+      - '@mcp_sentinel.audit_logger'
+      - '@logger.channel.mcp_sentinel'
