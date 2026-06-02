@@ -145,6 +145,19 @@ function mcp_sentinel_jsonapi_entity_filter_access(
 }
 
 /**
+ * Implements hook_mail().
+ *
+ * Formats outbound emails for anomaly alerts. The 'anomaly_alert' key is used
+ * by McpAlertDispatcher when anomaly_alert_email is non-empty.
+ */
+function mcp_sentinel_mail(string $key, array &$message, array $params): void {
+  if ($key === 'anomaly_alert') {
+    $message['subject'] = $params['subject'] ?? 'MCP Sentinel anomaly alert';
+    $message['body'][] = $params['body'] ?? '';
+  }
+}
+
+/**
  * Implements hook_cron().
  */
 function mcp_sentinel_cron(): void {
@@ -175,6 +188,26 @@ function mcp_sentinel_cron(): void {
     \Drupal::logger('mcp_sentinel')->info(
       'Re-enqueued @count due webhook delivery rows.',
       ['@count' => $requeued]
+    );
+  }
+
+  // Evaluate anomaly-detection rules against the audit stream. A rule that
+  // fires triggers log/email/webhook alerts via McpAlertDispatcher.
+  // Wrapped in try/catch so a detector exception never breaks cron entirely.
+  try {
+    /** @var \Drupal\mcp_sentinel\Service\McpAnomalyDetector $detector */
+    $detector = \Drupal::service('mcp_sentinel.anomaly_detector');
+    $firedRules = $detector->evaluate();
+    if ($firedRules) {
+      /** @var \Drupal\mcp_sentinel\Service\McpAlertDispatcher $alertDispatcher */
+      $alertDispatcher = \Drupal::service('mcp_sentinel.anomaly_alert_dispatcher');
+      $alertDispatcher->dispatch($firedRules);
+    }
+  }
+  catch (\Throwable $e) {
+    \Drupal::logger('mcp_sentinel')->error(
+      'Anomaly detection failed during cron: @message',
+      ['@message' => $e->getMessage()]
     );
   }
 }

@@ -82,6 +82,23 @@ services:
     tags:
       - { name: event_subscriber }
 
+  mcp_sentinel.anomaly_detector:
+    class: Drupal\mcp_sentinel\Service\McpAnomalyDetector
+    arguments:
+      - '@database'
+      - '@config.factory'
+      - '@state'
+      - '@datetime.time'
+
+  mcp_sentinel.anomaly_alert_dispatcher:
+    class: Drupal\mcp_sentinel\Service\McpAlertDispatcher
+    arguments:
+      - '@config.factory'
+      - '@logger.channel.mcp_sentinel'
+      - '@plugin.manager.mail'
+      - '@mcp_sentinel.webhook_queue_manager'
+      - '@language_manager'
+
   mcp_sentinel.content_lock:
     class: Drupal\mcp_sentinel\Service\McpContentLock
     arguments:

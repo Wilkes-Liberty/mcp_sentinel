@@ -361,6 +361,28 @@ function mcp_sentinel_update_10008(): string {
 }
 
 /**
+ * Add anomaly detection settings (all off by default; no rules enabled).
+ */
+function mcp_sentinel_update_10009(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $defaults = [
+    'anomaly_enabled'       => FALSE,
+    'anomaly_alert_email'   => '',
+    'anomaly_alert_webhook' => FALSE,
+    'anomaly_alert_log'     => TRUE,
+    'anomaly_rules'         => [],
+  ];
+  foreach ($defaults as $key => $default) {
+    if ($config->get($key) === NULL) {
+      $config->set($key, $default);
+    }
+  }
+  $config->save();
+  return 'Added anomaly detection settings (all off by default). '
+    . 'Configure rules at Configuration → Web services → MCP Sentinel.';
+}
+
+/**
  * Implements hook_uninstall().
  */
 function mcp_sentinel_uninstall(): void {

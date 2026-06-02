@@ -352,6 +352,66 @@ Ungoverned requests and profiles with `result_count_cap = 0` are never capped.
 The response-size cap applies to Tool output only (JSON:API and GraphQL
 response-size enforcement is deferred to a future pass).
 
+## Anomaly detection & alerting
+
+MCP Sentinel can evaluate threshold rules over the audit log on each cron run
+and fire alerts when a rule trips. This lets you detect bulk-delete spikes,
+access-denial storms, and other unusual agent behaviour automatically.
+
+### How rules work
+
+Each rule specifies:
+
+| Field | Description |
+|---|---|
+| `id` | Unique machine name (lowercase letters, numbers, underscores). |
+| `label` | Human-readable name shown in alerts. |
+| `operation_pattern` | Prefix match against the audit log `operation` column. `entity_delete` matches `entity_delete`, `entity_delete_bulk`, etc. |
+| `window_seconds` | Look-back window. Only rows newer than `now - window_seconds` are counted. |
+| `threshold` | Minimum row count to trigger the rule. |
+| `debounce_seconds` | Minimum seconds between alerts for this rule (default 3600). Prevents alert storms. |
+| `enabled` | `1` to enable; `0` to disable. |
+
+Rules are evaluated on cron. All rules ship **disabled by default** (D4.7) to
+avoid false positives during content imports. Enable and tune rules per-site.
+
+### Alert channels
+
+Three channels are available — mix and match:
+
+| Channel | Setting | Behaviour |
+|---|---|---|
+| **Log** | `anomaly_alert_log` (default `true`) | Writes a `warning` to the `mcp_sentinel` logger channel. Route this channel to syslog/SIEM for monitoring. |
+| **Email** | `anomaly_alert_email` | Sends an email to the configured address when non-empty; empty = disabled. Requires a working mail setup. |
+| **Webhook** | `anomaly_alert_webhook` | Enqueues an `mcp.anomaly.alert` event through the F9 webhook queue manager. Endpoints whose event filter includes `mcp.anomaly.alert` (or an empty filter) receive it, with retry/backoff/HMAC inherited. |
+
+### Enabling anomaly detection
+
+1. Go to **Configuration → Web services → MCP Sentinel**.
+2. In the *Anomaly detection* fieldset, check **Enable anomaly detection**.
+3. Configure alert channels (log is on by default; add an email and/or enable
+   webhook delivery as needed).
+4. Add rules in the textarea (one per line):
+   ```
+   bulk_delete|Bulk delete spike|entity_delete|300|20|3600|1
+   denied_storm|Access denial storm|denied_access|300|50|3600|1
+   ```
+5. Save. Alerts will fire on the next cron run where a rule is tripped.
+
+### Debounce (alert-storm suppression)
+
+The `debounce_seconds` field prevents a misconfigured rule from alerting on
+every cron run. After a rule fires, it is suppressed for `debounce_seconds`
+using `@state` (key `mcp_sentinel.anomaly_last_alert.{rule_id}`). Set
+`debounce_seconds` to `0` only for rules where you need unrestricted frequency.
+
+### Performance notes
+
+Queries hit only the indexed `operation` and `timestamp` columns of
+`mcp_sentinel_audit_log` — no full-table scans. Each rule is one
+lightweight `COUNT` query. A bad rule (zero threshold, empty pattern) is
+skipped with a log warning rather than fataling cron.
+
 ## Reliable webhooks
 
 MCP change events (`mcp.entity.presave`, `mcp.entity.delete`) are delivered to

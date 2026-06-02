@@ -111,6 +111,46 @@ mcp_sentinel.settings:
           mask:
             type: string
             label: 'Mask character'
+    anomaly_enabled:
+      type: boolean
+      label: 'Anomaly detection enabled'
+    anomaly_alert_email:
+      type: string
+      label: 'Alert email address (empty = disabled)'
+    anomaly_alert_webhook:
+      type: boolean
+      label: 'Send alerts via webhook queue'
+    anomaly_alert_log:
+      type: boolean
+      label: 'Log alerts to mcp_sentinel channel'
+    anomaly_rules:
+      type: sequence
+      label: 'Anomaly detection rules'
+      sequence:
+        type: mapping
+        label: 'Rule'
+        mapping:
+          id:
+            type: string
+            label: 'Rule ID'
+          label:
+            type: string
+            label: 'Label'
+          operation_pattern:
+            type: string
+            label: 'Operation prefix (e.g. entity_delete)'
+          window_seconds:
+            type: integer
+            label: 'Lookback window (seconds)'
+          threshold:
+            type: integer
+            label: 'Count threshold'
+          debounce_seconds:
+            type: integer
+            label: 'Min seconds between alerts (default 3600)'
+          enabled:
+            type: boolean
+            label: 'Rule enabled'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

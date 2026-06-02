@@ -421,6 +421,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $queue = \Drupal::queue('mcp_sentinel_webhook_delivery');
     $item = $queue->claimItem();
     $this->assertNotFalse($item, 'A queue item must be created by replay.');
+    \assert(is_object($item));
     $this->assertSame($originalPayload, $item->data['payload'],
       'Replay must enqueue the stored payload byte-for-byte.');
   }

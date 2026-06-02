@@ -38,3 +38,8 @@ dlp_patterns:
     label: credit_card
     regex: '\b\d{4}[\s\-]\d{4}[\s\-]\d{4}[\s\-]\d{4}\b'
     mask: '*'
+anomaly_enabled: false
+anomaly_alert_email: ''
+anomaly_alert_webhook: false
+anomaly_alert_log: true
+anomaly_rules: {  }

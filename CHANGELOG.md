@@ -8,6 +8,25 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- **Anomaly detection & alerting:** cron-evaluated rules over the MCP audit log
+  stream. The new `McpAnomalyDetector` service (`mcp_sentinel.anomaly_detector`)
+  evaluates all enabled anomaly rules on each cron run. Each rule specifies an
+  `operation_pattern` (prefix match against the `operation` column), a
+  `window_seconds` lookback, and a `count threshold`. When the count of matching
+  rows within the window meets or exceeds the threshold, the rule fires. Alerts
+  are dispatched through up to three channels via the new `McpAlertDispatcher`
+  service (`mcp_sentinel.anomaly_alert_dispatcher`): the `mcp_sentinel` logger
+  channel (warning-level; on by default), email (configured via
+  `anomaly_alert_email`; disabled when empty), and webhook (enqueues an
+  `mcp.anomaly.alert` event through the F9 `McpWebhookQueueManager`, inheriting
+  retry/SSRF/HMAC — enabled via `anomaly_alert_webhook`). Alert storms are
+  prevented by mandatory debounce: a rule fires at most once per
+  `debounce_seconds` (default 3600), stored in `@state` under
+  `mcp_sentinel.anomaly_last_alert.{rule_id}`. Zero enabled rules ship by
+  default (D4.7) — operators opt in per-site to avoid false positives during
+  content imports. `update_10009` seeds the anomaly settings on existing installs.
+  The settings form gains an *Anomaly detection* fieldset for enabling detection,
+  configuring alert channels, and managing rules via a pipe-delimited textarea.
 - **Reliable webhooks — queued delivery with retry/backoff, multiple endpoints,
   per-event filtering, delivery log + replay, and an SSRF guard:** webhook
   delivery moved off the old fire-and-forget `httpClient->requestAsync()` path

@@ -212,6 +212,66 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
 
+    // -----------------------------------------------------------------------
+    // Anomaly detection fieldset.
+    // -----------------------------------------------------------------------
+    $form['anomaly'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Anomaly detection'),
+      '#description' => $this->t('Evaluates thresholds over the audit log on cron. All rules ship disabled; enable and tune per-site to avoid false positives during content imports.'),
+    ];
+    $form['anomaly']['anomaly_enabled'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Enable anomaly detection'),
+      '#default_value' => $config->get('anomaly_enabled') ?? FALSE,
+    ];
+    $form['anomaly']['anomaly_alert_log'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Log alerts to MCP Sentinel logger channel'),
+      '#default_value' => $config->get('anomaly_alert_log') ?? TRUE,
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['anomaly']['anomaly_alert_email'] = [
+      '#type' => 'email',
+      '#title' => $this->t('Alert email address (empty = disabled)'),
+      '#default_value' => $config->get('anomaly_alert_email') ?? '',
+      '#description' => $this->t('When non-empty, an email is sent to this address for each fired rule. Requires a working mail setup.'),
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['anomaly']['anomaly_alert_webhook'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Send alerts via webhook queue (requires configured endpoints)'),
+      '#description' => $this->t('Enqueues an <code>mcp.anomaly.alert</code> event for each fired rule. Endpoints whose event filter includes <code>mcp.anomaly.alert</code> (or an empty filter) receive it.'),
+      '#default_value' => $config->get('anomaly_alert_webhook') ?? FALSE,
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+
+    // Build the rules textarea: id|label|operation_pattern|window_sec|threshold|debounce_sec|enabled(1/0).
+    $rulesLines = '';
+    foreach ((array) $config->get('anomaly_rules') as $r) {
+      if (!is_array($r)) {
+        continue;
+      }
+      $enabled = !empty($r['enabled']) ? '1' : '0';
+      $rulesLines .= implode('|', [
+        $r['id'] ?? '',
+        $r['label'] ?? '',
+        $r['operation_pattern'] ?? '',
+        $r['window_seconds'] ?? 300,
+        $r['threshold'] ?? 10,
+        $r['debounce_seconds'] ?? 3600,
+        $enabled,
+      ]) . "\n";
+    }
+    $form['anomaly']['anomaly_rules'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Rules'),
+      '#description' => $this->t('One rule per line: <code>id|label|operation_pattern|window_sec|threshold|debounce_sec|enabled(1/0)</code>. Example: <code>bulk_delete|Bulk delete spike|entity_delete|300|20|3600|0</code>. All rules ship disabled (0); set to 1 to enable. The operation_pattern is matched as a prefix.'),
+      '#default_value' => rtrim($rulesLines),
+      '#rows' => 8,
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+
     $form['webhooks'] = [
       '#type' => 'fieldset',
       '#title' => $this->t('Reliable webhooks'),
@@ -369,6 +429,55 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
+    // Validate anomaly rules textarea.
+    if ($form_state->getValue('anomaly_enabled')) {
+      $rawRules = (string) ($form_state->getValue('anomaly_rules') ?? '');
+      $ruleLines = array_filter(array_map('trim', explode("\n", $rawRules)));
+      $seenRuleIds = [];
+      foreach ($ruleLines as $lineNum => $line) {
+        $parts = explode('|', $line, 7);
+        if (count($parts) < 5) {
+          $form_state->setErrorByName(
+            'anomaly_rules',
+            $this->t(
+              'Anomaly rule line @n is invalid: expected at least <code>id|label|operation_pattern|window_sec|threshold</code>.',
+              ['@n' => (int) $lineNum + 1],
+            ),
+          );
+          continue;
+        }
+        $rId = trim($parts[0]);
+        $rOp = trim($parts[2]);
+        $rWin = (int) trim($parts[3]);
+        $rThr = (int) trim($parts[4]);
+        if ($rId === '') {
+          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: id must not be empty.', ['@n' => (int) $lineNum + 1]));
+        }
+        elseif (!preg_match('/^[a-z0-9_]+$/', $rId)) {
+          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: id must be lowercase letters, numbers and underscores only.', ['@n' => (int) $lineNum + 1]));
+        }
+        elseif (isset($seenRuleIds[$rId])) {
+          $form_state->setErrorByName('anomaly_rules', $this->t('Duplicate anomaly rule id "@id".', ['@id' => $rId]));
+        }
+        $seenRuleIds[$rId] = TRUE;
+        if ($rOp === '') {
+          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: operation_pattern must not be empty.', ['@n' => (int) $lineNum + 1]));
+        }
+        if ($rWin <= 0) {
+          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: window_sec must be a positive integer.', ['@n' => (int) $lineNum + 1]));
+        }
+        if ($rThr <= 0) {
+          $form_state->setErrorByName('anomaly_rules', $this->t('Anomaly rule line @n: threshold must be a positive integer.', ['@n' => (int) $lineNum + 1]));
+        }
+      }
+    }
+
+    // Validate the alert email address if provided.
+    $alertEmail = trim((string) ($form_state->getValue('anomaly_alert_email') ?? ''));
+    if ($alertEmail !== '' && !filter_var($alertEmail, FILTER_VALIDATE_EMAIL)) {
+      $form_state->setErrorByName('anomaly_alert_email', $this->t('Alert email address is not a valid email address.'));
+    }
+
     // Validate each configured webhook endpoint.
     $keyStorage = $this->entityTypeManager->getStorage('key');
     $endpoints = (array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []);
@@ -452,6 +561,31 @@ class McpSettingsForm extends ConfigFormBase {
         ];
       }
     }
+    // Parse the anomaly rules textarea into the sequence-of-maps config shape.
+    $rawRules = (string) ($form_state->getValue('anomaly_rules') ?? '');
+    $ruleLines = array_filter(array_map('trim', explode("\n", $rawRules)));
+    $anomaly_rules = [];
+    foreach ($ruleLines as $line) {
+      $parts = explode('|', $line, 7);
+      if (count($parts) < 5) {
+        continue;
+      }
+      $rId = trim($parts[0]);
+      $rOp = trim($parts[2]);
+      if ($rId === '' || $rOp === '') {
+        continue;
+      }
+      $anomaly_rules[] = [
+        'id'                => $rId,
+        'label'             => trim($parts[1]),
+        'operation_pattern' => $rOp,
+        'window_seconds'    => max(1, (int) trim($parts[3])),
+        'threshold'         => max(1, (int) trim($parts[4])),
+        'debounce_seconds'  => isset($parts[5]) ? max(0, (int) trim($parts[5])) : 3600,
+        'enabled'           => isset($parts[6]) && trim($parts[6]) === '1',
+      ];
+    }
+
     // Serialize the webhook endpoint slots into the config sequence, dropping
     // entirely blank slots.
     $webhook_endpoints = [];
@@ -489,6 +623,11 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
       ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
       ->set('dlp_patterns', $dlp_patterns)
+      ->set('anomaly_enabled', (bool) $form_state->getValue('anomaly_enabled'))
+      ->set('anomaly_alert_log', (bool) $form_state->getValue('anomaly_alert_log'))
+      ->set('anomaly_alert_email', trim((string) ($form_state->getValue('anomaly_alert_email') ?? '')))
+      ->set('anomaly_alert_webhook', (bool) $form_state->getValue('anomaly_alert_webhook'))
+      ->set('anomaly_rules', $anomaly_rules)
       ->set('webhook_endpoints', $webhook_endpoints)
       ->set('webhook_delivery_retention_days', (int) $form_state->getValue([
         'webhooks', 'webhook_delivery_retention_days',

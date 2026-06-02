@@ -66,7 +66,7 @@ final class McpRateLimitToolTest extends KernelTestBase {
   }
 
   /**
-   * The second tool call within the window is rejected with a rate-limit message.
+   * The second tool call within the window is rejected with a rate-limit msg.
    */
   public function testSecondCallBlockedByRateLimit(): void {
     $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
