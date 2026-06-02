@@ -144,6 +144,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks |
 | `mcp_sentinel.metrics` | `McpMetrics` | governance-dashboard data; reads existing stores only, every audit/webhook query window-bounded |
 | `mcp_sentinel.urgent_conditions` | `McpUrgentConditions` | `evaluate()` → critical/warning/info conditions + operator broadcast for the dashboard banner (pure read) |
+| `mcp_sentinel.chart_renderer` | `McpChartRenderer` | `render($type, $series, $options)` → a `drupal/charts` element when `charts` is enabled, else an inline-SVG fallback (empty-state on empty series) |
 
 ### `McpMetrics` — governance-dashboard data
 
@@ -184,6 +185,18 @@ governance dashboard banner:
 
 `severity` is one of `info`/`warning`/`critical`; `url` is an internal path to
 the relevant settings/audit route (or NULL). It performs no writes.
+
+### `McpChartRenderer` — dashboard charts (optional drupal/charts upgrade)
+
+`mcp_sentinel.chart_renderer` turns a metric series into a render array via
+`render(string $type, array $series, array $options = [])` (`$type` is
+`bar`/`line`/`donut`/`pie`; `$options` accepts `title` and `drill_url`). It
+isolates the optional `drupal/charts` contrib dependency to a single place:
+when the `charts` module is enabled it returns a `#type => 'chart'` element;
+otherwise it returns a self-contained inline-SVG/CSS fallback (no JavaScript).
+An empty series returns an empty-state ("No data") build. `drupal/charts` is a
+composer `suggest` only — it is never a hard requirement or an info.yml
+dependency.
 
 ### Resolving governance in your own code
 

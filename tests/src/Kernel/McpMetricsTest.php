@@ -208,8 +208,9 @@ class McpMetricsTest extends KernelTestBase {
     $series = $m->auditTimeSeries('24h');
     $this->assertNotEmpty($series);
     $this->assertSame(2, array_sum(array_column($series, 'count')));
-    // Each bucket must carry an 'anomaly' flag.
-    $this->assertArrayHasKey('anomaly', reset($series));
+    // Each bucket carries an 'anomaly' flag; none fired here.
+    $bucket = reset($series);
+    $this->assertFalse($bucket['anomaly']);
   }
 
   /**

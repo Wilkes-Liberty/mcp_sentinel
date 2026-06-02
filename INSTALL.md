@@ -34,6 +34,12 @@ These are required because the module calls their PHP APIs directly:
   so it is a `require-dev`/`suggest` dependency only; see the note on
   `minimum-stability` in `README.md`.
 - `drupal/graphql_compose` — enables the `mcp_sentinel_graphql` submodule.
+- `drupal/charts` — optional. Upgrades the governance dashboard's built-in
+  inline-SVG charts to interactive, exportable charts. Install it together with a
+  charts library submodule (for example `charts_chartjs`) and enable both:
+  `composer require drupal/charts` then `drush en charts charts_chartjs -y`. The
+  dashboard renders correctly without it — `McpChartRenderer` falls back to
+  self-contained inline SVG when the `charts` module is absent.
 
 ## 1. Install with Composer
 

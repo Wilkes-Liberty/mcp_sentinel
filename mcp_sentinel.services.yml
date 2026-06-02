@@ -128,3 +128,8 @@ services:
       - '@datetime.time'
       - '@entity_type.manager'
       - '@key.repository'
+
+  mcp_sentinel.chart_renderer:
+    class: Drupal\mcp_sentinel\Service\McpChartRenderer
+    arguments:
+      - '@module_handler'

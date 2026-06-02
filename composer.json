@@ -30,7 +30,8 @@
   "suggest": {
     "drupal/mcp_server":     "Exposes MCP Sentinel Tool plugins to MCP clients (via the mcp_sentinel_server submodule). Strongly recommended.",
     "drupal/graphql_compose": "Enables the mcp_sentinel_graphql submodule: mutation gating, field redaction, and audit for the GraphQL endpoint.",
-    "drupal/mcp_tools":      "Adds 222 site-building tools (across 34 optional submodules, per the drupal/mcp_tools project) via the Tool API; MCP Sentinel governs them."
+    "drupal/mcp_tools":      "Adds 222 site-building tools (across 34 optional submodules, per the drupal/mcp_tools project) via the Tool API; MCP Sentinel governs them.",
+    "drupal/charts":         "Optional: upgrades the governance-dashboard inline-SVG charts to interactive, exportable charts (install a library submodule such as charts_chartjs). The dashboard works without it."
   },
   "minimum-stability": "dev",
   "prefer-stable": true

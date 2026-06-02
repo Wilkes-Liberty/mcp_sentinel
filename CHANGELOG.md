@@ -12,6 +12,7 @@ stable release is tagged.
 - Live policy-preview summary on the profile form; refreshes via AJAX when gate or cap fields change.
 - McpMetrics dashboard-data service (`mcp_sentinel.metrics`): read-only, window-bounded aggregation over the existing audit, webhook, approval, anomaly, and config stores.
 - McpUrgentConditions service (`mcp_sentinel.urgent_conditions`): evaluates critical/warning conditions (broken hash chain, unresolvable encryption profile, governance off with recent traffic, unresolvable webhook signing key) plus the operator broadcast.
+- McpChartRenderer service (`mcp_sentinel.chart_renderer`): renders metric series as charts with a self-contained inline-SVG fallback and an optional `drupal/charts` upgrade (added to composer `suggest`).
 
 ### Changed
 - Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.
