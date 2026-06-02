@@ -15,6 +15,7 @@ stable release is tagged.
 - DLP patterns edited via an add/remove row table (config storage unchanged).
 - Anomaly rules edited via an add/remove row table (config storage unchanged).
 - Webhook endpoints edited via a dynamic add/remove editor (config storage unchanged).
+- Policy-profile form grouped into vertical tabs (Identity · Allowed operations · Entity scope · Redaction · Rate limits &amp; quotas · Network/IP).
 
 ## [1.0.0-beta1] - 2026-06-02
 
