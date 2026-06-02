@@ -7,6 +7,50 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Security (P5-W2 holistic review — F15/F16/F17)
+- **F15 — IP allowlist now enforced at the write tools' `checkAccess()`.** The
+  three read tools gated the IP allowlist in `checkAccess()`, but the four write
+  tools (`McpNodeOperationsTool`, `McpBulkOperationsTool`, `McpMediaUploadTool`,
+  `McpWorkflowTransitionTool`) only checked the permission. An IP-blocked governed
+  agent could therefore probe tool availability, and the write tools' early-return
+  error paths (e.g. bulk with `confirm=false` or empty `ids`) skipped the
+  per-entity IP gate entirely. Each write tool's `checkAccess()` now resolves the
+  account's profile and, when governed and `isClientIpAllowed()` fails, returns
+  `AccessResult::forbidden()` with `max-age 0` — matching the canonical
+  `McpContentLockTool` pattern. Ungoverned accounts are unaffected.
+- **F16 — JSON:API filter-access denials now carry cache contexts (cache-bleed
+  fix).** `McpAccessChecker::getJsonApiFilterAccess()` returned forbidden results
+  WITHOUT the `user.roles` + `oauth2_scopes` cache contexts that every other
+  governed access result attaches. JSON:API's filter-access cache could therefore
+  serve a governed deny-result to a non-governed account (or vice-versa) sharing
+  the cache bin. The forbidden results now add those contexts plus the
+  settings/profile cache tags, and are marked `max-age 0` when the profile carries
+  a non-empty `allowed_ips` list (client IP is not a cache context).
+- **F17 — Webhook SSRF guard now covers IPv6-only (AAAA) hosts.**
+  `McpWebhookWorker::validateAndResolveHost()` resolved only IPv4 A records via
+  `gethostbynamel()`/`gethostbyname()`, so a hostname with ONLY an AAAA record
+  (e.g. resolving to `::1` or `fd00::/8`) returned no IPv4 and slipped through
+  unpinned — letting cURL connect to the private IPv6 at send time (SSRF bypass).
+  The worker now also resolves AAAA records via `dns_get_record($host, DNS_AAAA)`,
+  runs every resolved IP (v4 and v6) through the internal-range guard, and blocks
+  fail-closed if ANY resolved address is internal. A public IPv6 is pinned via
+  `CURLOPT_RESOLVE` using the bracketed `host:port:[ipv6]` format, the same way
+  the IPv4 path pins its address. HTTPS enforcement is unchanged.
+
+### Added (tests — P5-W2 holistic review F15/F16/F17)
+- **F15** — IP-gate `checkAccess()` coverage for each write tool: deny from a
+  disallowed IP (with `max-age 0`), allow from an allowed IP, and (node) neutral
+  when `allowed_ips` is empty — added to `McpNodeOperationsToolTest`,
+  `McpBulkCapTest`, `McpMediaUploadToolTest`, `McpWorkflowTransitionToolTest`.
+- **F16** — `McpAccessCheckerTest`: filter-access denial carries `user.roles` +
+  `oauth2_scopes` contexts (denied-type and not-in-allowlist cases), and is
+  `max-age 0` when `allowed_ips` is set.
+- **F17** — `McpWebhookWorkerTest` (Unit): the resolution policy was extracted
+  into the pure, DNS-free `classifyResolvedIps()` so it is testable — an internal
+  IPv6 result is blocked, a mixed public+internal result is blocked fail-closed, a
+  public resolution returns the first IP, and `curlResolveEntry()` brackets IPv6
+  but not IPv4.
+
 ### Added (tests — P5-W1 task T8 + cache-invariant addition)
 - **W1-T8 / G10 — Server submodule registration** (`McpServerRegistrationTest`):
   4 kernel tests verifying that every base Tool plugin is discoverable by

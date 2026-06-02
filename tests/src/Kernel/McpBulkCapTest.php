@@ -12,6 +12,7 @@ use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests result-count and response-size caps on McpBulkOperationsTool.
@@ -75,7 +76,7 @@ final class McpBulkCapTest extends KernelTestBase {
       $role->save();
     }
     // Grant administer nodes so entity->access('update') passes in tests.
-    user_role_grant_permissions('mcp_api', ['administer nodes']);
+    user_role_grant_permissions('mcp_api', ['administer nodes', 'access mcp sentinel context']);
 
     // Enable role fallback so the test account triggers governance.
     // governed_roles already includes mcp_api from the default config install
@@ -250,6 +251,81 @@ final class McpBulkCapTest extends KernelTestBase {
     $message = (string) $tool->getResultMessage();
     $this->assertStringContainsStringIgnoringCase('truncated', $message,
       'Success message must mention truncation when size cap was applied.');
+  }
+
+  /**
+   * CheckAccess() denies a governed account from a disallowed IP (F15).
+   *
+   * The bulk tool's early-return error paths (confirm=false, empty ids) skip
+   * the per-entity IP gate, so the gate must live in checkAccess() up front.
+   */
+  public function testCheckAccessDeniedFromDisallowedIp(): void {
+    $this->setProfileIps(['203.0.113.0/24']);
+    $account = $this->createGovernedAdminAccount();
+    $this->pushRequest('192.0.2.1');
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_bulk_operations');
+    // Required inputs must be set: access() validates before checkAccess().
+    $tool->setInputValue('operation', 'unpublish');
+    $tool->setInputValue('ids', ['1']);
+    $tool->setInputValue('confirm', TRUE);
+    $result = $tool->access($account, TRUE);
+
+    $this->assertTrue($result->isForbidden(),
+      'McpBulkOperationsTool must deny a governed account whose IP is not in the allowlist.');
+    $this->assertSame(0, $result->getCacheMaxAge(),
+      'An IP-gate denial must be uncacheable.');
+    $this->popRequest();
+  }
+
+  /**
+   * CheckAccess() allows a governed account from an allowed IP (F15).
+   */
+  public function testCheckAccessAllowedFromAllowedIp(): void {
+    $this->setProfileIps(['203.0.113.0/24']);
+    $account = $this->createGovernedAdminAccount();
+    $this->pushRequest('203.0.113.42');
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_bulk_operations');
+    $tool->setInputValue('operation', 'unpublish');
+    $tool->setInputValue('ids', ['1']);
+    $tool->setInputValue('confirm', TRUE);
+    $result = $tool->access($account, TRUE);
+
+    $this->assertFalse($result->isForbidden(),
+      'McpBulkOperationsTool must allow a governed account whose IP is in the allowlist.');
+    $this->popRequest();
+  }
+
+  /**
+   * Sets an IP restriction on the default profile.
+   *
+   * @param string[] $allowedIps
+   *   The list of allowed IPs/CIDRs.
+   */
+  private function setProfileIps(array $allowedIps): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('allowed_ips', $allowedIps)
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+  }
+
+  /**
+   * Pushes a request with the given REMOTE_ADDR onto the request stack.
+   */
+  private function pushRequest(string $remoteAddr): void {
+    $request = Request::create('/', 'GET', [], [], [], ['REMOTE_ADDR' => $remoteAddr]);
+    \Drupal::service('request_stack')->push($request);
+  }
+
+  /**
+   * Pops the current request from the stack.
+   */
+  private function popRequest(): void {
+    \Drupal::service('request_stack')->pop();
   }
 
 }

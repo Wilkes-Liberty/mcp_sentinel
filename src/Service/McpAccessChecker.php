@@ -285,12 +285,32 @@ final class McpAccessChecker {
     string $entityTypeId,
     McpPolicyProfileInterface $profile,
   ): array {
+    // Every governed filter-access result must carry the same cacheability
+    // metadata as the other governed access hooks (mcp_sentinel_entity_access,
+    // _create_access, _field_access). Without the 'user.roles' and
+    // 'oauth2_scopes' cache contexts, JSON:API's filter-access cache can serve
+    // a governed deny-result to a non-governed account (or vice-versa) sharing
+    // the cache bin — a cache-bleed governance bypass. When the profile carries
+    // an IP restriction the result is additionally uncacheable (client IP is
+    // not a Drupal cache context), consistent with checkEntityAccess().
+    $contexts = ['user.roles', 'oauth2_scopes'];
+    $tags = [
+      'config:mcp_sentinel.settings',
+      'config:mcp_sentinel.mcp_policy_profile.' . $profile->id(),
+    ];
+    $ipRestricted = $profile->getAllowedIps() !== [];
+
+    $decorate = function (AccessResult $result) use ($contexts, $tags, $ipRestricted): AccessResult {
+      $result->addCacheContexts($contexts)->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    };
+
     if (in_array($entityTypeId, $profile->getDeniedEntityTypes(), TRUE)) {
-      return [JSONAPI_FILTER_AMONG_ALL => AccessResult::forbidden('Denied by MCP Sentinel.')];
+      return [JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::forbidden('Denied by MCP Sentinel.'))];
     }
     $allowed = $profile->getAllowedEntityTypes();
     if ($allowed && !in_array($entityTypeId, $allowed, TRUE)) {
-      return [JSONAPI_FILTER_AMONG_ALL => AccessResult::forbidden('Not in MCP Sentinel allowlist.')];
+      return [JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::forbidden('Not in MCP Sentinel allowlist.'))];
     }
     return [];
   }

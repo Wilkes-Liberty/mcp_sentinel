@@ -12,6 +12,7 @@ use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Kernel tests for McpMediaUploadTool governed behavior.
@@ -278,6 +279,78 @@ final class McpMediaUploadToolTest extends KernelTestBase {
       strtolower((string) $tool->getResultMessage()),
       'Failure message must identify the unknown bundle.'
     );
+  }
+
+  /**
+   * CheckAccess() denies a governed account from a disallowed IP (F15).
+   */
+  public function testCheckAccessDeniedFromDisallowedIp(): void {
+    $this->setProfileIps(['203.0.113.0/24']);
+    $account = $this->createGovernedAccount();
+    $this->pushRequest('192.0.2.1');
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_media_create');
+    // Required inputs must be set: access() validates before checkAccess().
+    $tool->setInputValue('bundle', 'image');
+    $tool->setInputValue('name', 'IP gate test');
+    $tool->setInputValue('source_value', '1');
+    $result = $tool->access($account, TRUE);
+
+    $this->assertTrue($result->isForbidden(),
+      'McpMediaUploadTool must deny a governed account whose IP is not in the allowlist.');
+    $this->assertSame(0, $result->getCacheMaxAge(),
+      'An IP-gate denial must be uncacheable.');
+    $this->popRequest();
+  }
+
+  /**
+   * CheckAccess() allows a governed account from an allowed IP (F15).
+   */
+  public function testCheckAccessAllowedFromAllowedIp(): void {
+    $this->setProfileIps(['203.0.113.0/24']);
+    $account = $this->createGovernedAccount();
+    $this->pushRequest('203.0.113.42');
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_media_create');
+    $tool->setInputValue('bundle', 'image');
+    $tool->setInputValue('name', 'IP gate test');
+    $tool->setInputValue('source_value', '1');
+    $result = $tool->access($account, TRUE);
+
+    $this->assertFalse($result->isForbidden(),
+      'McpMediaUploadTool must allow a governed account whose IP is in the allowlist.');
+    $this->popRequest();
+  }
+
+  /**
+   * Sets an IP restriction on the default profile.
+   *
+   * @param string[] $allowedIps
+   *   The list of allowed IPs/CIDRs.
+   */
+  private function setProfileIps(array $allowedIps): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('allowed_ips', $allowedIps)
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+  }
+
+  /**
+   * Pushes a request with the given REMOTE_ADDR onto the request stack.
+   */
+  private function pushRequest(string $remoteAddr): void {
+    $request = Request::create('/', 'GET', [], [], [], ['REMOTE_ADDR' => $remoteAddr]);
+    \Drupal::service('request_stack')->push($request);
+  }
+
+  /**
+   * Pops the current request from the stack.
+   */
+  private function popRequest(): void {
+    \Drupal::service('request_stack')->pop();
   }
 
 }

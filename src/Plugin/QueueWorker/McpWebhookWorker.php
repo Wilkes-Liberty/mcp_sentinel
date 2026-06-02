@@ -79,6 +79,68 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   }
 
   /**
+   * Classifies a set of resolved IPs (v4 and v6) against the SSRF guard.
+   *
+   * Pure and static so the resolution-handling policy is unit-testable without
+   * mocking DNS. Given the list of IP addresses a hostname resolved to (any mix
+   * of IPv4 A records and IPv6 AAAA records), it applies the fail-closed rule:
+   * if ANY resolved IP is internal/reserved the whole destination is blocked
+   * (an attacker returning a mix of public and private addresses must not slip
+   * the private one through). Otherwise it returns the first public IP so the
+   * caller can pin it via CURLOPT_RESOLVE.
+   *
+   * @param string[] $ips
+   *   The list of resolved IP addresses (IPv4 and/or IPv6).
+   *
+   * @return string|false|null
+   *   NULL when any resolved IP is internal (SSRF-blocked); the first public IP
+   *   string when all resolved IPs are public; FALSE when the list is empty
+   *   (nothing resolved — the caller lets the HTTP layer fail it normally).
+   */
+  public static function classifyResolvedIps(array $ips): string|false|null {
+    $validatedIp = FALSE;
+    foreach ($ips as $ip) {
+      $ip = (string) $ip;
+      if ($ip === '') {
+        continue;
+      }
+      if (self::ipIsInternal($ip)) {
+        // Any internal IP in the result set blocks the whole request.
+        return NULL;
+      }
+      if ($validatedIp === FALSE) {
+        // Capture the first public IP to pin via CURLOPT_RESOLVE.
+        $validatedIp = $ip;
+      }
+    }
+    return $validatedIp;
+  }
+
+  /**
+   * Builds the CURLOPT_RESOLVE pin entry for a host/port/IP triple.
+   *
+   * The CURLOPT_RESOLVE format is "host:port:address"; for an IPv6 literal the
+   * address must be wrapped in square brackets ("host:port:[::1]"). This helper
+   * applies the correct bracket format so an AAAA-resolved IPv6 destination is
+   * pinned the same way the IPv4 path pins its address.
+   *
+   * @param string $host
+   *   The request hostname.
+   * @param int $port
+   *   The request port.
+   * @param string $ip
+   *   The validated public IP (v4 or v6) to pin.
+   *
+   * @return string
+   *   The CURLOPT_RESOLVE entry string.
+   */
+  public static function curlResolveEntry(string $host, int $port, string $ip): string {
+    // An IPv6 literal (contains a colon) must be bracketed for CURLOPT_RESOLVE.
+    $pinned = str_contains($ip, ':') ? '[' . $ip . ']' : $ip;
+    return "{$host}:{$port}:{$pinned}";
+  }
+
+  /**
    * Constructs a new McpWebhookWorker.
    *
    * @param array $configuration
@@ -198,11 +260,14 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // FALSE means unresolvable hostname — let the HTTP layer fail it normally.
     $curlResolvePin = [];
     if ($resolvedIp !== FALSE) {
-      $host = (string) parse_url($url, PHP_URL_HOST);
+      $host = trim((string) parse_url($url, PHP_URL_HOST), '[]');
       $port = (int) (parse_url($url, PHP_URL_PORT) ?: 443);
       // Pin the validated IP to the host:port so libcurl skips a second DNS
-      // lookup and connects to the exact address we checked.
-      $curlResolvePin = [CURLOPT_RESOLVE => ["{$host}:{$port}:{$resolvedIp}"]];
+      // lookup and connects to the exact address we checked. An IPv6 address
+      // (AAAA-resolved) is bracket-wrapped per the CURLOPT_RESOLVE format.
+      $curlResolvePin = [
+        CURLOPT_RESOLVE => [self::curlResolveEntry($host, $port, $resolvedIp)],
+      ];
     }
 
     // Fix 3: Atomic claim — update status from 'pending' to 'in_progress'
@@ -388,11 +453,30 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return self::ipIsInternal($host) ? NULL : $host;
     }
 
-    // Resolve all A records for the hostname. Block if ANY resolved IP is
-    // internal (an attacker returning a mix of public and private IPs must not
-    // bypass the guard).
+    // Resolve BOTH A (IPv4) and AAAA (IPv6) records for the hostname. A
+    // hostname with only an AAAA record (e.g. pointing at ::1 or fd00::/8)
+    // would otherwise return no IPv4 from gethostbynamel() and slip through
+    // unpinned, letting cURL connect to a private IPv6 at send time (SSRF
+    // bypass). We collect every resolved address and run them all through the
+    // internal-IP guard: if ANY resolved IP (v4 or v6) is internal the whole
+    // destination is blocked (fail-closed against split A/AAAA results).
     $records = @gethostbynamel($host);
-    if ($records === FALSE || $records === []) {
+    $ips = ($records === FALSE) ? [] : $records;
+
+    // AAAA lookup via dns_get_record(). gethostbyname*() are IPv4-only, so this
+    // is the only path that surfaces IPv6-only hosts.
+    $aaaa = @dns_get_record($host, DNS_AAAA);
+    if (is_array($aaaa)) {
+      foreach ($aaaa as $record) {
+        if (!empty($record['ipv6'])) {
+          $ips[] = (string) $record['ipv6'];
+        }
+      }
+    }
+
+    if ($ips === []) {
+      // Last-resort IPv4 lookup (covers resolvers where gethostbynamel() fails
+      // but gethostbyname() succeeds).
       $ip = @gethostbyname($host);
       // Unresolvable: the host value equals the input when lookup fails.
       if ($ip === $host) {
@@ -400,20 +484,12 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
         // the delivery can be retried.
         return FALSE;
       }
-      $records = [$ip];
+      $ips = [$ip];
     }
-    $validatedIp = FALSE;
-    foreach ($records as $ip) {
-      if (self::ipIsInternal($ip)) {
-        // Any internal IP in the result set blocks the whole request.
-        return NULL;
-      }
-      if ($validatedIp === FALSE) {
-        // Capture the first public IP to pin via CURLOPT_RESOLVE.
-        $validatedIp = $ip;
-      }
-    }
-    return $validatedIp;
+
+    // Delegate the public/internal classification to the pure, unit-testable
+    // helper so the fail-closed policy has exactly one implementation.
+    return self::classifyResolvedIps($ips);
   }
 
   /**

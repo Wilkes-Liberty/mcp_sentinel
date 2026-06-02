@@ -164,6 +164,20 @@ final class McpMediaUploadTool extends ToolBase {
    */
   protected function checkAccess(array $values, AccountInterface $account, bool $return_as_object = FALSE): bool|AccessResultInterface {
     $access = AccessResult::allowedIfHasPermission($account, 'access mcp sentinel context');
+    if (!$access->isAllowed()) {
+      return $return_as_object ? $access : FALSE;
+    }
+
+    // IP allowlist gate — governed requests only. When a policy profile applies
+    // and the client IP is not in the profile's allowlist, deny access so an
+    // IP-blocked agent cannot even probe the tool or reach the per-entity gate.
+    // The result is explicitly uncacheable: client IP is not a cache context.
+    $profile = $this->policyResolver->resolve($account);
+    if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
+      $denied = AccessResult::forbidden('Source IP not permitted by MCP Sentinel policy.')->setCacheMaxAge(0);
+      return $return_as_object ? $denied : FALSE;
+    }
+
     return $return_as_object ? $access : $access->isAllowed();
   }
 

@@ -221,4 +221,63 @@ final class McpAccessCheckerTest extends KernelTestBase {
     );
   }
 
+  /**
+   * A JSON:API filter-access deny carries the governance cache contexts.
+   *
+   * Without 'user.roles' + 'oauth2_scopes', JSON:API's filter-access cache can
+   * serve a governed deny-result to a non-governed account sharing the bin.
+   *
+   * @covers ::getJsonApiFilterAccess
+   */
+  public function testJsonApiFilterAccessDenyHasCacheContexts(): void {
+    $this->setMaster(TRUE);
+    $p = $this->profile(['denied_entity_types' => ['node']]);
+    $access = $this->checker()->getJsonApiFilterAccess('node', $p);
+    $result = $access[JSONAPI_FILTER_AMONG_ALL] ?? NULL;
+    $this->assertNotNull($result, 'A denied type must return a filter-access result.');
+    $this->assertTrue($result->isForbidden());
+    $contexts = $result->getCacheContexts();
+    $this->assertContains('user.roles', $contexts,
+      'JSON:API filter-access deny must vary by user.roles.');
+    $this->assertContains('oauth2_scopes', $contexts,
+      'JSON:API filter-access deny must vary by oauth2_scopes.');
+    // No IP restriction → result remains cacheable (max-age not forced to 0).
+    $this->assertSame(-1, $result->getCacheMaxAge(),
+      'Without an IP restriction the filter-access result stays cacheable.');
+  }
+
+  /**
+   * The not-in-allowlist filter-access deny also carries the cache contexts.
+   *
+   * @covers ::getJsonApiFilterAccess
+   */
+  public function testJsonApiFilterAccessAllowlistDenyHasCacheContexts(): void {
+    $this->setMaster(TRUE);
+    $p = $this->profile(['allowed_entity_types' => ['taxonomy_term']]);
+    $access = $this->checker()->getJsonApiFilterAccess('node', $p);
+    $result = $access[JSONAPI_FILTER_AMONG_ALL] ?? NULL;
+    $this->assertNotNull($result);
+    $this->assertTrue($result->isForbidden());
+    $this->assertContains('user.roles', $result->getCacheContexts());
+    $this->assertContains('oauth2_scopes', $result->getCacheContexts());
+  }
+
+  /**
+   * With allowed_ips set, the filter-access deny is uncacheable (max-age 0).
+   *
+   * @covers ::getJsonApiFilterAccess
+   */
+  public function testJsonApiFilterAccessDenyUncacheableWhenIpRestricted(): void {
+    $this->setMaster(TRUE);
+    $p = $this->profile([
+      'denied_entity_types' => ['node'],
+      'allowed_ips' => ['203.0.113.0/24'],
+    ]);
+    $result = $this->checker()->getJsonApiFilterAccess('node', $p)[JSONAPI_FILTER_AMONG_ALL];
+    $this->assertContains('user.roles', $result->getCacheContexts());
+    $this->assertContains('oauth2_scopes', $result->getCacheContexts());
+    $this->assertSame(0, $result->getCacheMaxAge(),
+      'An IP-restricted profile must make the filter-access deny uncacheable.');
+  }
+
 }
