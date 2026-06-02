@@ -8,6 +8,56 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- **Reliable webhooks — queued delivery with retry/backoff, multiple endpoints,
+  per-event filtering, delivery log + replay, and an SSRF guard:** webhook
+  delivery moved off the old fire-and-forget `httpClient->requestAsync()` path
+  (which silently lost notifications if PHP exited before the promise settled)
+  onto the Drupal queue system. `McpEventDispatcher::dispatch()` keeps its public
+  signature, but now enqueues via the new `McpWebhookQueueManager`
+  (`mcp_sentinel.webhook_queue_manager`): for each enabled endpoint whose event
+  filter matches, it writes a `pending` row to the new
+  `mcp_sentinel_webhook_delivery` table and pushes an item onto the
+  `mcp_sentinel_webhook_delivery` queue.
+  - **Multiple endpoints + per-event filtering:** the new `webhook_endpoints`
+    setting is a sequence of `{id, label, url, secret_key, events[], enabled}`
+    maps. An endpoint receives only events whose name is in its `events` list
+    (empty = all events). HTTPS is required.
+  - **Retry + exponential backoff:** the `McpWebhookWorker` QueueWorker
+    (`id: mcp_sentinel_webhook_delivery`, cron time 30 s) POSTs the signed body
+    and, on a non-2xx response or network error, schedules a retry — 5 attempts
+    with backoff intervals of 30 s, 5 min, 30 min, 2 h, 8 h. The delivery row's
+    `next_attempt` gates early sends (not-yet-due rows are requeued unchanged);
+    after the 5th attempt the row is marked `failed`. A row already `sent` (or
+    terminally `failed`/`failed_ssrf`) short-circuits with no HTTP call, so a
+    duplicate queue item or concurrent worker can never double-send.
+  - **SSRF guard (two layers):** Layer 1 at enqueue time rejects non-HTTPS URLs
+    and obvious internal literals (`localhost`, `127.*`, `0.0.0.0`, `::1`).
+    Layer 2 runs in the worker at send time (DNS can rebind after enqueue):
+    literal IPs are validated directly and hostnames are resolved via
+    `gethostbynamel()`, blocking any address in a private/loopback/link-local/
+    reserved range (RFC1918 `10/8`, `172.16/12`, `192.168/16`, link-local
+    `169.254/16`, loopback `127/8` + `::1`, unique-local `fc00::/7`, etc.);
+    blocked rows are marked `failed_ssrf`. A global `allow_internal_webhook_urls`
+    flag (default `FALSE`) disables Layer 2 only for legitimate internal-network
+    deployments; HTTPS enforcement always applies.
+  - **HMAC signing:** the body is signed with HMAC-SHA256 using the endpoint's
+    Key-resolved secret and sent in the `X-MCP-Signature: sha256=…` header.
+  - **Delivery log UI + replay:** a report at
+    `/admin/reports/mcp-sentinel/webhooks` (permission `administer mcp sentinel`)
+    lists recent deliveries with status, attempts, last response code and next
+    attempt. A CSRF-protected **Replay** action (and `drush
+    mcp-sentinel:webhook-replay <id>`) resets a `failed`/`sent` row to `pending`,
+    attempts `0`, and re-queues it.
+  - **Retention/prune:** the `webhook_delivery_retention_days` setting (default
+    30) bounds table growth; `drush mcp-sentinel:webhook-prune` and `hook_cron`
+    delete rows older than the window.
+  - **Migration:** `update_10007` creates the delivery-log table; `update_10008`
+    seeds the retention/opt-out defaults and migrates a legacy single
+    `webhook_url`/`webhook_secret_key`/`webhook_enabled` into one
+    `webhook_endpoints` entry (legacy keys retained for review). The settings
+    form gains a *Reliable webhooks* section managing endpoints, retention and
+    the internal-URL opt-out, and keeps the legacy single-endpoint fields visible
+    with a deprecation notice.
 - **Per-profile exfiltration guards (result-count, response-size, JSON:API page
   ceiling):** each `mcp_policy_profile` now carries `result_count_cap` (default
   `0` = unlimited) and `response_size_cap` (default `0` = unlimited) fields. A

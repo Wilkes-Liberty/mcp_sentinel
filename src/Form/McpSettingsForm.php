@@ -212,27 +212,115 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
 
-    $form['webhooks'] = ['#type' => 'fieldset', '#title' => $this->t('HTTPS Webhooks')];
-    $form['webhooks']['webhook_enabled'] = [
+    $form['webhooks'] = [
+      '#type' => 'fieldset',
+      '#title' => $this->t('Reliable webhooks'),
+      '#description' => $this->t('Configure one or more HTTPS endpoints. Each matching event records a delivery row and is queued for delivery with HMAC-SHA256 signing, retry/backoff (5 attempts over 30 s–8 h) and an SSRF guard. Review the <a href=":url">webhook delivery log</a>.', [
+        ':url' => '/admin/reports/mcp-sentinel/webhooks',
+      ]),
+      '#tree' => TRUE,
+    ];
+    $form['webhooks']['webhook_delivery_retention_days'] = [
+      '#type'          => 'number',
+      '#title'         => $this->t('Delivery log retention (days, 0 = forever)'),
+      '#default_value' => $config->get('webhook_delivery_retention_days') ?? 30,
+      '#min'           => 0,
+      '#max'           => 3650,
+    ];
+    $form['webhooks']['allow_internal_webhook_urls'] = [
       '#type'          => 'checkbox',
-      '#title'         => $this->t('Enable webhook notifications'),
+      '#title'         => $this->t('Allow internal/private endpoint URLs (disables SSRF DNS guard)'),
+      '#description'   => $this->t('Only enable for legitimate internal-network deployments. HTTPS is always required; this option disables the send-time DNS resolution check that blocks private/loopback/link-local addresses.'),
+      '#default_value' => $config->get('allow_internal_webhook_urls') ?? FALSE,
+    ];
+
+    // Key options for the per-endpoint signing-secret select.
+    /** @var \Drupal\key\KeyInterface[] $keys */
+    $keys = $this->entityTypeManager->getStorage('key')->loadMultiple();
+    $key_options = ['' => $this->t('- None -')];
+    foreach ($keys as $key_id => $key) {
+      $key_options[$key_id] = (string) $key->label();
+    }
+
+    // Render existing endpoints plus two blank slots for adding new ones.
+    $endpoints = array_values((array) ($config->get('webhook_endpoints') ?? []));
+    $slots = count($endpoints) + 2;
+    $form['webhooks']['endpoints'] = [
+      '#type' => 'container',
+      '#tree' => TRUE,
+    ];
+    for ($i = 0; $i < $slots; $i++) {
+      $ep = $endpoints[$i] ?? [];
+      $form['webhooks']['endpoints'][$i] = [
+        '#type' => 'details',
+        '#title' => $this->t('Endpoint @n', ['@n' => $i + 1]),
+        '#open' => $i < count($endpoints),
+      ];
+      $form['webhooks']['endpoints'][$i]['id'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Machine ID'),
+        '#default_value' => (string) ($ep['id'] ?? ''),
+        '#size' => 32,
+        '#maxlength' => 64,
+        '#description' => $this->t('Lowercase letters, numbers and underscores. Leave the whole endpoint blank to skip it.'),
+      ];
+      $form['webhooks']['endpoints'][$i]['label'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Label'),
+        '#default_value' => (string) ($ep['label'] ?? ''),
+        '#size' => 40,
+        '#maxlength' => 128,
+      ];
+      $form['webhooks']['endpoints'][$i]['url'] = [
+        '#type' => 'url',
+        '#title' => $this->t('Endpoint URL (HTTPS required)'),
+        '#default_value' => (string) ($ep['url'] ?? ''),
+      ];
+      $form['webhooks']['endpoints'][$i]['secret_key'] = [
+        '#type' => 'select',
+        '#title' => $this->t('Signing secret (Key)'),
+        '#options' => $key_options,
+        '#default_value' => (string) ($ep['secret_key'] ?? ''),
+      ];
+      $form['webhooks']['endpoints'][$i]['events'] = [
+        '#type' => 'textarea',
+        '#title' => $this->t('Event filter (one per line; empty = all events)'),
+        '#default_value' => implode("\n", (array) ($ep['events'] ?? [])),
+        '#rows' => 3,
+      ];
+      $form['webhooks']['endpoints'][$i]['enabled'] = [
+        '#type' => 'checkbox',
+        '#title' => $this->t('Enabled'),
+        '#default_value' => !empty($ep['enabled']),
+      ];
+    }
+
+    // Legacy single-endpoint fields (D4.5: kept visible with a migration
+    // notice; webhook_endpoints above is the going-forward mechanism).
+    $form['webhooks_legacy'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Legacy single webhook (deprecated)'),
+      '#open' => (bool) $config->get('webhook_url'),
+      '#description' => $this->t('These legacy settings are superseded by the endpoints above and are no longer used for delivery. They are retained for review; configure delivery via <em>Reliable webhooks</em> instead, then clear these.'),
+    ];
+    $form['webhooks_legacy']['webhook_enabled'] = [
+      '#type'          => 'checkbox',
+      '#title'         => $this->t('Enable legacy webhook notifications'),
       '#default_value' => $config->get('webhook_enabled') ?? FALSE,
     ];
-    $form['webhooks']['webhook_url'] = [
+    $form['webhooks_legacy']['webhook_url'] = [
       '#type'          => 'url',
-      '#title'         => $this->t('Webhook URL (HTTPS required)'),
+      '#title'         => $this->t('Legacy webhook URL (HTTPS required)'),
       '#default_value' => $config->get('webhook_url') ?? '',
-      '#states'        => ['visible' => ['[name="webhook_enabled"]' => ['checked' => TRUE]]],
     ];
-    $form['webhooks']['webhook_secret_key'] = [
+    $form['webhooks_legacy']['webhook_secret_key'] = [
       '#type'          => 'key_select',
-      '#title'         => $this->t('Webhook signing secret (HMAC-SHA256)'),
-      '#description'   => $this->t('Select a <a href=":url">Key</a> holding the signing secret. Use a File or Environment key provider so the secret is never written to exported configuration.', [
+      '#title'         => $this->t('Legacy webhook signing secret (HMAC-SHA256)'),
+      '#description'   => $this->t('Select a <a href=":url">Key</a> holding the signing secret.', [
         ':url' => '/admin/config/system/keys',
       ]),
       '#default_value' => $config->get('webhook_secret_key') ?? '',
       '#empty_option'  => $this->t('- None -'),
-      '#states'        => ['visible' => ['[name="webhook_enabled"]' => ['checked' => TRUE]]],
     ];
 
     return parent::buildForm($form, $form_state);
@@ -275,10 +363,64 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
-    $url = $form_state->getValue('webhook_url');
-    if ($form_state->getValue('webhook_enabled') && $url && !str_starts_with($url, 'https://')) {
-      $form_state->setErrorByName('webhook_url', $this->t('Webhook URL must use HTTPS.'));
+    // Validate each configured webhook endpoint.
+    $keyStorage = $this->entityTypeManager->getStorage('key');
+    $endpoints = (array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []);
+    $seen_ids = [];
+    foreach ($endpoints as $i => $ep) {
+      $id = trim((string) ($ep['id'] ?? ''));
+      $url = trim((string) ($ep['url'] ?? ''));
+      // An entirely blank slot is skipped.
+      if ($id === '' && $url === '') {
+        continue;
+      }
+      if ($id === '') {
+        $form_state->setErrorByName("webhooks][endpoints][$i][id", $this->t('Endpoint @n needs a machine ID.', ['@n' => $i + 1]));
+      }
+      elseif (!preg_match('/^[a-z0-9_]+$/', $id)) {
+        $form_state->setErrorByName("webhooks][endpoints][$i][id", $this->t('Endpoint @n machine ID must contain only lowercase letters, numbers and underscores.', ['@n' => $i + 1]));
+      }
+      elseif (isset($seen_ids[$id])) {
+        $form_state->setErrorByName("webhooks][endpoints][$i][id", $this->t('Duplicate endpoint machine ID "@id".', ['@id' => $id]));
+      }
+      $seen_ids[$id] = TRUE;
+      if ($url === '' || !str_starts_with($url, 'https://')) {
+        $form_state->setErrorByName("webhooks][endpoints][$i][url", $this->t('Endpoint @n URL must use HTTPS.', ['@n' => $i + 1]));
+      }
+      elseif ($this->isInternalHost($url)) {
+        $form_state->setErrorByName("webhooks][endpoints][$i][url", $this->t('Endpoint @n URL points at an internal/loopback host.', ['@n' => $i + 1]));
+      }
+      $secret = trim((string) ($ep['secret_key'] ?? ''));
+      if ($secret !== '' && !$keyStorage->load($secret)) {
+        $form_state->setErrorByName("webhooks][endpoints][$i][secret_key", $this->t(
+          'Endpoint @n signing key "@key" does not exist.',
+          ['@n' => $i + 1, '@key' => $secret],
+        ));
+      }
     }
+
+    $legacy_url = $form_state->getValue(['webhooks_legacy', 'webhook_url']);
+    if ($form_state->getValue(['webhooks_legacy', 'webhook_enabled']) && $legacy_url && !str_starts_with($legacy_url, 'https://')) {
+      $form_state->setErrorByName('webhooks_legacy][webhook_url', $this->t('Webhook URL must use HTTPS.'));
+    }
+  }
+
+  /**
+   * Fast (DNS-free) check for an obviously internal/loopback webhook host.
+   *
+   * @param string $url
+   *   The endpoint URL.
+   *
+   * @return bool
+   *   TRUE if the host is localhost or a loopback literal.
+   */
+  private function isInternalHost(string $url): bool {
+    $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+    $host = trim($host, '[]');
+    if (in_array($host, ['localhost', '::1', '0.0.0.0'], TRUE)) {
+      return TRUE;
+    }
+    return str_starts_with($host, '127.');
   }
 
   /**
@@ -304,6 +446,25 @@ class McpSettingsForm extends ConfigFormBase {
         ];
       }
     }
+    // Serialize the webhook endpoint slots into the config sequence, dropping
+    // entirely blank slots.
+    $webhook_endpoints = [];
+    foreach ((array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []) as $ep) {
+      $id = trim((string) ($ep['id'] ?? ''));
+      $url = trim((string) ($ep['url'] ?? ''));
+      if ($id === '' && $url === '') {
+        continue;
+      }
+      $webhook_endpoints[] = [
+        'id'         => $id,
+        'label'      => trim((string) ($ep['label'] ?? '')),
+        'url'        => $url,
+        'secret_key' => trim((string) ($ep['secret_key'] ?? '')),
+        'events'     => $split((string) ($ep['events'] ?? '')),
+        'enabled'    => (bool) ($ep['enabled'] ?? FALSE),
+      ];
+    }
+
     // An empty textarea clears to [] (falls back to default patterns at runtime
     // via McpDlp::createFromConfig, which calls defaultPatterns() when empty).
     $this->config('mcp_sentinel.settings')
@@ -321,9 +482,14 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
       ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
       ->set('dlp_patterns', $dlp_patterns)
-      ->set('webhook_enabled', (bool) $form_state->getValue('webhook_enabled'))
-      ->set('webhook_url', $form_state->getValue('webhook_url'))
-      ->set('webhook_secret_key', $form_state->getValue('webhook_secret_key'))
+      ->set('webhook_endpoints', $webhook_endpoints)
+      ->set('webhook_delivery_retention_days', (int) $form_state->getValue([
+        'webhooks', 'webhook_delivery_retention_days',
+      ]))
+      ->set('allow_internal_webhook_urls', (bool) $form_state->getValue(['webhooks', 'allow_internal_webhook_urls']))
+      ->set('webhook_enabled', (bool) $form_state->getValue(['webhooks_legacy', 'webhook_enabled']))
+      ->set('webhook_url', $form_state->getValue(['webhooks_legacy', 'webhook_url']))
+      ->set('webhook_secret_key', $form_state->getValue(['webhooks_legacy', 'webhook_secret_key']))
       ->save();
 
     parent::submitForm($form, $form_state);

@@ -156,4 +156,12 @@ function mcp_sentinel_cron(): void {
     );
   }
   \Drupal::service('mcp_sentinel.content_lock')->releaseExpired();
+
+  $prunedWebhooks = \Drupal::service('mcp_sentinel.webhook_queue_manager')->pruneOldDeliveries();
+  if ($prunedWebhooks > 0) {
+    \Drupal::logger('mcp_sentinel')->info(
+      'Pruned @count old webhook delivery log rows.',
+      ['@count' => $prunedWebhooks]
+    );
+  }
 }

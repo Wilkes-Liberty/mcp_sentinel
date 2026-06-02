@@ -8,6 +8,9 @@ webhook_enabled: false
 webhook_url: ''
 webhook_secret: ''
 webhook_secret_key: ''
+webhook_endpoints: {  }
+webhook_delivery_retention_days: 30
+allow_internal_webhook_urls: false
 agent_oauth_clients: {  }
 agent_scopes:
   - 'mcp:read'

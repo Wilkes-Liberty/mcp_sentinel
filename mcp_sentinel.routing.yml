@@ -22,6 +22,24 @@ mcp_sentinel.audit_export:
   requirements:
     _permission: 'view mcp sentinel audit log'
 
+mcp_sentinel.webhook_delivery:
+  path: '/admin/reports/mcp-sentinel/webhooks'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpWebhookDeliveryController::listing'
+    _title: 'MCP Sentinel webhook delivery log'
+  requirements:
+    _permission: 'administer mcp sentinel'
+
+mcp_sentinel.webhook_replay:
+  path: '/admin/reports/mcp-sentinel/webhooks/{delivery}/replay'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpWebhookDeliveryController::replay'
+    _title: 'Replay webhook delivery'
+  requirements:
+    _permission: 'administer mcp sentinel'
+    _csrf_token: 'TRUE'
+    delivery: \d+
+
 mcp_sentinel.context:
   path: '/drupal-mcp/context'
   defaults:

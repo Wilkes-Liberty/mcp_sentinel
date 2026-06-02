@@ -9,6 +9,7 @@ use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -34,6 +35,8 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly Connection $database,
     #[Autowire(service: 'entity_type.manager')]
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    #[Autowire(service: 'mcp_sentinel.webhook_queue_manager')]
+    private readonly McpWebhookQueueManager $webhookQueueManager,
   ) {
     parent::__construct();
   }
@@ -123,6 +126,36 @@ final class McpSentinelCommands extends DrushCommands {
   public function lockClear(): int {
     $released = $this->contentLock->releaseExpired();
     $this->logger()->success(sprintf('Released %d expired content lock%s.', $released, $released === 1 ? '' : 's'));
+    return self::EXIT_SUCCESS;
+  }
+
+  /**
+   * Prune webhook delivery log rows older than the retention period.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-prune', aliases: ['mcps:webhook-prune'])]
+  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-prune', description: 'Delete webhook delivery rows past the retention window (also runs on cron).')]
+  public function webhookPrune(): int {
+    $pruned = $this->webhookQueueManager->pruneOldDeliveries();
+    $this->logger()->success(sprintf('Pruned %d webhook delivery row%s.', $pruned, $pruned === 1 ? '' : 's'));
+    return self::EXIT_SUCCESS;
+  }
+
+  /**
+   * Re-enqueue a webhook delivery row for another delivery attempt.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-replay', aliases: ['mcps:webhook-replay'])]
+  #[CLI\Argument(name: 'deliveryId', description: 'Delivery log row ID to replay.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-replay 42', description: 'Reset delivery 42 to pending and re-queue it.')]
+  public function webhookReplay(int $deliveryId = 0): int {
+    if ($deliveryId <= 0) {
+      $this->logger()->error('Provide a positive delivery row ID, e.g. drush mcp-sentinel:webhook-replay 42.');
+      return self::EXIT_FAILURE;
+    }
+    if (!$this->webhookQueueManager->replayDelivery($deliveryId)) {
+      $this->logger()->error(sprintf('Delivery %d not found or its endpoint is no longer configured.', $deliveryId));
+      return self::EXIT_FAILURE;
+    }
+    $this->logger()->success(sprintf('Delivery %d reset to pending and re-queued for replay.', $deliveryId));
     return self::EXIT_SUCCESS;
   }
 

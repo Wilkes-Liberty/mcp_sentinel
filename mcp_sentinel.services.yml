@@ -37,15 +37,22 @@ services:
     arguments:
       - '@config.factory'
 
+  mcp_sentinel.webhook_queue_manager:
+    class: Drupal\mcp_sentinel\Service\McpWebhookQueueManager
+    arguments:
+      - '@config.factory'
+      - '@queue'
+      - '@database'
+      - '@datetime.time'
+      - '@logger.channel.mcp_sentinel'
+
   mcp_sentinel.event_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpEventDispatcher
     arguments:
       - '@event_dispatcher'
       - '@config.factory'
-      - '@logger.channel.mcp_sentinel'
-      - '@http_client'
       - '@datetime.time'
-      - '@key.repository'
+      - '@mcp_sentinel.webhook_queue_manager'
 
   mcp_sentinel.oauth_context:
     class: Drupal\mcp_sentinel\Service\McpOauthContext

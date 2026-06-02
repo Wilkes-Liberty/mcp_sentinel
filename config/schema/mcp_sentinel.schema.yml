@@ -31,6 +31,39 @@ mcp_sentinel.settings:
     webhook_secret_key:
       type: string
       label: 'Webhook signing secret — Key entity ID'
+    webhook_delivery_retention_days:
+      type: integer
+      label: 'Webhook delivery log retention in days (0 = forever)'
+    allow_internal_webhook_urls:
+      type: boolean
+      label: 'Allow webhook URLs resolving to internal IP ranges (disables SSRF DNS guard)'
+    webhook_endpoints:
+      type: sequence
+      label: 'Webhook endpoints'
+      sequence:
+        type: mapping
+        label: 'Webhook endpoint'
+        mapping:
+          id:
+            type: string
+            label: 'Machine ID'
+          label:
+            type: string
+            label: 'Label'
+          url:
+            type: string
+            label: 'HTTPS endpoint URL'
+          secret_key:
+            type: string
+            label: 'Key entity ID for signing secret'
+          events:
+            type: sequence
+            label: 'Event filter (empty = all)'
+            sequence:
+              type: string
+          enabled:
+            type: boolean
+            label: 'Endpoint enabled'
     agent_oauth_clients:
       type: sequence
       label: 'Agent OAuth client IDs (consumer client_id values)'

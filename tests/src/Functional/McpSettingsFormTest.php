@@ -48,19 +48,52 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
-   * Tests that webhook URLs must be HTTPS.
+   * Tests that a webhook endpoint URL must be HTTPS.
    */
-  public function testWebhookUrlMustBeHttps(): void {
+  public function testWebhookEndpointUrlMustBeHttps(): void {
     $admin = $this->drupalCreateUser(['administer mcp sentinel']);
     $this->drupalLogin($admin);
     $this->drupalGet('/admin/config/services/mcp-sentinel');
 
     $this->submitForm([
-      'webhook_enabled' => TRUE,
-      'webhook_url' => 'http://example.com/hook',
+      'webhooks[endpoints][0][id]' => 'ep1',
+      'webhooks[endpoints][0][label]' => 'EP1',
+      'webhooks[endpoints][0][url]' => 'http://example.com/hook',
+      'webhooks[endpoints][0][enabled]' => 1,
     ], 'Save configuration');
 
-    $this->assertSession()->pageTextContains('Webhook URL must use HTTPS.');
+    $this->assertSession()->pageTextContains('Endpoint 1 URL must use HTTPS.');
+  }
+
+  /**
+   * Tests that two endpoints save to the webhook_endpoints sequence.
+   */
+  public function testMultipleEndpointsSave(): void {
+    $admin = $this->drupalCreateUser(['administer mcp sentinel']);
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+
+    $this->submitForm([
+      'webhooks[endpoints][0][id]' => 'ep1',
+      'webhooks[endpoints][0][label]' => 'First',
+      'webhooks[endpoints][0][url]' => 'https://one.example.com/hook',
+      'webhooks[endpoints][0][enabled]' => 1,
+      'webhooks[endpoints][1][id]' => 'ep2',
+      'webhooks[endpoints][1][label]' => 'Second',
+      'webhooks[endpoints][1][url]' => 'https://two.example.com/hook',
+      'webhooks[endpoints][1][events]' => "mcp.entity.delete",
+      'webhooks[endpoints][1][enabled]' => 0,
+    ], 'Save configuration');
+
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+    $endpoints = $this->config('mcp_sentinel.settings')->get('webhook_endpoints');
+    $this->assertCount(2, $endpoints);
+    $this->assertSame('ep1', $endpoints[0]['id']);
+    $this->assertSame('https://one.example.com/hook', $endpoints[0]['url']);
+    $this->assertTrue($endpoints[0]['enabled']);
+    $this->assertSame('ep2', $endpoints[1]['id']);
+    $this->assertSame(['mcp.entity.delete'], $endpoints[1]['events']);
+    $this->assertFalse($endpoints[1]['enabled']);
   }
 
   /**

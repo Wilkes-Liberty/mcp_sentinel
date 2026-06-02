@@ -352,6 +352,74 @@ Ungoverned requests and profiles with `result_count_cap = 0` are never capped.
 The response-size cap applies to Tool output only (JSON:API and GraphQL
 response-size enforcement is deferred to a future pass).
 
+## Reliable webhooks
+
+MCP change events (`mcp.entity.presave`, `mcp.entity.delete`) are delivered to
+external HTTPS endpoints through the Drupal queue system — not fire-and-forget —
+so a notification is never lost if the request ends before the HTTP call
+settles. Each delivery is signed, retried with backoff, recorded in a delivery
+log, and replayable.
+
+### Endpoints
+
+Configure one or more endpoints under the *Reliable webhooks* section of the
+settings form. Each endpoint has:
+
+| Field | Purpose |
+|-------|---------|
+| **Machine ID** | Stable identifier used in the delivery log. |
+| **Label** | Human-readable name. |
+| **URL** | HTTPS endpoint (plain HTTP is rejected). |
+| **Signing secret** | A [Key](https://www.drupal.org/project/key) entity holding the HMAC secret. Use a File or Environment key provider so the value never lands in exported config. |
+| **Event filter** | One event name per line; leave empty to receive all events. |
+| **Enabled** | Toggles delivery without deleting the endpoint. |
+
+The request body is signed with HMAC-SHA256 and sent in the
+`X-MCP-Signature: sha256=…` header. Verify it with:
+
+```
+hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
+```
+
+### Retry behavior
+
+Delivery runs in the `mcp_sentinel_webhook_delivery` QueueWorker (processed on
+cron). A non-2xx response or network error schedules a retry: **5 attempts**
+with backoff intervals of **30 s, 5 min, 30 min, 2 h, 8 h**. After the final
+attempt the delivery is marked `failed`. A row already `sent` is never
+re-delivered, so duplicate queue items or concurrent workers cannot double-send.
+
+### Delivery log + replay
+
+`/admin/reports/mcp-sentinel/webhooks` (permission *Administer MCP Sentinel*)
+lists recent deliveries with status, attempts, last response code, and next
+attempt time. Use the CSRF-protected **Replay** action — or
+`drush mcp-sentinel:webhook-replay <delivery-id>` — to reset a `failed`/`sent`
+row to `pending` and re-queue it.
+
+### SSRF protection (HTTPS required)
+
+All endpoints must use `https://`. A two-layer SSRF guard runs at enqueue time
+and again at send time (DNS can rebind in between): the worker resolves the
+host and blocks any address in a private, loopback, link-local, or reserved
+range (RFC1918 `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `::1`,
+`fc00::/7`, …); such deliveries are marked `failed_ssrf`. For legitimate
+internal-network targets, set `allow_internal_webhook_urls` to `TRUE` — this
+disables the resolved-IP check only; HTTPS is still enforced.
+
+### Retention / prune
+
+The delivery log is bounded by `webhook_delivery_retention_days` (default 30,
+`0` = forever). Rows past the window are deleted on cron and by
+`drush mcp-sentinel:webhook-prune`.
+
+### Migrating from the legacy single webhook
+
+Sites that used the old single `webhook_url`/`webhook_secret_key` settings are
+migrated automatically (`update_10008`) into one `webhook_endpoints` entry. The
+legacy fields remain visible in the form with a deprecation notice for review;
+clear them once the migrated endpoint is verified.
+
 ## Configuration
 
 **Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)

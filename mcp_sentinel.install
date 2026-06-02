@@ -41,6 +41,31 @@ function mcp_sentinel_schema(): array {
     ],
   ];
 
+  $schema['mcp_sentinel_webhook_delivery'] = [
+    'description' => 'Webhook delivery log for queued, retried MCP notifications.',
+    'fields' => [
+      'id'                 => ['type' => 'serial', 'unsigned' => TRUE, 'not null' => TRUE],
+      'endpoint_id'        => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'event_name'         => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
+      'payload_hash'       => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending'],
+      'attempts'           => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+      'last_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      'next_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      'last_response_code' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      'last_response_body' => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
+      'created'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'item_id'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'status'       => ['status'],
+      'next_attempt' => ['next_attempt'],
+      'created'      => ['created'],
+      'endpoint_id'  => ['endpoint_id'],
+    ],
+  ];
+
   $schema['mcp_sentinel_content_locks'] = [
     'description' => 'Content items locked against MCP writes.',
     'fields' => [
@@ -247,6 +272,74 @@ function mcp_sentinel_update_10006(): string {
   return 'Added rate_limit_requests (default 0 = unlimited), '
     . 'rate_limit_window (default 60 s), result_count_cap, '
     . 'response_size_cap to all policy profiles.';
+}
+
+/**
+ * Create the webhook delivery log table.
+ */
+function mcp_sentinel_update_10007(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->tableExists('mcp_sentinel_webhook_delivery')) {
+    return 'Webhook delivery log table already exists.';
+  }
+  $table = [
+    'description' => 'Webhook delivery log for queued, retried MCP notifications.',
+    'fields' => [
+      'id'                 => ['type' => 'serial', 'unsigned' => TRUE, 'not null' => TRUE],
+      'endpoint_id'        => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'event_name'         => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
+      'payload_hash'       => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'status'             => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE, 'default' => 'pending'],
+      'attempts'           => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+      'last_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      'next_attempt'       => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      'last_response_code' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      'last_response_body' => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
+      'created'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'item_id'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'status'       => ['status'],
+      'next_attempt' => ['next_attempt'],
+      'created'      => ['created'],
+      'endpoint_id'  => ['endpoint_id'],
+    ],
+  ];
+  $schema->createTable('mcp_sentinel_webhook_delivery', $table);
+  return 'Created the mcp_sentinel_webhook_delivery table for reliable queued webhooks.';
+}
+
+/**
+ * Migrate legacy single webhook endpoint into the webhook_endpoints sequence.
+ */
+function mcp_sentinel_update_10008(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  if ($config->get('webhook_delivery_retention_days') === NULL) {
+    $config->set('webhook_delivery_retention_days', 30);
+  }
+  if ($config->get('allow_internal_webhook_urls') === NULL) {
+    $config->set('allow_internal_webhook_urls', FALSE);
+  }
+  if ($config->get('webhook_endpoints') === NULL) {
+    $config->set('webhook_endpoints', []);
+  }
+  $legacy_url = (string) ($config->get('webhook_url') ?? '');
+  if ($legacy_url !== '' && $config->get('webhook_endpoints') === []) {
+    $config->set('webhook_endpoints', [
+      [
+        'id'         => 'default',
+        'label'      => 'Default (migrated from legacy settings)',
+        'url'        => $legacy_url,
+        'secret_key' => (string) ($config->get('webhook_secret_key') ?? ''),
+        'events'     => [],
+        'enabled'    => (bool) $config->get('webhook_enabled'),
+      ],
+    ]);
+  }
+  $config->save();
+  return 'Migrated legacy webhook_url/webhook_secret_key to webhook_endpoints. '
+    . 'Legacy keys retained for review.';
 }
 
 /**
