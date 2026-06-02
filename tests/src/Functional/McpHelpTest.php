@@ -44,7 +44,7 @@ final class McpHelpTest extends BrowserTestBase {
     $assert->pageTextContains('Tamper-evident audit log');
     // The help page links to the settings and audit routes.
     $assert->linkByHrefExists('/admin/config/services/mcp-sentinel');
-    $assert->linkByHrefExists('/admin/reports/mcp-sentinel');
+    $assert->linkByHrefExists('/admin/reports/mcp-sentinel/audit');
   }
 
 }

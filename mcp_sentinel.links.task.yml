@@ -1,0 +1,14 @@
+mcp_sentinel.dashboard_tab:
+  title: 'Dashboard'
+  route_name: mcp_sentinel.dashboard
+  base_route: mcp_sentinel.dashboard
+
+mcp_sentinel.audit_tab:
+  title: 'Audit log'
+  route_name: mcp_sentinel.audit_log
+  base_route: mcp_sentinel.dashboard
+
+mcp_sentinel.webhooks_tab:
+  title: 'Webhook deliveries'
+  route_name: mcp_sentinel.webhook_delivery
+  base_route: mcp_sentinel.dashboard

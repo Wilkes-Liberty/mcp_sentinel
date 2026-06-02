@@ -1,0 +1,22 @@
+{#
+/**
+ * @file
+ * Severity-colored, per-user-dismissible urgent-conditions banner.
+ *
+ * Available variables:
+ * - conditions: a list of fired conditions, each with:
+ *   - severity: 'critical', 'warning', or 'info'.
+ *   - key: the machine condition key (used for per-user dismissal).
+ *   - message: the human-readable message (auto-escaped).
+ *   - url: an optional internal path to investigate the condition.
+ */
+#}
+{% for condition in conditions %}
+  <div class="mcp-banner mcp-banner--{{ condition.severity }}" data-mcp-banner-key="{{ condition.key }}" role="alert">
+    <span class="mcp-banner__message">{{ condition.message }}</span>
+    {% if condition.url %}
+      <a class="mcp-banner__link" href="{{ condition.url }}">{{ 'Investigate'|t }}</a>
+    {% endif %}
+    <button type="button" class="mcp-banner__dismiss" data-mcp-banner-dismiss aria-label="{{ 'Dismiss'|t }}">×</button>
+  </div>
+{% endfor %}

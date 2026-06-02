@@ -198,6 +198,24 @@ An empty series returns an empty-state ("No data") build. `drupal/charts` is a
 composer `suggest` only — it is never a hard requirement or an info.yml
 dependency.
 
+### `McpDashboardController` — governance dashboard
+
+`McpDashboardController::dashboard(Request $request)` serves the governance
+dashboard at route `mcp_sentinel.dashboard` (`GET /admin/reports/mcp-sentinel`,
+permission *View MCP Sentinel audit log*). It is read-only: it assembles a
+themed render array (`#theme => 'mcp_sentinel_dashboard'`) from the three data
+services — the urgent banner (`McpUrgentConditions`), the posture hero, status
+tiles, chain-integrity card, top-agents / denied-by-policy panels,
+quick-actions, and active-controls strip (`McpMetrics`). The `?window=` query
+parameter is validated to `24h`/`7d`/`30d` (default `24h`). Each widget is
+built behind its own try/catch so a single failing metric degrades to an
+empty/"—" widget (logged to `mcp_sentinel`) rather than fataling the page.
+
+When the audit listing moved to `/admin/reports/mcp-sentinel/audit`, the route
+name `mcp_sentinel.audit_log` and the `mcp_sentinel.audit_export` route were
+left unchanged, so existing deep links and the filter form's reset link follow
+the new path automatically.
+
 ### Resolving governance in your own code
 
 ```php

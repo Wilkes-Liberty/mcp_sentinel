@@ -28,6 +28,11 @@ the governance layer those projects intentionally leave to site builders.
   from MCP requests: stripped from JSON:API/REST output and returned as
   `[REDACTED]` in GraphQL. A dedicated cache context keeps agent and public
   responses cached separately, so redacted data never leaks across the boundary.
+- **Governance dashboard** — a read-only operations console at
+  `/admin/reports/mcp-sentinel` with an urgent-conditions banner, a posture
+  rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy
+  panels, charts, quick actions, and an active-controls strip — all built from
+  data the module already stores.
 - **Audit logging** — every MCP entity operation and GraphQL query/mutation is
   written to a dedicated, query-optimised log with user, IP, timestamp, and
   payload metadata. Configurable retention with automatic pruning. The admin

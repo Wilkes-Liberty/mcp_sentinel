@@ -1,0 +1,4 @@
+mcp_sentinel_approval.approvals_tab:
+  title: 'Approvals'
+  route_name: entity.mcp_approval_request.collection
+  base_route: mcp_sentinel.dashboard

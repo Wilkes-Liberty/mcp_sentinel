@@ -1,0 +1,127 @@
+{#
+/**
+ * @file
+ * Governance dashboard layout.
+ *
+ * Available variables:
+ * - banner: a themed urgent-conditions banner render array (may be empty).
+ * - status: posture rollup with attention/all_clear/headline.
+ * - tiles: a list of status tiles (label, value, sub, state, url).
+ * - chain: chain-integrity card (state, label, detail).
+ * - panels: top_agents + denied_reasons row data.
+ * - quick_actions: a list of quick-action links (title, url).
+ * - active_controls: a list of controls (label, active).
+ * - charts: a keyed list of chart render arrays.
+ * - window: the active time window key.
+ * - windows: window-toggle links (key, label, url, active).
+ */
+#}
+<div class="mcp-dashboard">
+
+  {% if banner %}
+    {{ banner }}
+  {% endif %}
+
+  {% if status %}
+    <div class="mcp-hero mcp-hero--{{ status.all_clear ? 'ok' : 'attention' }}">
+      <span class="mcp-hero__count">{{ status.attention }}</span>
+      <span class="mcp-hero__headline">{{ status.headline }}</span>
+    </div>
+  {% endif %}
+
+  <div class="mcp-window-toggle">
+    <span class="mcp-window-toggle__label">{{ 'Window'|t }}:</span>
+    {% for w in windows %}
+      <a class="mcp-window-toggle__link{{ w.active ? ' is-active' : '' }}" href="{{ w.url }}">{{ w.label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if tiles %}
+    <div class="mcp-tiles">
+      {% for tile in tiles %}
+        <div class="mcp-tile mcp-tile--{{ tile.state }}">
+          {% if tile.url %}
+            <a class="mcp-tile__link" href="{{ tile.url }}">
+          {% endif %}
+          <span class="mcp-tile__label">{{ tile.label }}</span>
+          <span class="mcp-tile__value">{{ tile.value }}</span>
+          <span class="mcp-tile__sub">{{ tile.sub }}</span>
+          {% if tile.url %}
+            </a>
+          {% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if chain %}
+    <div class="mcp-chain-card mcp-chain-card--{{ chain.state }}">
+      <span class="mcp-chain-card__label">{{ 'Audit hash chain'|t }}: {{ chain.label }}</span>
+      <span class="mcp-chain-card__detail">{{ chain.detail }}</span>
+    </div>
+  {% endif %}
+
+  {% if quick_actions %}
+    <div class="mcp-quick-actions">
+      {% for action in quick_actions %}
+        <a class="mcp-quick-actions__link" href="{{ action.url }}">{{ action.title }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if charts %}
+    <div class="mcp-charts">
+      {% for chart in charts %}
+        <div class="mcp-chart-cell">{{ chart }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="mcp-panels">
+    {% if panels.top_agents %}
+      <div class="mcp-panel mcp-panel--agents">
+        <h3 class="mcp-panel__title">{{ 'Top agents'|t }}</h3>
+        <table class="mcp-panel__table">
+          <thead>
+            <tr><th>{{ 'Agent'|t }}</th><th>{{ 'Total'|t }}</th><th>{{ 'Denied'|t }}</th></tr>
+          </thead>
+          <tbody>
+            {% for agent in panels.top_agents %}
+              <tr>
+                <td><a href="{{ agent.url }}">{{ agent.label }}</a></td>
+                <td>{{ agent.total }}</td>
+                <td>{{ agent.denied }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    {% if panels.denied_reasons %}
+      <div class="mcp-panel mcp-panel--denied">
+        <h3 class="mcp-panel__title">{{ 'Denied by policy'|t }}</h3>
+        <table class="mcp-panel__table">
+          <thead>
+            <tr><th>{{ 'Reason'|t }}</th><th>{{ 'Count'|t }}</th></tr>
+          </thead>
+          <tbody>
+            {% for reason in panels.denied_reasons %}
+              <tr><td>{{ reason.label }}</td><td>{{ reason.count }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if active_controls %}
+    <div class="mcp-active-controls">
+      <span class="mcp-active-controls__label">{{ 'Active controls'|t }}:</span>
+      {% for control in active_controls %}
+        <span class="mcp-control mcp-control--{{ control.active ? 'on' : 'off' }}">{{ control.label }}</span>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+</div>

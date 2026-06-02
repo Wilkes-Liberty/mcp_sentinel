@@ -596,11 +596,39 @@ Admin routes:
 - `/admin/config/services/mcp-sentinel` — settings form (master switch,
   governance model, audit, encryption, DLP, rate limits, anomaly rules, IP
   allowlists, webhook endpoints).
-- `/admin/reports/mcp-sentinel` — audit log listing, with filters and CSV/JSON
-  export.
+- `/admin/reports/mcp-sentinel` — **governance dashboard** (landing page; see
+  below). Local-task tabs lead to the audit log, webhook deliveries, and (when
+  the approval submodule is enabled) approvals.
+- `/admin/reports/mcp-sentinel/audit` — audit log listing, with filters and
+  CSV/JSON export.
 - `/admin/reports/mcp-sentinel/webhooks` — webhook delivery log + replay.
 - `/admin/help/mcp_sentinel` — module help overview (requires the core Help
   module).
+
+### Governance dashboard
+
+`/admin/reports/mcp-sentinel` is a read-only operations console (permission
+*View MCP Sentinel audit log*) built entirely from data the module already
+stores — it performs no writes and re-verifies nothing on load. It surfaces:
+
+- an **urgent-conditions banner** (broken hash chain, unresolvable encryption
+  profile or webhook signing key, governance switched off while traffic flows,
+  and the operator broadcast message);
+- a **posture hero** rolling up how many items need attention (urgent
+  conditions + pending approvals + anomaly alerts + webhook failures), or an
+  all-clear state;
+- **five status tiles** — Governance, Audit, Anomaly, Approvals, Webhooks —
+  each linking into the relevant report;
+- a **chain-integrity card** reflecting the last stored verify result;
+- **top-agents** and **denied-by-policy** panels;
+- a **quick-actions** bar and an **active-controls** strip showing which
+  controls (hash chain, encryption, SIEM, DLP, rate limiting, IP allowlist,
+  approvals) are on.
+
+Every widget is built behind its own guard, so a single failing metric degrades
+to an empty/"—" widget rather than breaking the page. The dashboard renders
+even when the approval submodule is absent and when `drupal/charts` is not
+installed.
 
 ### Drush commands
 

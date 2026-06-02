@@ -77,13 +77,13 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
     $this->drupalLogin($admin);
 
     // Without filter, both rows appear.
-    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('mcp_op_alpha');
     $this->assertSession()->pageTextContains('mcp_op_beta');
 
     // Filter by operation=mcp_op_alpha only.
-    $this->drupalGet('/admin/reports/mcp-sentinel', [
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit', [
       'query' => ['operation' => 'mcp_op_alpha'],
     ]);
     $this->assertSession()->statusCodeEquals(200);
@@ -106,7 +106,7 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
     $admin = $this->drupalCreateUser(['view mcp sentinel audit log']);
     $this->drupalLogin($admin);
 
-    $this->drupalGet('/admin/reports/mcp-sentinel', [
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit', [
       'query' => ['entity_type' => 'mcp_etype_beta'],
     ]);
     $this->assertSession()->statusCodeEquals(200);
@@ -129,7 +129,7 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
     $admin = $this->drupalCreateUser(['view mcp sentinel audit log']);
     $this->drupalLogin($admin);
 
-    $this->drupalGet('/admin/reports/mcp-sentinel', [
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit', [
       'query' => ['uid' => '3002'],
     ]);
     $this->assertSession()->statusCodeEquals(200);
@@ -157,7 +157,7 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
     // Filter to only last hour: mcp_op_old (2 h ago) should be excluded.
     $from = date('Y-m-d\TH:i', $now - 3600);
     $to   = date('Y-m-d\TH:i', $now + 60);
-    $this->drupalGet('/admin/reports/mcp-sentinel', [
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit', [
       'query' => ['from' => $from, 'to' => $to],
     ]);
     $this->assertSession()->statusCodeEquals(200);
@@ -172,7 +172,7 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
     $admin = $this->drupalCreateUser(['view mcp sentinel audit log']);
     $this->drupalLogin($admin);
 
-    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
     $this->assertSession()->fieldExists('operation');
     $this->assertSession()->fieldExists('entity_type');
     $this->assertSession()->fieldExists('uid');
@@ -283,7 +283,7 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
     $admin = $this->drupalCreateUser(['view mcp sentinel audit log']);
     $this->drupalLogin($admin);
 
-    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
     $this->assertSession()->statusCodeEquals(200);
     // The row should still appear (metadata decode did not crash the page).
     $this->assertSession()->pageTextContains('mcp_meta_read');

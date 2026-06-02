@@ -25,6 +25,7 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
   switch ($route_name) {
     case 'help.page.mcp_sentinel':
       $settings_url = Url::fromRoute('mcp_sentinel.settings')->toString();
+      $dashboard_url = Url::fromRoute('mcp_sentinel.dashboard')->toString();
       $audit_url = Url::fromRoute('mcp_sentinel.audit_log')->toString();
       $output = '';
       $output .= '<h2>' . t('About') . '</h2>';
@@ -56,7 +57,8 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
       $output .= '<ul>';
       $output .= '<li>' . t('<a href=":settings">MCP Sentinel settings</a> — settings are organized into vertical tabs: MCP Access, OAuth agent channel, Audit Logging, Data Loss Prevention, Anomaly detection, Reliable webhooks, and Dashboard broadcast. The Dashboard broadcast tab lets operators post a message (with info/warning/critical severity) that appears as a banner on the governance dashboard. The DLP patterns, anomaly rules, and webhook endpoints lists are now edited as dynamic add/remove rows instead of fixed slots or pipe-delimited textareas.', [':settings' => $settings_url]) . '</li>';
       $output .= '<li>' . t('Policy profiles are managed as configuration entities; create and edit them from the settings page. The profile edit form is organized into vertical tabs — Identity, Allowed operations, Entity scope, Redaction, Rate limits &amp; quotas, and Network / IP — and shows a live plain-language policy summary that updates when key fields change.') . '</li>';
-      $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records.', [':audit' => $audit_url]) . '</li>';
+      $output .= '<li>' . t('<a href=":dashboard">MCP Sentinel governance dashboard</a> — the landing page at <code>/admin/reports/mcp-sentinel</code>. A read-only operations console showing an urgent-conditions banner, a posture rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy panels, quick actions, and an active-controls strip. Local-task tabs lead to the audit log, webhook deliveries, and (when the approval submodule is enabled) approvals.', [':dashboard' => $dashboard_url]) . '</li>';
+      $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records (now at <code>/admin/reports/mcp-sentinel/audit</code>, reachable from the dashboard "Audit log" tab).', [':audit' => $audit_url]) . '</li>';
       $output .= '</ul>';
 
       $output .= '<p>' . t('For full setup, the trust model in depth, and Drush commands, see the project <code>README.md</code>, <code>INSTALL.md</code>, and <code>API.md</code> shipped with the module.') . '</p>';
@@ -64,6 +66,31 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
   }
 
   return '';
+}
+
+/**
+ * Implements hook_theme().
+ */
+function mcp_sentinel_theme(): array {
+  return [
+    'mcp_sentinel_dashboard' => [
+      'variables' => [
+        'banner' => NULL,
+        'status' => [],
+        'tiles' => [],
+        'chain' => [],
+        'panels' => [],
+        'quick_actions' => [],
+        'active_controls' => [],
+        'charts' => [],
+        'window' => '24h',
+        'windows' => [],
+      ],
+    ],
+    'mcp_sentinel_urgent_banner' => [
+      'variables' => ['conditions' => []],
+    ],
+  ];
 }
 
 /**

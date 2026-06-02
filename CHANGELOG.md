@@ -13,8 +13,10 @@ stable release is tagged.
 - McpMetrics dashboard-data service (`mcp_sentinel.metrics`): read-only, window-bounded aggregation over the existing audit, webhook, approval, anomaly, and config stores.
 - McpUrgentConditions service (`mcp_sentinel.urgent_conditions`): evaluates critical/warning conditions (broken hash chain, unresolvable encryption profile, governance off with recent traffic, unresolvable webhook signing key) plus the operator broadcast.
 - McpChartRenderer service (`mcp_sentinel.chart_renderer`): renders metric series as charts with a self-contained inline-SVG fallback and an optional `drupal/charts` upgrade (added to composer `suggest`).
+- Governance dashboard at `/admin/reports/mcp-sentinel` (`McpDashboardController`): urgent-conditions banner, posture hero, status tiles, chain-integrity card, top-agents and denied-by-policy panels, quick actions, and an active-controls strip — each widget guarded so a failing metric degrades gracefully. Local-task tabs (Dashboard · Audit log · Webhook deliveries · Approvals) navigate the report surface.
 
 ### Changed
+- Audit log listing moved from `/admin/reports/mcp-sentinel` to `/admin/reports/mcp-sentinel/audit` (the base path is now the governance dashboard); the route name `mcp_sentinel.audit_log` and the export route are unchanged.
 - Settings form reorganized into vertical tabs; added a dashboard operator-broadcast message.
 - DLP patterns edited via an add/remove row table (config storage unchanged).
 - Anomaly rules edited via an add/remove row table (config storage unchanged).

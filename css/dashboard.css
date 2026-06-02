@@ -1,0 +1,353 @@
+/**
+ * @file
+ * Governance dashboard styling.
+ *
+ * Theme-neutral: uses only generic selectors and plain colors so it renders
+ * correctly under both Claro and Gin. No theme-specific overrides.
+ */
+
+.mcp-dashboard {
+  margin: 1em 0;
+}
+
+/* Urgent banner. */
+.mcp-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  padding: 0.75em 1em;
+  margin: 0 0 0.75em;
+  border-radius: 4px;
+  border-left: 4px solid #888;
+}
+
+.mcp-banner__message {
+  flex: 1 1 auto;
+}
+
+.mcp-banner__link {
+  white-space: nowrap;
+}
+
+.mcp-banner__dismiss {
+  flex: 0 0 auto;
+  padding: 0 0.4em;
+  font-size: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  color: inherit;
+}
+
+.mcp-banner--critical {
+  background: #f8d7da;
+  border-left-color: #721c24;
+  color: #721c24;
+}
+
+.mcp-banner--warning {
+  background: #fff3cd;
+  border-left-color: #856404;
+  color: #856404;
+}
+
+.mcp-banner--info {
+  background: #d1ecf1;
+  border-left-color: #0c5460;
+  color: #0c5460;
+}
+
+/* Posture hero. */
+.mcp-hero {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  padding: 1em 1.25em;
+  margin: 0 0 1em;
+  border-radius: 6px;
+  background: #f1f3f5;
+}
+
+.mcp-hero--ok {
+  background: #d4edda;
+  color: #155724;
+}
+
+.mcp-hero--attention {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.mcp-hero__count {
+  font-size: 2em;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.mcp-hero__headline {
+  font-size: 1.1em;
+}
+
+/* Window toggle. */
+.mcp-window-toggle {
+  margin: 0 0 1em;
+}
+
+.mcp-window-toggle__label {
+  font-weight: 700;
+  margin-inline-end: 0.5em;
+}
+
+.mcp-window-toggle__link {
+  display: inline-block;
+  padding: 0.2em 0.7em;
+  margin-inline-end: 0.25em;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  text-decoration: none;
+}
+
+.mcp-window-toggle__link.is-active {
+  background: #0d6efd;
+  border-color: #0d6efd;
+  color: #fff;
+}
+
+/* Status tiles. */
+.mcp-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75em;
+  margin: 0 0 1em;
+}
+
+.mcp-tile {
+  padding: 0.75em 1em;
+  border: 1px solid #dee2e6;
+  border-top: 4px solid #adb5bd;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.mcp-tile--ok {
+  border-top-color: #28a745;
+}
+
+.mcp-tile--warn {
+  border-top-color: #ffc107;
+}
+
+.mcp-tile--crit {
+  border-top-color: #dc3545;
+}
+
+.mcp-tile__link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.mcp-tile__label {
+  display: block;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6c757d;
+}
+
+.mcp-tile__value {
+  display: block;
+  font-size: 1.8em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.mcp-tile__sub {
+  display: block;
+  font-size: 0.85em;
+  color: #6c757d;
+}
+
+/* Chain-integrity card. */
+.mcp-chain-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: 0.75em 1em;
+  margin: 0 0 1em;
+  border: 1px solid #dee2e6;
+  border-left: 4px solid #adb5bd;
+  border-radius: 4px;
+}
+
+.mcp-chain-card--ok {
+  border-left-color: #28a745;
+}
+
+.mcp-chain-card--warn {
+  border-left-color: #ffc107;
+}
+
+.mcp-chain-card--crit {
+  border-left-color: #dc3545;
+}
+
+.mcp-chain-card__label {
+  font-weight: 700;
+}
+
+.mcp-chain-card__detail {
+  font-size: 0.9em;
+  color: #6c757d;
+}
+
+/* Quick actions. */
+.mcp-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0 0 1em;
+}
+
+.mcp-quick-actions__link {
+  display: inline-block;
+  padding: 0.4em 0.9em;
+  border: 1px solid #0d6efd;
+  border-radius: 3px;
+  text-decoration: none;
+  color: #0d6efd;
+}
+
+/* Charts grid. */
+.mcp-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1em;
+  margin: 0 0 1em;
+}
+
+.mcp-chart-cell {
+  padding: 0.75em;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.mcp-chart__title {
+  margin: 0 0 0.5em;
+  font-size: 0.95em;
+}
+
+.mcp-chart__svg {
+  width: 100%;
+  height: auto;
+}
+
+.mcp-chart__link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.mcp-chart__bar {
+  fill: #0d6efd;
+}
+
+.mcp-chart__line {
+  stroke: #0d6efd;
+  stroke-width: 2;
+}
+
+.mcp-chart__slice--0 {
+  stroke: #0d6efd;
+}
+
+.mcp-chart__slice--1 {
+  stroke: #dc3545;
+}
+
+.mcp-chart__slice--2 {
+  stroke: #ffc107;
+}
+
+.mcp-chart__slice--3 {
+  stroke: #28a745;
+}
+
+.mcp-chart__slice--4 {
+  stroke: #6f42c1;
+}
+
+.mcp-chart__slice--5 {
+  stroke: #20c997;
+}
+
+.mcp-chart--empty .mcp-chart__empty {
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* Panels. */
+.mcp-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1em;
+  margin: 0 0 1em;
+}
+
+.mcp-panel {
+  padding: 0.75em 1em;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.mcp-panel__title {
+  margin: 0 0 0.5em;
+  font-size: 1em;
+}
+
+.mcp-panel__table {
+  width: 100%;
+}
+
+.mcp-panel__table th,
+.mcp-panel__table td {
+  padding: 0.25em 0.5em;
+  text-align: start;
+}
+
+/* Active-controls strip. */
+.mcp-active-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.75em 1em;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  background: #f8f9fa;
+}
+
+.mcp-active-controls__label {
+  font-weight: 700;
+  margin-inline-end: 0.25em;
+}
+
+.mcp-control {
+  display: inline-block;
+  padding: 0.15em 0.6em;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.mcp-control--on {
+  background: #d4edda;
+  color: #155724;
+}
+
+.mcp-control--off {
+  background: #e9ecef;
+  color: #6c757d;
+}

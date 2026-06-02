@@ -6,8 +6,16 @@ mcp_sentinel.settings:
   requirements:
     _permission: 'administer mcp sentinel'
 
-mcp_sentinel.audit_log:
+mcp_sentinel.dashboard:
   path: '/admin/reports/mcp-sentinel'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpDashboardController::dashboard'
+    _title: 'MCP Sentinel'
+  requirements:
+    _permission: 'view mcp sentinel audit log'
+
+mcp_sentinel.audit_log:
+  path: '/admin/reports/mcp-sentinel/audit'
   defaults:
     _controller: '\Drupal\mcp_sentinel\Controller\McpAuditController::listing'
     _title: 'MCP Sentinel Audit Log'
