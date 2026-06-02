@@ -90,6 +90,8 @@ final class McpDrushCommandsTest extends KernelTestBase {
       $this->container->get('database'),
       $this->container->get('entity_type.manager'),
       $this->container->get('mcp_sentinel.webhook_queue_manager'),
+      $this->container->get('state'),
+      $this->container->get('datetime.time'),
     );
 
     // Wire a no-op DrushLoggerManager so commands can call $this->logger()->
@@ -380,6 +382,70 @@ final class McpDrushCommandsTest extends KernelTestBase {
       ->fetchField();
     $this->assertSame('pending', $status,
       'webhook-replay must reset the delivery row status to pending.');
+  }
+
+  /**
+   * Audit-verify writes last_verify state (ok=TRUE) on a clean chain.
+   *
+   * @covers ::auditVerify
+   */
+  public function testAuditVerifyWritesStateOnCleanChain(): void {
+    /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $logger->log('entity_save', ['entity_type' => 'node', 'id' => '1', 'label' => 'A']);
+
+    $result = $this->commands->auditVerify();
+    $this->assertSame(McpSentinelCommands::EXIT_SUCCESS, $result);
+
+    $state = \Drupal::state()->get('mcp_sentinel.last_verify');
+    $this->assertIsArray($state, 'audit-verify must write mcp_sentinel.last_verify state.');
+    $this->assertTrue($state['ok'], 'State ok must be TRUE on a clean chain.');
+    $this->assertNull($state['broken_at'], 'State broken_at must be NULL on a clean chain.');
+    $this->assertSame(1, $state['rows'], 'State rows must equal the audit log row count.');
+    $this->assertIsInt($state['time'], 'State time must be an integer timestamp.');
+
+    // McpMetrics::chainIntegrity() must reflect the stored state.
+    /** @var \Drupal\mcp_sentinel\Service\McpMetrics $metrics */
+    $metrics = \Drupal::service('mcp_sentinel.metrics');
+    $chain = $metrics->chainIntegrity();
+    $this->assertTrue($chain['ok']);
+    $this->assertSame(1, $chain['rows']);
+
+    // McpUrgentConditions must NOT fire chain_broken when ok===TRUE.
+    $keys = array_column(\Drupal::service('mcp_sentinel.urgent_conditions')->evaluate(), 'key');
+    $this->assertNotContains('chain_broken', $keys);
+  }
+
+  /**
+   * Audit-verify writes last_verify state (ok=FALSE) on a tampered chain.
+   *
+   * @covers ::auditVerify
+   */
+  public function testAuditVerifyWritesStateOnTamperedChain(): void {
+    /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $logger->log('entity_save', ['entity_type' => 'node', 'id' => '1', 'label' => 'First']);
+
+    // Tamper: overwrite row_hash with garbage so verifyChain() returns FALSE.
+    $this->container->get('database')
+      ->update('mcp_sentinel_audit_log')
+      ->fields(['row_hash' => 'tampered'])
+      ->execute();
+
+    $result = $this->commands->auditVerify();
+    $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+
+    $state = \Drupal::state()->get('mcp_sentinel.last_verify');
+    $this->assertIsArray($state, 'audit-verify must write mcp_sentinel.last_verify state even on failure.');
+    $this->assertFalse($state['ok'], 'State ok must be FALSE on a tampered chain.');
+    $this->assertNotNull($state['broken_at'], 'State broken_at must be set when the chain is broken.');
+
+    // McpUrgentConditions must fire chain_broken when ok===FALSE.
+    $conditions = \Drupal::service('mcp_sentinel.urgent_conditions')->evaluate();
+    $keys = array_column($conditions, 'key');
+    $this->assertContains('chain_broken', $keys, 'chain_broken urgent condition must fire after a failed audit-verify.');
+    $crit = array_filter($conditions, fn($c) => $c['key'] === 'chain_broken');
+    $this->assertSame('critical', reset($crit)['severity']);
   }
 
   /**

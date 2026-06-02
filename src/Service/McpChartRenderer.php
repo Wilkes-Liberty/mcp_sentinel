@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Render\FormattableMarkup;
+use Drupal\Component\Utility\Html;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\Render\Markup;
 
 /**
  * Renders a metric series as a chart render array.
@@ -182,7 +184,7 @@ final class McpChartRenderer {
     return [
       '#type' => 'html_tag',
       '#tag' => 'h4',
-      '#value' => $title,
+      '#value' => Html::escape($title),
       '#attributes' => ['class' => ['mcp-chart__title']],
     ];
   }
@@ -292,8 +294,8 @@ final class McpChartRenderer {
     );
     // The markup is built entirely from numeric geometry plus values that have
     // already been passed through htmlspecialchars() in $this->escape(), so it
-    // is safe to mark as such for the renderer.
-    return new FormattableMarkup($svg, []);
+    // is safe to mark as trusted for the renderer.
+    return Markup::create($svg);
   }
 
   /**

@@ -177,6 +177,37 @@ class McpMetricsTest extends KernelTestBase {
   }
 
   /**
+   * @covers ::deniedReasons
+   *
+   * rate_limit_exceeded rows carry no 'reason' metadata key; they must appear
+   * under their operation string ('rate_limit_exceeded'), not 'unspecified'.
+   * Both denied_access (with reason) and rate_limit_exceeded (no reason) must
+   * be present — the query must use IN (DENIED_OPERATIONS).
+   */
+  public function testDeniedReasonsIncludesRateLimitExceeded(): void {
+    $now = \Drupal::time()->getRequestTime();
+    // denied_access row WITH an explicit reason key.
+    $this->seedAudit('denied_access', $now - 100, ['reason' => 'write_denied']);
+    // rate_limit_exceeded row — metadata does NOT carry a 'reason' key; it
+    // carries the tool name as per McpEntityToolTrait::checkRateLimit().
+    $this->seedAudit('rate_limit_exceeded', $now - 200, ['tool' => 'mcp_node_ops']);
+    $this->seedAudit('rate_limit_exceeded', $now - 300, ['tool' => 'mcp_node_ops']);
+    // entity_save must be invisible.
+    $this->seedAudit('entity_save', $now - 100, []);
+    /** @var \Drupal\mcp_sentinel\Service\McpMetrics $m */
+    $m = \Drupal::service('mcp_sentinel.metrics');
+    $reasons = $m->deniedReasons('24h');
+    // Policy denial labelled by its metadata reason key.
+    $this->assertSame(1, $reasons['write_denied']);
+    // Rate-limit denials labelled by operation name (no 'reason' key present).
+    $this->assertSame(2, $reasons['rate_limit_exceeded']);
+    // entity_save must not appear.
+    $this->assertArrayNotHasKey('entity_save', $reasons);
+    // No 'unspecified' bucket — operation name fallback is used instead.
+    $this->assertArrayNotHasKey('unspecified', $reasons);
+  }
+
+  /**
    * @covers ::topAgents
    */
   public function testTopAgentsGroupsByUid(): void {

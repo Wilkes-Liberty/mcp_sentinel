@@ -250,8 +250,15 @@ final class McpMetrics {
       $query = $this->auditBaseQuery($since);
       $query->addField('l', 'uid', 'uid');
       $query->addExpression('COUNT(*)', 'total');
-      $denied = "SUM(CASE WHEN l.operation IN (:denied[]) THEN 1 ELSE 0 END)";
-      $query->addExpression($denied, 'denied', [':denied[]' => self::DENIED_OPERATIONS]);
+      // Use explicit scalar placeholders for the CASE expression so it is safe
+      // on both MySQL/MariaDB and PostgreSQL (the :name[] array-expansion
+      // convention is only documented for condition() and does not reliably
+      // bind inside addExpression() on pgsql).
+      $denied = "SUM(CASE WHEN l.operation IN (:denied_op0, :denied_op1) THEN 1 ELSE 0 END)";
+      $query->addExpression($denied, 'denied', [
+        ':denied_op0' => self::DENIED_OPERATIONS[0],
+        ':denied_op1' => self::DENIED_OPERATIONS[1],
+      ]);
       $query->groupBy('l.uid');
       $query->orderBy('total', 'DESC');
       $query->range(0, max($limit, 1));
@@ -284,15 +291,22 @@ final class McpMetrics {
     return $this->guard(__FUNCTION__, $window, [], function () use ($window): array {
       $since = $this->since($window);
       $rows = $this->auditBaseQuery($since)
-        ->fields('l', ['metadata'])
-        ->condition('operation', 'denied_access')
+        ->fields('l', ['operation', 'metadata'])
+        ->condition('operation', self::DENIED_OPERATIONS, 'IN')
         ->execute();
       $reasons = [];
       foreach ($rows as $row) {
         $meta = $this->auditLogger->decodeMetadata((string) ($row->metadata ?? ''));
-        $reason = isset($meta['reason']) && $meta['reason'] !== ''
-          ? (string) $meta['reason']
-          : 'unspecified';
+        if (isset($meta['reason']) && $meta['reason'] !== '') {
+          // denied_access rows carry an explicit 'reason' metadata key.
+          $reason = (string) $meta['reason'];
+        }
+        else {
+          // rate_limit_exceeded (and future denial ops) carry no 'reason' key;
+          // use the operation string as the label so the returned map
+          // distinguishes rate-limit throttles from policy denials.
+          $reason = (string) $row->operation;
+        }
         $reasons[$reason] = ($reasons[$reason] ?? 0) + 1;
       }
       arsort($reasons);

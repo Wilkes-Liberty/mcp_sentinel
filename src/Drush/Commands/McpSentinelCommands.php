@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
@@ -37,6 +39,10 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly EntityTypeManagerInterface $entityTypeManager,
     #[Autowire(service: 'mcp_sentinel.webhook_queue_manager')]
     private readonly McpWebhookQueueManager $webhookQueueManager,
+    #[Autowire(service: 'state')]
+    private readonly StateInterface $state,
+    #[Autowire(service: 'datetime.time')]
+    private readonly TimeInterface $time,
   ) {
     parent::__construct();
   }
@@ -170,6 +176,26 @@ final class McpSentinelCommands extends DrushCommands {
   #[CLI\Usage(name: 'drush mcp-sentinel:audit-verify', description: 'Verify the tamper-evident audit log hash chain.')]
   public function auditVerify(): int {
     $result = $this->auditLogger->verifyChain();
+
+    // Persist the verification outcome so the dashboard chain-integrity widget
+    // (McpMetrics::chainIntegrity()) and the McpUrgentConditions chain_broken
+    // alert reflect this run without re-running the full walk on every request.
+    //
+    // NOTE (Task C/D implementer): the dashboard "Verify now" action must also
+    // write this same state key with the same shape so the widget stays live.
+    // Shape read by chainIntegrity(): ok, broken_at, time (-> verified_at).
+    $rowCount = (int) $this->database
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->state->set('mcp_sentinel.last_verify', [
+      'ok'        => (bool) $result['ok'],
+      'broken_at' => isset($result['broken_at']) ? (int) $result['broken_at'] : NULL,
+      'rows'      => $rowCount,
+      'time'      => $this->time->getRequestTime(),
+    ]);
+
     if ($result['ok']) {
       $this->logger()->success('Audit log hash chain OK — no tampering detected.');
       return self::EXIT_SUCCESS;
