@@ -7,11 +7,11 @@ stable release is tagged.
 
 ## [Unreleased]
 
-> Phase 5 (hardening & release readiness). The next tagged release is the
-> maintainer's decision at tag time; on promotion, rename this heading to the
-> chosen version + date (likely `1.0.0-beta1`) and start a fresh empty
-> `[Unreleased]` above it. No breaking changes — this is additive hardening,
-> test, and documentation work over `1.0.0-alpha2`.
+## [1.0.0-beta1] - 2026-06-02
+
+> Hardening, test-coverage, and documentation work over `1.0.0-alpha2`
+> (Phase 5). Additive only — no breaking changes. Notably closed a JSON:API
+> entity-create governance bypass and three holistic-security-review findings.
 
 ### Security
 - **Webhook SSRF guard now covers IPv6-only (AAAA) hosts (F17).**
@@ -493,6 +493,7 @@ stable release is tagged.
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha2...1.0.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta1...1.0.x
+[1.0.0-beta1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha2...1.0.0-beta1
 [1.0.0-alpha2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha1...1.0.0-alpha2
 [1.0.0-alpha1]: https://git.drupalcode.org/project/mcp_sentinel/-/tags/1.0.0-alpha1
