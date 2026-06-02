@@ -76,6 +76,68 @@ final class McpDashboardTest extends BrowserTestBase {
   }
 
   /**
+   * The six charts render (SVG fallback) and at least one drills to the audit.
+   */
+  public function testSixChartsRenderWithData(): void {
+    $now = \Drupal::time()->getRequestTime();
+    foreach (['entity_save', 'entity_save', 'denied_access'] as $op) {
+      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+        'timestamp' => $now - 60,
+        'uid' => 1,
+        'operation' => $op,
+        'entity_type' => 'node',
+        'entity_id' => '1',
+        'metadata' => '{}',
+      ])->execute();
+    }
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    // Six chart cells (SVG fallback — the charts module is absent in CI).
+    $this->assertSession()->elementsCount('css', '.mcp-chart-cell', 6);
+    // At least one chart links into the filtered audit log.
+    $this->assertSession()->elementExists('css', '.mcp-chart-cell a[href*="/admin/reports/mcp-sentinel/audit"]');
+  }
+
+  /**
+   * The window toggle changes the ?window= query and re-renders.
+   */
+  public function testWindowToggleChangesQuery(): void {
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel', ['query' => ['window' => '7d']]);
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->linkByHrefExists('window=30d');
+  }
+
+  /**
+   * Verify-now runs, writes last_verify state, redirects, and shows a message.
+   */
+  public function testVerifyNowWritesStateAndRedirects(): void {
+    $admin = $this->drupalCreateUser(['administer mcp sentinel', 'view mcp sentinel audit log']);
+    $this->drupalLogin($admin);
+    // Follow the CSRF-protected Verify-now link from the dashboard.
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->clickLink('Verify chain now');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->addressEquals('/admin/reports/mcp-sentinel');
+    // The action wrote the last-verify state in the drush-compatible shape.
+    $last = \Drupal::state()->get('mcp_sentinel.last_verify');
+    $this->assertIsArray($last);
+    $this->assertArrayHasKey('ok', $last);
+    $this->assertArrayHasKey('rows', $last);
+    $this->assertArrayHasKey('time', $last);
+    $this->assertTrue($last['ok']);
+  }
+
+  /**
+   * The Verify-now action is CSRF-protected (no token → access denied).
+   */
+  public function testVerifyNowRequiresCsrfToken(): void {
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/verify');
+    $this->assertSession()->statusCodeEquals(403);
+  }
+
+  /**
    * A broken stored chain surfaces the critical banner on the dashboard.
    */
   public function testCriticalBannerShownWhenChainBroken(): void {

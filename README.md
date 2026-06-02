@@ -621,14 +621,28 @@ stores — it performs no writes and re-verifies nothing on load. It surfaces:
   each linking into the relevant report;
 - a **chain-integrity card** reflecting the last stored verify result;
 - **top-agents** and **denied-by-policy** panels;
-- a **quick-actions** bar and an **active-controls** strip showing which
-  controls (hash chain, encryption, SIEM, DLP, rate limiting, IP allowlist,
-  approvals) are on.
+- a **quick-actions** bar (including **Verify chain now**, a CSRF-protected
+  action that re-runs the hash-chain check, records the result, and returns to
+  the dashboard with a status message) and an **active-controls** strip showing
+  which controls (hash chain, encryption, SIEM, DLP, rate limiting, IP
+  allowlist, approvals) are on;
+- **six charts** — audit volume over time (anomaly buckets flagged),
+  allowed-vs-denied, operation mix, top agents, denied reasons, and webhook
+  health.
 
-Every widget is built behind its own guard, so a single failing metric degrades
-to an empty/"—" widget rather than breaking the page. The dashboard renders
-even when the approval submodule is absent and when `drupal/charts` is not
-installed.
+A **time-window toggle** (`?window=24h|7d|30d`, default 24h, validated) re-scopes
+every count and chart via plain server-rendered links — no heavy JavaScript.
+Charts and tiles **click through** to the audit log filtered to the relevant
+slice (e.g. the volume chart and the Audit tile link to
+`/admin/reports/mcp-sentinel/audit`; the denied-reasons chart links to
+`?operation=denied_access`).
+
+Charts render as self-contained inline SVG by default; installing the optional
+`drupal/charts` contrib module (a composer `suggest`) upgrades them to
+interactive charts with no code change. Every widget is built behind its own
+guard, so a single failing metric degrades to an empty/"—" widget rather than
+breaking the page. The dashboard renders even when the approval submodule is
+absent and when `drupal/charts` is not installed.
 
 ### Drush commands
 

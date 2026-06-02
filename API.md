@@ -209,7 +209,17 @@ tiles, chain-integrity card, top-agents / denied-by-policy panels,
 quick-actions, and active-controls strip (`McpMetrics`). The `?window=` query
 parameter is validated to `24h`/`7d`/`30d` (default `24h`). Each widget is
 built behind its own try/catch so a single failing metric degrades to an
-empty/"—" widget (logged to `mcp_sentinel`) rather than fataling the page.
+empty/"—" widget (logged to `mcp_sentinel`) rather than fataling the page. The
+six charts are produced via `McpChartRenderer`, and chart/tile click-to-drill
+links target the filtered audit (and webhook) logs.
+
+`McpDashboardController::verify()` backs the route `mcp_sentinel.verify_chain`
+(`GET /admin/reports/mcp-sentinel/verify`, permission *View MCP Sentinel audit
+log*, **CSRF-protected** via `_csrf_token: TRUE`). It re-runs
+`McpAuditLogger::verifyChain()`, writes the outcome to `@state`
+`mcp_sentinel.last_verify` in the SAME shape the `drush
+mcp-sentinel:audit-verify` command writes (`ok`, `broken_at`, `rows`, `time`),
+then redirects to the dashboard with a status message.
 
 When the audit listing moved to `/admin/reports/mcp-sentinel/audit`, the route
 name `mcp_sentinel.audit_log` and the `mcp_sentinel.audit_export` route were

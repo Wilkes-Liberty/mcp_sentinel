@@ -14,6 +14,8 @@ stable release is tagged.
 - McpUrgentConditions service (`mcp_sentinel.urgent_conditions`): evaluates critical/warning conditions (broken hash chain, unresolvable encryption profile, governance off with recent traffic, unresolvable webhook signing key) plus the operator broadcast.
 - McpChartRenderer service (`mcp_sentinel.chart_renderer`): renders metric series as charts with a self-contained inline-SVG fallback and an optional `drupal/charts` upgrade (added to composer `suggest`).
 - Governance dashboard at `/admin/reports/mcp-sentinel` (`McpDashboardController`): urgent-conditions banner, posture hero, status tiles, chain-integrity card, top-agents and denied-by-policy panels, quick actions, and an active-controls strip — each widget guarded so a failing metric degrades gracefully. Local-task tabs (Dashboard · Audit log · Webhook deliveries · Approvals) navigate the report surface.
+- Six dashboard charts (audit volume with anomaly markers, allowed-vs-denied, operation mix, top agents, denied reasons, webhook health) via `McpChartRenderer`, with a server-rendered time-window toggle (`?window=24h|7d|30d`, default 24h) and click-to-drill links into the filtered audit / webhook logs.
+- CSRF-protected **Verify chain now** dashboard action (`mcp_sentinel.verify_chain`): re-runs `verifyChain()` and writes `@state` `mcp_sentinel.last_verify` in the same shape as the Drush command, then redirects to the dashboard with a status message.
 
 ### Changed
 - Audit log listing moved from `/admin/reports/mcp-sentinel` to `/admin/reports/mcp-sentinel/audit` (the base path is now the governance dashboard); the route name `mcp_sentinel.audit_log` and the export route are unchanged.

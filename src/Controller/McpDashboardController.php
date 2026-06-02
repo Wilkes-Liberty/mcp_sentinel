@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Controller;
 
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Utility\Html;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Database\Connection;
+use Drupal\Core\State\StateInterface;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpChartRenderer;
 use Drupal\mcp_sentinel\Service\McpMetrics;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -48,12 +54,27 @@ class McpDashboardController extends ControllerBase {
    *   The dashboard-data service.
    * @param \Drupal\mcp_sentinel\Service\McpUrgentConditions $urgentConditions
    *   The urgent-conditions evaluator.
+   * @param \Drupal\mcp_sentinel\Service\McpChartRenderer $chartRenderer
+   *   The chart renderer (charts + SVG fallback).
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   The audit logger (Verify-now runs verifyChain()).
+   * @param \Drupal\Core\State\StateInterface $state
+   *   The state service (Verify-now writes mcp_sentinel.last_verify).
+   * @param \Drupal\Core\Database\Connection $database
+   *   The database connection (Verify-now reads the audit row count).
+   * @param \Drupal\Component\Datetime\TimeInterface $time
+   *   The time service (Verify-now timestamps the last-verify result).
    * @param \Psr\Log\LoggerInterface $logger
    *   The mcp_sentinel logger channel.
    */
   public function __construct(
     private readonly McpMetrics $metrics,
     private readonly McpUrgentConditions $urgentConditions,
+    private readonly McpChartRenderer $chartRenderer,
+    private readonly McpAuditLogger $auditLogger,
+    private readonly StateInterface $state,
+    private readonly Connection $database,
+    private readonly TimeInterface $time,
     private readonly LoggerInterface $logger,
   ) {}
 
@@ -64,6 +85,11 @@ class McpDashboardController extends ControllerBase {
     return new static(
       $container->get('mcp_sentinel.metrics'),
       $container->get('mcp_sentinel.urgent_conditions'),
+      $container->get('mcp_sentinel.chart_renderer'),
+      $container->get('mcp_sentinel.audit_logger'),
+      $container->get('state'),
+      $container->get('database'),
+      $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
     );
   }
@@ -399,17 +425,101 @@ class McpDashboardController extends ControllerBase {
   }
 
   /**
-   * Builds the six dashboard charts (Task C2 wires the renderer).
+   * Builds the six dashboard charts via the chart renderer.
+   *
+   * (1) audit volume time-series (anomaly buckets flagged in the title),
+   * (2) allowed vs denied, (3) operation mix, (4) top agents, (5) denied
+   * reasons, (6) webhook health. Each chart that maps onto a filterable report
+   * carries a click-to-drill URL into the (moved) audit log or webhook log.
    *
    * @param string $window
    *   The selected window.
    *
-   * @return array<string, array>
-   *   Keyed chart render arrays.
+   * @return array<int, array>
+   *   The ordered chart render arrays.
    */
   private function buildCharts(string $window): array {
-    // Charts are wired in Task C2.
-    return [];
+    $auditUrl = Url::fromRoute('mcp_sentinel.audit_log')->toString();
+    $deniedUrl = Url::fromRoute('mcp_sentinel.audit_log', [], [
+      'query' => ['operation' => 'denied_access'],
+    ])->toString();
+
+    $charts = [];
+
+    // (1) Audit volume time-series.
+    $timeSeries = $this->metrics->auditTimeSeries($window);
+    $volume = [];
+    $anomalyBuckets = 0;
+    foreach ($timeSeries as $label => $bucket) {
+      $volume[(string) $label] = $bucket['count'];
+      if ($bucket['anomaly']) {
+        $anomalyBuckets++;
+      }
+    }
+    $volumeTitle = $anomalyBuckets > 0
+      ? (string) $this->formatPlural(
+        $anomalyBuckets,
+        'Audit volume (1 anomaly bucket)',
+        'Audit volume (@count anomaly buckets)',
+      )
+      : (string) $this->t('Audit volume');
+    $charts[] = $this->chartRenderer->render('line', $volume, [
+      'title' => $volumeTitle,
+      'drill_url' => $auditUrl,
+    ]);
+
+    // (2) Allowed vs denied.
+    $split = $this->metrics->allowedVsDenied($window);
+    $charts[] = $this->chartRenderer->render('bar', [
+      (string) $this->t('Allowed') => $split['allowed'],
+      (string) $this->t('Denied') => $split['denied'],
+    ], [
+      'title' => (string) $this->t('Allowed vs denied'),
+      'drill_url' => $auditUrl,
+    ]);
+
+    // (3) Operation mix.
+    $charts[] = $this->chartRenderer->render('donut', $this->metrics->operationMix($window), [
+      'title' => (string) $this->t('Operation mix'),
+      'drill_url' => $auditUrl,
+    ]);
+
+    // (4) Top agents.
+    $agentSeries = [];
+    foreach ($this->metrics->topAgents($window) as $agent) {
+      $uid = $agent['uid'];
+      $key = $uid > 0
+        ? (string) $this->t('UID @uid', ['@uid' => $uid])
+        : (string) $this->t('anonymous');
+      $agentSeries[$key] = $agent['total'];
+    }
+    $charts[] = $this->chartRenderer->render('bar', $agentSeries, [
+      'title' => (string) $this->t('Top agents'),
+      'drill_url' => $auditUrl,
+    ]);
+
+    // (5) Denied reasons.
+    $reasonSeries = [];
+    foreach ($this->metrics->deniedReasons($window) as $reason => $count) {
+      $reasonSeries[(string) $reason] = (int) $count;
+    }
+    $charts[] = $this->chartRenderer->render('bar', $reasonSeries, [
+      'title' => (string) $this->t('Denied reasons'),
+      'drill_url' => $deniedUrl,
+    ]);
+
+    // (6) Webhook health.
+    $health = $this->metrics->webhookHealth($window);
+    $charts[] = $this->chartRenderer->render('donut', [
+      (string) $this->t('Sent') => $health['sent'],
+      (string) $this->t('Failed') => $health['failed'],
+      (string) $this->t('Pending') => $health['pending'],
+    ], [
+      'title' => (string) $this->t('Webhook health'),
+      'drill_url' => $this->webhookUrl() ?? '',
+    ]);
+
+    return $charts;
   }
 
   /**
@@ -457,12 +567,14 @@ class McpDashboardController extends ControllerBase {
   }
 
   /**
-   * Returns the Verify-now action URL, or an empty string when unavailable.
+   * Returns the CSRF-tokened Verify-now action URL, or '' when unavailable.
    *
-   * Wired in Task C2; returns '' until the route exists.
+   * The route declares `_csrf_token: TRUE`, so generating its URL automatically
+   * appends the per-session `?token=` query parameter that the action's access
+   * check validates.
    *
    * @return string
-   *   The internal path, or ''.
+   *   The internal path with a CSRF token, or ''.
    */
   private function verifyUrl(): string {
     try {
@@ -471,6 +583,52 @@ class McpDashboardController extends ControllerBase {
     catch (\Throwable $e) {
       return '';
     }
+  }
+
+  /**
+   * Runs the audit hash-chain verification and records the result.
+   *
+   * CSRF-protected (route requirement). Walks the audit chain via the audit
+   * logger, writes the outcome to @state 'mcp_sentinel.last_verify' in the SAME
+   * shape the `drush mcp-sentinel:audit-verify` command writes (ok, broken_at,
+   * rows, time) so the chain-integrity widget and the urgent-conditions
+   * chain_broken alert stay live, then redirects back to the dashboard with a
+   * status message.
+   *
+   * @return \Symfony\Component\HttpFoundation\RedirectResponse
+   *   A redirect back to the dashboard.
+   */
+  public function verify(): RedirectResponse {
+    try {
+      $result = $this->auditLogger->verifyChain();
+      $rows = (int) $this->database
+        ->select('mcp_sentinel_audit_log', 'l')
+        ->countQuery()
+        ->execute()
+        ->fetchField();
+      $this->state->set('mcp_sentinel.last_verify', [
+        'ok' => (bool) $result['ok'],
+        'broken_at' => isset($result['broken_at']) ? (int) $result['broken_at'] : NULL,
+        'rows' => $rows,
+        'time' => $this->time->getRequestTime(),
+      ]);
+      if ($result['ok']) {
+        $this->messenger()->addStatus($this->t('Audit hash chain verified — @n rows intact.', [
+          '@n' => $rows,
+        ]));
+      }
+      else {
+        $this->messenger()->addError($this->t('Audit hash chain BROKEN at row @id. Tampering or data loss is indicated.', [
+          '@id' => isset($result['broken_at']) ? (int) $result['broken_at'] : 0,
+        ]));
+      }
+    }
+    catch (\Throwable $e) {
+      $this->logger->error('Verify-now failed: @message', ['@message' => $e->getMessage()]);
+      $this->messenger()->addError($this->t('Audit hash chain verification could not be completed.'));
+    }
+
+    return $this->redirect('mcp_sentinel.dashboard');
   }
 
 }
