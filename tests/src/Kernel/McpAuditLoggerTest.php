@@ -72,6 +72,55 @@ final class McpAuditLoggerTest extends KernelTestBase {
   }
 
   /**
+   * The connector's X-MCP-Client label is recorded for audit (log-only).
+   *
+   * Integration Contract v1.0: the header is captured into the audit metadata
+   * as `mcp_client` and is never an enforcement signal — governance keys on the
+   * authenticated role and OAuth scopes, not on this client-supplied header.
+   *
+   * @covers ::log
+   */
+  public function testLogCapturesMcpClientHeader(): void {
+    $this->container->get('request_stack')->getCurrentRequest()->headers
+      ->set('X-MCP-Client', 'drupal-mcp-connector/0.6.0');
+
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
+      'entity_type' => 'node',
+      'bundle' => 'page',
+      'id' => '7',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->fields('l')
+      ->execute()
+      ->fetchAssoc();
+
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame('drupal-mcp-connector/0.6.0', $metadata['mcp_client'] ?? NULL);
+  }
+
+  /**
+   * A request without the X-MCP-Client header records no mcp_client label.
+   *
+   * @covers ::log
+   */
+  public function testLogOmitsMcpClientWhenHeaderAbsent(): void {
+    // The booted kernel request carries no X-MCP-Client header.
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '8']);
+
+    $row = $this->container->get('database')
+      ->select('mcp_sentinel_audit_log', 'l')
+      ->fields('l')
+      ->execute()
+      ->fetchAssoc();
+
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertArrayNotHasKey('mcp_client', $metadata ?? []);
+  }
+
+  /**
    * @covers ::log
    */
   public function testLogRespectsAuditDisabled(): void {

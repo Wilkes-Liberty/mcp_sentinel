@@ -1,9 +1,30 @@
 # MCP Sentinel — Connector ↔ Drupal Contract & Per-Environment Runbook
 
-> **Audience:** DevOps / platform engineers wiring the `drupal-mcp-server`
+> **Audience:** DevOps / platform engineers wiring the `drupal-mcp-connector`
 > connector to a Drupal site protected by MCP Sentinel. This document covers
 > the authorization model, per-environment configuration steps, and the
 > end-to-end manual verification procedure.
+
+---
+
+## Integration Contract v1.0
+
+MCP Sentinel implements **Integration Contract v1.0**, the shared contract
+published by the companion connector at `docs/integration-contract.md` in
+[Wilkes-Liberty/drupal-mcp-connector](https://github.com/Wilkes-Liberty/drupal-mcp-connector).
+On the Drupal side that means:
+
+- **Log-only `X-MCP-Client` identity.** The connector's self-reported client
+  label is recorded in the audit log (as the `mcp_client` metadata field) for
+  forensics only — it is never an enforcement signal.
+- **OAuth scopes `mcp:read` / `mcp:write`.** Read/explain tools require
+  `mcp:read`; write tools require `mcp:write`.
+- **The `/drupal-mcp/context` endpoint** exposes the governed site schema.
+- **Server-authoritative authorization keyed on role + scopes.** Every gate is
+  decided server-side from the authenticated role and the token's OAuth scopes —
+  never from a client-supplied header.
+
+**Compatibility:** mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6 (contract 1.0).
 
 ---
 

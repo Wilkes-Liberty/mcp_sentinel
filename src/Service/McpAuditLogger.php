@@ -131,7 +131,17 @@ class McpAuditLogger {
     $user_agent = $request
       ? substr($request->headers->get('User-Agent', ''), 0, 512)
       : NULL;
+    // The connector's self-reported X-MCP-Client label (Integration Contract
+    // v1.0). Recorded into the audit metadata for forensic identity only — it
+    // is NEVER an enforcement signal. Governance keys on the authenticated role
+    // and OAuth scopes, so a forged or omitted header cannot bypass any gate.
+    $mcp_client = $request
+      ? substr($request->headers->get('X-MCP-Client', ''), 0, 256)
+      : '';
     $extra_metadata = array_diff_key($metadata, array_flip(['entity_type', 'bundle', 'id', 'label']));
+    if ($mcp_client !== '') {
+      $extra_metadata['mcp_client'] = $mcp_client;
+    }
 
     $key_value = $this->resolveHashKey($config->get('audit_hash_key'));
 

@@ -7,6 +7,21 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added
+- Adopted the shared **Integration Contract v1.0** (published by the companion
+  connector at `docs/integration-contract.md`). The connector's `X-MCP-Client`
+  label is now recorded in the audit log — log-only, as the `mcp_client`
+  metadata field, never an enforcement signal. `docs/CONNECTOR.md` documents the
+  contract surface (log-only client identity, `mcp:read`/`mcp:write` scopes, the
+  `/drupal-mcp/context` endpoint, and server-authoritative authorization keyed on
+  role + scopes). Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6.
+
+### Changed
+- Renamed all references to the companion connector to its final public name
+  **`drupal-mcp-connector`** (formerly published under its working name; repo
+  `Wilkes-Liberty/drupal-mcp-connector`, npm `drupal-mcp-connector`). The
+  `X-MCP-Client` label default is now `drupal-mcp-connector/<version>`.
+
 ## [1.0.0-beta3] - 2026-06-02
 
 ### Fixed
