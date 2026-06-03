@@ -6,6 +6,7 @@ chartjs
 ciphertext
 cret
 cset
+cspell
 curlopt
 cust
 cweagans
@@ -15,6 +16,7 @@ drush
 eccdeac
 endcode
 entr
+eslint
 etype
 exfiltration
 fataling
@@ -53,6 +55,7 @@ serialised
 SIEM
 sixteenbytekey
 spoofable
+stylelint
 symfony
 tempstore
 textareas

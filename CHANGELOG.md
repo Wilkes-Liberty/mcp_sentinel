@@ -7,6 +7,17 @@ stable release is tagged.
 
 ## [Unreleased]
 
+## [1.0.0-beta3] - 2026-06-02
+
+### Fixed
+- Drupal.org CI code-quality jobs: added project words for CSpell, fixed the
+  Stylelint CSS property order, removed a redundant ESLint `'use strict'`, and
+  wrapped a PHPCS line-length warning. No functional change.
+
+### Changed
+- Module, composer, and project-page descriptions updated to the current
+  governance feature set.
+
 ## [1.0.0-beta2] - 2026-06-02
 
 ### Added
@@ -517,7 +528,8 @@ stable release is tagged.
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta2...1.0.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta3...1.0.x
+[1.0.0-beta3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta2...1.0.0-beta3
 [1.0.0-beta2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta1...1.0.0-beta2
 [1.0.0-beta1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha2...1.0.0-beta1
 [1.0.0-alpha2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha1...1.0.0-alpha2
