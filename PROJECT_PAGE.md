@@ -15,8 +15,19 @@ It builds **on top of** the Acquia-sponsored, Lullabot-maintained
 does not reinvent the MCP protocol, OAuth, or the tool plugin system — it adds
 the governance layer those projects intentionally leave to site builders.
 
+**How governance triggers.** MCP Sentinel governs traffic on the validated
+**OAuth agent channel** — a designated consumer, or an agent scope on the
+request's access token (server-validated, never a spoofable header). Your public
+frontend and your own cookie-session admin work are unaffected. The acting
+agent's **role selects the policy profile**, and every governed action is
+attributed to the authenticated account.
+
 ## What it does
 
+- **Per-role policy profiles** — every gate, redaction rule, rate limit, quota
+  cap, and IP allowlist lives on a reusable policy-profile config entity; the
+  acting agent's Drupal role selects which profile applies, so different agents
+  can have different policies.
 - **Security presets & operation gates** — master on/off switch plus
   independent read / write / delete / GraphQL-mutation toggles. When disabled,
   MCP requests are refused regardless of credentials.
