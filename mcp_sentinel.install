@@ -12,8 +12,18 @@ use Drupal\user\Entity\Role;
 
 /**
  * Implements hook_schema().
+ *
+ * Defines three tables that hold runtime governance state rather than
+ * configuration. On uninstall, core drops all three automatically from this
+ * definition (see mcp_sentinel_uninstall()).
  */
 function mcp_sentinel_schema(): array {
+  // Tamper-evident audit trail of every governed MCP operation. Each row stores
+  // who (uid), what (operation/entity_*), and the request context (ip/user
+  // agent) plus free-form 'metadata' (the change diff, optionally encrypted).
+  // prev_hash/row_hash form the hash chain: row_hash covers the row's contents
+  // and the previous row's hash, so any insertion, deletion, or edit breaks the
+  // chain and is detectable by the integrity verifier.
   $schema['mcp_sentinel_audit_log'] = [
     'description' => 'Audit log for all MCP agent operations.',
     'fields' => [
@@ -32,6 +42,8 @@ function mcp_sentinel_schema(): array {
       'row_hash'     => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
     ],
     'primary key' => ['id'],
+    // Indexes back the audit log's filter facets (time window, user, operation,
+    // entity type) and the chain verifier's row_hash lookups.
     'indexes' => [
       'timestamp'   => ['timestamp'],
       'uid'         => ['uid'],
@@ -41,6 +53,12 @@ function mcp_sentinel_schema(): array {
     ],
   ];
 
+  // Durable record of each webhook delivery attempt, decoupled from the queue so
+  // deliveries survive a queue flush and can be replayed. 'status' tracks the
+  // lifecycle (pending/delivered/failed); 'attempts' and 'next_attempt' drive
+  // the exponential backoff and the cron requeue scan; 'item_id' links the row
+  // to its in-flight queue item; the last_response_* columns retain the most
+  // recent endpoint reply for the delivery log UI.
   $schema['mcp_sentinel_webhook_delivery'] = [
     'description' => 'Webhook delivery log for queued, retried MCP notifications.',
     'fields' => [
@@ -59,6 +77,9 @@ function mcp_sentinel_schema(): array {
       'item_id'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
     ],
     'primary key' => ['id'],
+    // 'status' + 'next_attempt' support the cron scan for due pending rows;
+    // 'created' backs retention pruning; 'endpoint_id' backs per-endpoint
+    // filtering in the delivery log UI.
     'indexes' => [
       'status'       => ['status'],
       'next_attempt' => ['next_attempt'],
@@ -67,6 +88,9 @@ function mcp_sentinel_schema(): array {
     ],
   ];
 
+  // Short-lived advisory locks preventing concurrent agent writes to the same
+  // entity. Keyed on (entity_type, entity_id) so at most one lock exists per
+  // target; 'expires_at' bounds the lock lifetime and is pruned on cron.
   $schema['mcp_sentinel_content_locks'] = [
     'description' => 'Content items locked against MCP writes.',
     'fields' => [
@@ -78,6 +102,7 @@ function mcp_sentinel_schema(): array {
       'reason'      => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
     ],
     'primary key' => ['entity_type', 'entity_id'],
+    // Backs the cron sweep that releases expired locks.
     'indexes' => ['expires_at' => ['expires_at']],
   ];
 
@@ -86,6 +111,10 @@ function mcp_sentinel_schema(): array {
 
 /**
  * Implements hook_install().
+ *
+ * Seeds the 'mcp_api' role with the minimum read permissions an agent account
+ * needs, so a fresh install has a ready-to-assign governed identity. The role
+ * is only created when absent, keeping reinstall idempotent.
  */
 function mcp_sentinel_install(): void {
   if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
@@ -400,6 +429,13 @@ function mcp_sentinel_update_10010(): string {
 
 /**
  * Implements hook_uninstall().
+ *
+ * Only removes what core does not clean up automatically: the module's main
+ * settings object and the 'mcp_api' role created on install. The hook_schema()
+ * tables (audit_log, webhook_delivery, content_locks) and the module's config
+ * entities (policy profiles, and the approval submodule's request entity) are
+ * dropped by core's uninstall machinery, so they are intentionally not handled
+ * here.
  */
 function mcp_sentinel_uninstall(): void {
   \Drupal::configFactory()->getEditable('mcp_sentinel.settings')->delete();

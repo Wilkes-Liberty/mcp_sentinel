@@ -184,6 +184,13 @@ function mcp_sentinel_page_top(array &$page): void {
 
 /**
  * Implements hook_entity_presave().
+ *
+ * Records every create/update made over the governed agent channel to the
+ * audit log, capturing a redaction-aware change diff for updates, and
+ * dispatches the internal 'mcp.entity.presave' event (consumed e.g. by the
+ * approval submodule). Ungoverned saves are skipped via the isGoverned() early
+ * return so normal site activity is never audited. The diff runs at presave
+ * because the original (pre-change) field values are still available here.
  */
 function mcp_sentinel_entity_presave(EntityInterface $entity): void {
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
@@ -223,6 +230,11 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
 
 /**
  * Implements hook_entity_delete().
+ *
+ * Audits a governed-agent deletion and dispatches the internal
+ * 'mcp.entity.delete' event. This fires after the delete commits; gating a
+ * delete for human approval happens earlier, on the destructive-op event raised
+ * before the entity is removed (see the approval submodule), not here.
  */
 function mcp_sentinel_entity_delete(EntityInterface $entity): void {
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
@@ -241,6 +253,18 @@ function mcp_sentinel_entity_delete(EntityInterface $entity): void {
 
 /**
  * Implements hook_entity_access().
+ *
+ * Governs read/update/delete on existing entities for governed agents. When the
+ * account does not resolve to a policy profile (not a governed agent channel),
+ * the result is neutral so cookie-session and ungoverned access is unaffected —
+ * Sentinel adds gates, it never grants access core would deny. The delegated
+ * checker decides allow/forbid from the profile's gates and allow/deny lists.
+ *
+ * Caching: the outcome varies by 'user.roles' and 'oauth2_scopes' (governance
+ * keys on roles and the OAuth agent channel), and is tagged so editing a
+ * profile invalidates cached decisions. The neutral (ungoverned) branch carries
+ * the same contexts/tag so a profile becoming applicable later cannot serve a
+ * stale neutral result.
  */
 function mcp_sentinel_entity_access(
   EntityInterface $entity,
@@ -331,6 +355,12 @@ function mcp_sentinel_entity_field_access(
 
 /**
  * Implements hook_jsonapi_entity_filter_access().
+ *
+ * Controls which entity types a governed agent may filter on in JSON:API
+ * collection queries, mirroring the read gate and entity-type policy. Without
+ * this, an agent could probe denied entity types through filter conditions even
+ * when it cannot read the entities directly. Ungoverned requests resolve to no
+ * profile and return [] so core's default filter access applies unchanged.
  */
 function mcp_sentinel_jsonapi_entity_filter_access(
   EntityTypeInterface $entity_type,
