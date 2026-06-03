@@ -152,9 +152,11 @@ filterable audit log on its **Audit log** tab.
 
 ## Companion connector
 
-[drupal-mcp-server](https://github.com/wilkes-liberty/drupal-mcp-server) is an
+[drupal-mcp-connector](https://github.com/Wilkes-Liberty/drupal-mcp-connector) is an
 external Node.js MCP connector (multi-site, JSON:API + GraphQL, Drush bridge)
-that pairs with MCP Sentinel; the module identifies its requests automatically.
+that pairs with MCP Sentinel; the module records its `X-MCP-Client` label in the
+audit log. MCP Sentinel implements the shared **Integration Contract v1.0**
+(compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6).
 
 ## Security
 

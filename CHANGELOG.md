@@ -150,7 +150,7 @@ stable release is tagged.
   to `INSTALL.md`/`API.md`, and a note explaining why `composer.json` keeps
   `minimum-stability: dev` (the dev-only `drupal/mcp_server` has no stable tag).
 - Clarified the external tool-count claims: the README "66 tools" now
-  unambiguously refers to the external `drupal-mcp-server` Node connector (66
+  unambiguously refers to the external `drupal-mcp-connector` Node connector (66
   connector tools across 9 modules), not Sentinel's own plugins; the
   `composer.json` suggest for `drupal/mcp_tools` cites that project's own count
   (222 tools across 34 submodules).

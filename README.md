@@ -679,7 +679,7 @@ while the condition still holds.
 
 ## Companion Node.js Connector
 
-[drupal-mcp-server](https://github.com/wilkes-liberty/drupal-mcp-server) is a
+[drupal-mcp-connector](https://github.com/Wilkes-Liberty/drupal-mcp-connector) is a
 separate, optional Node.js MCP connector — not part of this module and not a
 count of Sentinel's own plugins. It exposes **66 connector tools across 9
 modules** (multi-site, GraphQL, and a Drush bridge) that an MCP client can call

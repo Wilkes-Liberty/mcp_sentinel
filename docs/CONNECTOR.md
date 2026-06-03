@@ -26,7 +26,7 @@ Keycloak (IdP)
 Drupal simple_oauth  (token endpoint: /oauth/token)
     │  access_token (≤ 3600 s) + refresh_token
     ▼
-drupal-mcp-server connector
+drupal-mcp-connector connector
     │  Authorization: Bearer <access_token>
     ▼
 Drupal JSON:API / Tool API  →  MCP Sentinel governance
@@ -288,13 +288,13 @@ ddev drush cex
 
 ## 4. The `X-MCP-Client` header
 
-The connector sends `X-MCP-Client: drupal-mcp-server/<version>`. This header
-is **not an enforcement gate** — it is recorded in the audit log as a label
-only. Governance cannot be bypassed by omitting the header; a non-agent request
-cannot be governed by adding it. No site configuration is required for this
-header.
+The connector sends `X-MCP-Client: drupal-mcp-connector/<version>`. This header
+is **not an enforcement gate** — it is recorded in the audit log as the
+`mcp_client` metadata field (a label only). Governance cannot be bypassed by
+omitting the header; a non-agent request cannot be governed by adding it. No
+site configuration is required for this header.
 
-The label value defaults to `drupal-mcp-server/<version>` and may be overridden
+The label value defaults to `drupal-mcp-connector/<version>` and may be overridden
 per environment via the connector's `MCP_CLIENT_ID` environment variable. This
 changes only the **logged label** — it has no effect on authentication,
 scope enforcement, or governance.
@@ -303,7 +303,7 @@ scope enforcement, or governance.
 
 | Concept | Source | Role |
 |---------|--------|------|
-| **`X-MCP-Client` label** | connector env var `MCP_CLIENT_ID` (default `drupal-mcp-server/<version>`) | **Cosmetic / audit-log only.** Never read for any security decision. |
+| **`X-MCP-Client` label** | connector env var `MCP_CLIENT_ID` (default `drupal-mcp-connector/<version>`) | **Cosmetic / audit-log only.** Never read for any security decision. |
 | **OAuth Consumer `client_id`** | the `consumers` Consumer entity (e.g. `mcp-agent-prod`, §3.2) | **Security-relevant.** Identifies the token's issuing client; when Sentinel's `agent_oauth_clients` allowlist is populated (§3.3) it is matched against **this** id to scope governance to a specific consumer. |
 
 Changing `MCP_CLIENT_ID` does **not** change which consumer the OAuth token is
