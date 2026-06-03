@@ -205,9 +205,9 @@ final class McpBulkOperationsTool extends ToolBase {
     // Apply response-size cap: because all writes have already been performed,
     // returning failure here would misreport a completed batch — an agent
     // seeing "failure" may retry and toggle publish/unpublish state again.
-    // Instead,
-    // truncate the reported lists to fit under the cap and signal truncation
-    // via '_size_truncated' / '_size_cap' keys. The operation WAS performed.
+    // Instead, truncate the reported lists to fit under the cap and signal
+    // truncation via '_size_truncated' / '_size_cap' keys. The operation WAS
+    // performed.
     $results = $this->truncateBulkResultsToSizeCap($results, $profileForRateLimit);
 
     $truncationNote = '';
@@ -232,6 +232,18 @@ final class McpBulkOperationsTool extends ToolBase {
 
   /**
    * Performs a single publish/unpublish/delete operation.
+   *
+   * Publish and unpublish require the entity to implement
+   * EntityPublishedInterface; entity types without publishing support throw,
+   * surfacing as a per-ID failure rather than aborting the batch.
+   *
+   * @param object $entity
+   *   The loaded entity to act on.
+   * @param string $operation
+   *   One of 'publish', 'unpublish', or 'delete'.
+   *
+   * @throws \RuntimeException
+   *   When a publish/unpublish is requested on a non-publishable entity type.
    */
   private function performOperation(object $entity, string $operation): void {
     if ($operation === 'delete') {

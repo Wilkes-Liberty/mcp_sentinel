@@ -19,6 +19,13 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
  * Drush commands for MCP Sentinel maintenance and inspection.
+ *
+ * Most maintenance commands here (audit-purge, lock-clear, webhook-prune) are
+ * manual triggers for work that also runs on cron; running them by hand simply
+ * performs the same cleanup immediately. The inspection commands (status,
+ * audit-verify) report state and use their exit code to signal health, so they
+ * can be wired into monitoring: a non-zero exit from audit-verify indicates a
+ * tampered audit log.
  */
 final class McpSentinelCommands extends DrushCommands {
 
@@ -148,6 +155,10 @@ final class McpSentinelCommands extends DrushCommands {
 
   /**
    * Re-enqueue a webhook delivery row for another delivery attempt.
+   *
+   * Resets the row to 'pending' and re-queues it so the worker replays the
+   * stored payload byte-for-byte. Exits with a failure code when no positive
+   * delivery ID is given or the row/endpoint no longer exists.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-replay', aliases: ['mcps:webhook-replay'])]
   #[CLI\Argument(name: 'deliveryId', description: 'Delivery log row ID to replay.')]
@@ -170,7 +181,12 @@ final class McpSentinelCommands extends DrushCommands {
    *
    * Walks all audit rows in insertion order, recomputing each row's SHA-256
    * hash from its stored prev_hash and canonical content. Prints OK if the
-   * chain is intact, or the id of the first broken link if not.
+   * chain is intact, or the id of the first broken link if not. Exits non-zero
+   * when the chain is broken so the command can drive monitoring/alerting.
+   *
+   * The outcome is also persisted to the 'mcp_sentinel.last_verify' state key
+   * so the dashboard chain-integrity widget reflects this run without having to
+   * re-walk the whole log on every page load.
    */
   #[CLI\Command(name: 'mcp-sentinel:audit-verify', aliases: ['mcps:audit-verify'])]
   #[CLI\Usage(name: 'drush mcp-sentinel:audit-verify', description: 'Verify the tamper-evident audit log hash chain.')]

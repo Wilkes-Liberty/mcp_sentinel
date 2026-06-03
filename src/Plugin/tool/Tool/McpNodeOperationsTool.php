@@ -201,6 +201,21 @@ final class McpNodeOperationsTool extends ToolBase {
 
   /**
    * Applies fields + published state, validates, and saves the node.
+   *
+   * Unknown field names are silently skipped (hasField() guard) so an agent
+   * supplying an extra key never aborts an otherwise valid write. Validation
+   * runs before save, so a constraint violation returns a failure rather than
+   * persisting an invalid entity.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The new or loaded node to populate and save.
+   * @param array $values
+   *   Tool input values; the 'fields' and 'published' keys are consumed here.
+   * @param \Drupal\Core\StringTranslation\TranslatableMarkup $verb
+   *   The past-tense verb for the success message ('created' or 'updated').
+   *
+   * @return \Drupal\tool\ExecutableResult
+   *   Success with the saved node's identifiers, or a validation/save failure.
    */
   private function applyAndSave(NodeInterface $node, array $values, TranslatableMarkup $verb): ExecutableResult {
     try {
@@ -229,6 +244,15 @@ final class McpNodeOperationsTool extends ToolBase {
 
   /**
    * Loads a node by numeric ID or UUID.
+   *
+   * A purely numeric value is treated as an entity ID; anything else is looked
+   * up by UUID, so agents may reference nodes by either identifier.
+   *
+   * @param string $id
+   *   A numeric node ID or a node UUID.
+   *
+   * @return \Drupal\node\NodeInterface|null
+   *   The loaded node, or NULL when the id is empty or no node matches.
    */
   private function loadNode(string $id): ?NodeInterface {
     if ($id === '') {

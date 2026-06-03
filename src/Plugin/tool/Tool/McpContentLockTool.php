@@ -116,6 +116,16 @@ final class McpContentLockTool extends ToolBase {
 
   /**
    * Sets a lock and returns the result.
+   *
+   * @param string $entity_type
+   *   The entity type ID to lock, e.g. 'node'.
+   * @param string $entity_id
+   *   The entity ID or UUID to lock.
+   * @param string $reason
+   *   Human-readable reason recorded with the lock.
+   *
+   * @return \Drupal\tool\ExecutableResult
+   *   A success result confirming the lock was set.
    */
   private function lock(string $entity_type, string $entity_id, string $reason): ExecutableResult {
     $this->contentLock->lock($entity_type, $entity_id, $reason);
@@ -127,6 +137,14 @@ final class McpContentLockTool extends ToolBase {
 
   /**
    * Releases a lock and returns the result.
+   *
+   * @param string $entity_type
+   *   The entity type ID to unlock, e.g. 'node'.
+   * @param string $entity_id
+   *   The entity ID or UUID to unlock.
+   *
+   * @return \Drupal\tool\ExecutableResult
+   *   A success result confirming the lock was released.
    */
   private function release(string $entity_type, string $entity_id): ExecutableResult {
     $this->contentLock->release($entity_type, $entity_id);
