@@ -1,6 +1,6 @@
 name: 'MCP Sentinel'
 type: module
-description: 'Enterprise security presets, audit logging, content locks, and HMAC webhooks for MCP-connected Drupal sites.'
+description: 'Enterprise governance for AI-agent access to Drupal — policy profiles, field redaction, DLP, tamper-evident audit logging, and reliable webhooks over MCP / JSON:API / GraphQL.'
 package: 'AI / MCP'
 core_version_requirement: ^10.3 || ^11
 

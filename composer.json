@@ -1,6 +1,6 @@
 {
   "name": "drupal/mcp_sentinel",
-  "description": "Enterprise security presets, audit logging, content locks, and HMAC webhooks for MCP-connected Drupal sites.",
+  "description": "Enterprise governance for AI-agent access to Drupal — policy profiles, field redaction, DLP, tamper-evident audit logging, and reliable webhooks over MCP / JSON:API / GraphQL.",
   "type": "drupal-module",
   "license": "GPL-2.0-or-later",
   "homepage": "https://www.drupal.org/project/mcp_sentinel",
