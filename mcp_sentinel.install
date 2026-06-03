@@ -53,12 +53,12 @@ function mcp_sentinel_schema(): array {
     ],
   ];
 
-  // Durable record of each webhook delivery attempt, decoupled from the queue so
-  // deliveries survive a queue flush and can be replayed. 'status' tracks the
-  // lifecycle (pending/delivered/failed); 'attempts' and 'next_attempt' drive
-  // the exponential backoff and the cron requeue scan; 'item_id' links the row
-  // to its in-flight queue item; the last_response_* columns retain the most
-  // recent endpoint reply for the delivery log UI.
+  // Durable record of each webhook delivery attempt, decoupled from the queue
+  // so deliveries survive a queue flush and can be replayed. 'status' tracks
+  // the lifecycle (pending/delivered/failed); 'attempts' and 'next_attempt'
+  // drive the exponential backoff and the cron requeue scan; 'item_id' links
+  // the row to its in-flight queue item; the last_response_* columns retain the
+  // most recent endpoint reply for the delivery log UI.
   $schema['mcp_sentinel_webhook_delivery'] = [
     'description' => 'Webhook delivery log for queued, retried MCP notifications.',
     'fields' => [

@@ -14,11 +14,11 @@
 .mcp-banner {
   display: flex;
   align-items: center;
-  gap: 0.75em;
-  padding: 0.75em 1em;
   margin: 0 0 0.75em;
-  border-radius: 4px;
+  padding: 0.75em 1em;
   border-left: 4px solid #888;
+  border-radius: 4px;
+  gap: 0.75em;
 }
 
 .mcp-banner__message {
@@ -32,51 +32,51 @@
 .mcp-banner__dismiss {
   flex: 0 0 auto;
   padding: 0 0.4em;
+  cursor: pointer;
+  color: inherit;
+  border: 0;
+  background: transparent;
   font-size: 1.2em;
   line-height: 1;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-  color: inherit;
 }
 
 .mcp-banner--critical {
-  background: #f8d7da;
-  border-left-color: #721c24;
   color: #721c24;
+  border-left-color: #721c24;
+  background: #f8d7da;
 }
 
 .mcp-banner--warning {
-  background: #fff3cd;
-  border-left-color: #856404;
   color: #856404;
+  border-left-color: #856404;
+  background: #fff3cd;
 }
 
 .mcp-banner--info {
-  background: #d1ecf1;
-  border-left-color: #0c5460;
   color: #0c5460;
+  border-left-color: #0c5460;
+  background: #d1ecf1;
 }
 
 /* Posture hero. */
 .mcp-hero {
   display: flex;
   align-items: center;
-  gap: 1em;
-  padding: 1em 1.25em;
   margin: 0 0 1em;
+  padding: 1em 1.25em;
   border-radius: 6px;
   background: #f1f3f5;
+  gap: 1em;
 }
 
 .mcp-hero--ok {
-  background: #d4edda;
   color: #155724;
+  background: #d4edda;
 }
 
 .mcp-hero--attention {
-  background: #fff3cd;
   color: #856404;
+  background: #fff3cd;
 }
 
 .mcp-hero__count {
@@ -95,23 +95,23 @@
 }
 
 .mcp-window-toggle__label {
-  font-weight: 700;
   margin-inline-end: 0.5em;
+  font-weight: 700;
 }
 
 .mcp-window-toggle__link {
   display: inline-block;
-  padding: 0.2em 0.7em;
   margin-inline-end: 0.25em;
+  padding: 0.2em 0.7em;
+  text-decoration: none;
   border: 1px solid #ccc;
   border-radius: 3px;
-  text-decoration: none;
 }
 
 .mcp-window-toggle__link.is-active {
-  background: #0d6efd;
-  border-color: #0d6efd;
   color: #fff;
+  border-color: #0d6efd;
+  background: #0d6efd;
 }
 
 /* Status tiles. */
@@ -150,10 +150,10 @@
 
 .mcp-tile__label {
   display: block;
-  font-size: 0.85em;
-  text-transform: uppercase;
   letter-spacing: 0.03em;
+  text-transform: uppercase;
   color: #6c757d;
+  font-size: 0.85em;
 }
 
 .mcp-tile__value {
@@ -165,20 +165,20 @@
 
 .mcp-tile__sub {
   display: block;
-  font-size: 0.85em;
   color: #6c757d;
+  font-size: 0.85em;
 }
 
 /* Chain-integrity card. */
 .mcp-chain-card {
   display: flex;
   flex-direction: column;
-  gap: 0.25em;
-  padding: 0.75em 1em;
   margin: 0 0 1em;
+  padding: 0.75em 1em;
   border: 1px solid #dee2e6;
   border-left: 4px solid #adb5bd;
   border-radius: 4px;
+  gap: 0.25em;
 }
 
 .mcp-chain-card--ok {
@@ -198,8 +198,8 @@
 }
 
 .mcp-chain-card__detail {
-  font-size: 0.9em;
   color: #6c757d;
+  font-size: 0.9em;
 }
 
 /* Quick actions. */
@@ -213,10 +213,10 @@
 .mcp-quick-actions__link {
   display: inline-block;
   padding: 0.4em 0.9em;
-  border: 1px solid #0d6efd;
-  border-radius: 3px;
   text-decoration: none;
   color: #0d6efd;
+  border: 1px solid #0d6efd;
+  border-radius: 3px;
 }
 
 /* Charts grid. */
@@ -331,8 +331,8 @@
 }
 
 .mcp-active-controls__label {
-  font-weight: 700;
   margin-inline-end: 0.25em;
+  font-weight: 700;
 }
 
 .mcp-control {
@@ -343,11 +343,11 @@
 }
 
 .mcp-control--on {
-  background: #d4edda;
   color: #155724;
+  background: #d4edda;
 }
 
 .mcp-control--off {
-  background: #e9ecef;
   color: #6c757d;
+  background: #e9ecef;
 }

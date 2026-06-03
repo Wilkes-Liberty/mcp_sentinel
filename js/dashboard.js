@@ -7,8 +7,6 @@
  * banner and recording a per-user dismissal via the dismissal endpoint.
  */
 ((Drupal, drupalSettings, once) => {
-  'use strict';
-
   Drupal.behaviors.mcpSentinelDashboard = {
     attach(context) {
       once('mcp-banner-dismiss', '[data-mcp-banner-dismiss]', context).forEach(

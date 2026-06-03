@@ -4,8 +4,8 @@
 }
 
 .mcp-sentinel-rows td {
-  vertical-align: top;
   padding: 0.25em 0.5em;
+  vertical-align: top;
 }
 
 .mcp-sentinel-row-remove {
@@ -13,10 +13,10 @@
 }
 
 .mcp-policy-preview {
-  border: 1px solid #ccc;
   padding: 1em;
-  background: #f8f8f8;
+  border: 1px solid #ccc;
   border-radius: 4px;
+  background: #f8f8f8;
 }
 
 .mcp-badge {
@@ -28,16 +28,16 @@
 }
 
 .mcp-badge--ok {
-  background: #d4edda;
   color: #155724;
+  background: #d4edda;
 }
 
 .mcp-badge--warn {
-  background: #fff3cd;
   color: #856404;
+  background: #fff3cd;
 }
 
 .mcp-badge--crit {
-  background: #f8d7da;
   color: #721c24;
+  background: #f8d7da;
 }
