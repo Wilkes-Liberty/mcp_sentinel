@@ -8,11 +8,36 @@ use Drupal\Core\Session\AccountProxyInterface;
 
 /**
  * Manages content locks that block MCP writes to human-edited content.
+ *
+ * A lock pins an (entity_type, entity_id) pair in the
+ * mcp_sentinel_content_locks table so a human editor can fence off content
+ * that a governed agent must not overwrite. The presave guard consults
+ * isLocked() and rejects governed writes to locked entities, giving humans a
+ * deterministic "hands off" marker that survives across requests.
+ *
+ * Locks are time-bounded: expires_at stores an absolute Unix timestamp, with
+ * the sentinel value 0 meaning "never expires" (a permanent, manually-managed
+ * lock). Expiry is enforced on read (isLocked() excludes lapsed rows) and the
+ * lapsed rows are reaped by hook_cron via releaseExpired(); permanent locks
+ * (expires_at = 0) are deliberately never auto-reaped.
  */
 class McpContentLock {
 
+  /**
+   * Default lock lifetime in seconds (one hour) when no TTL is supplied.
+   */
   private const DEFAULT_TTL = 3600;
 
+  /**
+   * Constructs an McpContentLock service.
+   *
+   * @param \Drupal\Core\Database\Connection $database
+   *   The database connection.
+   * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
+   *   The current user proxy (recorded as the lock owner in locked_by).
+   * @param \Drupal\Component\Datetime\TimeInterface $time
+   *   The time service (provides the request time used for lock timestamps).
+   */
   public function __construct(
     private readonly Connection $database,
     private readonly AccountProxyInterface $currentUser,
@@ -20,7 +45,21 @@ class McpContentLock {
   ) {}
 
   /**
-   * Lock an entity against MCP writes.
+   * Locks an entity against governed MCP writes.
+   *
+   * Uses a MERGE upsert keyed on (entity_type, entity_id) so re-locking an
+   * already-locked entity refreshes the owner, timestamp, expiry, and reason
+   * rather than failing on a duplicate key.
+   *
+   * @param string $entityType
+   *   The entity type ID to lock.
+   * @param string $entityId
+   *   The entity ID to lock.
+   * @param string $reason
+   *   Optional human-readable reason, truncated to the column width (512).
+   * @param int|null $ttl
+   *   Lock lifetime in seconds; the lock expires at now + $ttl. Pass 0 or NULL
+   *   for a permanent lock (stored as expires_at = 0) that never auto-expires.
    */
   public function lock(string $entityType, string $entityId, string $reason = '', ?int $ttl = self::DEFAULT_TTL): void {
     $now = $this->time->getRequestTime();
@@ -29,6 +68,7 @@ class McpContentLock {
       ->fields([
         'locked_by'  => $this->currentUser->id(),
         'locked_at'  => $now,
+        // 0 is the "never expires" sentinel; a TTL becomes an absolute expiry.
         'expires_at' => $ttl ? ($now + $ttl) : 0,
         'reason'     => substr($reason, 0, 512),
       ])
@@ -36,7 +76,12 @@ class McpContentLock {
   }
 
   /**
-   * Release a lock on an entity.
+   * Releases the lock on an entity, if any.
+   *
+   * @param string $entityType
+   *   The entity type ID to unlock.
+   * @param string $entityId
+   *   The entity ID to unlock.
    */
   public function release(string $entityType, string $entityId): void {
     $this->database->delete('mcp_sentinel_content_locks')
@@ -46,11 +91,21 @@ class McpContentLock {
   }
 
   /**
-   * Check whether an entity is currently locked against MCP writes.
+   * Checks whether an entity is currently locked against governed MCP writes.
    *
-   * Expired locks are excluded by a query condition rather than deleted, so a
-   * read never writes. Expired rows are reaped by hook_cron via
-   * releaseExpired().
+   * Expired locks are excluded by a query condition rather than deleted, so
+   * this read path never writes (avoiding lock contention and side effects on
+   * a hot guard call). Lapsed rows are instead reaped by hook_cron via
+   * releaseExpired(). A row counts as active when it never expires
+   * (expires_at = 0) or its expiry is still in the future.
+   *
+   * @param string $entityType
+   *   The entity type ID to check.
+   * @param string $entityId
+   *   The entity ID to check.
+   *
+   * @return bool
+   *   TRUE if an active (non-expired) lock exists for the entity.
    */
   public function isLocked(string $entityType, string $entityId): bool {
     $now = $this->time->getRequestTime();
@@ -62,7 +117,19 @@ class McpContentLock {
   }
 
   /**
-   * Returns lock details or NULL if not locked.
+   * Returns the raw lock row for an entity, or NULL when no lock row exists.
+   *
+   * This returns the row regardless of expiry (it does not filter lapsed
+   * locks), so callers that need an active-only answer should use isLocked().
+   *
+   * @param string $entityType
+   *   The entity type ID to look up.
+   * @param string $entityId
+   *   The entity ID to look up.
+   *
+   * @return array|null
+   *   The lock row (entity_type, entity_id, locked_by, locked_at, expires_at,
+   *   reason), or NULL if the entity has no lock row.
    */
   public function getLockInfo(string $entityType, string $entityId): ?array {
     $row = $this->database->select('mcp_sentinel_content_locks', 'l')
@@ -74,7 +141,14 @@ class McpContentLock {
   }
 
   /**
-   * Releases all expired locks. Called by hook_cron.
+   * Reaps all expired (time-bounded) locks. Called by hook_cron.
+   *
+   * Only rows with a positive expires_at that lies in the past are deleted.
+   * Permanent locks (expires_at = 0) are excluded by the expires_at > 0
+   * condition so a never-expiring lock is never silently cleared by cron.
+   *
+   * @return int
+   *   The number of expired lock rows deleted.
    */
   public function releaseExpired(): int {
     $now = $this->time->getRequestTime();

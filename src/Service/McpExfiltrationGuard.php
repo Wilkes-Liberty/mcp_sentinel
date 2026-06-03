@@ -45,6 +45,10 @@ final class McpExfiltrationGuard {
    *   The byte length of the serialized response.
    * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
    *   The active governance profile.
+   *
+   * @return bool
+   *   TRUE when an active size cap is set and $bytes exceeds it; FALSE when the
+   *   cap is unlimited (0) or the response is within the cap.
    */
   public function exceedsResponseSizeCap(int $bytes, McpPolicyProfileInterface $profile): bool {
     $cap = $profile->getResponseSizeCap();
