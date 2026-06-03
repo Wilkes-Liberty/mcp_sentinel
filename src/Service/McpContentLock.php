@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;

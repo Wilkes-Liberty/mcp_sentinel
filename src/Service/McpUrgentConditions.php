@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
@@ -113,7 +114,7 @@ final class McpUrgentConditions {
    * @param array $conditions
    *   The condition list, modified by reference.
    */
-  private function evaluateEncryption(object $config, array &$conditions): void {
+  private function evaluateEncryption(ImmutableConfig $config, array &$conditions): void {
     $profileId = (string) ($config->get('audit_encryption_profile') ?? '');
     if ($profileId === '') {
       return;
@@ -136,7 +137,7 @@ final class McpUrgentConditions {
    * @param array $conditions
    *   The condition list, modified by reference.
    */
-  private function evaluateMasterSwitch(object $config, array &$conditions): void {
+  private function evaluateMasterSwitch(ImmutableConfig $config, array &$conditions): void {
     if ((bool) $config->get('enabled')) {
       return;
     }
@@ -164,7 +165,7 @@ final class McpUrgentConditions {
    * @param array $conditions
    *   The condition list, modified by reference.
    */
-  private function evaluateEndpoints(object $config, array &$conditions): void {
+  private function evaluateEndpoints(ImmutableConfig $config, array &$conditions): void {
     foreach ((array) ($config->get('webhook_endpoints') ?? []) as $endpoint) {
       if (!is_array($endpoint) || empty($endpoint['enabled'])) {
         continue;
@@ -191,7 +192,7 @@ final class McpUrgentConditions {
    * @param array $conditions
    *   The condition list, modified by reference.
    */
-  private function evaluateBroadcast(object $config, array &$conditions): void {
+  private function evaluateBroadcast(ImmutableConfig $config, array &$conditions): void {
     $broadcast = (array) ($config->get('dashboard_broadcast') ?? []);
     $message = trim((string) ($broadcast['message'] ?? ''));
     if ($message === '') {
