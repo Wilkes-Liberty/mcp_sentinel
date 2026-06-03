@@ -1,2 +1,3 @@
 MCP Sentinel is maintained by:
-- Wilkes & Liberty <https://www.drupal.org/u/wilkes-liberty>
+- Jeremy Michael Cerda <jmcerda@wilkesliberty.com>
+- Wilkes & Liberty, LLC <https://www.drupal.org/u/wilkes-liberty>

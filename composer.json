@@ -6,7 +6,12 @@
   "homepage": "https://www.drupal.org/project/mcp_sentinel",
   "authors": [
     {
-      "name": "Wilkes & Liberty",
+      "name": "Jeremy Michael Cerda",
+      "email": "jmcerda@wilkesliberty.com",
+      "role": "Maintainer"
+    },
+    {
+      "name": "Wilkes & Liberty, LLC",
       "homepage": "https://github.com/wilkes-liberty",
       "role": "Maintainer"
     }

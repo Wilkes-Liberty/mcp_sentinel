@@ -687,9 +687,18 @@ against a Drupal site. MCP Sentinel governs those calls when they reach Drupal;
 it does not provide them. For reference, this module itself ships 7 base Tool
 plugins plus 1 GraphQL schema tool (via `mcp_sentinel_graphql`).
 
+MCP Sentinel implements **Integration Contract v1.0** (published by the connector
+at `docs/integration-contract.md` in
+[Wilkes-Liberty/drupal-mcp-connector](https://github.com/Wilkes-Liberty/drupal-mcp-connector)):
+log-only `X-MCP-Client` identity, the `mcp:read` / `mcp:write` OAuth scopes, the
+`/drupal-mcp/context` endpoint, and server-authoritative authorization keyed on
+role + scopes. Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6
+(contract 1.0). See [`docs/CONNECTOR.md`](docs/CONNECTOR.md).
+
 ## Maintainers
 
-- Wilkes & Liberty — [drupal.org/u/wilkes-liberty](https://www.drupal.org/u/wilkes-liberty)
+- Jeremy Michael Cerda — <jmcerda@wilkesliberty.com>
+- Wilkes & Liberty, LLC — [drupal.org/u/wilkes-liberty](https://www.drupal.org/u/wilkes-liberty)
 
 See `MAINTAINERS.txt`. Report issues and feature requests in the
 [project issue queue](https://www.drupal.org/project/issues/mcp_sentinel); report
