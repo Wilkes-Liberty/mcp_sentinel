@@ -7,6 +7,8 @@ stable release is tagged.
 
 ## [Unreleased]
 
+## [1.0.0-beta2] - 2026-06-02
+
 ### Added
 - Reusable in-form multi-row list editor trait.
 - Live policy-preview summary on the profile form; refreshes via AJAX when gate or cap fields change.
@@ -515,7 +517,8 @@ stable release is tagged.
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta1...1.0.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta2...1.0.x
+[1.0.0-beta2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta1...1.0.0-beta2
 [1.0.0-beta1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha2...1.0.0-beta1
 [1.0.0-alpha2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-alpha1...1.0.0-alpha2
 [1.0.0-alpha1]: https://git.drupalcode.org/project/mcp_sentinel/-/tags/1.0.0-alpha1
