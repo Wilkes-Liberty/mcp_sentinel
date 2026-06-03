@@ -20,6 +20,16 @@ use Symfony\Component\HttpFoundation\JsonResponse;
  */
 class McpContextController extends ControllerBase {
 
+  /**
+   * Constructs an McpContextController.
+   *
+   * @param \Drupal\Core\Entity\EntityFieldManagerInterface $entityFieldManager
+   *   The entity field manager (reads content-type field definitions).
+   * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
+   *   The policy resolver (resolves the governing profile for the request).
+   * @param \Drupal\mcp_sentinel\Service\McpAccessChecker $accessChecker
+   *   The access checker (evaluates the profile's IP allowlist).
+   */
   public function __construct(
     private readonly EntityFieldManagerInterface $entityFieldManager,
     private readonly McpPolicyResolver $policyResolver,
@@ -38,13 +48,17 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Returns full site schema.
+   * Returns the full site schema as JSON for an MCP agent.
    *
    * IP allowlist enforcement: when the requesting account is governed by a
    * policy profile that carries an IP restriction, and the client IP is not
    * in the allowlist, a 403 response is returned immediately before any
    * schema data is emitted. The response carries no-store / no-cache headers
    * so it cannot be served to a later request from a different IP.
+   *
+   * @return \Symfony\Component\HttpFoundation\JsonResponse
+   *   The schema document (200), or a 403 when MCP access is disabled or the
+   *   client IP is not permitted by policy.
    */
   public function context(): JsonResponse {
     $config = $this->config('mcp_sentinel.settings');
@@ -75,7 +89,11 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Health check — no auth required.
+   * Liveness/health probe for the MCP endpoint — no authentication required.
+   *
+   * @return \Symfony\Component\HttpFoundation\JsonResponse
+   *   200 with status "ok" when MCP access is enabled, 503 with status
+   *   "disabled" when the master switch is off.
    */
   public function health(): JsonResponse {
     $enabled = $this->config('mcp_sentinel.settings')->get('enabled') ?? TRUE;
@@ -87,7 +105,11 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Builds basic site information.
+   * Builds the basic site-identity block.
+   *
+   * @return array
+   *   The site name and default langcode. The Drupal version is deliberately
+   *   excluded (see inline note).
    */
   private function buildSiteInfo(): array {
     // Deliberately omit the Drupal version: agents do not need it, and
@@ -99,7 +121,12 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Builds the content type field schemas.
+   * Builds the per-content-type field schemas.
+   *
+   * @return array
+   *   Keyed by node-type machine name; each entry carries the type label,
+   *   description, and a field map (label, type, required, multiple). Internal
+   *   base fields with no agent value are skipped.
    */
   private function buildContentTypeSchemas(): array {
     $skip   = ['vid', 'langcode', 'default_langcode', 'revision_translation_affected'];
@@ -129,7 +156,11 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Builds the vocabulary schemas.
+   * Builds the taxonomy vocabulary schemas.
+   *
+   * @return array
+   *   Keyed by vocabulary ID; each entry carries the label, description, and
+   *   current term count (access checks bypassed for an accurate total).
    */
   private function buildVocabularySchemas(): array {
     $vocabs = $this->entityTypeManager()->getStorage('taxonomy_vocabulary')->loadMultiple();
@@ -147,7 +178,11 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Builds the media type information.
+   * Builds the media-type information.
+   *
+   * @return array
+   *   Keyed by media-type machine name (label + source plugin ID), or an empty
+   *   array when the media module is not installed.
    */
   private function buildMediaTypeInfo(): array {
     if (!$this->moduleHandler()->moduleExists('media')) {
