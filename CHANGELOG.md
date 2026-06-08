@@ -8,6 +8,10 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- CI: Dependabot patch/minor PRs now auto-merge once checks pass (majors still
+  reviewed), via the org reusable workflow
+  (`.github/workflows/dependabot-automerge.yml` calls the shared
+  `dependabot-automerge.yml` in `Wilkes-Liberty/.github`).
 - Adopted the shared **Integration Contract v1.0** (published by the companion
   connector at `docs/integration-contract.md`). The connector's `X-MCP-Client`
   label is now recorded in the audit log — log-only, as the `mcp_client`
