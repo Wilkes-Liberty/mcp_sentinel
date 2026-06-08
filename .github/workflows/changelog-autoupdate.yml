@@ -1,0 +1,12 @@
+name: Changelog autoupdate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  autoupdate:
+    uses: Wilkes-Liberty/.github/.github/workflows/changelog-autoupdate.yml@master
+    secrets:
+      app-id: ${{ secrets.CHANGELOG_APP_ID }}
+      app-private-key: ${{ secrets.CHANGELOG_APP_PRIVATE_KEY }}
