@@ -1,0 +1,15 @@
+name: Dependabot auto-merge
+
+# Enables GitHub auto-merge on Dependabot patch/minor PRs (majors → human review)
+# via the org reusable workflow. Requires "Allow auto-merge" enabled on the repo
+# (already configured). See Wilkes-Liberty/.github docs/REUSABLE-WORKFLOWS.md §2.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    uses: Wilkes-Liberty/.github/.github/workflows/dependabot-automerge.yml@master
