@@ -1,0 +1,10 @@
+name: Changelog
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  check:
+    uses: Wilkes-Liberty/.github/.github/workflows/changelog-check.yml@master

@@ -15,6 +15,15 @@ stable release is tagged.
   contract surface (log-only client identity, `mcp:read`/`mcp:write` scopes, the
   `/drupal-mcp/context` endpoint, and server-authoritative authorization keyed on
   role + scopes). Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6.
+- Adopted the organization governance baseline for GitHub. Added a CHANGELOG
+  check (`.github/workflows/changelog.yml`, with a `no-changelog` bypass label)
+  and CHANGELOG autoupdate (`.github/workflows/changelog-autoupdate.yml`), both
+  calling the shared reusable workflows in `Wilkes-Liberty/.github`. Added
+  Dependabot (`.github/dependabot.yml`) for the `composer` and `github-actions`
+  ecosystems on a weekly schedule. Added a non-blocking PHP dependency audit
+  (`.github/workflows/composer-audit.yml`) that runs `composer audit` on pull
+  requests and on pushes to `1.0.x`; CodeQL is intentionally omitted as it does
+  not support PHP.
 
 ### Changed
 - Renamed all references to the companion connector to its final public name
