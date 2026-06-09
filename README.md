@@ -42,7 +42,9 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
   signing secret and (optionally) the audit encryption key outside exported
   configuration
 - [Encrypt](https://www.drupal.org/project/encrypt) (`drupal/encrypt`) —
-  provides Encryption Profiles for optional at-rest encryption of audit metadata
+  provides Encryption Profiles for at-rest encryption of audit metadata; the
+  package is a required dependency (listed in `composer.json` and `info.yml`),
+  though the encryption feature is opt-in and configured via settings
 - [Simple OAuth](https://www.drupal.org/project/simple_oauth) (`drupal/simple_oauth`)
   and [Consumers](https://www.drupal.org/project/consumers) (`drupal/consumers`) —
   the validated OAuth agent channel governance triggers on
