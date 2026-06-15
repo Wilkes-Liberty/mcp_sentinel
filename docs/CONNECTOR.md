@@ -17,8 +17,8 @@ On the Drupal side that means:
 - **Log-only `X-MCP-Client` identity.** The connector's self-reported client
   label is recorded in the audit log (as the `mcp_client` metadata field) for
   forensics only — it is never an enforcement signal.
-- **OAuth scopes `mcp:read` / `mcp:write`.** Read/explain tools require
-  `mcp:read`; write tools require `mcp:write`.
+- **OAuth scopes `mcp_read` / `mcp_write`.** Read/explain tools require
+  `mcp_read`; write tools require `mcp_write`.
 - **The `/drupal-mcp/context` endpoint** exposes the governed site schema.
 - **Server-authoritative authorization keyed on role + scopes.** Every gate is
   decided server-side from the authenticated role and the token's OAuth scopes —
@@ -96,7 +96,7 @@ Each `mcp_tool_config` entity carries third-party settings under the
 | Setting | Value |
 |---------|-------|
 | `authentication_mode` | `required` |
-| `scopes` | `mcp:read` (read/explain tools) or `mcp:write` (write tools) |
+| `scopes` | `mcp_read` (read/explain tools) or `mcp_write` (write tools) |
 
 The `mcp_server_oauth` subscriber enforces these per tool call — a token that
 lacks the required scope is rejected before governance even fires.
@@ -105,14 +105,14 @@ lacks the required scope is rejected before governance even fires.
 
 | Tool | Scope |
 |------|-------|
-| `mcp_sentinel_site_context` | `mcp:read` |
-| `mcp_sentinel_security_policy` | `mcp:read` |
-| `mcp_sentinel_graphql_schema` | `mcp:read` |
-| `mcp_sentinel_content_lock` | `mcp:write` |
-| `mcp_sentinel_node_operations` | `mcp:write` |
-| `mcp_sentinel_media_create` | `mcp:write` |
-| `mcp_sentinel_workflow_transition` | `mcp:write` |
-| `mcp_sentinel_bulk_operations` | `mcp:write` |
+| `mcp_sentinel_site_context` | `mcp_read` |
+| `mcp_sentinel_security_policy` | `mcp_read` |
+| `mcp_sentinel_graphql_schema` | `mcp_read` |
+| `mcp_sentinel_content_lock` | `mcp_write` |
+| `mcp_sentinel_node_operations` | `mcp_write` |
+| `mcp_sentinel_media_create` | `mcp_write` |
+| `mcp_sentinel_workflow_transition` | `mcp_write` |
+| `mcp_sentinel_bulk_operations` | `mcp_write` |
 
 ---
 
@@ -145,11 +145,11 @@ Create two simple_oauth scope entities (or use `simple_oauth_static_scope` for
 static scope definitions):
 
 ```bash
-# mcp:read
+# mcp_read
 ddev drush php:eval "
   \$scope = \Drupal\simple_oauth\Entity\Oauth2Scope::create([
     'id' => 'mcp_read',
-    'name' => 'mcp:read',
+    'name' => 'mcp_read',
     'description' => 'MCP read/explain tools',
     'grant_types' => [
       'authorization_code' => ['status' => TRUE],
@@ -160,11 +160,11 @@ ddev drush php:eval "
   \$scope->save();
 "
 
-# mcp:write
+# mcp_write
 ddev drush php:eval "
   \$scope = \Drupal\simple_oauth\Entity\Oauth2Scope::create([
     'id' => 'mcp_write',
-    'name' => 'mcp:write',
+    'name' => 'mcp_write',
     'description' => 'MCP write tools',
     'grant_types' => [
       'authorization_code' => ['status' => TRUE],
@@ -175,6 +175,14 @@ ddev drush php:eval "
   \$scope->save();
 "
 ```
+
+> **Scope `name` must equal the machine `id`.** MCP Sentinel governance matches
+> the scope *name* carried on the validated token against
+> `mcp_sentinel.settings:agent_scopes`. Both ship as `mcp_read` / `mcp_write`
+> (underscore). If you set a scope `name` that differs from the configured
+> `agent_scopes`, governance will never recognise the token as the agent channel
+> and write tools will fail open as ungoverned. See UPGRADE.md if you previously
+> created colon-form (`mcp:read` / `mcp:write`) scopes.
 
 ### 3.2 Consumer (one per environment)
 
@@ -215,7 +223,7 @@ ddev drush php:eval "
 ```
 
 > **Important:** with the default config `agent_oauth_clients: {}` (empty),
-> ANY OAuth token bearing `mcp:read` or `mcp:write` from ANY consumer is
+> ANY OAuth token bearing `mcp_read` or `mcp_write` from ANY consumer is
 > treated as on the governed agent channel. To restrict governance to a
 > specific consumer, populate `agent_oauth_clients` with its `client_id`.
 
@@ -294,7 +302,7 @@ Verify one tool:
 ```bash
 ddev drush config:get mcp_server.mcp_tool_config.mcp_sentinel_node_operations
 # Expected: third_party_settings.mcp_server_oauth.authentication_mode = required
-#           third_party_settings.mcp_server_oauth.scopes[0] = mcp:write
+#           third_party_settings.mcp_server_oauth.scopes[0] = mcp_write
 ```
 
 ### 3.8 Export configuration
@@ -355,7 +363,7 @@ manual runbook — record the results in an ops ticket or this section.
 
 ### Prerequisites
 
-- Consumer `mcp-agent-<env>` created with `mcp:read` + `mcp:write` scopes.
+- Consumer `mcp-agent-<env>` created with `mcp_read` + `mcp_write` scopes.
 - Agent policy profile with `allow_write: true`, `allow_delete: false`.
 - JSON:API `read_only: false` on the internal host.
 - `drush mcp-sentinel:setup --require-oauth` run; `drush cr` done.
@@ -368,7 +376,7 @@ TOKEN=$(curl -s -X POST '<INTERNAL_BASE_URL>/oauth/token' \
   -d 'grant_type=client_credentials' \
   -d 'client_id=<CLIENT_ID>' \
   -d 'client_secret=<CLIENT_SECRET>' \
-  -d 'scope=mcp:read mcp:write' \
+  -d 'scope=mcp_read mcp_write' \
   | jq -r '.access_token')
 echo "Token: $TOKEN"
 ```

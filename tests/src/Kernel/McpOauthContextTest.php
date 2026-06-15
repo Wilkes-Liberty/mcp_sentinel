@@ -91,7 +91,7 @@ final class McpOauthContextTest extends KernelTestBase {
     $proxy->method('getAccount')->willReturn($tokenUser);
 
     $scope = $this->createMock(Oauth2ScopeInterface::class);
-    $scope->method('getName')->willReturn('mcp:write');
+    $scope->method('getName')->willReturn('mcp_write');
 
     $scopesField = $this->createMock(Oauth2ScopeReferenceItemListInterface::class);
     $scopesField->method('getScopes')->willReturn([$scope]);
@@ -106,7 +106,7 @@ final class McpOauthContextTest extends KernelTestBase {
     $tokenUser->method('getConsumer')->willReturn($consumer);
 
     $ctx = new McpOauthContext($proxy, $this->container->get('config.factory'));
-    $this->assertSame(['mcp:write'], $ctx->scopes());
+    $this->assertSame(['mcp_write'], $ctx->scopes());
     $this->assertSame('mcp-agent', $ctx->clientId());
     $this->assertTrue($ctx->isAgentChannel());
   }
