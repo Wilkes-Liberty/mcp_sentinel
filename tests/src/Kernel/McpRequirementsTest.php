@@ -59,6 +59,12 @@ final class McpRequirementsTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installConfig(['mcp_sentinel']);
 
+    // hook_requirements() uses the REQUIREMENT_* severity constants, which are
+    // defined in core/includes/install.inc. Drupal loads that file before
+    // running requirements at runtime, but a kernel test invoking the hook
+    // directly must load it explicitly.
+    require_once \Drupal::root() . '/core/includes/install.inc';
+
     // Load the .install file so mcp_sentinel_requirements() is available.
     // Resolve the module path dynamically — the module is not always at
     // modules/contrib/ (e.g. on Drupal.org CI it lives at the project root).
@@ -146,7 +152,7 @@ final class McpRequirementsTest extends KernelTestBase {
   }
 
   /**
-   * agent_oauth_clients alone also clears the channel half of the check.
+   * Setting agent_oauth_clients alone clears the channel half of the check.
    */
   public function testAgentOauthClientsWiresChannel(): void {
     $this->config('mcp_sentinel.settings')
