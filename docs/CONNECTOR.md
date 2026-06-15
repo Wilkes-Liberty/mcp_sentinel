@@ -101,6 +101,15 @@ Each `mcp_tool_config` entity carries third-party settings under the
 The `mcp_server_oauth` subscriber enforces these per tool call — a token that
 lacks the required scope is rejected before governance even fires.
 
+> **When is `mcp_server_oauth` needed?** It is an optional submodule that adds
+> *per-tool* scope enforcement on the `mcp_server` transport. It is not required
+> for governance itself — entity-access gating, redaction, auditing, rate limits,
+> and content locks all work without it. Enable it (and re-run
+> `drush mcp-sentinel:setup --require-oauth`) only when you want each individual
+> Tool call gated on `mcp_read` / `mcp_write` at the transport layer in addition
+> to the role-based policy profile. If you see a 401 on every tool call, this
+> submodule (or an `authentication_mode` mismatch) is the usual cause.
+
 ### Tool → scope mapping
 
 | Tool | Scope |

@@ -52,6 +52,11 @@ stable release is tagged.
   **`drupal-mcp-connector`** (formerly published under its working name; repo
   `Wilkes-Liberty/drupal-mcp-connector`, npm `drupal-mcp-connector`). The
   `X-MCP-Client` label default is now `drupal-mcp-connector/<version>`.
+- Docs clarity: INSTALL.md now states the underscore scope form is the default
+  (most sites need no change) and links the colon-form migration section directly;
+  added an "agent discovery" pointer to the `/drupal-mcp/context` endpoint after
+  OAuth setup. docs/CONNECTOR.md clarifies that `mcp_server_oauth` is optional
+  (per-tool transport-layer scope enforcement) and is not required for governance.
 
 ## [1.0.0-beta3] - 2026-06-02
 
