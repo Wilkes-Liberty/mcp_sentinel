@@ -52,6 +52,14 @@ stable release is tagged.
   **`drupal-mcp-connector`** (formerly published under its working name; repo
   `Wilkes-Liberty/drupal-mcp-connector`, npm `drupal-mcp-connector`). The
   `X-MCP-Client` label default is now `drupal-mcp-connector/<version>`.
+- CI: made the GitHub-mirror workflows self-contained instead of calling reusable
+  workflows in the private `Wilkes-Liberty/.github` repo. A public repository
+  cannot use reusable workflows from a private one, so every PR run was failing at
+  startup ("workflow file issue"). `changelog.yml` and `dependabot-automerge.yml`
+  now inline their logic (no external repo dependency, so forks work too);
+  `changelog-autoupdate.yml` is removed (it required an org GitHub App). Also
+  dropped the `composer` Dependabot ecosystem — the Drupal contrib deps live on
+  packages.drupal.org, not Packagist, so Dependabot could not resolve them.
 - Docs clarity: INSTALL.md now states the underscore scope form is the default
   (most sites need no change) and links the colon-form migration section directly;
   added an "agent discovery" pointer to the `/drupal-mcp/context` endpoint after
