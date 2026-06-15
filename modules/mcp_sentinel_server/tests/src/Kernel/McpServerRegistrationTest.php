@@ -155,9 +155,11 @@ final class McpServerRegistrationTest extends KernelTestBase {
   /**
    * Every tool in the server command map has a valid OAuth scope string.
    *
-   * The scope tags ('mcp:read' or 'mcp:write') are forwarded to
+   * The scope tags ('mcp_read' or 'mcp_write') are forwarded to
    * mcp_server_oauth; an empty or null scope would silently disable auth on
-   * a registered tool.
+   * a registered tool. Scope machine ids use the underscore convention so that
+   * the scope name carried on the token matches the governance allowlist
+   * (mcp_sentinel.settings:agent_scopes) end-to-end.
    */
   public function testServerCommandsToolMapScopesAreNonEmpty(): void {
     $rc = new \ReflectionClass(McpSentinelServerCommands::class);
@@ -169,9 +171,9 @@ final class McpServerRegistrationTest extends KernelTestBase {
         "Scope for tool '$toolId' must be a string.");
       $this->assertNotEmpty($scope,
         "Scope for tool '$toolId' must not be empty.");
-      $this->assertStringStartsWith('mcp:',
+      $this->assertStringStartsWith('mcp_',
         $scope,
-        "Scope '$scope' for tool '$toolId' must follow the 'mcp:*' namespace.");
+        "Scope '$scope' for tool '$toolId' must follow the 'mcp_*' namespace.");
     }
   }
 

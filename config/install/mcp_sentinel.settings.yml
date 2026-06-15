@@ -13,8 +13,8 @@ webhook_delivery_retention_days: 30
 allow_internal_webhook_urls: false
 agent_oauth_clients: {  }
 agent_scopes:
-  - 'mcp:read'
-  - 'mcp:write'
+  - 'mcp_read'
+  - 'mcp_write'
 governed_role_fallback: false
 audit_hash_key: ''
 siem_enabled: false

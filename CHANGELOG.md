@@ -16,7 +16,7 @@ stable release is tagged.
   connector at `docs/integration-contract.md`). The connector's `X-MCP-Client`
   label is now recorded in the audit log — log-only, as the `mcp_client`
   metadata field, never an enforcement signal. `docs/CONNECTOR.md` documents the
-  contract surface (log-only client identity, `mcp:read`/`mcp:write` scopes, the
+  contract surface (log-only client identity, `mcp_read`/`mcp_write` scopes, the
   `/drupal-mcp/context` endpoint, and server-authoritative authorization keyed on
   role + scopes). Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6.
 - Adopted the organization governance baseline for GitHub. Added a CHANGELOG
@@ -30,6 +30,15 @@ stable release is tagged.
   not support PHP.
 
 ### Changed
+- **OAuth scope machine ids standardized to underscores: `mcp:read` →
+  `mcp_read`, `mcp:write` → `mcp_write`.** This is a **contract change**.
+  Governance matches the scope *name* carried on a validated token against
+  `mcp_sentinel.settings:agent_scopes`; the install default, the settings-form
+  default, the `mcp-sentinel:setup` tool→scope tags, and all docs now use the
+  underscore form so token, tagging, and governance agree end-to-end. **Action
+  required for existing installs that created colon-form scopes:** rename your
+  `Oauth2Scope` entities (and any consumer `scopes`) and update
+  `agent_scopes` to the underscore form. See `docs/UPGRADE.md`.
 - Renamed all references to the companion connector to its final public name
   **`drupal-mcp-connector`** (formerly published under its working name; repo
   `Wilkes-Liberty/drupal-mcp-connector`, npm `drupal-mcp-connector`). The
