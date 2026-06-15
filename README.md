@@ -703,7 +703,7 @@ plugins plus 1 GraphQL schema tool (via `mcp_sentinel_graphql`).
 MCP Sentinel implements **Integration Contract v1.0** (published by the connector
 at `docs/integration-contract.md` in
 [Wilkes-Liberty/drupal-mcp-connector](https://github.com/Wilkes-Liberty/drupal-mcp-connector)):
-log-only `X-MCP-Client` identity, the `mcp:read` / `mcp:write` OAuth scopes, the
+log-only `X-MCP-Client` identity, the `mcp_read` / `mcp_write` OAuth scopes, the
 `/drupal-mcp/context` endpoint, and server-authoritative authorization keyed on
 role + scopes. Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 0.6
 (contract 1.0). See [`docs/CONNECTOR.md`](docs/CONNECTOR.md).

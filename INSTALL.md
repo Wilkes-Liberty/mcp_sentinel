@@ -190,6 +190,48 @@ Then verify the audit hash chain survived the update:
 drush mcp-sentinel:audit-verify
 ```
 
+### Upgrade note: OAuth scope machine ids are now underscores
+
+MCP Sentinel standardized its OAuth scope machine ids on the **underscore**
+convention: `mcp:read` → `mcp_read` and `mcp:write` → `mcp_write`. This is a
+**contract change**. Governance matches the scope *name* carried on a validated
+token against `mcp_sentinel.settings:agent_scopes`, so the token, the
+`mcp-sentinel:setup` tool tags, and the governance allowlist must all agree.
+
+Fresh installs need no action — the install default and `mcp-sentinel:setup`
+already use the underscore form. **If you previously created colon-form
+(`mcp:read` / `mcp:write`) scopes you must migrate**, otherwise tokens will no
+longer be recognised as the agent channel and write tools will fail open as
+ungoverned:
+
+1. Update the governance allowlist to the underscore form (UI: **Configuration →
+   Web services → MCP Sentinel → OAuth agent channel → Agent scopes**, one per
+   line), or via drush:
+
+   ```bash
+   drush php:eval "\Drupal::configFactory()->getEditable('mcp_sentinel.settings')->set('agent_scopes', ['mcp_read', 'mcp_write'])->save();"
+   ```
+
+2. Rename the `simple_oauth` scope entities so their **`name` equals the
+   underscore machine `id`**. The simplest path is to delete the old colon-form
+   scopes and recreate them per `docs/CONNECTOR.md` §3.1 (with `id` and `name`
+   both set to `mcp_read` / `mcp_write`), then re-grant them on each consumer.
+
+3. Update each consumer's granted `scopes` to `['mcp_read', 'mcp_write']`
+   (UI: **Configuration → Web services → Consumers**, or via `drush php:eval`).
+
+4. Re-tag the registered tools and rebuild caches:
+
+   ```bash
+   drush mcp-sentinel:setup --require-oauth
+   drush cr
+   ```
+
+5. Mint fresh tokens (existing tokens carry the old colon scope names) and
+   confirm a write tool is governed again via `drush mcp-sentinel:status`.
+
+See `docs/UPGRADE.md` for the full step-by-step.
+
 ## Uninstalling
 
 ```bash

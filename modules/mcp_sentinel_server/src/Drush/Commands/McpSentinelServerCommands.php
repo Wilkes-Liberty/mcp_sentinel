@@ -37,15 +37,15 @@ final class McpSentinelServerCommands extends DrushCommands {
    * mcp_server_oauth submodule is enabled.
    */
   private const TOOLS = [
-    'mcp_sentinel_site_context' => 'mcp:read',
-    'mcp_sentinel_security_policy' => 'mcp:read',
-    'mcp_sentinel_content_lock' => 'mcp:write',
-    'mcp_sentinel_node_operations' => 'mcp:write',
-    'mcp_sentinel_media_create' => 'mcp:write',
-    'mcp_sentinel_workflow_transition' => 'mcp:write',
-    'mcp_sentinel_bulk_operations' => 'mcp:write',
+    'mcp_sentinel_site_context' => 'mcp_read',
+    'mcp_sentinel_security_policy' => 'mcp_read',
+    'mcp_sentinel_content_lock' => 'mcp_write',
+    'mcp_sentinel_node_operations' => 'mcp_write',
+    'mcp_sentinel_media_create' => 'mcp_write',
+    'mcp_sentinel_workflow_transition' => 'mcp_write',
+    'mcp_sentinel_bulk_operations' => 'mcp_write',
     // Registered only when the mcp_sentinel_graphql submodule is enabled.
-    'mcp_sentinel_graphql_schema' => 'mcp:read',
+    'mcp_sentinel_graphql_schema' => 'mcp_read',
   ];
 
   /**

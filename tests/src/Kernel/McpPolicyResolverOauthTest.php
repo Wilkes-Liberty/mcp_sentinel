@@ -139,7 +139,7 @@ final class McpPolicyResolverOauthTest extends KernelTestBase {
     // Stub: isAgentChannel() = TRUE, other methods return safe defaults.
     $oauthStub = $this->createMock(McpOauthContext::class);
     $oauthStub->method('isAgentChannel')->willReturn(TRUE);
-    $oauthStub->method('scopes')->willReturn(['mcp:write']);
+    $oauthStub->method('scopes')->willReturn(['mcp_write']);
     $oauthStub->method('clientId')->willReturn('mcp-agent-test');
 
     // Construct the resolver with the stub so that container-cached real
