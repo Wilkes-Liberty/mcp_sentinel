@@ -112,11 +112,16 @@ companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
 
 > **Scope-name convention.** The `agent_scopes` you configure here must match the
 > scope **machine-ids** of your `oauth2_scope` entities exactly. simple_oauth
-> scope machine-ids are conventionally underscore-separated, so fresh installs
-> ship `agent_scopes: [mcp_read, mcp_write]`. If your scopes use a different
-> naming (e.g. the colon form `mcp:read`/`mcp:write`), set `agent_scopes` to
-> match your actual scope ids — otherwise no token will ever be recognised as the
-> agent channel and the module will fail open. (See the fail-loud note below.)
+> scope machine-ids are conventionally underscore-separated, and the underscore
+> form is the default: fresh installs ship `agent_scopes: [mcp_read, mcp_write]`.
+> Most sites need no change here. Only if your scope ids use a *different* naming
+> — for example legacy colon-form scopes (`mcp:read` / `mcp:write`) created
+> before this convention was standardized — must you either set `agent_scopes` to
+> match those ids, or (recommended) migrate the scopes to the underscore form per
+> [§ "Upgrade note: OAuth scope machine ids are now underscores"](#upgrade-note-oauth-scope-machine-ids-are-now-underscores).
+> If nothing
+> matches, no token is ever recognised as the agent channel and the module fails
+> open — see the fail-loud note below.
 
 > **Fail-loud safety net.** If the module is **enabled but cannot govern any
 > request** — both `agent_scopes` and `agent_oauth_clients` empty (with the role
@@ -124,6 +129,11 @@ companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
 > **Reports → Status report** (`/admin/reports/status`) raises a WARNING
 > ("MCP Sentinel: not governing any request"). Treat that warning as a
 > misconfiguration: the module is failing open until it is wired correctly.
+
+> **Agent discovery.** Once the agent channel is wired, agents can introspect
+> your content model before acting via the governed context endpoint
+> `/drupal-mcp/context` (content types, fields, vocabularies, media types);
+> `/drupal-mcp/health` is a status probe. Both are described in `docs/CONNECTOR.md`.
 
 ## 5. Set up audit-metadata encryption (optional but recommended)
 
