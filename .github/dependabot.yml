@@ -1,8 +1,10 @@
 version: 2
 updates:
-  - package-ecosystem: composer
-    directory: "/"
-    schedule: { interval: weekly }
+  # NOTE: no `composer` ecosystem. The module's runtime deps are Drupal contrib
+  # (drupal/tool, drupal/simple_oauth, drupal/encrypt, …) which live on
+  # packages.drupal.org, not Packagist, so Dependabot cannot resolve them
+  # (dependency_file_not_resolvable). Drupal core compatibility for those is
+  # managed on drupal.org; `composer audit` still runs in CI for advisories.
   - package-ecosystem: github-actions
     directory: "/"
     schedule: { interval: weekly }

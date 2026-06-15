@@ -1,8 +1,8 @@
 name: Dependabot auto-merge
 
-# Enables GitHub auto-merge on Dependabot patch/minor PRs (majors → human review)
-# via the org reusable workflow. Requires "Allow auto-merge" enabled on the repo
-# (already configured). See Wilkes-Liberty/.github docs/REUSABLE-WORKFLOWS.md §2.
+# Enables GitHub auto-merge on Dependabot patch/minor PRs (majors → human review).
+# Self-contained (does not depend on a private org repo, so it works on this public
+# mirror and on forks). Requires "Allow auto-merge" enabled on the repo.
 
 on: pull_request
 
@@ -12,4 +12,17 @@ permissions:
 
 jobs:
   automerge:
-    uses: Wilkes-Liberty/.github/.github/workflows/dependabot-automerge.yml@master
+    if: ${{ github.event.pull_request.user.login == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enable auto-merge for patch and minor updates
+        if: ${{ steps.meta.outputs.update-type == 'version-update:semver-patch' || steps.meta.outputs.update-type == 'version-update:semver-minor' }}
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "$PR_URL"
