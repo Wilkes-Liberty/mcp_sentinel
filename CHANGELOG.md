@@ -57,6 +57,9 @@ stable release is tagged.
   not support PHP.
 
 ### Changed
+- CI: the CHANGELOG check now exempts Dependabot PRs automatically (author
+  `dependabot[bot]`), so dependency bumps no longer need a changelog entry or the
+  `no-changelog` label.
 - **OAuth scope machine ids standardized to underscores: `mcp:read` →
   `mcp_read`, `mcp:write` → `mcp_write`.** This is a **contract change**.
   Governance matches the scope *name* carried on a validated token against
