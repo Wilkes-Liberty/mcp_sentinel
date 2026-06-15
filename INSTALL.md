@@ -110,6 +110,21 @@ An optional **authenticated-role fallback** can govern requests by role when no
 token is present — set `governed_role_fallback` in the settings form. The
 companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
 
+> **Scope-name convention.** The `agent_scopes` you configure here must match the
+> scope **machine-ids** of your `oauth2_scope` entities exactly. simple_oauth
+> scope machine-ids are conventionally underscore-separated, so fresh installs
+> ship `agent_scopes: [mcp_read, mcp_write]`. If your scopes use a different
+> naming (e.g. the colon form `mcp:read`/`mcp:write`), set `agent_scopes` to
+> match your actual scope ids — otherwise no token will ever be recognised as the
+> agent channel and the module will fail open. (See the fail-loud note below.)
+
+> **Fail-loud safety net.** If the module is **enabled but cannot govern any
+> request** — both `agent_scopes` and `agent_oauth_clients` empty (with the role
+> fallback unusable), or no policy profile configured — the status report at
+> **Reports → Status report** (`/admin/reports/status`) raises a WARNING
+> ("MCP Sentinel: not governing any request"). Treat that warning as a
+> misconfiguration: the module is failing open until it is wired correctly.
+
 ## 5. Set up audit-metadata encryption (optional but recommended)
 
 The `metadata` column of every audit row can be encrypted at rest:

@@ -8,6 +8,15 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- Fail-loud runtime requirement (`mcp_sentinel_requirements('runtime')`): the
+  status report now raises a WARNING ("MCP Sentinel: not governing any request")
+  when the module is enabled but governance can never engage — i.e. both
+  `agent_scopes` and `agent_oauth_clients` are empty and the local-dev role
+  fallback is not usable (so `McpOauthContext::isAgentChannel()` can never fire),
+  or no `mcp_policy_profile` exists (so `McpPolicyResolver::resolve()` always
+  returns NULL). The check mirrors the real governance decision and links to the
+  settings form. This closes the silent no-op footgun where the module fails open
+  without telling the operator.
 - CI: Dependabot patch/minor PRs now auto-merge once checks pass (majors still
   reviewed), via the org reusable workflow
   (`.github/workflows/dependabot-automerge.yml` calls the shared
@@ -30,6 +39,12 @@ stable release is tagged.
   not support PHP.
 
 ### Changed
+- The shipped default `agent_scopes` changed from the colon form
+  (`mcp:read`/`mcp:write`) to the underscore convention used by simple_oauth
+  scope machine-ids (`mcp_read`/`mcp_write`). This only affects **fresh
+  installs** — existing sites keep their configured `agent_scopes`. Sites whose
+  OAuth scopes use the colon form must set `agent_scopes` to match their actual
+  scope machine-ids; the new fail-loud requirement will warn if nothing matches.
 - Renamed all references to the companion connector to its final public name
   **`drupal-mcp-connector`** (formerly published under its working name; repo
   `Wilkes-Liberty/drupal-mcp-connector`, npm `drupal-mcp-connector`). The

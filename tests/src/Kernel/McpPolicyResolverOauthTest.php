@@ -47,7 +47,7 @@ final class McpPolicyResolverOauthTest extends KernelTestBase {
    */
   public function testAgentChannelDefaults(): void {
     $config = $this->config('mcp_sentinel.settings');
-    $this->assertSame(['mcp:read', 'mcp:write'], $config->get('agent_scopes'));
+    $this->assertSame(['mcp_read', 'mcp_write'], $config->get('agent_scopes'));
     $this->assertFalse($config->get('governed_role_fallback'));
   }
 

@@ -34,6 +34,17 @@ enabled profile whose roles it holds, else the shipped `default` profile), which
 defines its operation gates, entity allow/deny lists, and redacted fields. Manage
 profiles at **Configuration → Web services → MCP Sentinel → MCP policy profiles**.
 
+> **Scope-name convention & fail-loud guard.** The `agent_scopes` you configure
+> must match your `oauth2_scope` machine-ids exactly. simple_oauth scope
+> machine-ids are conventionally underscore-separated, so fresh installs ship
+> `agent_scopes: [mcp_read, mcp_write]`; align this with your actual scope ids.
+> A governance module should never be a silent no-op, so when the module is
+> **enabled but cannot govern any request** — both `agent_scopes` and
+> `agent_oauth_clients` empty (with the role fallback unusable), or no policy
+> profile configured — the status report (**Reports → Status report**) raises a
+> WARNING, "MCP Sentinel: not governing any request". Fix the warning before
+> relying on governance; until then the module is failing open.
+
 ## Requirements
 
 - Drupal 10.3+ or 11
