@@ -57,6 +57,10 @@ final class McpRequirementsTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
+    // The warning the hook builds renders a settings-page link via
+    // Url::fromRoute(), which resolves path aliases — install the path_alias
+    // schema so that lookup has its table in the kernel test.
+    $this->installEntitySchema('path_alias');
     $this->installConfig(['mcp_sentinel']);
 
     // hook_requirements() uses the REQUIREMENT_* severity constants, which are

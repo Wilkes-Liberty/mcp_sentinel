@@ -14,7 +14,10 @@ stable release is tagged.
     directly, which uses the `REQUIREMENT_*` severity constants from
     `core/includes/install.inc`; that file is loaded by core before runtime
     requirements run but not in a kernel test, causing "Undefined constant
-    REQUIREMENT_WARNING". The test now loads `install.inc` in `setUp()`.
+    REQUIREMENT_WARNING". The test now loads `install.inc` in `setUp()`. It also
+    installs the `path_alias` entity schema, because the warning the hook builds
+    renders a settings link via `Url::fromRoute()`, which resolves path aliases
+    (a latent failure the undefined-constant error had been masking).
   - **phpstan** — `McpSentinelServerCommands::setup()` type-hinted the
     `mcp_tool_config` entity with the optional `mcp_server_tool_bridge` module's
     concrete class, which static analysis cannot resolve (6 errors). Retyped to
