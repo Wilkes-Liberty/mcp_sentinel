@@ -135,6 +135,95 @@ function mcp_sentinel_install(): void {
 }
 
 /**
+ * Implements hook_requirements().
+ *
+ * Fail-loud guard against the silent no-op failure mode: when the module is
+ * enabled but governance can never engage, it fails open without telling anyone.
+ * This emits a runtime status-report WARNING in either of the two situations
+ * where no request can ever be governed and gated:
+ *
+ *   - No channel can trigger governance. McpOauthContext::isAgentChannel() can
+ *     only return TRUE when agent_oauth_clients or agent_scopes is non-empty,
+ *     and the local-dev role fallback (McpPolicyResolver::isGoverned()) only
+ *     applies when governed_role_fallback is on AND a non-forbidden governed
+ *     role is configured. If neither path can ever fire, isGoverned() is always
+ *     FALSE and no entity-access gate runs.
+ *   - No policy profile exists. Even when a request is governed,
+ *     McpPolicyResolver::resolve() returns NULL when there is no policy profile
+ *     to resolve to, so no read/write/delete gate is ever applied.
+ *
+ * The check mirrors how isAgentChannel()/McpPolicyResolver actually decide so
+ * the warning is accurate, and links to the settings form so the operator can
+ * fix it. It only runs in the 'runtime' phase (status report); install does not
+ * need it because a fresh install ships sensible defaults.
+ */
+function mcp_sentinel_requirements(string $phase): array {
+  $requirements = [];
+  if ($phase !== 'runtime') {
+    return $requirements;
+  }
+
+  $config = \Drupal::config('mcp_sentinel.settings');
+  if (!$config->get('enabled')) {
+    // The operator has explicitly turned governance off; nothing to warn about.
+    return $requirements;
+  }
+
+  // Mirror McpOauthContext::isAgentChannel(): the agent channel can only ever
+  // fire when at least one client_id or one scope is configured.
+  $has_agent_clients = !empty($config->get('agent_oauth_clients'));
+  $has_agent_scopes = !empty($config->get('agent_scopes'));
+  $channel_can_fire = $has_agent_clients || $has_agent_scopes;
+
+  // Mirror McpPolicyResolver::isGoverned(): the local-dev role fallback can only
+  // govern when it is enabled AND a usable (non-forbidden) governed role exists.
+  $forbidden_roles = ['anonymous', 'authenticated'];
+  $governed_roles = array_diff((array) ($config->get('governed_roles') ?? []), $forbidden_roles);
+  $role_fallback_can_fire = (bool) $config->get('governed_role_fallback') && !empty($governed_roles);
+
+  $can_be_governed = $channel_can_fire || $role_fallback_can_fire;
+
+  // Mirror McpPolicyResolver::resolve(): without a policy profile, even a
+  // governed request resolves to NULL and no gate is applied.
+  $has_profile = (bool) \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->getQuery()
+    ->accessCheck(FALSE)
+    ->range(0, 1)
+    ->count()
+    ->execute();
+
+  if ($can_be_governed && $has_profile) {
+    // Governance can engage; no warning needed.
+    return $requirements;
+  }
+
+  // Build an actionable description listing exactly which precondition failed.
+  $reasons = [];
+  if (!$can_be_governed) {
+    $reasons[] = t('No request can be recognised as a governed agent request: <code>agent_scopes</code> and <code>agent_oauth_clients</code> are both empty, and the local-dev role fallback is not usable. Configure <code>agent_scopes</code> (e.g. <code>mcp_read</code>, <code>mcp_write</code>) and/or <code>agent_oauth_clients</code>.');
+  }
+  if (!$has_profile) {
+    $reasons[] = t('No policy profile exists, so even a governed request resolves to no policy and no read/write/delete gate is applied. Create at least one policy profile.');
+  }
+
+  $requirements['mcp_sentinel_not_governing'] = [
+    'title' => t('MCP Sentinel: not governing any request'),
+    'value' => t('Enabled but not governing'),
+    'severity' => REQUIREMENT_WARNING,
+    'description' => [
+      '#theme' => 'item_list',
+      '#items' => $reasons,
+      '#prefix' => '<p>' . t('MCP Sentinel is enabled but cannot govern any request, so it is failing open silently. Fix one or more of the following, then review the <a href=":url">MCP Sentinel settings</a>:', [
+        ':url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
+      ]) . '</p>',
+    ],
+  ];
+
+  return $requirements;
+}
+
+/**
  * Move the plaintext webhook secret into a Key entity.
  */
 function mcp_sentinel_update_10001(): string {

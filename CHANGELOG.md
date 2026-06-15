@@ -8,6 +8,15 @@ stable release is tagged.
 ## [Unreleased]
 
 ### Added
+- Fail-loud runtime requirement (`mcp_sentinel_requirements('runtime')`): the
+  status report now raises a WARNING ("MCP Sentinel: not governing any request")
+  when the module is enabled but governance can never engage — i.e. both
+  `agent_scopes` and `agent_oauth_clients` are empty and the local-dev role
+  fallback is not usable (so `McpOauthContext::isAgentChannel()` can never fire),
+  or no `mcp_policy_profile` exists (so `McpPolicyResolver::resolve()` always
+  returns NULL). The check mirrors the real governance decision and links to the
+  settings form. This closes the silent no-op footgun where the module fails open
+  without telling the operator.
 - CI: Dependabot patch/minor PRs now auto-merge once checks pass (majors still
   reviewed), via the org reusable workflow
   (`.github/workflows/dependabot-automerge.yml` calls the shared
