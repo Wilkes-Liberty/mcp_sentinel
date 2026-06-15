@@ -7,6 +7,21 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Fixed
+- Drupal.org GitLab CI was red on `1.0.x` (phpcs, phpstan, phpunit). All fixes
+  are in code introduced by the fail-loud requirement plus one type-hint:
+  - **phpunit** — `McpRequirementsTest` invoked `mcp_sentinel_requirements()`
+    directly, which uses the `REQUIREMENT_*` severity constants from
+    `core/includes/install.inc`; that file is loaded by core before runtime
+    requirements run but not in a kernel test, causing "Undefined constant
+    REQUIREMENT_WARNING". The test now loads `install.inc` in `setUp()`.
+  - **phpstan** — `McpSentinelServerCommands::setup()` type-hinted the
+    `mcp_tool_config` entity with the optional `mcp_server_tool_bridge` module's
+    concrete class, which static analysis cannot resolve (6 errors). Retyped to
+    `\Drupal\Core\Config\Entity\ConfigEntityInterface`.
+  - **phpcs** — fixed three 81-char lines in `mcp_sentinel.install` and a
+    non-capitalized doc-comment short description in `McpRequirementsTest`.
+
 ### Added
 - Fail-loud runtime requirement (`mcp_sentinel_requirements('runtime')`): the
   status report now raises a WARNING ("MCP Sentinel: not governing any request")

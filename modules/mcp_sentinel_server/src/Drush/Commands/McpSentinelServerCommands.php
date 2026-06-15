@@ -89,7 +89,11 @@ final class McpSentinelServerCommands extends DrushCommands {
         continue;
       }
 
-      /** @var \Drupal\mcp_server_tool_bridge\Entity\McpToolConfig $entity */
+      // mcp_tool_config is a config entity provided by the optional
+      // mcp_server_tool_bridge module; type to the core interface so static
+      // analysis resolves set()/setThirdPartySetting()/save() without a hard
+      // dependency on that module's concrete class.
+      /** @var \Drupal\Core\Config\Entity\ConfigEntityInterface $entity */
       $entity = $storage->load($tool_id) ?? $storage->create(['id' => $tool_id]);
       $entity->set('tool_id', $tool_id);
       $entity->set('status', TRUE);

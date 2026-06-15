@@ -138,7 +138,8 @@ function mcp_sentinel_install(): void {
  * Implements hook_requirements().
  *
  * Fail-loud guard against the silent no-op failure mode: when the module is
- * enabled but governance can never engage, it fails open without telling anyone.
+ * enabled but governance can never engage, it fails open without telling
+ * anyone.
  * This emits a runtime status-report WARNING in either of the two situations
  * where no request can ever be governed and gated:
  *
@@ -175,8 +176,9 @@ function mcp_sentinel_requirements(string $phase): array {
   $has_agent_scopes = !empty($config->get('agent_scopes'));
   $channel_can_fire = $has_agent_clients || $has_agent_scopes;
 
-  // Mirror McpPolicyResolver::isGoverned(): the local-dev role fallback can only
-  // govern when it is enabled AND a usable (non-forbidden) governed role exists.
+  // Mirror McpPolicyResolver::isGoverned(): the local-dev role fallback can
+  // only govern when it is enabled AND a usable (non-forbidden) governed
+  // role exists.
   $forbidden_roles = ['anonymous', 'authenticated'];
   $governed_roles = array_diff((array) ($config->get('governed_roles') ?? []), $forbidden_roles);
   $role_fallback_can_fire = (bool) $config->get('governed_role_fallback') && !empty($governed_roles);
