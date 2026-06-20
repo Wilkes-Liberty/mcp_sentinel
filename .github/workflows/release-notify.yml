@@ -1,0 +1,36 @@
+name: Release notification
+
+# Posts a Slack message to the maintainers' release channel when a release tag is
+# pushed. Internal operational notification only — it does not change the
+# project's release/publish process. No-ops when SLACK_WEBHOOK_RELEASES is unset
+# (e.g. on forks), and never fails the run.
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '[0-9]*'
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post release to Slack
+        env:
+          WEBHOOK: ${{ secrets.SLACK_WEBHOOK_RELEASES }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK:-}" ]; then
+            echo "SLACK_WEBHOOK_RELEASES not set — skipping."
+            exit 0
+          fi
+          TEXT=":package: *Release* — \`$REPO\` \`$TAG\`  •  by ${ACTOR:-?}  •  <$RUN_URL|run log>"
+          PAYLOAD=$(jq -n --arg t "$TEXT" '{text:$t}')
+          curl -sS -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$WEBHOOK" >/dev/null || true

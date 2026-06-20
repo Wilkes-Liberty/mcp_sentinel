@@ -7,6 +7,10 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added
+- CI: Slack release notification (`.github/workflows/release-notify.yml`) — posts to the
+  maintainers' release channel on release tags; no-ops without the `SLACK_WEBHOOK_RELEASES` secret.
+
 ### Fixed
 - Drupal.org GitLab CI was red on `1.0.x` (phpcs, phpstan, phpunit). All fixes
   are in code introduced by the fail-loud requirement plus one type-hint:
