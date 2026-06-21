@@ -26,6 +26,8 @@ stable release is tagged.
     non-capitalized doc-comment short description in `McpRequirementsTest`.
 
 ### Added
+- CI: Slack release notification (`.github/workflows/release-notify.yml`) — posts to the
+  maintainers' release channel on release tags; no-ops without the `SLACK_WEBHOOK_RELEASES` secret.
 - Fail-loud runtime requirement (`mcp_sentinel_requirements('runtime')`): the
   status report now raises a WARNING ("MCP Sentinel: not governing any request")
   when the module is enabled but governance can never engage — i.e. both
