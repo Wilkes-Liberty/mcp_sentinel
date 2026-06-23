@@ -1,3 +1,15 @@
+mcp_sentinel.dashboard:
+  title: 'MCP Sentinel'
+  description: 'Governance posture, audit metrics, and webhook delivery for the MCP server.'
+  route_name: mcp_sentinel.dashboard
+  parent: system.admin_reports
+
+mcp_sentinel.settings:
+  title: 'MCP Sentinel'
+  description: 'Configure MCP Sentinel governance, audit, and webhook behavior.'
+  route_name: mcp_sentinel.settings
+  parent: system.admin_config_services
+
 mcp_sentinel.profiles:
   title: 'MCP policy profiles'
   description: 'Per-agent MCP Sentinel governance profiles.'

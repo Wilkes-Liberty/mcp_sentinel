@@ -54,6 +54,15 @@ final class McpDashboardTest extends BrowserTestBase {
     $this->assertSession()->linkExists('Dashboard');
     $this->assertSession()->linkExists('Audit log');
     $this->assertSession()->linkExists('Webhook deliveries');
+
+    // The dashboard is discoverable from the Reports listing, and the settings
+    // form from the Web services configuration listing.
+    $this->drupalGet('/admin/reports');
+    $this->assertSession()->linkByHrefExists('/admin/reports/mcp-sentinel');
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->statusCodeEquals(200);
+    // The collapsed setup guide is present on the settings form.
+    $this->assertSession()->pageTextContains('Quick start for site builders');
   }
 
   /**

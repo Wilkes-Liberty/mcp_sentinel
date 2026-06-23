@@ -615,16 +615,26 @@ clear them once the migrated endpoint is verified.
 
 ## Configuration
 
-**Configuration → Web services → MCP Sentinel** (`/admin/config/services/mcp-sentinel`)
+The module adds two admin-menu entries, so both landing pages are reachable
+without knowing their URLs:
+
+- **Configuration → Web services → MCP Sentinel** — the settings form.
+- **Reports → MCP Sentinel** — the governance dashboard.
+
+(Policy profiles remain at **Configuration → Web services → MCP policy
+profiles**.) The settings form also opens with a collapsed **Setup &
+configuration guide** — a short site-builder quickstart that links out to this
+README, `INSTALL.md`, and the in-site Keys and policy-profile pages.
 
 Admin routes:
 
 - `/admin/config/services/mcp-sentinel` — settings form (master switch,
   governance model, audit, encryption, DLP, rate limits, anomaly rules, IP
-  allowlists, webhook endpoints).
+  allowlists, webhook endpoints). Linked from **Configuration → Web services**.
 - `/admin/reports/mcp-sentinel` — **governance dashboard** (landing page; see
-  below). Local-task tabs lead to the audit log, webhook deliveries, and (when
-  the approval submodule is enabled) approvals.
+  below), linked from the **Reports** menu. Local-task tabs lead to the audit
+  log, webhook deliveries, and (when the approval submodule is enabled)
+  approvals.
 - `/admin/reports/mcp-sentinel/audit` — audit log listing, with filters and
   CSV/JSON export.
 - `/admin/reports/mcp-sentinel/webhooks` — webhook delivery log + replay.
