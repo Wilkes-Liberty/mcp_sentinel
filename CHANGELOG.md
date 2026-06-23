@@ -26,6 +26,19 @@ stable release is tagged.
     non-capitalized doc-comment short description in `McpRequirementsTest`.
 
 ### Added
+- Admin menu links for the governance **dashboard** (`/admin/reports/mcp-sentinel`,
+  under Reports) and the **settings** form (`/admin/config/services/mcp-sentinel`,
+  under Configuration → Web services). Both were previously reachable only by direct
+  URL or local-task tabs, so the dashboard never appeared in the Reports listing and
+  the settings form never appeared in the Web services group. Access is unchanged —
+  each link inherits its route's existing permission requirement
+  (`mcp_sentinel.links.menu.yml`).
+- A collapsed, unobtrusive **"Setup & configuration guide"** on the settings form
+  (`McpSettingsForm`): a short site-builder quickstart (install → register tools →
+  make requests governable → define a policy profile → configure a signing Key),
+  linking to policy profiles, the Keys UI, and the shipped `README.md` / `INSTALL.md`
+  / `API.md`. It is a curated quickstart, not a copy — the README and `hook_help()`
+  remain the source of truth.
 - CI: Slack release notification (`.github/workflows/release-notify.yml`) — posts to the
   maintainers' release channel on release tags; no-ops without the `SLACK_WEBHOOK_RELEASES` secret.
 - Fail-loud runtime requirement (`mcp_sentinel_requirements('runtime')`): the

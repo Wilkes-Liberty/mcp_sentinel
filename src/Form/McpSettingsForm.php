@@ -65,6 +65,34 @@ class McpSettingsForm extends ConfigFormBase {
     $form['tabs'] = ['#type' => 'vertical_tabs', '#default_tab' => 'edit-status'];
     $form['#attached']['library'][] = 'mcp_sentinel/admin';
 
+    // Unobtrusive, collapsed setup guide for site builders. Sits above the
+    // vertical tabs (lower weight) but stays closed by default. This is a
+    // curated quickstart — the README/INSTALL and the module help page remain
+    // the source of truth, so it links out rather than duplicating them.
+    $profiles_url = '/admin/config/services/mcp-sentinel/profiles';
+    $keys_url = '/admin/config/system/keys';
+    $form['setup_help'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Setup &amp; configuration guide'),
+      '#open' => FALSE,
+      '#weight' => -100,
+      'body' => [
+        '#theme' => 'item_list',
+        '#title' => $this->t('Quick start for site builders'),
+        '#list_type' => 'ol',
+        '#items' => [
+          ['#markup' => $this->t('<strong>Install &amp; enable:</strong> <code>composer require drupal/mcp_sentinel</code>, then <code>drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge -y</code> and <code>drush cr</code>.')],
+          ['#markup' => $this->t('<strong>Register the Tool plugins</strong> with mcp_server: <code>drush mcp-sentinel:setup</code>.')],
+          ['#markup' => $this->t('<strong>Make requests governable:</strong> set the governed roles (<em>MCP Access</em> tab) and the OAuth agent scopes / client IDs (<em>OAuth agent channel</em> tab). Until a request can match the agent channel, the Status report warns that the module is <em>not governing any request</em>.')],
+          ['#markup' => $this->t('<strong>Define per-agent policy</strong> at <a href=":profiles">MCP policy profiles</a> (allowed operations, entity scope, redaction, rate limits).', [':profiles' => $profiles_url])],
+          ['#markup' => $this->t('<strong>For signed webhooks or at-rest audit encryption,</strong> create a <a href=":keys">Key</a> and select it in the <em>Audit Logging</em> / <em>Reliable webhooks</em> tabs.', [':keys' => $keys_url])],
+        ],
+      ],
+      'docs' => [
+        '#markup' => '<p>' . $this->t('Full setup, the trust model, and Drush commands are in the project <code>README.md</code>, <code>INSTALL.md</code>, and <code>API.md</code> shipped with the module, and on the module help page when core Help is enabled.') . '</p>',
+      ],
+    ];
+
     $form['status'] = [
       '#type' => 'details',
       '#title' => $this->t('MCP Access'),
