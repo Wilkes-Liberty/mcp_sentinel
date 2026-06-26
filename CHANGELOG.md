@@ -7,6 +7,8 @@ stable release is tagged.
 
 ## [Unreleased]
 
+## [1.0.0-beta5] - 2026-06-26
+
 ### Added
 - **Configuration governance (two-persona, environment-keyed least privilege).**
   A new layer that governs configuration operations and content publishing under
