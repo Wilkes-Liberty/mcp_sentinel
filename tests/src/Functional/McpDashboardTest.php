@@ -38,10 +38,13 @@ final class McpDashboardTest extends BrowserTestBase {
    */
   public function testDashboardRendersForPermittedUser(): void {
     // The "Webhook deliveries" tab route requires 'administer mcp sentinel';
-    // grant both so all three base tabs resolve for this user.
+    // grant both so all three base tabs resolve. 'access site reports' is
+    // required to view the core Reports index (/admin/reports) where the
+    // dashboard's menu link is asserted below.
     $this->drupalLogin($this->drupalCreateUser([
       'view mcp sentinel audit log',
       'administer mcp sentinel',
+      'access site reports',
     ]));
     $this->drupalGet('/admin/reports/mcp-sentinel');
     $this->assertSession()->statusCodeEquals(200);
@@ -58,6 +61,7 @@ final class McpDashboardTest extends BrowserTestBase {
     // The dashboard is discoverable from the Reports listing, and the settings
     // form from the Web services configuration listing.
     $this->drupalGet('/admin/reports');
+    $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->linkByHrefExists('/admin/reports/mcp-sentinel');
     $this->drupalGet('/admin/config/services/mcp-sentinel');
     $this->assertSession()->statusCodeEquals(200);
