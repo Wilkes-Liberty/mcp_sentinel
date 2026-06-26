@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **CI (phpunit)**: `GraphqlFieldResultsAlterTest` saved `mcp_sentinel.settings` without
+  installing the `mcp_sentinel_audit_log` schema, so the `ConfigEvents::SAVE` audit subscriber
+  errored on a missing table (2 errors on the drupal.org pipeline, red since 1.0.0-beta5).
+  `setUp()` now installs the audit-log schema, matching the sibling kernel tests. Test-only —
+  no runtime change.
+
 ## [1.0.0] - 2026-06-26
 
 First **stable** release. Promotes the `1.0.0-alpha1` … `1.0.0-beta6` pre-release
