@@ -387,12 +387,13 @@ class McpAuditController extends ControllerBase {
           return;
         }
 
-        // Header row.
+        // Header row. The separator/enclosure/escape are passed explicitly:
+        // PHP 8.4 deprecates calling fputcsv() without the $escape argument.
         fputcsv($handle, [
           'id', 'timestamp', 'uid', 'operation', 'entity_type', 'bundle',
           'entity_id', 'entity_label', 'ip_address', 'user_agent',
           'metadata', 'prev_hash', 'row_hash',
-        ]);
+        ], ',', '"', '\\');
 
         foreach ($rows as $row) {
           // Route metadata reads through the accessor seam for Feature 5.
@@ -413,7 +414,7 @@ class McpAuditController extends ControllerBase {
             json_encode($metadata),
             $row->prev_hash ?? '',
             $row->row_hash ?? '',
-          ]);
+          ], ',', '"', '\\');
         }
 
         fclose($handle);

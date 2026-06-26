@@ -7,6 +7,17 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Fixed
+- **PHP 8.4 compatibility**: the audit-log CSV export (`McpAuditController::buildCsvResponse()`)
+  called `fputcsv()` without the `$escape` argument, which PHP 8.4 deprecates — under the
+  test deprecation handler this errored, and on PHP 8.4 sites the export would emit a
+  deprecation notice. The separator/enclosure/escape are now passed explicitly (no change to
+  output). Fixes the red `McpAuditFilterExportTest` CSV jobs in CI.
+- **Test**: `McpDashboardTest::testDashboardRendersForPermittedUser` granted the test user
+  `access site reports` so the core Reports index (`/admin/reports`) renders; previously the
+  page 403'd and the dashboard menu-link assertion failed. Added an explicit 200 assertion so
+  the cause is obvious if it regresses.
+
 ## [1.0.0-beta5] - 2026-06-26
 
 ### Added
