@@ -7,6 +7,8 @@ stable release is tagged.
 
 ## [Unreleased]
 
+## [1.0.0-beta6] - 2026-06-26
+
 ### Fixed
 - **PHP 8.4 compatibility**: the audit-log CSV export (`McpAuditController::buildCsvResponse()`)
   called `fputcsv()` without the `$escape` argument, which PHP 8.4 deprecates — under the
