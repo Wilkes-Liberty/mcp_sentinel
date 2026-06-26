@@ -99,7 +99,11 @@ final class McpSiemStreamingTest extends KernelTestBase {
     $spy = new TestLogger();
     $this->container->set('logger.channel.mcp_sentinel_audit', $spy);
 
-    // Rebuild the audit logger so it picks up the swapped-in spy.
+    // Force the audit logger to be rebuilt so it picks up the swapped-in spy.
+    // A config save can eagerly construct the audit logger (the config-save
+    // event subscriber depends on it), so resetting guarantees a fresh instance
+    // wired to the spy channel.
+    $this->container->set('mcp_sentinel.audit_logger', NULL);
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
       'entity_type' => 'node',
       'bundle'      => 'article',
@@ -146,6 +150,8 @@ final class McpSiemStreamingTest extends KernelTestBase {
     $spy = new TestLogger();
     $this->container->set('logger.channel.mcp_sentinel_audit', $spy);
 
+    // Force a fresh audit logger wired to the spy (see the emit-on-write test).
+    $this->container->set('mcp_sentinel.audit_logger', NULL);
     $logger = $this->container->get('mcp_sentinel.audit_logger');
     $db = $this->container->get('database');
 

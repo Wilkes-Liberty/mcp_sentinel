@@ -2,6 +2,7 @@ Acquia
 autowires
 behaviour
 bookmarkable
+breakglass
 Cerda
 chartjs
 ciphertext
@@ -17,6 +18,7 @@ drush
 eccdeac
 endcode
 entr
+entrancy
 eslint
 etype
 exfiltration
@@ -25,10 +27,12 @@ fatals
 fieldable
 fieldsets
 filebeat
+footgun
 gatechange
 gethostbynamel
 hmac
 hostnames
+idempotently
 jmcerda
 langcode
 libsodium
@@ -41,9 +45,11 @@ memorise
 normalises
 nosniff
 optimised
+packagist
 pcre
 phpcs
 phpstan
+phpunit
 PKCE
 preg
 Recognised
@@ -68,9 +74,12 @@ unconfigured
 undismissed
 unexecutable
 ungated
+unmoderated
+unpublishing
 unregisters
 untampered
 unthrottled
+updatedb
 updb
 varchar
 vocabs

@@ -10,7 +10,9 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
@@ -153,6 +155,12 @@ final class McpWorkflowTransitionTool extends ToolBase {
       return ExecutableResult::failure($this->t('You do not have permission to update this entity.'));
     }
 
+    // Publish gate + moderation ceiling. Resolve the target state in the
+    // entity's workflow so we can reason about its published-ness and weight.
+    if ($denial = $this->checkPublishGate($entity, (string) $state, $profile, $entity_type, $id)) {
+      return $denial;
+    }
+
     $from = $entity->get('moderation_state')->value;
     try {
       $entity->set('moderation_state', $state);
@@ -170,6 +178,69 @@ final class McpWorkflowTransitionTool extends ToolBase {
       $this->t('Moderation state changed from @from to @to.', ['@from' => $from, '@to' => $state]),
       ['id' => $entity->id(), 'entity_type' => $entity_type, 'from_state' => $from, 'to_state' => $state],
     );
+  }
+
+  /**
+   * Enforces the MCP Sentinel publish gate and moderation-state ceiling.
+   *
+   * Resolves the target state within the entity's content-moderation workflow.
+   * When the profile denies publishing, a transition to any published state is
+   * refused (a human publisher must publish). When the profile sets a maximum
+   * moderation state, a transition to a higher-weight state is refused.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The moderated entity being transitioned.
+   * @param string $state
+   *   The requested target state machine name.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile.
+   * @param string $entityType
+   *   The entity type ID (for audit logging).
+   * @param string $id
+   *   The entity ID (for audit logging).
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when the transition is gated, NULL when permitted.
+   */
+  protected function checkPublishGate(
+    ContentEntityInterface $entity,
+    string $state,
+    McpPolicyProfileInterface $profile,
+    string $entityType,
+    string $id,
+  ): ?ExecutableResult {
+    if ($this->moderationInformation === NULL) {
+      return NULL;
+    }
+    $workflow = $this->moderationInformation->getWorkflowForEntity($entity);
+    if ($workflow === NULL) {
+      return NULL;
+    }
+    $typePlugin = $workflow->getTypePlugin();
+    if (!$typePlugin->hasState($state)) {
+      // Unknown state — leave it to the ModerationState constraint to report.
+      return NULL;
+    }
+    $target = $typePlugin->getState($state);
+
+    if ($profile->deniesPublish() && $target instanceof ContentModerationState && $target->isPublishedState()) {
+      $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entityType, $id, 'publish', 'publish denied by policy');
+      return ExecutableResult::failure($this->t('MCP Sentinel denied the transition: publishing is not permitted for this agent. A human publisher must publish.'));
+    }
+
+    $max = $profile->getMaxModerationState();
+    if ($max !== '' && $typePlugin->hasState($max)) {
+      $ceiling = $typePlugin->getState($max);
+      if ($target->weight() > $ceiling->weight()) {
+        $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entityType, $id, 'update', 'moderation state exceeds policy ceiling');
+        return ExecutableResult::failure($this->t(
+          'MCP Sentinel denied the transition: state "@to" exceeds the maximum permitted state "@max".',
+          ['@to' => $state, '@max' => $max],
+        ));
+      }
+    }
+
+    return NULL;
   }
 
   /**

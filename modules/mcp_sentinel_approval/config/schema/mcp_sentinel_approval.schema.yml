@@ -8,3 +8,6 @@ mcp_sentinel_approval.settings:
       sequence:
         type: string
         label: 'Operation'
+    break_glass_ttl_seconds:
+      type: integer
+      label: 'Break-glass mcp_admin grant lifetime in seconds'

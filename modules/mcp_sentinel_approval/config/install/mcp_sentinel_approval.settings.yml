@@ -1,2 +1,5 @@
 gated_operations:
   - delete
+  - config_import
+  - module_disable
+break_glass_ttl_seconds: 3600

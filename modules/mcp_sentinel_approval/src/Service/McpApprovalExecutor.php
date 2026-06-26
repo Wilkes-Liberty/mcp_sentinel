@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_approval\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\Extension\ModuleInstallerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
@@ -13,11 +16,14 @@ use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 /**
  * Executes approve/deny decisions on MCP approval requests.
  *
- * On approve, the stored destructive operation is replayed (currently delete):
- * the target entity is reloaded, re-access-checked for the approver, and
- * deleted if it still exists. The decision is recorded on the request and an
- * audit row is written via the base audit logger. On deny, the request is
- * marked denied and the decision audited without touching the target.
+ * On approve, the stored destructive operation is replayed:
+ *  - delete: the target entity is reloaded, re-access-checked for the approver,
+ *    and deleted if it still exists (with a UUID guard against id reuse);
+ *  - config_import: the queued config values are written to the target config;
+ *  - module_disable: the target module is uninstalled.
+ * The decision is recorded on the request and an audit row is written via the
+ * base audit logger. On deny, the request is marked denied and the decision
+ * audited without touching the target.
  */
 final class McpApprovalExecutor {
 
@@ -32,12 +38,24 @@ final class McpApprovalExecutor {
    *   The current user (the approver).
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service.
+   * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
+   *   The config factory, used to replay config_import.
+   * @param \Drupal\Core\Extension\ModuleInstallerInterface $moduleInstaller
+   *   The module installer, used to replay module_disable.
+   * @param \Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager $breakGlass
+   *   The break-glass manager, used to replay grant_mcp_admin.
+   * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
+   *   The module handler, used to check module_disable targets.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly McpAuditLogger $auditLogger,
     private readonly AccountProxyInterface $currentUser,
     private readonly TimeInterface $time,
+    private readonly ConfigFactoryInterface $configFactory,
+    private readonly ModuleInstallerInterface $moduleInstaller,
+    private readonly McpBreakGlassManager $breakGlass,
+    private readonly ModuleHandlerInterface $moduleHandler,
   ) {}
 
   /**
@@ -113,6 +131,43 @@ final class McpApprovalExecutor {
           $executed = TRUE;
           $message = 'Target deleted.';
         }
+      }
+    }
+    elseif ($request->getOperation() === 'config_import') {
+      // Replay the queued config write. The approver is a human admin (not a
+      // governed agent), so McpConfigSaveSubscriber no-ops on this save.
+      $data = (array) ($request->getPayload()['data'] ?? []);
+      if ($data === []) {
+        $reason = 'empty_config_payload';
+        $message = 'No queued config values to apply; request marked approved but not executed.';
+      }
+      else {
+        $editable = $this->configFactory->getEditable($entity_id);
+        foreach ($data as $key => $value) {
+          $editable->set((string) $key, $value);
+        }
+        $editable->save();
+        $executed = TRUE;
+        $message = sprintf('Configuration "%s" updated.', $entity_id);
+      }
+    }
+    elseif ($request->getOperation() === 'module_disable') {
+      if (!$this->moduleHandler->moduleExists($entity_id)) {
+        $reason = 'module_not_installed';
+        $message = sprintf('Module "%s" is not installed; request marked approved but not executed.', $entity_id);
+      }
+      else {
+        $this->moduleInstaller->uninstall([$entity_id]);
+        $executed = TRUE;
+        $message = sprintf('Module "%s" uninstalled.', $entity_id);
+      }
+    }
+    elseif ($request->getOperation() === 'grant_mcp_admin') {
+      $result = $this->breakGlass->grant((int) $entity_id);
+      $executed = $result['granted'];
+      $message = $result['message'];
+      if (!$executed) {
+        $reason = 'break_glass_grant_failed';
       }
     }
     else {

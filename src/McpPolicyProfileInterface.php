@@ -114,4 +114,42 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function getAllowedIps(): array;
 
+  /**
+   * Whether configuration read operations are permitted under this profile.
+   */
+  public function allowsConfigRead(): bool;
+
+  /**
+   * Whether configuration write operations are permitted under this profile.
+   */
+  public function allowsConfigWrite(): bool;
+
+  /**
+   * Config name prefixes denied for read and write (deny always wins).
+   *
+   * Each entry is matched as a prefix against the full config object name
+   * (e.g. 'system.', 'field.field.'). A config name matching any entry is
+   * denied regardless of the allow_config_* flags.
+   *
+   * @return string[]
+   *   The denied config name prefixes.
+   */
+  public function getDeniedConfigTypes(): array;
+
+  /**
+   * Whether the agent is forbidden from publishing content.
+   *
+   * When TRUE (the safe default), moderated transitions to a published state
+   * are denied and unmoderated publishable entities are saved unpublished.
+   */
+  public function deniesPublish(): bool;
+
+  /**
+   * Highest moderation state the agent may set (empty = unrestricted).
+   *
+   * @return string
+   *   The ceiling moderation state ID, or '' for no ceiling.
+   */
+  public function getMaxModerationState(): string;
+
 }

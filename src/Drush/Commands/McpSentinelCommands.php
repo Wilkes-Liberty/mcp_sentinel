@@ -11,6 +11,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
@@ -50,6 +51,8 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly StateInterface $state,
     #[Autowire(service: 'datetime.time')]
     private readonly TimeInterface $time,
+    #[Autowire(service: 'mcp_sentinel.urgent_conditions')]
+    private readonly McpUrgentConditions $urgentConditions,
   ) {
     parent::__construct();
   }
@@ -90,6 +93,24 @@ final class McpSentinelCommands extends DrushCommands {
       ),
     ];
 
+    // Config governance posture — surfaced explicitly so the report never
+    // implies config governance is live when it is not (never fail open). A
+    // critical config_governance condition flips the command's exit code.
+    $conditions = $this->urgentConditions->evaluate();
+    $configCondition = NULL;
+    foreach ($conditions as $condition) {
+      if ($condition['key'] === 'config_governance') {
+        $configCondition = $condition;
+        break;
+      }
+    }
+    $rows[] = [
+      'Config governance',
+      $configCondition === NULL
+        ? 'live'
+        : strtoupper((string) $configCondition['severity']) . ': ' . $configCondition['message'],
+    ];
+
     $output = $this->output();
     $this->io()->title('MCP Sentinel status');
     $this->io()->table(['Setting', 'Value'], $rows);
@@ -100,16 +121,25 @@ final class McpSentinelCommands extends DrushCommands {
       $output->writeln('');
       foreach ($profiles as $profile) {
         $output->writeln(sprintf(
-          'Profile %s (roles: %s) read=%d write=%d delete=%d gql_mut=%d redacted=[%s]',
+          'Profile %s (roles: %s) read=%d write=%d delete=%d gql_mut=%d cfg_read=%d cfg_write=%d deny_pub=%d redacted=[%s]',
           $profile->id(),
           $profile->getRoles() ? implode(',', $profile->getRoles()) : 'default',
           (int) $profile->allowsRead(),
           (int) $profile->allowsWrite(),
           (int) $profile->allowsDelete(),
           (int) $profile->allowsGraphqlMutations(),
+          (int) $profile->allowsConfigRead(),
+          (int) $profile->allowsConfigWrite(),
+          (int) $profile->deniesPublish(),
           implode(',', $profile->getRedactedFields()),
         ));
       }
+    }
+
+    // Non-zero exit when config governance is in a critical fail-open state so
+    // monitoring catches it, mirroring audit-verify's exit-code contract.
+    if ($configCondition !== NULL && $configCondition['severity'] === 'critical') {
+      return self::EXIT_FAILURE;
     }
 
     return self::EXIT_SUCCESS;

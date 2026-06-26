@@ -92,6 +92,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.webhook_queue_manager'),
       $this->container->get('state'),
       $this->container->get('datetime.time'),
+      $this->container->get('mcp_sentinel.urgent_conditions'),
     );
 
     // Wire a no-op DrushLoggerManager so commands can call $this->logger()->

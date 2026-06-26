@@ -7,6 +7,49 @@ stable release is tagged.
 
 ## [Unreleased]
 
+### Added
+- **Configuration governance (two-persona, environment-keyed least privilege).**
+  A new layer that governs configuration operations and content publishing under
+  the resolved policy profile, additive and default-off:
+  - **Profile fields** (`McpPolicyProfile`): `allow_config_read`,
+    `allow_config_write`, `denied_config_types` (name-prefix denylist),
+    `deny_publish`, and `max_moderation_state`. All default to the safe value
+    (config off, publishing denied); existing profiles are backfilled by
+    `mcp_sentinel_update_10011()`. A new "Configuration governance" tab on the
+    policy-profile form edits them.
+  - **Config access seam**: `McpAccessChecker::checkConfigAccess()` mirrors the
+    entity-access pattern (master switch, IP allowlist, denylist, read/write
+    gates). Three new governed MCP tools — `mcp_sentinel_config_get`,
+    `mcp_sentinel_config_list`, `mcp_sentinel_config_set` — registered via
+    `drush mcp-sentinel:setup`. Config reads/lists honor `audit_log_reads`.
+  - **Hard-deny config subscriber**: a `ConfigEvents::SAVE` subscriber audits
+    every governed config save (`config_save`, with a redaction/DLP-aware diff
+    via `McpAuditLogger::computeConfigDiff()`) and hard-denies — reverting the
+    persisted value and throwing — a governed write to a `denied_config_types`
+    name, closing the direct-`Config::save()` bypass.
+- **Publish gate.** Agent-authored content lands unpublished unless a profile
+  opts in. Enforced at the `mcp_sentinel_workflow_transition` tool (value-aware:
+  blocks transitions to a published state and beyond `max_moderation_state`),
+  with `hook_entity_field_access` (`edit` on `moderation_state`/`status`) and an
+  `entity_presave` `setUnpublished()` fallback as defense in depth.
+- **Approval coverage for config/admin ops.** `gated_operations` now defaults to
+  `delete`, `config_import`, `module_disable`. A non-entity
+  `McpDestructiveActionEvent` + subscriber queue these for human approval, and
+  `McpApprovalExecutor` replays `config_import` and `module_disable` on approval.
+- **`mcp-sentinel:agent-provision <tier> --env`** drush command — idempotently
+  provisions a tier's role, dedicated agent account, and OAuth consumer (one
+  source of truth so connector/Keychain/consumer cannot drift). Secrets remain a
+  human action.
+- **Time-boxed `mcp_admin` break-glass.** The admin role is never standing:
+  `mcp-sentinel:break-glass <uid>` raises an always-gated approval request; on
+  approval the role is granted with a TTL (`break_glass_ttl_seconds`) and
+  recorded as an `mcp_admin_grant` entity, then auto-revoked by
+  `mcp_sentinel_approval_cron()`.
+- **`config_governance` status guard.** `McpUrgentConditions` emits a critical
+  condition (surfaced on the dashboard and as a non-zero `mcp-sentinel:status`
+  exit) when config write is reachable but governance is not live — never fail
+  open.
+
 ## [1.0.0-beta4] - 2026-06-22
 
 ### Fixed

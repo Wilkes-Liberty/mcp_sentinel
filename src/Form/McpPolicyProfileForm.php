@@ -119,6 +119,44 @@ final class McpPolicyProfileForm extends EntityForm {
       ];
     }
 
+    // --- Configuration governance tab ----------------------------------------
+    $form['config_governance'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Configuration governance'),
+      '#group' => 'tabs',
+    ];
+    $form['config_governance']['allow_config_read'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Allow configuration read'),
+      '#description' => $this->t('Permit governed config get/list operations. Off by default.'),
+      '#default_value' => $profile->get('allow_config_read'),
+    ];
+    $form['config_governance']['allow_config_write'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Allow configuration write'),
+      '#description' => $this->t('Permit governed config set operations. Off by default; reserve for developer-tier profiles.'),
+      '#default_value' => $profile->get('allow_config_write'),
+    ];
+    $form['config_governance']['denied_config_types'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Denied configuration name prefixes'),
+      '#description' => $this->t('One config name or prefix per line (e.g. system., field.field.). Matching config is denied for read and write regardless of the allow flags above.'),
+      '#default_value' => implode("\n", $profile->getDeniedConfigTypes()),
+      '#rows' => 3,
+    ];
+    $form['config_governance']['deny_publish'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Deny publishing (force draft / unpublished)'),
+      '#description' => $this->t('When on (recommended), agent-authored content cannot be published: moderated transitions to a published state are denied and unmoderated publishable entities are saved unpublished. A human publisher publishes.'),
+      '#default_value' => $profile->get('deny_publish'),
+    ];
+    $form['config_governance']['max_moderation_state'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Maximum moderation state (empty = unrestricted)'),
+      '#description' => $this->t('Optional ceiling state ID (e.g. draft, needs_review). Transitions to a higher-weight workflow state are denied. Leave empty for no ceiling.'),
+      '#default_value' => $profile->getMaxModerationState(),
+    ];
+
     // --- Entity scope tab ----------------------------------------------------
     $lines = static fn (array $v): string => implode("\n", $v);
     $form['entity_scope'] = [
@@ -421,6 +459,11 @@ final class McpPolicyProfileForm extends EntityForm {
       'result_count_cap',
       'response_size_cap',
       'allowed_ips',
+      'allow_config_read',
+      'allow_config_write',
+      'denied_config_types',
+      'deny_publish',
+      'max_moderation_state',
     ];
     assert($entity instanceof ConfigEntityBase);
     foreach ($form_state->getValues() as $key => $value) {
@@ -472,6 +515,17 @@ final class McpPolicyProfileForm extends EntityForm {
     $profile->set(
       'allowed_ips',
       $split($form_state->getValue('allowed_ips'))
+    );
+    foreach (['allow_config_read', 'allow_config_write', 'deny_publish'] as $key) {
+      $profile->set($key, (bool) $form_state->getValue($key));
+    }
+    $profile->set(
+      'denied_config_types',
+      $split($form_state->getValue('denied_config_types'))
+    );
+    $profile->set(
+      'max_moderation_state',
+      trim((string) $form_state->getValue('max_moderation_state'))
     );
 
     $status = $profile->save();

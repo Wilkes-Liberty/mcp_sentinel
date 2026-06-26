@@ -1,0 +1,22 @@
+<?php
+
+/**
+ * @file
+ * Hook implementations for the MCP Sentinel Approval submodule.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Implements hook_cron().
+ *
+ * Reaps expired time-boxed mcp_admin break-glass grants: removes the role and
+ * marks the grant revoked once its expiry passes. Cron-based revocation mirrors
+ * the content-lock reaper and survives missed runs, where a delayed queue item
+ * could be lost.
+ */
+function mcp_sentinel_approval_cron(): void {
+  /** @var \Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager $breakGlass */
+  $breakGlass = \Drupal::service('mcp_sentinel_approval.break_glass');
+  $breakGlass->reapExpired();
+}

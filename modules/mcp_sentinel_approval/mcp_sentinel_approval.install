@@ -1,0 +1,21 @@
+<?php
+
+/**
+ * @file
+ * Install/update hooks for the MCP Sentinel Approval submodule.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Install the mcp_admin_grant entity type for the break-glass model.
+ */
+function mcp_sentinel_approval_update_10001(): string {
+  $manager = \Drupal::entityDefinitionUpdateManager();
+  if ($manager->getEntityType('mcp_admin_grant') === NULL) {
+    $type = \Drupal::entityTypeManager()->getDefinition('mcp_admin_grant');
+    $manager->installEntityType($type);
+    return 'Installed the mcp_admin_grant entity type (time-boxed break-glass grants).';
+  }
+  return 'The mcp_admin_grant entity type is already installed.';
+}

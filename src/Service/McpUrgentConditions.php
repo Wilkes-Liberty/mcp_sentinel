@@ -13,6 +13,7 @@ use Drupal\Core\State\StateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileInterface;
 use Drupal\key\KeyRepositoryInterface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 
 /**
  * Evaluates critical/warning/info governance conditions for the dashboard.
@@ -79,10 +80,73 @@ final class McpUrgentConditions {
     $this->evaluateChain($conditions);
     $this->evaluateEncryption($config, $conditions);
     $this->evaluateMasterSwitch($config, $conditions);
+    $this->evaluateConfigGovernance($config, $conditions);
     $this->evaluateEndpoints($config, $conditions);
     $this->evaluateBroadcast($config, $conditions);
 
     return $conditions;
+  }
+
+  /**
+   * Asserts config governance is live; never fails open.
+   *
+   * Config write is "reachable" when at least one enabled policy profile grants
+   * allow_config_write. When it is reachable, config governance MUST be live:
+   * the master switch on (so checkConfigAccess enforces) and auditing on (the
+   * ConfigEvents::SAVE subscriber records every mutation). A critical condition
+   * fires when config write is reachable but either guarantee is missing, so
+   * status report can never silently imply config governance is active when it
+   * is not.
+   *
+   * @param \Drupal\Core\Config\ImmutableConfig $config
+   *   The settings config.
+   * @param array $conditions
+   *   The condition list, modified by reference.
+   */
+  private function evaluateConfigGovernance(ImmutableConfig $config, array &$conditions): void {
+    if (!$this->configWriteReachable()) {
+      return;
+    }
+    if (!(bool) $config->get('enabled')) {
+      $conditions[] = [
+        'severity' => 'critical',
+        'key' => 'config_governance',
+        'message' => 'A policy profile grants configuration write, but MCP Sentinel governance is OFF. Agent configuration changes would be ungoverned.',
+        'url' => $this->routeUrl('mcp_sentinel.settings'),
+      ];
+      return;
+    }
+    if (!(bool) $config->get('audit_enabled')) {
+      $conditions[] = [
+        'severity' => 'critical',
+        'key' => 'config_governance',
+        'message' => 'A policy profile grants configuration write, but audit logging is OFF. Agent configuration changes would not be recorded.',
+        'url' => $this->routeUrl('mcp_sentinel.settings'),
+      ];
+    }
+  }
+
+  /**
+   * Returns TRUE when any enabled policy profile grants config write.
+   *
+   * @return bool
+   *   TRUE when configuration write is reachable by a governed agent.
+   */
+  private function configWriteReachable(): bool {
+    try {
+      $profiles = $this->entityTypeManager
+        ->getStorage('mcp_policy_profile')
+        ->loadByProperties(['status' => TRUE]);
+    }
+    catch (\Throwable $e) {
+      return FALSE;
+    }
+    foreach ($profiles as $profile) {
+      if ($profile instanceof McpPolicyProfileInterface && $profile->allowsConfigWrite()) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
   /**
