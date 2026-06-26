@@ -1,11 +1,36 @@
 # Changelog
 
 All notable changes to MCP Sentinel are documented here. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project will
-adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once a
-stable release is tagged.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
+to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-06-26
+
+First **stable** release. Promotes the `1.0.0-alpha1` … `1.0.0-beta6` pre-release
+series to a stable 1.0.x line under semantic versioning. There are **no code changes
+since `1.0.0-beta6`** — this tag marks API stability for the governance surface
+(policy-profile fields, MCP tools, events, and Drush commands). Supported core:
+`^10.3 || ^11`. Headline scope of the 1.0.0 line, consolidated from the pre-release
+entries below:
+
+### Added
+- **Two-persona, environment-keyed configuration governance**: per-tier
+  `McpPolicyProfile` capabilities (`allow_config_read`, `allow_config_write`,
+  `denied_config_types`), governed config MCP tools (`mcp_sentinel_config_get` /
+  `_list` / `_set`), and a `ConfigEvents::SAVE` hard-deny + audit subscriber.
+- **Publish gate**: agent-authored content lands unpublished (`deny_publish`,
+  `max_moderation_state`), with a `status = 0` fallback for unmoderated types.
+- **Approval workflow + break-glass**: `mcp_sentinel_approval` gates `delete`,
+  `config_import`, and `module_disable`; time-boxed, approval-gated `mcp_admin`
+  elevation (never standing).
+- **Tamper-evident audit**: HMAC-SHA256 audit hash chain, at-rest audit-metadata
+  encryption (`real_aes` encryption profile), DLP redaction, anomaly detection, SIEM
+  streaming, and reliable governance webhooks.
+- **Admin UX**: dashboard + settings menu links and an in-form setup guide.
+
+See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detail.
 
 ## [1.0.0-beta6] - 2026-06-26
 
