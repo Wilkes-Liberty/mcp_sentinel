@@ -225,3 +225,21 @@ mcp_sentinel.mcp_policy_profile.*:
       sequence:
         type: string
         label: 'IP address or CIDR'
+    allow_config_read:
+      type: boolean
+      label: 'Allow configuration read'
+    allow_config_write:
+      type: boolean
+      label: 'Allow configuration write'
+    denied_config_types:
+      type: sequence
+      label: 'Denied configuration name prefixes'
+      sequence:
+        type: string
+        label: 'Config name or prefix'
+    deny_publish:
+      type: boolean
+      label: 'Deny publishing (force draft / unpublished)'
+    max_moderation_state:
+      type: string
+      label: 'Maximum moderation state an agent may set (empty = unrestricted)'

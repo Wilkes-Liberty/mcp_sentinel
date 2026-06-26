@@ -39,6 +39,20 @@ This is the exact seam the `mcp_sentinel_approval` submodule uses
 (`McpDestructiveOpSubscriber`). Subscribe to it to add your own approval,
 quota, or business-rule gate.
 
+### `McpDestructiveActionEvent` — veto a non-entity destructive action
+
+`Drupal\mcp_sentinel\Event\McpDestructiveActionEvent`
+(event name: `McpDestructiveActionEvent::NAME` = `mcp_sentinel.destructive_action`).
+
+The non-entity sibling of `McpDestructiveOpEvent`, for actions that have no
+target entity — `config_import` (a governed config write), `module_disable`, and
+`grant_mcp_admin` (break-glass elevation). It carries a target descriptor instead
+of an `EntityInterface`: `getTargetType()` (e.g. `'config'`, `'module'`,
+`'user'`), `getTargetId()`, `getOperation()`, `getAccount()`, and `getPayload()`;
+the `veto()`/`isVetoed()`/`getVetoReason()` contract is identical. The approval
+submodule's `McpDestructiveActionSubscriber` queues these for human approval and
+`McpApprovalExecutor` replays them on approval.
+
 ```php
 public static function getSubscribedEvents(): array {
   return [McpDestructiveOpEvent::NAME => 'onDestructiveOp'];
@@ -118,10 +132,51 @@ governance the resolver selects per request. Read its gates and limits via:
 | `getRateLimitRequests()` / `getRateLimitWindow()` | rate-limit budget + window (seconds) |
 | `getResultCountCap()` / `getResponseSizeCap()` | exfiltration caps (`0` = unlimited) |
 | `getAllowedIps()` | per-profile CIDR allowlist (empty = no restriction) |
+| `allowsConfigRead()` / `allowsConfigWrite()` | configuration read/write gates (both default off) |
+| `getDeniedConfigTypes()` | config name-prefix denylist (deny always wins, e.g. `system.`) |
+| `deniesPublish()` | publish gate — when `TRUE` (default) the agent cannot publish content |
+| `getMaxModerationState()` | ceiling moderation state ID the agent may set (empty = no ceiling) |
 
 Profiles are configuration entities, so they are exportable, deployable, and
 overridable per environment. Do not store secrets in a profile — use Key
 entities (see `INSTALL.md`).
+
+## Configuration governance & publish gate
+
+Beyond entity operations, a profile also governs **configuration** access and
+content **publishing**. Both layers are additive and default to the safe value
+(config off, publishing denied).
+
+- **Config tools.** `mcp_sentinel_config_get`, `mcp_sentinel_config_list`, and
+  `mcp_sentinel_config_set` are governed MCP tools registered with
+  `drush mcp-sentinel:setup`. Each calls
+  `McpAccessChecker::checkConfigAccess($name, $operation, $profile)` — the
+  config counterpart to `checkEntityAccess()` — enforcing the master switch, IP
+  allowlist, the `denied_config_types` prefix denylist (deny always wins), and
+  the `allow_config_read` / `allow_config_write` gates. Reads/lists honor
+  `audit_log_reads`; denied config names are never even enumerated by the list
+  tool.
+- **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on
+  `ConfigEvents::SAVE`) audits every governed config save as `config_save` (diff
+  via `McpAuditLogger::computeConfigDiff()`) and, for a governed write to a
+  `denied_config_types` name, reverts the just-written value and throws a
+  `ConfigException` — closing the bypass where a `TokenAuthUser` calls
+  `Config::save()` directly without going through a tool.
+- **Publish gate.** When `deniesPublish()` is `TRUE`, the
+  `mcp_sentinel_workflow_transition` tool refuses transitions to a published
+  state (and beyond `getMaxModerationState()`); `hook_entity_field_access`
+  forbids `edit` on `moderation_state`/`status`; and `hook_entity_presave`
+  forces unmoderated publishable entities unpublished. A human publisher
+  publishes.
+
+## Drush commands
+
+| Command | Purpose |
+|---------|---------|
+| `mcp-sentinel:status` | Posture summary; non-zero exit when the `config_governance` guard is critical (never fail open). |
+| `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. |
+| `mcp-sentinel:agent-provision <tier> --env=<env>` | Idempotently provision a tier's role, dedicated agent account, and OAuth consumer (deterministic `client_id` = `<tier>-<env>`). Secrets stay a human action. |
+| `mcp-sentinel:break-glass <uid>` | Raise an always-gated approval request to grant the time-boxed `mcp_admin` role (auto-revoked at `break_glass_ttl_seconds`). |
 
 ## Services
 
@@ -131,8 +186,8 @@ the supported PHP entry points for other modules:
 | Service ID | Class | Use |
 |------------|-------|-----|
 | `mcp_sentinel.policy_resolver` | `McpPolicyResolver` | `isGoverned()` and `resolve(?AccountInterface)` → the active `McpPolicyProfile` or `NULL` |
-| `mcp_sentinel.access_checker` | `McpAccessChecker` | entity/create access decisions, JSON:API filter access, `isClientIpAllowed()` |
-| `mcp_sentinel.audit_logger` | `McpAuditLogger` | write/read the tamper-evident, hash-chained, optionally encrypted audit log; `computeChangeDiff()` |
+| `mcp_sentinel.access_checker` | `McpAccessChecker` | entity/create access decisions, JSON:API filter access, `isClientIpAllowed()`, `checkConfigAccess()` |
+| `mcp_sentinel.audit_logger` | `McpAuditLogger` | write/read the tamper-evident, hash-chained, optionally encrypted audit log; `computeChangeDiff()` / `computeConfigDiff()` |
 | `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |
 | `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) |

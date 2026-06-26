@@ -148,6 +148,9 @@ discover available types, queries, and mutations.
 | JSON:API access | ✅ | ✅ |
 | Security presets (read-only, auditor, etc.) | ❌ | ✅ |
 | Entity type allow/deny lists | ❌ | ✅ |
+| Configuration read/write governance + denylist | ❌ | ✅ |
+| Publish gate (agent content lands unpublished) | ❌ | ✅ |
+| Time-boxed `mcp_admin` break-glass | ❌ | ✅ |
 | Field-level PII redaction | ❌ | ✅ |
 | DLP value-pattern redaction / masking | ❌ | ✅ |
 | Audit log | ❌ | ✅ |
@@ -165,6 +168,37 @@ discover available types, queries, and mutations.
 | Human approval workflow (submodule) | ❌ | ✅ |
 | Rich context endpoint | ❌ | ✅ |
 | mcp_api role | ❌ | ✅ |
+
+## Configuration governance & publish gate
+
+Beyond entity CRUD, a policy profile also governs **configuration** and content
+**publishing**. Both are additive and default to the safe value — config read
+and write are off, and publishing is denied — so upgrading changes no behavior
+until you opt a profile in at **Configuration → Web services → MCP Sentinel →
+MCP policy profiles → Configuration governance**.
+
+- **Config tools.** Enable governed `config get` / `list` / `set` by running
+  `drush mcp-sentinel:setup` (it registers the three new tools). Access is gated
+  by `allow_config_read` / `allow_config_write` and a `denied_config_types`
+  name-prefix denylist (deny always wins). A `ConfigEvents::SAVE` subscriber
+  audits every governed config save and hard-denies (revert + throw) a governed
+  write to a denied config name, so a direct `Config::save()` cannot bypass it.
+- **Publish gate.** When *Deny publishing* is on (the default), agent-authored
+  content lands in a non-published state — the workflow-transition tool refuses
+  a transition to a published state (and beyond an optional maximum moderation
+  state), and unmoderated publishable entities are forced unpublished. A human
+  `publisher` publishes.
+- **Approval for config/admin ops** (with the approval submodule):
+  `gated_operations` defaults to `delete`, `config_import`, `module_disable`.
+  Tier provisioning is one command: `drush mcp-sentinel:agent-provision <tier>
+  --env=<env>`. The `mcp_admin` role is never standing — request it with
+  `drush mcp-sentinel:break-glass <uid>`, which raises an approval; on approval
+  it is granted for `break_glass_ttl_seconds` and auto-revoked on cron.
+
+**Upgrade note.** The new profile fields are added at their safe defaults by an
+update hook (`drush updatedb`); run `drush mcp-sentinel:setup` to expose the
+config tools, and `drush cr`. No existing behavior changes until a profile opts
+in.
 
 ## Tamper-evident audit log
 

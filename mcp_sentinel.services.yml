@@ -84,6 +84,16 @@ services:
     tags:
       - { name: event_subscriber }
 
+  mcp_sentinel.config_save_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpConfigSaveSubscriber
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.audit_logger'
+      - '@config.factory'
+      - '@config.storage'
+    tags:
+      - { name: event_subscriber }
+
   mcp_sentinel.anomaly_detector:
     class: Drupal\mcp_sentinel\Service\McpAnomalyDetector
     arguments:

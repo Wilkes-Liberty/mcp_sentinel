@@ -4,6 +4,14 @@ services:
     arguments:
       - '@config.factory'
 
+  mcp_sentinel_approval.break_glass:
+    class: Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager
+    arguments:
+      - '@entity_type.manager'
+      - '@datetime.time'
+      - '@config.factory'
+      - '@mcp_sentinel.audit_logger'
+
   mcp_sentinel_approval.executor:
     class: Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor
     arguments:
@@ -11,9 +19,22 @@ services:
       - '@mcp_sentinel.audit_logger'
       - '@current_user'
       - '@datetime.time'
+      - '@config.factory'
+      - '@module_installer'
+      - '@mcp_sentinel_approval.break_glass'
+      - '@module_handler'
 
   mcp_sentinel_approval.destructive_op_subscriber:
     class: Drupal\mcp_sentinel_approval\EventSubscriber\McpDestructiveOpSubscriber
+    arguments:
+      - '@mcp_sentinel_approval.gate'
+      - '@entity_type.manager'
+      - '@logger.channel.mcp_sentinel'
+    tags:
+      - { name: event_subscriber }
+
+  mcp_sentinel_approval.destructive_action_subscriber:
+    class: Drupal\mcp_sentinel_approval\EventSubscriber\McpDestructiveActionSubscriber
     arguments:
       - '@mcp_sentinel_approval.gate'
       - '@entity_type.manager'

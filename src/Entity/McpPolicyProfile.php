@@ -63,6 +63,11 @@ use Drupal\mcp_sentinel\McpPolicyProfileListBuilder;
     'result_count_cap',
     'response_size_cap',
     'allowed_ips',
+    'allow_config_read',
+    'allow_config_write',
+    'denied_config_types',
+    'deny_publish',
+    'max_moderation_state',
   ],
 )]
 final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfileInterface {
@@ -156,6 +161,41 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * @var string[]
    */
   protected array $allowed_ips = [];
+
+  /**
+   * Whether configuration read operations are permitted.
+   */
+  protected bool $allow_config_read = FALSE;
+
+  /**
+   * Whether configuration write operations are permitted.
+   */
+  protected bool $allow_config_write = FALSE;
+
+  /**
+   * Config name prefixes denied for read and write (deny always wins).
+   *
+   * @var string[]
+   */
+  protected array $denied_config_types = [];
+
+  /**
+   * Whether the agent is forbidden from publishing content.
+   *
+   * When TRUE (the safe default), agent-authored content is forced to a
+   * non-published state: moderated transitions to a published state are denied
+   * and unmoderated publishable entities are saved unpublished. A human
+   * publisher remains responsible for publishing.
+   */
+  protected bool $deny_publish = TRUE;
+
+  /**
+   * Highest moderation state the agent may set (empty = unrestricted).
+   *
+   * The state ID of the ceiling state; transitions to a higher-weight state in
+   * the entity's workflow are denied. Empty applies no ceiling.
+   */
+  protected string $max_moderation_state = '';
 
   /**
    * {@inheritdoc}
@@ -253,6 +293,41 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function getAllowedIps(): array {
     return array_values(array_filter($this->allowed_ips));
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsConfigRead(): bool {
+    return (bool) $this->allow_config_read;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsConfigWrite(): bool {
+    return (bool) $this->allow_config_write;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getDeniedConfigTypes(): array {
+    return array_values(array_filter($this->denied_config_types));
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function deniesPublish(): bool {
+    return (bool) $this->deny_publish;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getMaxModerationState(): string {
+    return (string) $this->max_moderation_state;
   }
 
 }

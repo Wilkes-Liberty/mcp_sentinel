@@ -112,13 +112,16 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
       ->set('governed_roles', ['mcp_api'])
       ->save();
 
-    // Allow writes; no rate limit.
+    // Allow writes; no rate limit. The publish gate is exercised by its own
+    // test (testPublishGateDeniesPublishedTransition); the transition-mechanics
+    // tests opt out of it so draft->published transitions can be asserted.
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('allow_write', TRUE)
       ->set('allow_read', TRUE)
       ->set('rate_limit_requests', 0)
       ->set('denied_entity_types', [])
+      ->set('deny_publish', FALSE)
       ->save();
     \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
 
@@ -200,6 +203,38 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
       ->countQuery()->execute()->fetchField();
     $this->assertGreaterThan(0, $count,
       'At least one audit row must be written after a successful transition.');
+  }
+
+  /**
+   * The publish gate denies a transition to a published state.
+   */
+  public function testPublishGateDeniesPublishedTransition(): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('deny_publish', TRUE)
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $this->createGovernedAccount();
+    $node = $this->createDraftArticle();
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_workflow_transition');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('id', (string) $node->id());
+    $tool->setInputValue('state', 'published');
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus(),
+      'A deny_publish profile must block a transition to a published state.');
+    $this->assertStringContainsString('publishing is not permitted',
+      (string) $tool->getResultMessage());
+
+    // The node stays in draft.
+    \Drupal::entityTypeManager()->getStorage('node')->resetCache([$node->id()]);
+    $reloaded = \Drupal::entityTypeManager()->getStorage('node')->load($node->id());
+    $this->assertSame('draft', $reloaded->get('moderation_state')->value,
+      'The node must remain unpublished when the publish gate denies.');
   }
 
   /**

@@ -113,7 +113,12 @@ class McpAuditLogger {
     if (!$config->get('audit_enabled')) {
       return;
     }
-    if (str_starts_with($operation, 'entity_read') && !$config->get('audit_log_reads')) {
+    // Read operations are suppressed unless audit_log_reads is on. This covers
+    // both entity reads and the config read/list tools, which are non-mutating.
+    $isRead = str_starts_with($operation, 'entity_read')
+      || str_starts_with($operation, 'config_read')
+      || str_starts_with($operation, 'config_list');
+    if ($isRead && !$config->get('audit_log_reads')) {
       return;
     }
 
@@ -502,6 +507,75 @@ class McpAuditLogger {
     }
 
     return $diff;
+  }
+
+  /**
+   * Computes an old/new diff between two configuration value arrays.
+   *
+   * The config counterpart to computeChangeDiff(). Config objects are not
+   * fieldable entities, so this compares the two value arrays key-by-key over
+   * their union of top-level keys. Each side is stringified (scalars cast,
+   * arrays JSON-encoded) and capped, redacted keys are masked, and non-redacted
+   * values are DLP-scanned, matching the entity-diff shape and guarantees.
+   *
+   * @param array $old
+   *   The configuration values before the write (empty for a new object).
+   * @param array $new
+   *   The configuration values after the write.
+   * @param string[] $redacted_fields
+   *   Top-level config keys whose values must never appear in the diff.
+   *
+   * @return array<string, array{old: string, new: string}>
+   *   A map of changed config keys to their old/new string representations.
+   */
+  public function computeConfigDiff(array $old, array $new, array $redacted_fields = []): array {
+    $diff = [];
+    $keys = array_keys($old + $new);
+    foreach ($keys as $key) {
+      if (count($diff) >= self::DIFF_MAX_FIELDS) {
+        break;
+      }
+      $oldHas = array_key_exists($key, $old);
+      $newHas = array_key_exists($key, $new);
+      $old_str = $oldHas ? $this->stringifyConfigValue($old[$key]) : '';
+      $new_str = $newHas ? $this->stringifyConfigValue($new[$key]) : '';
+      if ($old_str === $new_str) {
+        continue;
+      }
+      if (in_array($key, $redacted_fields, TRUE)) {
+        $diff[$key] = ['old' => '[REDACTED]', 'new' => '[REDACTED]'];
+        continue;
+      }
+      if ($this->dlp !== NULL) {
+        $old_str = $this->dlp->scan($old_str);
+        $new_str = $this->dlp->scan($new_str);
+      }
+      $diff[$key] = ['old' => $old_str, 'new' => $new_str];
+    }
+
+    return $diff;
+  }
+
+  /**
+   * Converts a configuration value to a capped string for the change diff.
+   *
+   * Scalars are cast; arrays and other structures are JSON-encoded so the
+   * representation is always a valid, deterministic string.
+   *
+   * @param mixed $value
+   *   A configuration value.
+   *
+   * @return string
+   *   A string representation capped at DIFF_MAX_VALUE_LENGTH bytes.
+   */
+  private function stringifyConfigValue(mixed $value): string {
+    if (is_scalar($value) || $value === NULL) {
+      $str = (string) $value;
+    }
+    else {
+      $str = (string) json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    return substr($str, 0, self::DIFF_MAX_VALUE_LENGTH);
   }
 
   /**

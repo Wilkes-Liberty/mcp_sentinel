@@ -519,6 +519,39 @@ function mcp_sentinel_update_10010(): string {
 }
 
 /**
+ * Add config-governance + publish-gate fields to existing policy profiles.
+ */
+function mcp_sentinel_update_10011(): string {
+  $defaults = [
+    'allow_config_read' => FALSE,
+    'allow_config_write' => FALSE,
+    'denied_config_types' => [],
+    'deny_publish' => TRUE,
+    'max_moderation_state' => '',
+  ];
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    $changed = FALSE;
+    foreach ($defaults as $key => $value) {
+      if ($e->get($key) === NULL) {
+        $e->set($key, $value);
+        $changed = TRUE;
+      }
+    }
+    if ($changed) {
+      $e->save();
+    }
+  }
+  return 'Added config-governance (allow_config_*, denied_config_types) and '
+    . 'publish-gate (deny_publish, max_moderation_state) fields at safe '
+    . 'defaults to all policy profiles.';
+}
+
+/**
  * Implements hook_uninstall().
  *
  * Only removes what core does not clean up automatically: the module's main

@@ -62,6 +62,9 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installSchema('system', ['sequences']);
+    // Governed config saves in these tests are audited by the config-save
+    // subscriber, so the audit table must exist.
+    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log', 'mcp_sentinel_content_locks']);
     $this->installConfig(['mcp_sentinel', 'user']);
   }
 

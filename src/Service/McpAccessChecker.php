@@ -202,6 +202,104 @@ final class McpAccessChecker {
   }
 
   /**
+   * Checks whether an MCP configuration operation is permitted under a profile.
+   *
+   * The config-governance counterpart to checkEntityAccess(). Enforces the same
+   * master switch and IP-allowlist gates, then the config-specific policy: the
+   * denied_config_types prefix denylist (deny always wins), the config-read
+   * gate for read/view operations, and the allow_config_write gate for
+   * write/update operations.
+   *
+   * Cache safety mirrors checkEntityAccess(): when the profile carries a
+   * non-empty allowed_ips list every result is uncacheable (max-age 0).
+   *
+   * @param string $configName
+   *   The full configuration object name (e.g. 'system.site').
+   * @param string $operation
+   *   The operation: 'read'/'view' or 'write'/'update'.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile for the requesting account.
+   *
+   * @return \Drupal\Core\Access\AccessResult
+   *   Forbidden if the operation is disallowed; neutral otherwise.
+   */
+  public function checkConfigAccess(
+    string $configName,
+    string $operation,
+    McpPolicyProfileInterface $profile,
+  ): AccessResult {
+    $tags = [
+      'config:mcp_sentinel.settings',
+      'config:mcp_sentinel.mcp_policy_profile.' . $profile->id(),
+    ];
+    $ipRestricted = $profile->getAllowedIps() !== [];
+
+    if (!$this->configFactory->get('mcp_sentinel.settings')->get('enabled')) {
+      $result = AccessResult::forbidden('MCP access is disabled.')->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+
+    if ($ipRestricted && !$this->isClientIpAllowed($profile)) {
+      return AccessResult::forbidden(
+        'Source IP not permitted by MCP Sentinel policy.'
+      )->addCacheTags($tags)->setCacheMaxAge(0);
+    }
+
+    $typeResult = $this->checkConfigTypePolicy($configName, $profile, $tags);
+    if ($typeResult !== NULL) {
+      return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
+    }
+
+    if (in_array($operation, ['read', 'view'], TRUE) && !$profile->allowsConfigRead()) {
+      $result = AccessResult::forbidden(
+        'Configuration read is disabled in MCP Sentinel.'
+      )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+    if (in_array($operation, ['write', 'update'], TRUE) && !$profile->allowsConfigWrite()) {
+      $result = AccessResult::forbidden(
+        'Configuration write is disabled in MCP Sentinel.'
+      )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+
+    $result = AccessResult::neutral()->addCacheTags($tags);
+    return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+  }
+
+  /**
+   * Returns a forbidden result if the config name is on the profile denylist.
+   *
+   * The denylist entries are matched as prefixes against the full config name
+   * (e.g. 'system.' denies 'system.site'). Deny always wins, independent of the
+   * allow_config_* flags. Returns NULL when the config name is permitted.
+   *
+   * @param string $configName
+   *   The full configuration object name.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile.
+   * @param string[] $tags
+   *   Cache tags to attach to any forbidden result.
+   *
+   * @return \Drupal\Core\Access\AccessResult|null
+   *   A forbidden result when the config name is denied, NULL when permitted.
+   */
+  public function checkConfigTypePolicy(
+    string $configName,
+    McpPolicyProfileInterface $profile,
+    array $tags,
+  ): ?AccessResult {
+    foreach ($profile->getDeniedConfigTypes() as $prefix) {
+      if ($prefix !== '' && str_starts_with($configName, $prefix)) {
+        return AccessResult::forbidden(
+          "Configuration '{$configName}' is denied by MCP Sentinel."
+        )->addCacheTags($tags);
+      }
+    }
+    return NULL;
+  }
+
+  /**
    * Returns a forbidden result if the entity type violates the profile policy.
    *
    * Shared by checkEntityAccess() and checkCreateAccess() so the allowed/denied

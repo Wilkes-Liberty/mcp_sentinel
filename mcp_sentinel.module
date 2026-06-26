@@ -11,7 +11,9 @@
 use Drupal\mcp_sentinel\Controller\McpBannerController;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
@@ -198,6 +200,23 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     return;
   }
 
+  // Publish-gate fallback (status=0) for unmoderated publishable entities. The
+  // workflow tool and field-access hook gate the moderated path; this catches a
+  // direct setPublished() on a publishable entity that is NOT under Content
+  // Moderation, forcing it unpublished so a deny_publish agent cannot publish.
+  if ($entity instanceof EntityPublishedInterface && $entity->isPublished()) {
+    $profile = $resolver->resolve();
+    $moderation = \Drupal::hasService('content_moderation.moderation_information')
+      ? \Drupal::service('content_moderation.moderation_information')
+      : NULL;
+    $moderated = $moderation !== NULL
+      && $entity instanceof ContentEntityInterface
+      && $moderation->isModeratedEntity($entity);
+    if ($profile !== NULL && $profile->deniesPublish() && !$moderated) {
+      $entity->setUnpublished();
+    }
+  }
+
   /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
   $logger = \Drupal::service('mcp_sentinel.audit_logger');
 
@@ -320,12 +339,18 @@ function mcp_sentinel_entity_create_access(
 /**
  * Implements hook_entity_field_access().
  *
- * Redacts fields listed in the resolved policy profile from MCP responses by
- * forbidding 'view' access for governed agent accounts. This strips the field
- * from JSON:API and REST output and nulls it in GraphQL — a single, uniform
- * redaction across every read channel. The 'user.roles' and 'oauth2_scopes'
- * cache contexts keep governed and non-governed responses cached separately so
- * a value is never served across the boundary.
+ * Two governed-agent gates fire here, both keyed on 'user.roles' and
+ * 'oauth2_scopes' so governed and non-governed results never share a cache:
+ *
+ * 1. 'view' — redacts fields listed in the resolved policy profile by
+ *    forbidding view access, stripping the field from JSON:API and REST output
+ *    and nulling it in GraphQL: one uniform redaction across read channels.
+ * 2. 'edit' — the publish-gate fallback. When the profile denies publishing,
+ *    edit access to the 'moderation_state' field (moderated types) and the
+ *    'status' field (the status=0 fallback for unmoderated publishable types)
+ *    is forbidden, so a JSON:API/REST PATCH cannot publish around the precise
+ *    tool gate. This is intentionally blunt — it also blocks unpublishing — and
+ *    is defense in depth behind McpWorkflowTransitionTool's value-aware check.
  */
 function mcp_sentinel_entity_field_access(
   string $operation,
@@ -333,6 +358,21 @@ function mcp_sentinel_entity_field_access(
   AccountInterface $account,
   ?FieldItemListInterface $items = NULL,
 ): AccessResult {
+  $contexts = ['user.roles', 'oauth2_scopes'];
+  $tags = ['config:mcp_sentinel.settings', 'config:mcp_sentinel.mcp_policy_profile_list'];
+
+  if ($operation === 'edit') {
+    $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+    $profile = $resolver->resolve($account);
+    $gated = $profile !== NULL
+      && $profile->deniesPublish()
+      && in_array($field_definition->getName(), ['moderation_state', 'status'], TRUE);
+    $result = $gated
+      ? AccessResult::forbidden('Publishing is denied by MCP Sentinel.')
+      : AccessResult::neutral();
+    return $result->addCacheContexts($contexts)->addCacheTags($tags);
+  }
+
   if ($operation !== 'view') {
     return AccessResult::neutral();
   }
@@ -349,8 +389,8 @@ function mcp_sentinel_entity_field_access(
     ? AccessResult::forbidden('Field redacted by MCP Sentinel.')
     : AccessResult::neutral();
   return $result
-    ->addCacheContexts(['user.roles', 'oauth2_scopes'])
-    ->addCacheTags(['config:mcp_sentinel.settings', 'config:mcp_sentinel.mcp_policy_profile_list']);
+    ->addCacheContexts($contexts)
+    ->addCacheTags($tags);
 }
 
 /**
