@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-27
+
 ### Security
 - Isolated the configuration tools behind a dedicated **`mcp_config`** OAuth scope.
   `mcp_sentinel_config_get`, `mcp_sentinel_config_list`, and `mcp_sentinel_config_set`
