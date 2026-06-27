@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-26
+
 ### Security
 - Hardened the default `denied_entity_types` to block secret-, governance-, and
   credential-bearing entity types — `oauth2_token`, `key`, `consumer`,
