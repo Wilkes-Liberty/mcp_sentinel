@@ -552,6 +552,44 @@ function mcp_sentinel_update_10011(): string {
 }
 
 /**
+ * Deny secret-, governance-, and credential-bearing entity types by default.
+ *
+ * Existing profiles denied only `user`. Profiles whose `allowed_entity_types`
+ * is empty mean "allow all (minus the denylist)", so without this the agent
+ * could read/write OAuth tokens, encryption keys, consumers, and the MCP
+ * governance config itself. Additively merge a hardened denylist into every
+ * profile (idempotent — only missing entries are appended; operator additions
+ * are preserved).
+ */
+function mcp_sentinel_update_10012(): string {
+  $hardened = [
+    'user',
+    'oauth2_token',
+    'key',
+    'consumer',
+    'encryption_profile',
+    'mcp_tool_config',
+    'mcp_policy_profile',
+  ];
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  $count = 0;
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    $current = $e->get('denied_entity_types') ?? [];
+    $merged = array_values(array_unique([...$current, ...$hardened]));
+    if ($merged !== $current) {
+      $e->set('denied_entity_types', $merged)->save();
+      $count++;
+    }
+  }
+  return "Hardened denied_entity_types (secrets, governance config, credentials) "
+    . "on {$count} policy profile(s).";
+}
+
+/**
  * Implements hook_uninstall().
  *
  * Only removes what core does not clean up automatically: the module's main

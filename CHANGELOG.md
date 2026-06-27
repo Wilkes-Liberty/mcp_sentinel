@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- Hardened the default `denied_entity_types` to block secret-, governance-, and
+  credential-bearing entity types — `oauth2_token`, `key`, `consumer`,
+  `encryption_profile`, `mcp_tool_config`, `mcp_policy_profile` — in addition to `user`.
+  Because a profile with an empty `allowed_entity_types` means "allow all (minus the
+  denylist)", these were previously reachable by any profile with write access. New
+  installs get the hardened default; `mcp_sentinel_update_10012()` additively merges the
+  list into existing profiles (idempotent; operator-added denies are preserved).
+
 ### Fixed
 - **CI (phpunit)**: `GraphqlFieldResultsAlterTest` saved `mcp_sentinel.settings` without
   installing the `mcp_sentinel_audit_log` schema, so the `ConfigEvents::SAVE` audit subscriber

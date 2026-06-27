@@ -422,7 +422,43 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
-   * The full chain 10001–10010 applies without exception.
+   * Update_10012 additively hardens denied_entity_types and is idempotent.
+   */
+  public function testUpdate10012HardensDeniedEntityTypes(): void {
+    $hardened = [
+      'oauth2_token', 'key', 'consumer', 'encryption_profile',
+      'mcp_tool_config', 'mcp_policy_profile',
+    ];
+
+    // Simulate a pre-10012 profile that only denied 'user', plus an operator
+    // addition that must be preserved.
+    $editable = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default');
+    $editable->set('denied_entity_types', ['user', 'commerce_order'])->save();
+
+    $message = mcp_sentinel_update_10012();
+    $this->assertIsString($message);
+
+    $denied = \Drupal::configFactory()
+      ->get('mcp_sentinel.mcp_policy_profile.default')
+      ->get('denied_entity_types');
+
+    $this->assertContains('user', $denied, 'pre-existing user deny preserved.');
+    $this->assertContains('commerce_order', $denied, 'operator addition preserved.');
+    foreach ($hardened as $type) {
+      $this->assertContains($type, $denied, "update_10012 must deny {$type}.");
+    }
+
+    // Idempotent: a second run leaves the list unchanged.
+    mcp_sentinel_update_10012();
+    $after = \Drupal::configFactory()
+      ->get('mcp_sentinel.mcp_policy_profile.default')
+      ->get('denied_entity_types');
+    $this->assertSame($denied, $after, 'update_10012 must be idempotent.');
+  }
+
+  /**
+   * The full chain 10001–10012 applies without exception.
    *
    * Runs all update hooks in sequence on a minimal config state that resembles
    * a freshly-installed (but not yet updated) site. Verifies no exception and
@@ -486,6 +522,8 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     mcp_sentinel_update_10008();
     mcp_sentinel_update_10009();
     mcp_sentinel_update_10010();
+    mcp_sentinel_update_10011();
+    mcp_sentinel_update_10012();
 
     // Post-chain assertions.
     // 1. The delivery table must exist.

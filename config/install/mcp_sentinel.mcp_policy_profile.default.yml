@@ -12,6 +12,12 @@ allow_graphql_mutations: false
 allowed_entity_types: {  }
 denied_entity_types:
   - user
+  - oauth2_token
+  - key
+  - consumer
+  - encryption_profile
+  - mcp_tool_config
+  - mcp_policy_profile
 redacted_fields:
   - pass
   - mail
