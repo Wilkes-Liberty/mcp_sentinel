@@ -37,7 +37,9 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 > **Scope-name convention & fail-loud guard.** The `agent_scopes` you configure
 > must match your `oauth2_scope` machine-ids exactly. simple_oauth scope
 > machine-ids are conventionally underscore-separated, so fresh installs ship
-> `agent_scopes: [mcp_read, mcp_write]`; align this with your actual scope ids.
+> `agent_scopes: [mcp_read, mcp_write, mcp_config]`; align this with your actual
+> scope ids. (`mcp_config` is the config-tier scope the `config_*` tools require;
+> grant it only to a dev/config consumer.)
 > A governance module should never be a silent no-op, so when the module is
 > **enabled but cannot govern any request** — both `agent_scopes` and
 > `agent_oauth_clients` empty (with the role fallback unusable), or no policy

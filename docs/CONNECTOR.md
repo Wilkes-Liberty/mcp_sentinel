@@ -17,8 +17,11 @@ On the Drupal side that means:
 - **Log-only `X-MCP-Client` identity.** The connector's self-reported client
   label is recorded in the audit log (as the `mcp_client` metadata field) for
   forensics only — it is never an enforcement signal.
-- **OAuth scopes `mcp_read` / `mcp_write`.** Read/explain tools require
-  `mcp_read`; write tools require `mcp_write`.
+- **OAuth scopes `mcp_read` / `mcp_write` / `mcp_config`.** Read/explain tools
+  require `mcp_read`; content write tools require `mcp_write`; the configuration
+  tools (`config_get` / `config_list` / `config_set`) require the dedicated
+  `mcp_config` scope so config management is isolated to the dev/config tier and
+  a content-tier token can never reach it.
 - **The `/drupal-mcp/context` endpoint** exposes the governed site schema.
 - **Server-authoritative authorization keyed on role + scopes.** Every gate is
   decided server-side from the authenticated role and the token's OAuth scopes —
@@ -96,7 +99,7 @@ Each `mcp_tool_config` entity carries third-party settings under the
 | Setting | Value |
 |---------|-------|
 | `authentication_mode` | `required` |
-| `scopes` | `mcp_read` (read/explain tools) or `mcp_write` (write tools) |
+| `scopes` | `mcp_read` (read/explain tools), `mcp_write` (content write tools), or `mcp_config` (config tools) |
 
 The `mcp_server_oauth` subscriber enforces these per tool call — a token that
 lacks the required scope is rejected before governance even fires.
@@ -122,6 +125,15 @@ lacks the required scope is rejected before governance even fires.
 | `mcp_sentinel_media_create` | `mcp_write` |
 | `mcp_sentinel_workflow_transition` | `mcp_write` |
 | `mcp_sentinel_bulk_operations` | `mcp_write` |
+| `mcp_sentinel_config_get` | `mcp_config` |
+| `mcp_sentinel_config_list` | `mcp_config` |
+| `mcp_sentinel_config_set` | `mcp_config` |
+
+> **Config tools are config-tier only.** The three `config_*` tools require
+> `mcp_config`, **not** `mcp_write`. A content-tier token (`mcp_read` +
+> `mcp_write`) is therefore denied on every config tool at the transport layer,
+> before governance fires. Grant `mcp_config` only to the dev/config consumer
+> (the `developer` / `admin` tiers in `mcp-sentinel:agent-provision`).
 
 ---
 
@@ -150,8 +162,9 @@ Repeat the steps in this section for **each** environment
 
 ### 3.1 Scope entities
 
-Create two simple_oauth scope entities (or use `simple_oauth_static_scope` for
-static scope definitions):
+Create three simple_oauth scope entities (or use `simple_oauth_static_scope` for
+static scope definitions). `mcp_config` is the config-tier scope — ship it only
+where a config/dev consumer needs it:
 
 ```bash
 # mcp_read
@@ -183,12 +196,27 @@ ddev drush php:eval "
   ]);
   \$scope->save();
 "
+
+# mcp_config (config-tier only — config_get / config_list / config_set)
+ddev drush php:eval "
+  \$scope = \Drupal\simple_oauth\Entity\Oauth2Scope::create([
+    'id' => 'mcp_config',
+    'name' => 'mcp_config',
+    'description' => 'MCP config (site-building) tools — dev/config tier only',
+    'grant_types' => [
+      'authorization_code' => ['status' => TRUE],
+      'client_credentials' => ['status' => TRUE],
+    ],
+    'umbrella' => FALSE,
+  ]);
+  \$scope->save();
+"
 ```
 
 > **Scope `name` must equal the machine `id`.** MCP Sentinel governance matches
 > the scope *name* carried on the validated token against
-> `mcp_sentinel.settings:agent_scopes`. Both ship as `mcp_read` / `mcp_write`
-> (underscore). If you set a scope `name` that differs from the configured
+> `mcp_sentinel.settings:agent_scopes`. These ship as `mcp_read` / `mcp_write` /
+> `mcp_config` (underscore). If you set a scope `name` that differs from the configured
 > `agent_scopes`, governance will never recognise the token as the agent channel
 > and write tools will fail open as ungoverned. See UPGRADE.md if you previously
 > created colon-form (`mcp:read` / `mcp:write`) scopes.

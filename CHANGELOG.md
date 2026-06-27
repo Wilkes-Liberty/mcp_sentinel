@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- Isolated the configuration tools behind a dedicated **`mcp_config`** OAuth scope.
+  `mcp_sentinel_config_get`, `mcp_sentinel_config_list`, and `mcp_sentinel_config_set`
+  now require `mcp_config` instead of `mcp_read` / `mcp_write`, so a content-tier token
+  (holding only `mcp_read` / `mcp_write`) can no longer read or write Drupal configuration
+  through MCP — config management is now isolated to the dev/config tier (the `developer`
+  and `admin` tiers in `mcp-sentinel:agent-provision`, which already grant `mcp_config`).
+  The transport-layer scope gate is in addition to the existing `allow_config_read` /
+  `allow_config_write` / `denied_config_types` policy gates.
+
+### Changed
+- `mcp_config` is now part of the default `agent_scopes` so a token carrying only that
+  scope is still recognized on the governed agent channel.
+
+> **Upgrade action.** After updating, re-run `drush mcp-sentinel:setup --require-oauth`
+> to re-tag the config tools with `mcp_config`. Ensure your config/dev consumer holds the
+> `mcp_config` scope (the `oauth2_scope` entity must exist) and that content-tier consumers
+> do **not**. Any consumer that previously called the config tools with only `mcp_write`
+> will now be denied until granted `mcp_config`.
+
 ## [1.1.0] - 2026-06-26
 
 ### Security

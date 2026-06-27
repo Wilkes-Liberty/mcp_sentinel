@@ -113,7 +113,9 @@ companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
 > **Scope-name convention.** The `agent_scopes` you configure here must match the
 > scope **machine-ids** of your `oauth2_scope` entities exactly. simple_oauth
 > scope machine-ids are conventionally underscore-separated, and the underscore
-> form is the default: fresh installs ship `agent_scopes: [mcp_read, mcp_write]`.
+> form is the default: fresh installs ship
+> `agent_scopes: [mcp_read, mcp_write, mcp_config]` (`mcp_config` gates the
+> config tools to the dev/config tier).
 > Most sites need no change here. Only if your scope ids use a *different* naming
 > — for example legacy colon-form scopes (`mcp:read` / `mcp:write`) created
 > before this convention was standardized — must you either set `agent_scopes` to
