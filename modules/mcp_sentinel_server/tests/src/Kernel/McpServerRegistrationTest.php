@@ -177,4 +177,41 @@ final class McpServerRegistrationTest extends KernelTestBase {
     }
   }
 
+  /**
+   * The config tools are isolated behind the dedicated 'mcp_config' scope.
+   *
+   * Security boundary: configuration management is a dev/config-tier capability
+   * only. A content-tier token (mcp_read/mcp_write) must never read or write
+   * config through MCP, so every config_* tool must require 'mcp_config' and no
+   * non-config tool may carry it. This test pins that mapping against
+   * regression — flipping a config tool back to mcp_read/mcp_write (or tagging
+   * a content tool with mcp_config) breaks here.
+   */
+  public function testConfigToolsRequireDedicatedConfigScope(): void {
+    $rc = new \ReflectionClass(McpSentinelServerCommands::class);
+    $tools = $rc->getConstants()['TOOLS'] ?? [];
+
+    $configTools = [
+      'mcp_sentinel_config_get',
+      'mcp_sentinel_config_list',
+      'mcp_sentinel_config_set',
+    ];
+
+    foreach ($configTools as $toolId) {
+      $this->assertArrayHasKey($toolId, $tools,
+        "Config tool '$toolId' must be present in the TOOLS map.");
+      $this->assertSame('mcp_config', $tools[$toolId],
+        "Config tool '$toolId' must require 'mcp_config' so the content tier cannot reach it.");
+    }
+
+    // Conversely, no other tool may carry mcp_config — that would leak a
+    // config-tier capability onto a content/read tool.
+    foreach ($tools as $toolId => $scope) {
+      if (!in_array($toolId, $configTools, TRUE)) {
+        $this->assertNotSame('mcp_config', $scope,
+          "Non-config tool '$toolId' must not carry the 'mcp_config' scope.");
+      }
+    }
+  }
+
 }

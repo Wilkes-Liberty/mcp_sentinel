@@ -15,6 +15,7 @@ agent_oauth_clients: {  }
 agent_scopes:
   - 'mcp_read'
   - 'mcp_write'
+  - 'mcp_config'
 governed_role_fallback: false
 audit_hash_key: ''
 siem_enabled: false

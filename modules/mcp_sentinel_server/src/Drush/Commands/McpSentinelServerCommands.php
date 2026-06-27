@@ -44,9 +44,13 @@ final class McpSentinelServerCommands extends DrushCommands {
     'mcp_sentinel_media_create' => 'mcp_write',
     'mcp_sentinel_workflow_transition' => 'mcp_write',
     'mcp_sentinel_bulk_operations' => 'mcp_write',
-    'mcp_sentinel_config_get' => 'mcp_read',
-    'mcp_sentinel_config_list' => 'mcp_read',
-    'mcp_sentinel_config_set' => 'mcp_write',
+    // Config tools are isolated behind a dedicated config-tier scope so a
+    // content-tier token (mcp_read/mcp_write only) can never read or write
+    // configuration through MCP — config management is a dev/config-tier
+    // capability only. Granted via the 'developer'/'admin' tiers below.
+    'mcp_sentinel_config_get' => 'mcp_config',
+    'mcp_sentinel_config_list' => 'mcp_config',
+    'mcp_sentinel_config_set' => 'mcp_config',
     // Registered only when the mcp_sentinel_graphql submodule is enabled.
     'mcp_sentinel_graphql_schema' => 'mcp_read',
   ];

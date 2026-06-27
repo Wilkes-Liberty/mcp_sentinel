@@ -155,7 +155,10 @@ content **publishing**. Both layers are additive and default to the safe value
   allowlist, the `denied_config_types` prefix denylist (deny always wins), and
   the `allow_config_read` / `allow_config_write` gates. Reads/lists honor
   `audit_log_reads`; denied config names are never even enumerated by the list
-  tool.
+  tool. When `mcp_server_oauth` is enabled, all three are additionally gated at
+  the transport layer on the dedicated **`mcp_config`** scope (not `mcp_write`),
+  so a content-tier token (`mcp_read` / `mcp_write`) is rejected before
+  governance fires — config management is isolated to the dev/config tier.
 - **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on
   `ConfigEvents::SAVE`) audits every governed config save as `config_save` (diff
   via `McpAuditLogger::computeConfigDiff()`) and, for a governed write to a
