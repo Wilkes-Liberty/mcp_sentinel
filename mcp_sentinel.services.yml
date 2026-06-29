@@ -38,6 +38,12 @@ services:
       - '@config.factory'
       - '@request_stack'
 
+  mcp_sentinel.moderation_gate:
+    class: Drupal\mcp_sentinel\Service\McpModerationGate
+    arguments:
+      # Optional: NULL when the Content Moderation module is not installed.
+      - '@?content_moderation.moderation_information'
+
   mcp_sentinel.webhook_queue_manager:
     class: Drupal\mcp_sentinel\Service\McpWebhookQueueManager
     arguments:

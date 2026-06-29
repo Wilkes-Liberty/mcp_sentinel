@@ -345,12 +345,22 @@ function mcp_sentinel_entity_create_access(
  * 1. 'view' — redacts fields listed in the resolved policy profile by
  *    forbidding view access, stripping the field from JSON:API and REST output
  *    and nulling it in GraphQL: one uniform redaction across read channels.
- * 2. 'edit' — the publish-gate fallback. When the profile denies publishing,
- *    edit access to the 'moderation_state' field (moderated types) and the
- *    'status' field (the status=0 fallback for unmoderated publishable types)
- *    is forbidden, so a JSON:API/REST PATCH cannot publish around the precise
- *    tool gate. This is intentionally blunt — it also blocks unpublishing — and
- *    is defense in depth behind McpWorkflowTransitionTool's value-aware check.
+ * 2. 'edit' — the publish gate on the JSON:API/REST write path. When the
+ *    profile denies publishing, this gate is value-aware so the agent keeps the
+ *    editorial transitions its role grants (draft, submit_for_review, restore,
+ *    archive) while go-live stays human-only:
+ *      - 'moderation_state' (moderated types): edit is forbidden only when the
+ *        *target* state is a published state, decided by the shared
+ *        mcp_sentinel.moderation_gate service — the same check the
+ *        McpWorkflowTransitionTool uses, so both write paths agree. A
+ *        non-publish target is neutral; when the new value isn't available
+ *        (a generic access probe with no $items) it stays neutral and the
+ *        value-bearing write-time check does the gating.
+ *      - 'status' (the status flag for unmoderated publishable types) is
+ *        forbidden only in the publish direction (status = TRUE); unpublishing
+ *        and no-ops are allowed.
+ *    This stops a JSON:API/REST PATCH publishing around the tool gate without
+ *    blocking the non-publish moderation writes the role permits (DEV-113).
  */
 function mcp_sentinel_entity_field_access(
   string $operation,
@@ -366,11 +376,13 @@ function mcp_sentinel_entity_field_access(
     $profile = $resolver->resolve($account);
     $gated = $profile !== NULL
       && $profile->deniesPublish()
-      && in_array($field_definition->getName(), ['moderation_state', 'status'], TRUE);
+      && mcp_sentinel_edit_publishes($field_definition->getName(), $items);
     $result = $gated
       ? AccessResult::forbidden('Publishing is denied by MCP Sentinel.')
       : AccessResult::neutral();
-    return $result->addCacheContexts($contexts)->addCacheTags($tags);
+    // The decision depends on the value being written, so it must not be reused
+    // across writes carrying a different value.
+    return $result->addCacheContexts($contexts)->addCacheTags($tags)->setCacheMaxAge(0);
   }
 
   if ($operation !== 'view') {
@@ -391,6 +403,47 @@ function mcp_sentinel_entity_field_access(
   return $result
     ->addCacheContexts($contexts)
     ->addCacheTags($tags);
+}
+
+/**
+ * Whether an 'edit' to a publish-controlling field would publish content.
+ *
+ * Backs the deny-publish branch of mcp_sentinel_entity_field_access(): it gates
+ * only the go-live direction so the agent keeps the non-publish editorial
+ * transitions its role grants. Returns FALSE for fields that don't control
+ * publishing, for non-publish moderation targets, and when the new value isn't
+ * available (a generic access probe) — in which case the value-bearing check
+ * during the actual write does the gating.
+ *
+ * @param string $field_name
+ *   The field being edited.
+ * @param \Drupal\Core\Field\FieldItemListInterface|null $items
+ *   The field items carrying the new value, when available.
+ *
+ * @return bool
+ *   TRUE only when this edit publishes.
+ */
+function mcp_sentinel_edit_publishes(string $field_name, ?FieldItemListInterface $items): bool {
+  if ($items === NULL) {
+    // Generic access probe with no pending value — defer to write-time.
+    return FALSE;
+  }
+  if ($field_name === 'moderation_state') {
+    $target = $items->value;
+    if (!is_string($target) || $target === '') {
+      return FALSE;
+    }
+    $entity = $items->getEntity();
+    if (!$entity instanceof ContentEntityInterface) {
+      return FALSE;
+    }
+    return \Drupal::service('mcp_sentinel.moderation_gate')->targetIsPublishedState($entity, $target);
+  }
+  if ($field_name === 'status') {
+    // Publish direction only: forbid status = TRUE, allow unpublish / no-op.
+    return (bool) $items->value === TRUE;
+  }
+  return FALSE;
 }
 
 /**
