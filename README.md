@@ -185,11 +185,17 @@ MCP policy profiles → Configuration governance**.
   name-prefix denylist (deny always wins). A `ConfigEvents::SAVE` subscriber
   audits every governed config save and hard-denies (revert + throw) a governed
   write to a denied config name, so a direct `Config::save()` cannot bypass it.
-- **Publish gate.** When *Deny publishing* is on (the default), agent-authored
-  content lands in a non-published state — the workflow-transition tool refuses
-  a transition to a published state (and beyond an optional maximum moderation
-  state), and unmoderated publishable entities are forced unpublished. A human
-  `publisher` publishes.
+- **Publish gate.** When *Deny publishing* is on (the default), only the
+  **go-live** transition is withheld from the agent — the gate is value-aware, so
+  the non-publish editorial transitions a role grants (`draft`,
+  `submit_for_review`, `restore`, `archive`) are permitted while a transition to a
+  *published* state is refused. This holds on **both** write paths: the
+  workflow-transition tool and the JSON:API/REST write path (the
+  `moderation_state` / `status` field-access gate), which share one
+  published-state check (`mcp_sentinel.moderation_gate`). An optional maximum
+  moderation state still applies, and on unmoderated publishable entities the
+  `status` flag is blocked only in the publish direction (unpublishing is allowed).
+  A human `publisher` publishes.
 - **Approval for config/admin ops** (with the approval submodule):
   `gated_operations` defaults to `delete`, `config_import`, `module_disable`.
   Tier provisioning is one command: `drush mcp-sentinel:agent-provision <tier>

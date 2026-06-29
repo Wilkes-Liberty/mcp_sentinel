@@ -165,12 +165,16 @@ content **publishing**. Both layers are additive and default to the safe value
   `denied_config_types` name, reverts the just-written value and throws a
   `ConfigException` — closing the bypass where a `TokenAuthUser` calls
   `Config::save()` directly without going through a tool.
-- **Publish gate.** When `deniesPublish()` is `TRUE`, the
-  `mcp_sentinel_workflow_transition` tool refuses transitions to a published
-  state (and beyond `getMaxModerationState()`); `hook_entity_field_access`
-  forbids `edit` on `moderation_state`/`status`; and `hook_entity_presave`
-  forces unmoderated publishable entities unpublished. A human publisher
-  publishes.
+- **Publish gate.** When `deniesPublish()` is `TRUE`, only the go-live transition
+  is withheld — the gate is value-aware and shares one published-state check
+  (`mcp_sentinel.moderation_gate` / `McpModerationGate::targetIsPublishedState()`)
+  across both write paths: the `mcp_sentinel_workflow_transition` tool refuses a
+  transition to a published state (and beyond `getMaxModerationState()`), and
+  `hook_entity_field_access` forbids `edit` on `moderation_state` only when the
+  *target* is a published state and on `status` only when set to `TRUE` — so the
+  non-publish editorial transitions a role grants (`draft`, `submit_for_review`,
+  `restore`, `archive`) and unpublishing are allowed. `hook_entity_presave` still
+  forces unmoderated publishable entities unpublished. A human publisher publishes.
 
 ## Drush commands
 

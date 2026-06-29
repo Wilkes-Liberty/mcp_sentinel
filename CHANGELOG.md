@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-29
+
+### Changed
+- **The publish gate is now value-aware on the JSON:API/REST write path.**
+  Previously, a deny-publish profile forbade **every** edit to `moderation_state`
+  (and `status`) via `hook_entity_field_access`, which also blocked the
+  non-publish editorial transitions a content role grants — the agent could not
+  set `draft`, `submit_for_review`, `restore`, or `archive` through the connector
+  (it received `403 — Publishing is denied by MCP Sentinel`). The gate now inspects
+  the **target value** and forbids only a transition to a *published* state
+  (`moderation_state`) or a publish via the `status` flag (`status = TRUE`);
+  non-publish transitions and unpublishing are allowed. The human-publish
+  guarantee is unchanged — any published-state target is still denied with the
+  same clear message, and a generic access probe (no pending value) defers to the
+  value-bearing write-time check. (DEV-113)
+
+### Added
+- **`mcp_sentinel.moderation_gate`** service (`McpModerationGate`) — the single
+  source of truth for "does this transition publish?" Both the field-access gate
+  and `McpWorkflowTransitionTool` use it, so the JSON:API write path and the
+  server-tool path agree on exactly which transitions are go-live. It is
+  conservative: only a known, published target state counts as a publish.
+
+### Notes
+- No Integration Contract change — OAuth scopes (`mcp_read` / `mcp_write` /
+  `mcp_config`), identity header, and server-authoritative authz are unchanged;
+  this is contract v1.0-compatible.
+- Governance unchanged: server-authoritative authz, attribution, tamper-evident
+  audit, DLP/redaction, and the content-tier config-scope isolation are untouched.
+
 ## [1.2.0] - 2026-06-27
 
 ### Security
