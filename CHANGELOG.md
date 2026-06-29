@@ -6,6 +6,46 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-29
+
+### Added
+- **Per-entity-type destructive overrides on policy profiles (`entity_rules`).**
+  A profile's global `allow_delete` / `allow_write` flags remain the default for
+  every entity type, but an `entity_rules` map can now override them for one type
+  at a time, e.g.
+
+  ```yaml
+  entity_rules:
+    taxonomy_term:
+      allow_delete: true
+  ```
+
+  The effective permission resolves as
+  `entity_rules[type].allow_delete ?? allow_delete` (and the parallel
+  `?? allow_write`). This lets an operator open delete for a single low-risk type
+  (e.g. `taxonomy_term`, for taxonomy maintenance) while the global no-delete
+  guarantee holds for node, media, paragraph, menu, redirect, file, and every
+  other type. New entity methods `getEntityRules()`,
+  `allowsDeleteForEntityType()`, and `allowsWriteForEntityType()` implement the
+  override-then-fallback resolution, and `McpAccessChecker` consults them on the
+  write and delete paths (the core-access hook and the bulk tool alike).
+- The per-type delete overrides are editable in the profile UI at **Allowed
+  operations → Per-entity-type delete overrides**, and the effective rule map is
+  reported by `mcp_sentinel_security_policy` (surfaced to the connector as
+  `entityRules` in `drupal_security_info`).
+
+### Notes
+- This is the *Sentinel* gate only — the Drupal role permission (e.g.
+  `delete terms in <vocabulary>`) remains an independent second gate; a delete
+  requires **both**.
+- No Integration Contract change (contract v1.0-compatible); OAuth scopes,
+  identity header, and server-authoritative authz are unchanged.
+- No update hook: the new `entity_rules` field defaults to empty, so existing
+  profiles are unchanged and behave exactly as before until a rule is added.
+- Governance unchanged: server-authoritative authz, attribution, tamper-evident
+  audit, DLP/redaction, the config-scope isolation, and the DEV-113 publish gate
+  are untouched.
+
 ## [1.3.0] - 2026-06-29
 
 ### Changed

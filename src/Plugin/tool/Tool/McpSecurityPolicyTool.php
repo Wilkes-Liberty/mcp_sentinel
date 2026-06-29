@@ -81,6 +81,10 @@ final class McpSecurityPolicyTool extends ToolBase {
       'allowed_entity_types' => $profile->getAllowedEntityTypes() ?: 'all',
       'denied_entity_types' => $profile->getDeniedEntityTypes(),
       'redacted_fields' => $profile->getRedactedFields(),
+      // Per-entity-type destructive overrides. Each entry overrides the global
+      // allow_delete / allow_write flag for that entity type only; types absent
+      // here follow the global flags. Surfaced to the connector as entityRules.
+      'entity_rules' => $profile->getEntityRules(),
     ];
     return ExecutableResult::success($this->t('Security policy retrieved.'), $data);
   }

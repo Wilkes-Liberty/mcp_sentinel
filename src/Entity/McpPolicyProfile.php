@@ -68,6 +68,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileListBuilder;
     'denied_config_types',
     'deny_publish',
     'max_moderation_state',
+    'entity_rules',
   ],
 )]
 final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfileInterface {
@@ -196,6 +197,19 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * the entity's workflow are denied. Empty applies no ceiling.
    */
   protected string $max_moderation_state = '';
+
+  /**
+   * Per-entity-type destructive overrides.
+   *
+   * A map of entity_type ID => rule, where a rule is an associative array that
+   * may carry 'allow_delete' and/or 'allow_write' booleans. A present override
+   * supersedes the corresponding global flag for that entity type only; an
+   * absent override (or absent key) falls back to the global flag. Empty means
+   * every type follows the global allow_delete / allow_write flags.
+   *
+   * @var array<string, array{allow_delete?: bool, allow_write?: bool}>
+   */
+  protected array $entity_rules = [];
 
   /**
    * {@inheritdoc}
@@ -328,6 +342,29 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function getMaxModerationState(): string {
     return (string) $this->max_moderation_state;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getEntityRules(): array {
+    return $this->entity_rules;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsDeleteForEntityType(string $entity_type): bool {
+    $override = $this->entity_rules[$entity_type]['allow_delete'] ?? NULL;
+    return $override === NULL ? $this->allowsDelete() : (bool) $override;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsWriteForEntityType(string $entity_type): bool {
+    $override = $this->entity_rules[$entity_type]['allow_write'] ?? NULL;
+    return $override === NULL ? $this->allowsWrite() : (bool) $override;
   }
 
 }

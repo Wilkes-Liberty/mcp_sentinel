@@ -196,6 +196,20 @@ MCP policy profiles → Configuration governance**.
   moderation state still applies, and on unmoderated publishable entities the
   `status` flag is blocked only in the publish direction (unpublishing is allowed).
   A human `publisher` publishes.
+- **Per-entity-type destructive overrides.** A profile's global `allow_delete`
+  (and `allow_write`) flag is the default for every entity type, but an
+  `entity_rules` map can override it for one type at a time. Setting
+  `entity_rules.taxonomy_term.allow_delete: true` on a profile whose global
+  `allow_delete` is `false` lets the agent delete **taxonomy terms only** — node,
+  media, paragraph, menu, redirect, file, and every other type stay
+  delete-denied. The effective rule is `entity_rules[type].allow_delete ??
+  allow_delete`. This is the *Sentinel* gate; the Drupal role permission
+  (e.g. `delete terms in <vocabulary>`) remains an independent second gate, so a
+  delete requires **both**. Edit the per-type delete overrides at **MCP policy
+  profiles → Allowed operations → Per-entity-type delete overrides** (one entity
+  type machine name per line); the effective map is reported by
+  `mcp_sentinel_security_policy` (and the connector's `drupal_security_info` as
+  `entityRules`).
 - **Approval for config/admin ops** (with the approval submodule):
   `gated_operations` defaults to `delete`, `config_import`, `module_disable`.
   Tier provisioning is one command: `drush mcp-sentinel:agent-provision <tier>

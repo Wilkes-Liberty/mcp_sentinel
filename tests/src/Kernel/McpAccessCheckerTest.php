@@ -9,6 +9,8 @@ use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\taxonomy\Entity\Term;
+use Drupal\taxonomy\Entity\Vocabulary;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
@@ -25,7 +27,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     'system', 'user', 'field', 'filter', 'text', 'file', 'node',
     'serialization', 'jsonapi', 'tool', 'key',
     'image', 'options', 'path_alias', 'consumers', 'simple_oauth',
-    'encrypt',
+    'encrypt', 'taxonomy',
     'mcp_sentinel',
   ];
 
@@ -35,15 +37,23 @@ final class McpAccessCheckerTest extends KernelTestBase {
   private Node $node;
 
   /**
+   * A taxonomy term used by the per-entity-type override assertions.
+   */
+  private Term $term;
+
+  /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
+    $this->installEntitySchema('taxonomy_term');
     $this->installConfig(['mcp_sentinel']);
     NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
     $this->node = Node::create(['type' => 'article', 'title' => 'Test']);
+    Vocabulary::create(['vid' => 'tags', 'name' => 'Tags'])->save();
+    $this->term = Term::create(['vid' => 'tags', 'name' => 'Term']);
   }
 
   /**
@@ -146,6 +156,74 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $this->assertFalse(
       $this->checker()->checkEntityAccess($this->node, 'delete', $on)->isForbidden()
     );
+  }
+
+  /**
+   * A per-entity-type delete override opens that type only.
+   *
+   * With the global delete gate off and an entity_rules override granting
+   * delete for taxonomy_term, a term delete is permitted while a node delete
+   * stays forbidden — the global no-delete guarantee holds for other types.
+   *
+   * @covers ::checkEntityAccess
+   */
+  public function testPerTypeDeleteOverrideAllowsTaxonomyButNotNode(): void {
+    $this->setMaster(TRUE);
+    $p = $this->profile([
+      'allow_write' => TRUE,
+      'allow_delete' => FALSE,
+      'entity_rules' => ['taxonomy_term' => ['allow_delete' => TRUE]],
+    ]);
+    $this->assertFalse(
+      $this->checker()->checkEntityAccess($this->term, 'delete', $p)->isForbidden(),
+      'A per-type override must permit deleting the named entity type.'
+    );
+    $this->assertTrue(
+      $this->checker()->checkEntityAccess($this->node, 'delete', $p)->isForbidden(),
+      'Types without an override must stay delete-denied under the global flag.'
+    );
+  }
+
+  /**
+   * Without entity_rules, deletes follow the global allow_delete flag.
+   *
+   * @covers ::checkEntityAccess
+   */
+  public function testNoEntityRulesFollowsGlobalDelete(): void {
+    $this->setMaster(TRUE);
+    $off = $this->profile(['allow_delete' => FALSE]);
+    $this->assertTrue(
+      $this->checker()->checkEntityAccess($this->term, 'delete', $off)->isForbidden(),
+      'With no override and global delete off, a term delete is forbidden.'
+    );
+    $on = $this->profile(['allow_delete' => TRUE]);
+    $this->assertFalse(
+      $this->checker()->checkEntityAccess($this->term, 'delete', $on)->isForbidden(),
+      'With no override and global delete on, a term delete is permitted.'
+    );
+  }
+
+  /**
+   * The per-type resolver overrides a present type and falls back otherwise.
+   *
+   * @covers \Drupal\mcp_sentinel\Entity\McpPolicyProfile::allowsDeleteForEntityType
+   * @covers \Drupal\mcp_sentinel\Entity\McpPolicyProfile::allowsWriteForEntityType
+   */
+  public function testEntityRuleResolverFallback(): void {
+    $p = $this->profile([
+      'allow_write' => TRUE,
+      'allow_delete' => FALSE,
+      'entity_rules' => [
+        'taxonomy_term' => ['allow_delete' => TRUE],
+        'node' => ['allow_write' => FALSE],
+      ],
+    ]);
+    // Delete: present override wins; absent type falls back to the global flag.
+    $this->assertTrue($p->allowsDeleteForEntityType('taxonomy_term'));
+    $this->assertFalse($p->allowsDeleteForEntityType('media'));
+    // Write: present override wins; absent type falls back to the global flag.
+    $this->assertFalse($p->allowsWriteForEntityType('node'));
+    $this->assertTrue($p->allowsWriteForEntityType('media'));
   }
 
   /**

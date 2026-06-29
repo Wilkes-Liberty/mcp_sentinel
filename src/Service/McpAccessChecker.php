@@ -110,13 +110,13 @@ final class McpAccessChecker {
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
-    if (in_array($operation, ['update', 'create'], TRUE) && !$profile->allowsWrite()) {
+    if (in_array($operation, ['update', 'create'], TRUE) && !$profile->allowsWriteForEntityType($entityType)) {
       $result = AccessResult::forbidden(
         'Write operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
-    if ($operation === 'delete' && !$profile->allowsDelete()) {
+    if ($operation === 'delete' && !$profile->allowsDeleteForEntityType($entityType)) {
       $result = AccessResult::forbidden(
         'Delete operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
@@ -189,8 +189,9 @@ final class McpAccessChecker {
       return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
     }
 
-    // Create is a write, so the write gate must permit it.
-    if (!$profile->allowsWrite()) {
+    // Create is a write, so the write gate must permit it (per-type override
+    // falls back to the global allow_write flag).
+    if (!$profile->allowsWriteForEntityType($entityTypeId)) {
       $result = AccessResult::forbidden(
         'Write operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);

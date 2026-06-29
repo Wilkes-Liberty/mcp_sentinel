@@ -243,3 +243,16 @@ mcp_sentinel.mcp_policy_profile.*:
     max_moderation_state:
       type: string
       label: 'Maximum moderation state an agent may set (empty = unrestricted)'
+    entity_rules:
+      type: sequence
+      label: 'Per-entity-type destructive overrides'
+      sequence:
+        type: mapping
+        label: 'Entity-type rule'
+        mapping:
+          allow_delete:
+            type: boolean
+            label: 'Allow delete for this entity type'
+          allow_write:
+            type: boolean
+            label: 'Allow write for this entity type'
