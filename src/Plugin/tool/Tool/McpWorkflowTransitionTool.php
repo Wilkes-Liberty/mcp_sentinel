@@ -10,11 +10,11 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpModerationGate;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Exception\RequirementsException;
@@ -87,6 +87,11 @@ final class McpWorkflowTransitionTool extends ToolBase {
   protected ?ModerationInformationInterface $moderationInformation = NULL;
 
   /**
+   * The shared publish-gate decision service.
+   */
+  protected McpModerationGate $moderationGate;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -95,6 +100,7 @@ final class McpWorkflowTransitionTool extends ToolBase {
     $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->contentLock = $container->get('mcp_sentinel.content_lock');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
+    $instance->moderationGate = $container->get('mcp_sentinel.moderation_gate');
     // Content Moderation is optional; the service only exists when it is on.
     // @phpstan-ignore-next-line phpstan-drupal treats $container->has() as always true.
     if ($container->has('content_moderation.moderation_information')) {
@@ -223,7 +229,7 @@ final class McpWorkflowTransitionTool extends ToolBase {
     }
     $target = $typePlugin->getState($state);
 
-    if ($profile->deniesPublish() && $target instanceof ContentModerationState && $target->isPublishedState()) {
+    if ($profile->deniesPublish() && $this->moderationGate->targetIsPublishedState($entity, $state)) {
       $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entityType, $id, 'publish', 'publish denied by policy');
       return ExecutableResult::failure($this->t('MCP Sentinel denied the transition: publishing is not permitted for this agent. A human publisher must publish.'));
     }

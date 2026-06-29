@@ -47,7 +47,10 @@ final class McpPolicyResolverOauthTest extends KernelTestBase {
    */
   public function testAgentChannelDefaults(): void {
     $config = $this->config('mcp_sentinel.settings');
-    $this->assertSame(['mcp_read', 'mcp_write'], $config->get('agent_scopes'));
+    // agent_scopes is the set of OAuth scopes recognized as the agent channel.
+    // It has included mcp_config since the 1.2.0 config-scope isolation so that
+    // dev/admin tier tokens (which carry mcp_config) are still governed.
+    $this->assertSame(['mcp_read', 'mcp_write', 'mcp_config'], $config->get('agent_scopes'));
     $this->assertFalse($config->get('governed_role_fallback'));
   }
 
