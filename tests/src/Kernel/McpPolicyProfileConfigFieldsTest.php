@@ -50,6 +50,7 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
     $this->assertSame([], $profile->getDeniedConfigTypes());
     $this->assertTrue($profile->deniesPublish(), 'Publishing is denied by default.');
     $this->assertSame('', $profile->getMaxModerationState());
+    $this->assertSame([], $profile->getEntityRules(), 'Entity rules default empty.');
   }
 
   /**
@@ -75,6 +76,8 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
       'denied_config_types' => ['system.', 'field.field.'],
       'deny_publish' => FALSE,
       'max_moderation_state' => 'needs_review',
+      'allow_delete' => FALSE,
+      'entity_rules' => ['taxonomy_term' => ['allow_delete' => TRUE]],
     ])->save();
 
     $profile = McpPolicyProfile::load('dev');
@@ -83,6 +86,18 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
     $this->assertSame(['system.', 'field.field.'], $profile->getDeniedConfigTypes());
     $this->assertFalse($profile->deniesPublish());
     $this->assertSame('needs_review', $profile->getMaxModerationState());
+    $this->assertSame(
+      ['taxonomy_term' => ['allow_delete' => TRUE]],
+      $profile->getEntityRules()
+    );
+    $this->assertTrue(
+      $profile->allowsDeleteForEntityType('taxonomy_term'),
+      'The per-type override grants delete after reload.'
+    );
+    $this->assertFalse(
+      $profile->allowsDeleteForEntityType('node'),
+      'A type without an override falls back to the global allow_delete (false).'
+    );
   }
 
 }

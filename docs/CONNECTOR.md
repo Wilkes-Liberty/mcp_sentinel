@@ -306,6 +306,24 @@ ddev drush php:eval "
 **Key production constraints:**
 - `allow_delete: false` — agents must never delete content on production.
   Deletions are performed by humans via the standard Drupal admin UI.
+  - **Scoped exception (per-entity-type override).** When a single low-risk type
+    needs agent-driven cleanup (e.g. de-duping `taxonomy_term`), grant delete for
+    that type only via the `entity_rules` map instead of flipping the global
+    flag:
+
+    ```php
+    $p->set('allow_delete', FALSE)                  // global default: no delete
+      ->set('entity_rules', [
+        'taxonomy_term' => ['allow_delete' => TRUE],  // this type only
+      ]);
+    ```
+
+    The effective rule is `entity_rules[type].allow_delete ?? allow_delete`, so
+    every other type (node, media, paragraph, menu, redirect, file, …) stays
+    delete-denied. This is the **Sentinel** gate only — the agent's Drupal role
+    must also grant the matching permission (e.g. `delete terms in <vocabulary>`);
+    a delete needs **both** gates. The effective map is reported by
+    `drupal_security_info` under `entityRules`.
 - `allow_graphql_mutations: false` — JSON:API is the write plane; GraphQL is
   read-only for the agent.
 - `denied_entity_types: [user]` — agents must not create or update user

@@ -152,4 +152,40 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function getMaxModerationState(): string;
 
+  /**
+   * Per-entity-type destructive overrides.
+   *
+   * A map of entity_type ID => rule. Each rule may carry an 'allow_delete'
+   * and/or 'allow_write' boolean that overrides the corresponding global flag
+   * for that entity type only. Empty means every type follows the global flags.
+   *
+   * @return array<string, array{allow_delete?: bool, allow_write?: bool}>
+   *   The per-entity-type rule map.
+   */
+  public function getEntityRules(): array;
+
+  /**
+   * Whether deleting an entity of the given type is permitted by this profile.
+   *
+   * Resolves the per-type override first and falls back to the global
+   * allow_delete flag (entity_rules[type]['allow_delete'] ?? allowsDelete()).
+   * This is the Sentinel gate only; the Drupal role permission still applies as
+   * an independent second gate.
+   *
+   * @param string $entity_type
+   *   The entity type ID being deleted.
+   */
+  public function allowsDeleteForEntityType(string $entity_type): bool;
+
+  /**
+   * Whether writing an entity of the given type is permitted by this profile.
+   *
+   * Resolves the per-type override first and falls back to the global
+   * allow_write flag (entity_rules[type]['allow_write'] ?? allowsWrite()).
+   *
+   * @param string $entity_type
+   *   The entity type ID being created or updated.
+   */
+  public function allowsWriteForEntityType(string $entity_type): bool;
+
 }

@@ -119,6 +119,23 @@ final class McpPolicyProfileForm extends EntityForm {
       ];
     }
 
+    // Per-entity-type delete overrides. Listing an entity type here grants
+    // delete for that type only, overriding the global "Allow delete" gate
+    // above. The global flag remains the default for every unlisted type.
+    $delete_override_types = [];
+    foreach ($profile->getEntityRules() as $type => $rule) {
+      if (!empty($rule['allow_delete'])) {
+        $delete_override_types[] = $type;
+      }
+    }
+    $form['gates']['entity_rules_delete'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Per-entity-type delete overrides'),
+      '#description' => $this->t('One entity type machine name per line (e.g. taxonomy_term). Listed types are permitted to be deleted even when the global "Allow delete" gate above is off — the global flag stays the default for every other type. The Drupal role permission (e.g. "delete terms in <vocabulary>") still applies as an independent second gate.'),
+      '#default_value' => implode("\n", $delete_override_types),
+      '#rows' => 3,
+    ];
+
     // --- Configuration governance tab ----------------------------------------
     $form['config_governance'] = [
       '#type' => 'details',
@@ -464,6 +481,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'denied_config_types',
       'deny_publish',
       'max_moderation_state',
+      'entity_rules_delete',
     ];
     assert($entity instanceof ConfigEntityBase);
     foreach ($form_state->getValues() as $key => $value) {
@@ -527,6 +545,22 @@ final class McpPolicyProfileForm extends EntityForm {
       'max_moderation_state',
       trim((string) $form_state->getValue('max_moderation_state'))
     );
+
+    // Rebuild the per-entity-type rule map from the delete-overrides textarea,
+    // preserving any non-delete keys (e.g. allow_write overrides set via config
+    // YAML) so the form does not clobber them.
+    $rules = [];
+    foreach (($profile->get('entity_rules') ?: []) as $type => $rule) {
+      unset($rule['allow_delete']);
+      if ($rule !== []) {
+        $rules[$type] = $rule;
+      }
+    }
+    foreach ($split($form_state->getValue('entity_rules_delete')) as $type) {
+      $rules[$type]['allow_delete'] = TRUE;
+    }
+    ksort($rules);
+    $profile->set('entity_rules', $rules);
 
     $status = $profile->save();
     $this->messenger()->addStatus(

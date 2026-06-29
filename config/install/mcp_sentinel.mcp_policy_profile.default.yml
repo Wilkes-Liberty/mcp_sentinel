@@ -31,3 +31,4 @@ allow_config_write: false
 denied_config_types: {  }
 deny_publish: true
 max_moderation_state: ''
+entity_rules: {  }
