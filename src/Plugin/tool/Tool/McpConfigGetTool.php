@@ -12,6 +12,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
@@ -40,7 +41,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
     ),
   ],
 )]
-final class McpConfigGetTool extends ToolBase {
+final class McpConfigGetTool extends ToolBase implements ConfigScopeToolInterface {
 
   use McpEntityToolTrait;
 

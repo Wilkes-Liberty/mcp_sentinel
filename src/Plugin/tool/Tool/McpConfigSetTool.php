@@ -12,6 +12,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
@@ -52,7 +53,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
     ),
   ],
 )]
-final class McpConfigSetTool extends ToolBase {
+final class McpConfigSetTool extends ToolBase implements ConfigScopeToolInterface {
 
   use McpEntityToolTrait;
 
