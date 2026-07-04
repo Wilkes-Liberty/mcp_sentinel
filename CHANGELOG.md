@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-04
+
 ### Changed
 - **Tool OAuth scopes are now derived from the plugin, not a hand-maintained table.**
   `mcp_sentinel_server` derives each registered tool's required scope from the plugin's
