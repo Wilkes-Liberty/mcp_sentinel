@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-04
+
+### Fixed
+- Test-suite fixes so the CI pipeline passes; **no functional or API change from 1.5.0**
+  (shipped module code is identical). Updated `McpPolicyResolverOauthTest` to expect the
+  1.5.0 `agent_scopes` default that now includes `mcp_config_read`, and removed a redundant
+  always-false guard in the tool-scope derivation test that static analysis flagged.
+
 ## [1.5.0] - 2026-07-04
 
 ### Changed
