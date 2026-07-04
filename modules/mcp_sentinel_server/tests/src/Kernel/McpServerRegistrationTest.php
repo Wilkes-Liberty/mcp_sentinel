@@ -125,93 +125,159 @@ final class McpServerRegistrationTest extends KernelTestBase {
   }
 
   /**
-   * The OAuth scope map in McpSentinelServerCommands covers every base tool.
+   * The TOOLS registration list covers every base tool plugin.
    *
-   * Validates that the TOOLS constant in McpSentinelServerCommands uses the
-   * same IDs as the base tool set — a refactored plugin ID that is not updated
-   * in the server commands would silently lose its scope tag.
+   * TOOLS is the explicit allow-list of tool ids the setup command registers;
+   * a refactored plugin id not updated here would silently lose registration.
    */
-  public function testServerCommandsToolMapMatchesBasePlugins(): void {
-    // Read the TOOLS constant via reflection so this test stays in sync when
-    // new tools are added, without duplicating the list here.
+  public function testServerCommandsToolListCoversBasePlugins(): void {
     $rc = new \ReflectionClass(McpSentinelServerCommands::class);
     $constants = $rc->getConstants();
     $this->assertArrayHasKey('TOOLS', $constants,
       'McpSentinelServerCommands must declare a TOOLS constant.');
 
-    $commandToolIds = array_keys($constants['TOOLS']);
-
-    // Every base tool must appear in the command map (graphql schema tool
-    // is conditional on the graphql submodule and may be present or absent).
+    // TOOLS is a flat list of tool ids; every base tool must appear (the
+    // graphql schema tool is conditional on the graphql submodule).
     foreach (self::BASE_TOOL_IDS as $toolId) {
-      $this->assertContains(
-        $toolId,
-        $commandToolIds,
-        "Tool '$toolId' is missing from McpSentinelServerCommands::TOOLS."
-      );
+      $this->assertContains($toolId, $constants['TOOLS'],
+        "Tool '$toolId' is missing from McpSentinelServerCommands::TOOLS.");
     }
   }
 
   /**
-   * Every tool in the server command map has a valid OAuth scope string.
+   * Every registered tool derives a valid, non-empty 'mcp_*' scope.
    *
-   * The scope tags ('mcp_read' or 'mcp_write') are forwarded to
-   * mcp_server_oauth; an empty or null scope would silently disable auth on
-   * a registered tool. Scope machine ids use the underscore convention so that
-   * the scope name carried on the token matches the governance allowlist
-   * (mcp_sentinel.settings:agent_scopes) end-to-end.
+   * The scope is derived per plugin (operation + config-domain) and forwarded
+   * to mcp_server_oauth; an empty or malformed scope would silently disable
+   * auth on a registered tool. Scope machine ids use the 'mcp_*' convention so
+   * the token scope matches the governance allowlist end-to-end.
    */
-  public function testServerCommandsToolMapScopesAreNonEmpty(): void {
+  public function testEveryRegisteredToolDerivesValidScope(): void {
+    $command = $this->serverCommands();
     $rc = new \ReflectionClass(McpSentinelServerCommands::class);
-    $constants = $rc->getConstants();
-    $tools = $constants['TOOLS'] ?? [];
+    $toolIds = $rc->getConstants()['TOOLS'] ?? [];
 
-    foreach ($tools as $toolId => $scope) {
-      $this->assertIsString($scope,
-        "Scope for tool '$toolId' must be a string.");
-      $this->assertNotEmpty($scope,
-        "Scope for tool '$toolId' must not be empty.");
-      $this->assertStringStartsWith('mcp_',
-        $scope,
-        "Scope '$scope' for tool '$toolId' must follow the 'mcp_*' namespace.");
+    foreach ($toolIds as $toolId) {
+      // graphql_schema is conditional on the graphql submodule; only assert
+      // the base tools discoverable in this test's module set.
+      if (!in_array($toolId, self::BASE_TOOL_IDS, TRUE)) {
+        continue;
+      }
+      $scope = $command->scopeForTool($toolId);
+      $this->assertIsString($scope, "Scope for '$toolId' must be a string.");
+      $this->assertNotEmpty($scope, "Scope for '$toolId' must not be empty.");
+      $this->assertStringStartsWith('mcp_', $scope,
+        "Scope '$scope' for '$toolId' must follow the 'mcp_*' namespace.");
     }
   }
 
   /**
-   * The config tools are isolated behind the dedicated 'mcp_config' scope.
+   * The command derives each tool's scope from the plugin's own declarations.
    *
-   * Security boundary: configuration management is a dev/config-tier capability
-   * only. A content-tier token (mcp_read/mcp_write) must never read or write
-   * config through MCP, so every config_* tool must require 'mcp_config' and no
-   * non-config tool may carry it. This test pins that mapping against
-   * regression — flipping a config tool back to mcp_read/mcp_write (or tagging
-   * a content tool with mcp_config) breaks here.
+   * Config-read tools are isolated behind the read-only 'mcp_config_read'
+   * scope; the config write tool keeps 'mcp_config'. Content tools derive
+   * mcp_read/mcp_write from their ToolOperation. Derived, not tabulated, so the
+   * plugin's operation + ConfigScopeToolInterface are the source of truth.
    */
-  public function testConfigToolsRequireDedicatedConfigScope(): void {
-    $rc = new \ReflectionClass(McpSentinelServerCommands::class);
-    $tools = $rc->getConstants()['TOOLS'] ?? [];
+  public function testScopeForToolDerivesConfigAndContentScopes(): void {
+    $command = $this->serverCommands();
 
+    // Config domain: reads isolated behind the read-only config scope; write
+    // behind the config write scope.
+    $this->assertSame('mcp_config_read', $command->scopeForTool('mcp_sentinel_config_get'));
+    $this->assertSame('mcp_config_read', $command->scopeForTool('mcp_sentinel_config_list'));
+    $this->assertSame('mcp_config', $command->scopeForTool('mcp_sentinel_config_set'));
+
+    // Content domain: derived from ToolOperation::isModifying().
+    $this->assertSame('mcp_read', $command->scopeForTool('mcp_sentinel_site_context'));
+    $this->assertSame('mcp_read', $command->scopeForTool('mcp_sentinel_security_policy'));
+    $this->assertSame('mcp_write', $command->scopeForTool('mcp_sentinel_node_operations'));
+    $this->assertSame('mcp_write', $command->scopeForTool('mcp_sentinel_workflow_transition'));
+  }
+
+  /**
+   * No content-domain tool may derive a config-tier scope.
+   *
+   * Security boundary: a content-tier token (mcp_read/mcp_write) must never
+   * reach a config tool, so no non-config tool may derive 'mcp_config' or
+   * 'mcp_config_read'.
+   */
+  public function testNoContentToolDerivesConfigScope(): void {
+    $command = $this->serverCommands();
     $configTools = [
       'mcp_sentinel_config_get',
       'mcp_sentinel_config_list',
       'mcp_sentinel_config_set',
     ];
 
-    foreach ($configTools as $toolId) {
-      $this->assertArrayHasKey($toolId, $tools,
-        "Config tool '$toolId' must be present in the TOOLS map.");
-      $this->assertSame('mcp_config', $tools[$toolId],
-        "Config tool '$toolId' must require 'mcp_config' so the content tier cannot reach it.");
-    }
-
-    // Conversely, no other tool may carry mcp_config — that would leak a
-    // config-tier capability onto a content/read tool.
-    foreach ($tools as $toolId => $scope) {
-      if (!in_array($toolId, $configTools, TRUE)) {
-        $this->assertNotSame('mcp_config', $scope,
-          "Non-config tool '$toolId' must not carry the 'mcp_config' scope.");
+    foreach (self::BASE_TOOL_IDS as $toolId) {
+      if (in_array($toolId, $configTools, TRUE)) {
+        continue;
       }
+      $scope = $command->scopeForTool($toolId);
+      $this->assertNotSame('mcp_config', $scope,
+        "Content tool '$toolId' must not derive the 'mcp_config' scope.");
+      $this->assertNotSame('mcp_config_read', $scope,
+        "Content tool '$toolId' must not derive the 'mcp_config_read' scope.");
     }
+  }
+
+  /**
+   * The auditor tier is read-only: config-read, no write or admin scopes.
+   *
+   * Security boundary: the read-only config auditor exists to read config for
+   * governance/audits without any write capability. It must map to the
+   * dedicated auditor role and carry mcp_config_read but none of the write or
+   * admin scopes.
+   */
+  public function testAuditorTierIsReadOnly(): void {
+    $rc = new \ReflectionClass(McpSentinelServerCommands::class);
+    $tiers = $rc->getConstants()['TIERS'] ?? [];
+
+    $this->assertArrayHasKey('auditor', $tiers, 'An auditor tier must be defined.');
+    [$role, $scopes] = $tiers['auditor'];
+
+    $this->assertSame('mcp_config_auditor', $role,
+      'The auditor tier must map to the dedicated read-only config role.');
+    $this->assertContains('mcp_config_read', $scopes,
+      'The auditor tier must grant the read-only config scope.');
+    $this->assertNotContains('mcp_config', $scopes,
+      'The auditor tier must not grant the config write scope.');
+    $this->assertNotContains('mcp_write', $scopes,
+      'The auditor tier must not grant the content write scope.');
+    $this->assertNotContains('mcp_admin', $scopes,
+      'The auditor tier must not grant the admin scope.');
+  }
+
+  /**
+   * The config-capable tiers retain config read after the scope split.
+   *
+   * The config_get/config_list tools now require mcp_config_read, so the
+   * developer and admin tiers must also carry it or they lose config read.
+   */
+  public function testDeveloperAndAdminTiersRetainConfigRead(): void {
+    $rc = new \ReflectionClass(McpSentinelServerCommands::class);
+    $tiers = $rc->getConstants()['TIERS'] ?? [];
+
+    $this->assertContains('mcp_config_read', $tiers['developer'][1],
+      'The developer tier must carry mcp_config_read to keep config read.');
+    $this->assertContains('mcp_config_read', $tiers['admin'][1],
+      'The admin tier must carry mcp_config_read to keep config read.');
+  }
+
+  /**
+   * Builds the server commands service from the container.
+   *
+   * @return \Drupal\mcp_sentinel_server\Drush\Commands\McpSentinelServerCommands
+   *   The command object with real collaborators wired.
+   */
+  private function serverCommands(): McpSentinelServerCommands {
+    return new McpSentinelServerCommands(
+      $this->container->get('entity_type.manager'),
+      $this->container->get('module_handler'),
+      $this->container->get('plugin.manager.tool'),
+      $this->container->get('cache_tags.invalidator'),
+    );
   }
 
 }

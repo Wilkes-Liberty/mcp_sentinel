@@ -7,6 +7,8 @@ namespace Drupal\mcp_sentinel_server\Drush\Commands;
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
+use Drupal\mcp_sentinel_server\ToolScopeResolver;
 use Drupal\tool\Tool\ToolManager;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
@@ -31,28 +33,30 @@ final class McpSentinelServerCommands extends DrushCommands {
   private const OAUTH_PROVIDER = 'mcp_server_oauth';
 
   /**
-   * MCP Sentinel tools to register, keyed by Tool API plugin id.
+   * MCP Sentinel tools to register with mcp_server, as Tool API plugin ids.
    *
-   * The map value is the OAuth scope the tool is tagged with when the
-   * mcp_server_oauth submodule is enabled.
+   * This is the explicit allow-list of tools the setup command registers. The
+   * OAuth scope each tool requires is NOT stored here — it is derived from the
+   * plugin's own declarations (its ToolOperation and whether it implements
+   * ConfigScopeToolInterface) by scopeForTool(), so the plugin is the single
+   * source of truth for its scope and cannot drift from a parallel table.
    */
   private const TOOLS = [
-    'mcp_sentinel_site_context' => 'mcp_read',
-    'mcp_sentinel_security_policy' => 'mcp_read',
-    'mcp_sentinel_content_lock' => 'mcp_write',
-    'mcp_sentinel_node_operations' => 'mcp_write',
-    'mcp_sentinel_media_create' => 'mcp_write',
-    'mcp_sentinel_workflow_transition' => 'mcp_write',
-    'mcp_sentinel_bulk_operations' => 'mcp_write',
-    // Config tools are isolated behind a dedicated config-tier scope so a
-    // content-tier token (mcp_read/mcp_write only) can never read or write
-    // configuration through MCP — config management is a dev/config-tier
-    // capability only. Granted via the 'developer'/'admin' tiers below.
-    'mcp_sentinel_config_get' => 'mcp_config',
-    'mcp_sentinel_config_list' => 'mcp_config',
-    'mcp_sentinel_config_set' => 'mcp_config',
+    'mcp_sentinel_site_context',
+    'mcp_sentinel_security_policy',
+    'mcp_sentinel_content_lock',
+    'mcp_sentinel_node_operations',
+    'mcp_sentinel_media_create',
+    'mcp_sentinel_workflow_transition',
+    'mcp_sentinel_bulk_operations',
+    // Config tools derive to the config scope family (config_get/list =>
+    // mcp_config_read, config_set => mcp_config), so a content-tier token
+    // (mcp_read/mcp_write only) can never read or write configuration.
+    'mcp_sentinel_config_get',
+    'mcp_sentinel_config_list',
+    'mcp_sentinel_config_set',
     // Registered only when the mcp_sentinel_graphql submodule is enabled.
-    'mcp_sentinel_graphql_schema' => 'mcp_read',
+    'mcp_sentinel_graphql_schema',
   ];
 
   /**
@@ -71,8 +75,15 @@ final class McpSentinelServerCommands extends DrushCommands {
    */
   private const TIERS = [
     'content' => ['mcp_content_editor', ['mcp_read', 'mcp_write']],
-    'developer' => ['mcp_config_editor', ['mcp_read', 'mcp_write', 'mcp_config']],
-    'admin' => ['mcp_admin', ['mcp_read', 'mcp_write', 'mcp_config', 'mcp_admin']],
+    // Read-only config auditor: config read only, no writes. Reads config for
+    // governance/audits (config_get/list require mcp_config_read) while the
+    // policy profile denies every write. Deliberately config-scoped (no
+    // mcp_read) so it resolves unambiguously to the config_auditor profile.
+    'auditor' => ['mcp_config_auditor', ['mcp_config_read']],
+    // Developer/admin carry mcp_config_read too, since config_get/list moved to
+    // the read scope; mcp_config remains their config *write* capability.
+    'developer' => ['mcp_config_editor', ['mcp_read', 'mcp_write', 'mcp_config', 'mcp_config_read']],
+    'admin' => ['mcp_admin', ['mcp_read', 'mcp_write', 'mcp_config', 'mcp_config_read', 'mcp_admin']],
   ];
 
   /**
@@ -87,6 +98,29 @@ final class McpSentinelServerCommands extends DrushCommands {
     private readonly CacheTagsInvalidatorInterface $cacheTagsInvalidator,
   ) {
     parent::__construct();
+  }
+
+  /**
+   * Derives the OAuth scope a registered tool requires.
+   *
+   * The scope is computed from the tool plugin's own declarations — its
+   * ToolOperation (read vs modifying) and whether it implements
+   * ConfigScopeToolInterface (config vs content domain) — so the plugin is the
+   * single source of truth for its scope rather than a hand-maintained table.
+   *
+   * @param string $toolId
+   *   The Tool API plugin id.
+   *
+   * @return string|null
+   *   The OAuth scope machine id, or NULL when the tool is not available.
+   */
+  public function scopeForTool(string $toolId): ?string {
+    if (!$this->toolManager->hasDefinition($toolId)) {
+      return NULL;
+    }
+    $definition = $this->toolManager->getDefinition($toolId);
+    $isConfigDomain = is_a($definition->getClass(), ConfigScopeToolInterface::class, TRUE);
+    return ToolScopeResolver::resolve($definition->getOperation(), $isConfigDomain);
   }
 
   /**
@@ -105,8 +139,9 @@ final class McpSentinelServerCommands extends DrushCommands {
     $mode = !empty($options['require-oauth']) ? 'required' : 'disabled';
 
     $rows = [];
-    foreach (self::TOOLS as $tool_id => $scope) {
-      if (!$this->toolManager->hasDefinition($tool_id)) {
+    foreach (self::TOOLS as $tool_id) {
+      $scope = $this->scopeForTool($tool_id);
+      if ($scope === NULL) {
         $rows[] = [$tool_id, 'skipped (tool not available)', '—', '—'];
         continue;
       }
@@ -263,7 +298,7 @@ final class McpSentinelServerCommands extends DrushCommands {
     $storage = $this->entityTypeManager->getStorage('mcp_tool_config');
     $entities = array_filter(array_map(
       static fn(string $id) => $storage->load($id),
-      array_keys(self::TOOLS),
+      self::TOOLS,
     ));
 
     if (!$entities) {

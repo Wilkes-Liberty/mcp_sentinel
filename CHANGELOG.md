@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Tool OAuth scopes are now derived from the plugin, not a hand-maintained table.**
+  `mcp_sentinel_server` derives each registered tool's required scope from the plugin's
+  own declarations — its `ToolOperation` (read vs modifying, via
+  `ToolOperation::isModifying()`) and a new `ConfigScopeToolInterface` marker (config vs
+  content domain) — replacing the parallel per-tool scope map that could drift from the
+  plugin. Config **reads** (`config_get`, `config_list`) now require a dedicated read-only
+  `mcp_config_read` scope; config **write** (`config_set`) keeps `mcp_config`. This lets a
+  read-only auditor identity read configuration with no config-write capability. Sites must
+  ship the `mcp_config_read` scope, a read-only role, and a matching policy profile (see
+  INSTALL/README).
+
+### Added
+- **`ConfigScopeToolInterface`** — marker implemented by the config tools to declare the
+  config scope domain; `ToolScopeResolver` maps `(domain × operation)` to the OAuth scope.
+- **`auditor` provisioning tier** — `drush mcp-sentinel:agent-provision auditor` provisions a
+  read-only config auditor (`mcp_config_auditor` role, `mcp_config_read` scope only); the
+  `developer` and `admin` tiers also gain `mcp_config_read` so they retain config read.
+
 ## [1.4.0] - 2026-06-29
 
 ### Added
