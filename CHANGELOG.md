@@ -21,6 +21,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - **`ConfigScopeToolInterface`** — marker implemented by the config tools to declare the
   config scope domain; `ToolScopeResolver` maps `(domain × operation)` to the OAuth scope.
+- The shipped `mcp_sentinel.settings` default `agent_scopes` now includes `mcp_config_read`
+  so a read-only auditor token (carrying only that scope) is recognised on the governed agent
+  channel. Sites that override `agent_scopes` must add `mcp_config_read` to keep the config
+  tools reachable.
 - **`auditor` provisioning tier** — `drush mcp-sentinel:agent-provision auditor` provisions a
   read-only config auditor (`mcp_config_auditor` role, `mcp_config_read` scope only); the
   `developer` and `admin` tiers also gain `mcp_config_read` so they retain config read.

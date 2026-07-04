@@ -16,6 +16,7 @@ agent_scopes:
   - 'mcp_read'
   - 'mcp_write'
   - 'mcp_config'
+  - 'mcp_config_read'
 governed_role_fallback: false
 audit_hash_key: ''
 siem_enabled: false

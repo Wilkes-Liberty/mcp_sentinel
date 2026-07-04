@@ -114,8 +114,10 @@ companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
 > scope **machine-ids** of your `oauth2_scope` entities exactly. simple_oauth
 > scope machine-ids are conventionally underscore-separated, and the underscore
 > form is the default: fresh installs ship
-> `agent_scopes: [mcp_read, mcp_write, mcp_config]` (`mcp_config` gates the
-> config tools to the dev/config tier).
+> `agent_scopes: [mcp_read, mcp_write, mcp_config, mcp_config_read]`
+> (`mcp_config_read` gates config *read* — `config_get`/`config_list` — to a
+> read-only auditor/dev tier; `mcp_config` gates config *write* — `config_set` —
+> to the dev/config tier).
 > Most sites need no change here. Only if your scope ids use a *different* naming
 > — for example legacy colon-form scopes (`mcp:read` / `mcp:write`) created
 > before this convention was standardized — must you either set `agent_scopes` to
