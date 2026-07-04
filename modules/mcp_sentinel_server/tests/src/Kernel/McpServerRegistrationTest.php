@@ -199,21 +199,14 @@ final class McpServerRegistrationTest extends KernelTestBase {
    * No content-domain tool may derive a config-tier scope.
    *
    * Security boundary: a content-tier token (mcp_read/mcp_write) must never
-   * reach a config tool, so no non-config tool may derive 'mcp_config' or
-   * 'mcp_config_read'.
+   * reach a config tool, so none of the base content tools may derive
+   * 'mcp_config' or 'mcp_config_read'.
    */
   public function testNoContentToolDerivesConfigScope(): void {
     $command = $this->serverCommands();
-    $configTools = [
-      'mcp_sentinel_config_get',
-      'mcp_sentinel_config_list',
-      'mcp_sentinel_config_set',
-    ];
 
+    // BASE_TOOL_IDS are the content/read tools only — none are config tools.
     foreach (self::BASE_TOOL_IDS as $toolId) {
-      if (in_array($toolId, $configTools, TRUE)) {
-        continue;
-      }
       $scope = $command->scopeForTool($toolId);
       $this->assertNotSame('mcp_config', $scope,
         "Content tool '$toolId' must not derive the 'mcp_config' scope.");
