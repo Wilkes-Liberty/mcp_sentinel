@@ -119,7 +119,7 @@ final class McpConfigSetTool extends ToolBase implements ConfigScopeToolInterfac
     // closed if the dispatcher itself errors.
     try {
       $event = new McpDestructiveActionEvent('config', $name, 'config_import', $this->currentUser, ['data' => $data]);
-      $this->eventDispatcher->dispatch($event);
+      $this->eventDispatcher->dispatch($event, McpDestructiveActionEvent::NAME);
       if ($event->isVetoed()) {
         return ExecutableResult::success(
           $this->t('Configuration change for @name was submitted for approval.', ['@name' => $name]),
