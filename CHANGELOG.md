@@ -7,6 +7,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Break-glass grants list** — `/admin/reports/mcp-sentinel/grants` (+ dashboard tab + Reports
+  menu link). Read-only view of all active time-boxed `mcp_admin` grants; previously visible
+  only in the database.
+- **Approval settings form** — `/admin/config/services/mcp-sentinel/approval` lets site admins
+  edit `gated_operations` and the break-glass TTL without touching YAML; `configure:` wired in
+  `mcp_sentinel_approval.info.yml`.
+- `hook_help` implementations for `mcp_sentinel_approval` and `mcp_sentinel_graphql`; small
+  `mcp_sentinel_server.module` with `hook_help` matching the module's existing procedural
+  pattern.
+- `README.md` for the `mcp_sentinel_approval`, `mcp_sentinel_graphql`, and `mcp_sentinel_server`
+  submodules.
+- `#description` field-level help on the four core policy-profile gates (allow read / write /
+  delete / GraphQL mutations) and several settings fields (audit logging, read logging,
+  retention, anomaly detection, webhook retention).
+- `mcp-sentinel:agent-provision` and `mcp-sentinel:break-glass` added to the README Drush
+  command table.
+- `McpApprovalAdminUiTest` functional test: settings form saves `gated_operations` + TTL,
+  permission-gated (403 without `administer mcp sentinel`), grants list shows an active grant.
 - New `content-auditor` provisioning tier (`drush mcp-sentinel:agent-provision content-auditor`):
   the read-only sibling of `content` — the content-editor role with only the `mcp_read` scope,
   so write tools are unreachable at the scope layer. Pair with the connector's `auditor` preset
