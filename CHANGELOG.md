@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- New `content-auditor` provisioning tier (`drush mcp-sentinel:agent-provision content-auditor`):
+  the read-only sibling of `content` — the content-editor role with only the `mcp_read` scope,
+  so write tools are unreachable at the scope layer. Pair with the connector's `auditor` preset
+  for content reports and audits.
+
 ### Fixed
 - **The config-write approval veto is now actually delivered.** `McpConfigSetTool` dispatched
   its `McpDestructiveActionEvent` with no event name, so it was delivered under the event's
