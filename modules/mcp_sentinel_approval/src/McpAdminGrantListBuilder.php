@@ -54,12 +54,14 @@ final class McpAdminGrantListBuilder extends EntityListBuilder {
   /**
    * {@inheritdoc}
    *
-   * Newest grants first so the most recent break-glass activity is on top.
+   * Active (non-revoked, not-yet-expired) grants first, then expired, then revoked.
    */
   protected function getEntityIds(): array {
     return array_values(
       $this->getStorage()->getQuery()
         ->accessCheck(TRUE)
+        ->sort('revoked', 'ASC')
+        ->sort('expires', 'DESC')
         ->sort('id', 'DESC')
         ->pager($this->limit)
         ->execute()
