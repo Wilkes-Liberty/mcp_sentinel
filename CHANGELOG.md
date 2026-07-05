@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-05
+
 ### Added
 - **Break-glass grants list** — `/admin/reports/mcp-sentinel/grants` (+ dashboard tab + Reports
   menu link). Read-only view of all active time-boxed `mcp_admin` grants; previously visible
