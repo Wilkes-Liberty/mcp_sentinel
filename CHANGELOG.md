@@ -12,6 +12,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so write tools are unreachable at the scope layer. Pair with the connector's `auditor` preset
   for content reports and audits.
 
+### Fixed
+- **The config-write approval veto is now actually delivered.** `McpConfigSetTool` dispatched
+  its `McpDestructiveActionEvent` with no event name, so it was delivered under the event's
+  class name while the `mcp_sentinel_approval` subscriber listens on
+  `McpDestructiveActionEvent::NAME` — the listener never fired and a gated config write
+  proceeded even when it should have been queued for human approval. It now dispatches under
+  the event NAME, so gated config writes are held for approval. The `mcp-sentinel:break-glass`
+  Drush command had the identical nameless-dispatch bug (it fail-closed to an error instead of
+  queuing a grant request) and is fixed the same way. Added a kernel regression test,
+  `McpDestructiveActionEventTest`, covering the config-veto seam (the bulk-delete seam was
+  already covered by `McpDestructiveOpEventTest`).
+
 ## [1.5.1] - 2026-07-04
 
 ### Fixed

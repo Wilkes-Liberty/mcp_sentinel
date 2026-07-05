@@ -47,7 +47,7 @@ final class McpApprovalCommands extends DrushCommands {
   #[CLI\Usage(name: 'drush mcp-sentinel:break-glass 5', description: 'Request break-glass elevation for user 5 (queued for approval).')]
   public function breakGlass(int $uid): int {
     $event = new McpDestructiveActionEvent('user', (string) $uid, 'grant_mcp_admin', $this->currentUser);
-    $this->eventDispatcher->dispatch($event);
+    $this->eventDispatcher->dispatch($event, McpDestructiveActionEvent::NAME);
 
     if ($event->isVetoed()) {
       $this->logger()->success(sprintf('Break-glass request raised for user %d: %s', $uid, (string) $event->getVetoReason()));
