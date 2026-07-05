@@ -1,0 +1,35 @@
+<?php
+
+/**
+ * @file
+ * Hook implementations for the MCP Sentinel Server submodule.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_help().
+ */
+function mcp_sentinel_server_help(string $route_name, RouteMatchInterface $route_match): string {
+  if ($route_name !== 'help.page.mcp_sentinel_server') {
+    return '';
+  }
+
+  $output = '';
+  $output .= '<h2>' . t('About') . '</h2>';
+  $output .= '<p>' . t('MCP Sentinel Server bridges the Sentinel Tool plugins to the <a href=":mcp">MCP Server</a> module. It registers each Sentinel tool as an <code>mcp_tool_config</code> entity and, when <code>mcp_server_oauth</code> is enabled, tags each tool with the OAuth scope derived from the tool plugin itself (content read/write vs config read/write). It also provisions the per-environment agent tiers (role, service account, and OAuth consumer).', [':mcp' => 'https://www.drupal.org/project/mcp']) . '</p>';
+
+  $output .= '<h2>' . t('This submodule has no settings page') . '</h2>';
+  $output .= '<p>' . t('It is operated entirely through Drush:') . '</p>';
+  $output .= '<ul>';
+  $output .= '<li>' . t('<code>drush mcp-sentinel:setup [--require-oauth]</code> — register the Sentinel tools with MCP Server (and require OAuth scopes).') . '</li>';
+  $output .= '<li>' . t('<code>drush mcp-sentinel:teardown</code> — unregister them.') . '</li>';
+  $output .= '<li>' . t('<code>drush mcp-sentinel:agent-provision &lt;tier&gt; --env=&lt;env&gt;</code> — provision an agent tier (content, content-auditor, auditor, developer, or admin) as a role + service account + OAuth consumer. Consumer secrets are never created or rotated by this command; set them out of band.') . '</li>';
+  $output .= '</ul>';
+  $output .= '<p>' . t('For the tier model, the trust model, and full command reference, see the <a href=":help">MCP Sentinel help</a> and the project <code>README.md</code> / <code>API.md</code>.', [':help' => Url::fromRoute('help.page.mcp_sentinel')->toString()]) . '</p>';
+
+  return $output;
+}

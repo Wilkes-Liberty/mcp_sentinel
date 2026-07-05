@@ -12,8 +12,29 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Url;
 use Drupal\graphql\GraphQL\Execution\FieldContext;
 use Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterface;
+
+/**
+ * Implements hook_help().
+ */
+function mcp_sentinel_graphql_help(string $route_name, RouteMatchInterface $route_match): string {
+  if ($route_name !== 'help.page.mcp_sentinel_graphql') {
+    return '';
+  }
+
+  $output = '';
+  $output .= '<h2>' . t('About') . '</h2>';
+  $output .= '<p>' . t('MCP Sentinel GraphQL extends the base governance to a <a href=":gc">GraphQL Compose</a> endpoint. For governed MCP agents it applies the resolved policy profile to GraphQL responses: field-name redaction, DLP value-pattern masking, and exfiltration result-count caps, and it adds mutation gating and audit. Entity allow/deny is handled by the base module entity-access hook.', [':gc' => 'https://www.drupal.org/project/graphql_compose']) . '</p>';
+
+  $output .= '<h2>' . t('Configuration') . '</h2>';
+  $output .= '<p>' . t('This submodule has no settings of its own. It reads the same policy profiles and Data Loss Prevention settings as the base module: set <em>redacted fields</em> and gates per profile, and enable DLP, from the <a href=":settings">MCP Sentinel settings</a> and profile forms. Enabling this submodule is all that is required to bring GraphQL responses under governance.', [':settings' => Url::fromRoute('mcp_sentinel.settings')->toString()]) . '</p>';
+  $output .= '<p>' . t('For the overall trust model, see the <a href=":help">MCP Sentinel help</a> and the project README.', [':help' => Url::fromRoute('help.page.mcp_sentinel')->toString()]) . '</p>';
+
+  return $output;
+}
 
 /**
  * Implements hook_graphql_compose_field_results_alter().

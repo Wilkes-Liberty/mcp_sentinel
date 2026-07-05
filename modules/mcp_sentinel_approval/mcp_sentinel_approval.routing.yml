@@ -1,3 +1,11 @@
+mcp_sentinel_approval.settings:
+  path: '/admin/config/services/mcp-sentinel/approval'
+  defaults:
+    _form: '\Drupal\mcp_sentinel_approval\Form\McpApprovalSettingsForm'
+    _title: 'MCP Sentinel Approval'
+  requirements:
+    _permission: 'administer mcp sentinel'
+
 mcp_sentinel_approval.approve:
   path: '/admin/reports/mcp-sentinel/approvals/{mcp_approval_request}/approve'
   defaults:

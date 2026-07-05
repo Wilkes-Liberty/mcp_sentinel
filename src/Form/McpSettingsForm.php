@@ -158,17 +158,20 @@ class McpSettingsForm extends ConfigFormBase {
     $form['audit']['audit_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable audit logging'),
+      '#description'   => $this->t('Record every governed operation to the tamper-evident audit log. Strongly recommended — turning this off also disables the dashboard, chain verification, and SIEM streaming.'),
       '#default_value' => $config->get('audit_enabled') ?? TRUE,
     ];
     $form['audit']['audit_log_reads'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Log read operations (high volume)'),
+      '#description'   => $this->t('Also record read, list, and get operations. These are high volume; enable only when you need a full read trail. Writes and denials are logged either way.'),
       '#default_value' => $config->get('audit_log_reads') ?? FALSE,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
     $form['audit']['audit_retention_days'] = [
       '#type'          => 'number',
       '#title'         => $this->t('Retention (days, 0 = forever)'),
+      '#description'   => $this->t('Purge audit entries older than this many days on cron. 0 keeps them forever. The default of 90 balances forensics against table growth.'),
       '#default_value' => $config->get('audit_retention_days') ?? 90,
       '#min' => 0,
       '#max' => 3650,
@@ -318,11 +321,13 @@ class McpSettingsForm extends ConfigFormBase {
     $form['anomaly']['anomaly_enabled'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Enable anomaly detection'),
+      '#description' => $this->t('Turn on the cron-based anomaly detector. Individual rules are configured below and ship disabled, so nothing fires until you enable and tune them.'),
       '#default_value' => $config->get('anomaly_enabled') ?? FALSE,
     ];
     $form['anomaly']['anomaly_alert_log'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Log alerts to MCP Sentinel logger channel'),
+      '#description' => $this->t('Write each fired rule to the MCP Sentinel logger channel (visible under Recent log messages). Low-noise and recommended as the baseline alert sink.'),
       '#default_value' => $config->get('anomaly_alert_log') ?? TRUE,
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
     ];
@@ -455,6 +460,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['webhooks']['webhook_delivery_retention_days'] = [
       '#type'          => 'number',
       '#title'         => $this->t('Delivery log retention (days, 0 = forever)'),
+      '#description'   => $this->t('Purge webhook delivery-log rows older than this many days on cron. 0 keeps them forever.'),
       '#default_value' => $config->get('webhook_delivery_retention_days') ?? 30,
       '#min'           => 0,
       '#max'           => 3650,
