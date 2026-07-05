@@ -75,6 +75,12 @@ final class McpSentinelServerCommands extends DrushCommands {
    */
   private const TIERS = [
     'content' => ['mcp_content_editor', ['mcp_read', 'mcp_write']],
+    // Read-only content auditor: content read only, no writes. Carries the
+    // content-editor role (so it resolves to the content policy) but only the
+    // mcp_read scope, so every write tool and JSON:API write is unreachable at
+    // the scope layer. Pair with the connector's "auditor" preset for reports
+    // and content audits with zero mutation surface.
+    'content-auditor' => ['mcp_content_editor', ['mcp_read']],
     // Read-only config auditor: config read only, no writes. Reads config for
     // governance/audits (config_get/list require mcp_config_read) while the
     // policy profile denies every write. Deliberately config-scoped (no
@@ -194,12 +200,13 @@ final class McpSentinelServerCommands extends DrushCommands {
    * set the consumer secret out of band.
    *
    * @param string $tier
-   *   The tier to provision: content, developer, or admin.
+   *   The tier to provision: content, content-auditor, auditor, developer, or
+   *   admin.
    * @param array $options
    *   The command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:agent-provision', aliases: ['mcps:provision'])]
-  #[CLI\Argument(name: 'tier', description: 'Tier to provision: content, developer, or admin.')]
+  #[CLI\Argument(name: 'tier', description: 'Tier to provision: content, content-auditor, auditor, developer, or admin.')]
   #[CLI\Option(name: 'env', description: 'Environment label used to build the consumer client_id (<tier>-<env>).')]
   #[CLI\Usage(name: 'drush mcp-sentinel:agent-provision content --env=prod', description: 'Provision the content tier consumer for prod.')]
   public function agentProvision(string $tier, array $options = ['env' => 'dev']): int {
