@@ -2,3 +2,8 @@ mcp_sentinel_approval.approvals_tab:
   title: 'Approvals'
   route_name: entity.mcp_approval_request.collection
   base_route: mcp_sentinel.dashboard
+
+mcp_sentinel_approval.grants_tab:
+  title: 'Break-glass grants'
+  route_name: entity.mcp_admin_grant.collection
+  base_route: mcp_sentinel.dashboard

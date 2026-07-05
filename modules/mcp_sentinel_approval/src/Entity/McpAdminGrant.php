@@ -9,6 +9,7 @@ use Drupal\Core\Entity\ContentEntityBase;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\mcp_sentinel_approval\McpAdminGrantListBuilder;
 
 /**
  * Defines the time-boxed mcp_admin break-glass grant entity.
@@ -32,9 +33,13 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
     'label' => 'id',
   ],
   handlers: [
+    'list_builder' => McpAdminGrantListBuilder::class,
     'route_provider' => [
       'html' => 'Drupal\Core\Entity\Routing\AdminHtmlRouteProvider',
     ],
+  ],
+  links: [
+    'collection' => '/admin/reports/mcp-sentinel/grants',
   ],
 )]
 final class McpAdminGrant extends ContentEntityBase implements McpAdminGrantInterface {

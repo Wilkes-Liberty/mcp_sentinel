@@ -757,6 +757,8 @@ while the condition still holds.
 | `drush mcp-sentinel:webhook-replay <id>` | Reset a delivery row to pending and re-queue it. |
 | `drush mcp-sentinel:setup [--require-oauth]` | (submodule) Register Sentinel Tool plugins with mcp_server. |
 | `drush mcp-sentinel:teardown` | (submodule) Unregister all Sentinel tools from mcp_server. |
+| `drush mcp-sentinel:agent-provision <tier> --env=<env>` | (submodule) Provision an agent tier — `content`, `content-auditor`, `auditor`, `developer`, or `admin` — as a role + service account + OAuth consumer (`<tier>-<env>`). Never creates or rotates secrets. |
+| `drush mcp-sentinel:break-glass <uid>` | (approval submodule) Request the time-boxed `mcp_admin` break-glass role for a user; always approval-gated, auto-revoked at the configured TTL. |
 
 ## Companion Node.js Connector
 

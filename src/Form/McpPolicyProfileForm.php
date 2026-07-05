@@ -106,14 +106,27 @@ final class McpPolicyProfileForm extends EntityForm {
       'event' => 'change',
     ];
     foreach ([
-      'allow_read' => $this->t('Allow read'),
-      'allow_write' => $this->t('Allow write (create, update)'),
-      'allow_delete' => $this->t('Allow delete'),
-      'allow_graphql_mutations' => $this->t('Allow GraphQL mutations'),
-    ] as $key => $label) {
+      'allow_read' => [
+        $this->t('Allow read'),
+        $this->t('Permit governed read, list, and get operations. Sentinel never grants what core access denies — turning a gate off only adds a restriction on top of core access.'),
+      ],
+      'allow_write' => [
+        $this->t('Allow write (create, update)'),
+        $this->t('Permit create and update operations. When off, every governed write is blocked even when the Drupal role would allow it.'),
+      ],
+      'allow_delete' => [
+        $this->t('Allow delete'),
+        $this->t('Permit delete operations. Off by default; prefer the per-entity-type overrides below to opening delete for every type at once.'),
+      ],
+      'allow_graphql_mutations' => [
+        $this->t('Allow GraphQL mutations'),
+        $this->t('Permit GraphQL mutation operations. Read queries are unaffected; leave off unless the agent must mutate through GraphQL.'),
+      ],
+    ] as $key => [$label, $gate_description]) {
       $form['gates'][$key] = [
         '#type' => 'checkbox',
         '#title' => $label,
+        '#description' => $gate_description,
         '#default_value' => $profile->get($key),
         '#ajax' => $preview_ajax,
       ];

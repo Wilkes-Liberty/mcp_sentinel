@@ -7,6 +7,43 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_help().
+ */
+function mcp_sentinel_approval_help(string $route_name, RouteMatchInterface $route_match): string {
+  if ($route_name !== 'help.page.mcp_sentinel_approval') {
+    return '';
+  }
+
+  $settings_url = Url::fromRoute('mcp_sentinel_approval.settings')->toString();
+  $approvals_url = Url::fromRoute('entity.mcp_approval_request.collection')->toString();
+  $grants_url = Url::fromRoute('entity.mcp_admin_grant.collection')->toString();
+
+  $output = '';
+  $output .= '<h2>' . t('About') . '</h2>';
+  $output .= '<p>' . t('MCP Sentinel Approval is an optional human-in-the-loop gate for the base module. When enabled, a governed <em>destructive</em> operation is not executed immediately — it is queued as an approval request for an authorized human to approve or deny. On approval the stored operation is replayed; on denial it is discarded. This adds a deliberate, audited checkpoint on top of the policy-profile gates.') . '</p>';
+
+  $output .= '<h2>' . t('What it gates') . '</h2>';
+  $output .= '<ul>';
+  $output .= '<li>' . t('The operations you select on the <a href=":settings">approval settings</a> page — by default bulk <strong>delete</strong>, <strong>config write</strong> (config set/import), and <strong>module disable</strong>.', [':settings' => $settings_url]) . '</li>';
+  $output .= '<li>' . t('Privilege escalation (<code>grant_mcp_admin</code> via <code>drush mcp-sentinel:break-glass</code>) is <strong>always</strong> gated, regardless of the settings, and results in a time-boxed grant that a cron reaper auto-revokes.') . '</li>';
+  $output .= '</ul>';
+  $output .= '<p>' . t('Enforcement uses a veto seam in the base module: a gated operation dispatches a destructive-operation event that this submodule vetoes to hold the operation. If this submodule is not enabled, nothing vetoes and operations run subject only to the policy-profile gates.') . '</p>';
+
+  $output .= '<h2>' . t('Where to work') . '</h2>';
+  $output .= '<ul>';
+  $output .= '<li>' . t('<a href=":approvals">Approvals queue</a> — review, approve, or deny pending requests.', [':approvals' => $approvals_url]) . '</li>';
+  $output .= '<li>' . t('<a href=":grants">Break-glass grants</a> — see who currently holds the time-boxed <code>mcp_admin</code> role and until when.', [':grants' => $grants_url]) . '</li>';
+  $output .= '<li>' . t('<a href=":settings">Approval settings</a> — choose which operations require approval and set the break-glass grant lifetime.', [':settings' => $settings_url]) . '</li>';
+  $output .= '</ul>';
+  $output .= '<p>' . t('For the overall trust model and the base module, see the <a href=":help">MCP Sentinel help</a> and the project README.', [':help' => Url::fromRoute('help.page.mcp_sentinel')->toString()]) . '</p>';
+
+  return $output;
+}
+
 /**
  * Implements hook_cron().
  *
