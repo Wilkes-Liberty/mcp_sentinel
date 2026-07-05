@@ -7,23 +7,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- **Break-glass grants admin list** (`mcp_sentinel_approval`) — a read-only page at
-  `/admin/reports/mcp-sentinel/grants` (also a dashboard tab) showing who holds the
-  time-boxed `mcp_admin` break-glass role and until when. Fills the discoverability gap
-  where the only view of active grants was the database table.
-- **Approval settings form** (`mcp_sentinel_approval`) — `/admin/config/services/mcp-sentinel/approval`
-  lets operators choose which operations require approval (`gated_operations`) and set the
-  break-glass grant lifetime, instead of editing YAML or using `drush config:set`.
-- **Submodule help and READMEs** — `hook_help` pages for `mcp_sentinel_approval`,
-  `mcp_sentinel_graphql`, and `mcp_sentinel_server` (the last gains a small `.module`), plus
-  a `README.md` for each submodule.
+- New `content-auditor` provisioning tier (`drush mcp-sentinel:agent-provision content-auditor`):
+  the read-only sibling of `content` — the content-editor role with only the `mcp_read` scope,
+  so write tools are unreachable at the scope layer. Pair with the connector's `auditor` preset
+  for content reports and audits.
 
-### Changed
-- **Field-level help** — added `#description` to the four core policy-profile gates
-  (allow read / write / delete / GraphQL mutations) and to several previously bare settings
-  fields (audit logging, audit read logging, retention, anomaly detection, webhook delivery
-  retention). Added `mcp-sentinel:agent-provision` and `mcp-sentinel:break-glass` to the
-  README Drush command table.
+### Fixed
+- **The config-write approval veto is now actually delivered.** `McpConfigSetTool` dispatched
+  its `McpDestructiveActionEvent` with no event name, so it was delivered under the event's
+  class name while the `mcp_sentinel_approval` subscriber listens on
+  `McpDestructiveActionEvent::NAME` — the listener never fired and a gated config write
+  proceeded even when it should have been queued for human approval. It now dispatches under
+  the event NAME, so gated config writes are held for approval. The `mcp-sentinel:break-glass`
+  Drush command had the identical nameless-dispatch bug (it fail-closed to an error instead of
+  queuing a grant request) and is fixed the same way. Added a kernel regression test,
+  `McpDestructiveActionEventTest`, covering the config-veto seam (the bulk-delete seam was
+  already covered by `McpDestructiveOpEventTest`).
 
 ## [1.5.1] - 2026-07-04
 
