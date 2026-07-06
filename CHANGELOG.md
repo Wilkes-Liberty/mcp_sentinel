@@ -6,6 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Moderated publish gate no longer blocks `published → draft`.** The deny-publish
+  gate for moderated content moved from `hook_entity_field_access()` ('edit') to a new
+  `McpDenyPublish` validation constraint. JSON:API and REST check field edit-access
+  against the entity's *stored* field value, so the old field-access gate saw a node's
+  current `moderation_state` rather than the incoming target and wrongly forbade every
+  `moderation_state` write on an already-published node — including a legitimate
+  transition back to `draft` (agents could not stage published pages as drafts for
+  review; each PATCH returned a 403). The constraint runs on the parsed entity with the
+  new value, so it denies only a genuine go-live (a transition *into* a published state,
+  or creating already-published content) and returns a clean 422, while allowing
+  `published → draft`, `draft → draft`, `published → archived`, and in-place edits of
+  already-published content. The human-publish invariant is unchanged: a deny-publish
+  agent can never transition content into a published state over JSON:API/REST. The
+  unmoderated `status`-flag path continues to be enforced by the presave fallback in
+  `mcp_sentinel_entity_presave()`.
+
+### Added
+- `McpPublishGateJsonApiTest` functional regression test exercising the publish gate over
+  real JSON:API `PATCH`/`POST` requests (published→draft allowed; draft→published and
+  create-published denied with 422; non-publish field edits on published content allowed),
+  plus a `McpDenyPublishValidatorTest` kernel test for the new constraint.
+
 ## [1.6.0] - 2026-07-05
 
 ### Added
