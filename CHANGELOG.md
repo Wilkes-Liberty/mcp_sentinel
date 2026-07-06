@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-07-05
+
 ### Fixed
 - **Moderated publish gate no longer blocks `published → draft`.** The deny-publish
   gate for moderated content moved from `hook_entity_field_access()` ('edit') to a new
