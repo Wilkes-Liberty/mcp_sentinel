@@ -188,7 +188,7 @@ final class McpDenyExternalRedirectValidatorTest extends KernelTestBase {
     $host = \Drupal::request()->getHost();
     $redirect = $this->makeRedirect('https://' . $host . '/somewhere');
     $this->assertFalse($this->hasDenyViolation($redirect),
-      "The site's own host (@host) must be treated as on-domain.");
+      "The site's own host ({$host}) must be treated as on-domain.");
   }
 
   /**
