@@ -189,7 +189,7 @@ final class McpPolicyProfileForm extends EntityForm {
     $form['config_governance']['deny_external_redirects'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Deny off-domain redirects (open-redirect guard)'),
-      '#description' => $this->t('When on (recommended), a governed agent cannot create or update a redirect whose destination points to an external host outside the allowlist below. Internal, entity, and relative targets are always permitted. Has no effect unless the redirect module is installed.'),
+      '#description' => $this->t('When on (recommended), a governed agent cannot create or update a redirect whose destination points to an external host outside the allowlist below. Internal:, entity:, base:, and relative targets are always permitted. Has no effect unless the redirect module is installed.'),
       '#default_value' => $profile->get('deny_external_redirects'),
     ];
     $form['config_governance']['allowed_redirect_hosts'] = [
