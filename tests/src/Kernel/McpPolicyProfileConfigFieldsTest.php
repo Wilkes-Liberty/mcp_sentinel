@@ -42,6 +42,8 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
    * @covers ::getDeniedConfigTypes
    * @covers ::deniesPublish
    * @covers ::getMaxModerationState
+   * @covers ::deniesExternalRedirects
+   * @covers ::getAllowedRedirectHosts
    */
   public function testSafeDefaults(): void {
     $profile = McpPolicyProfile::create(['id' => 'bare', 'label' => 'Bare']);
@@ -50,6 +52,11 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
     $this->assertSame([], $profile->getDeniedConfigTypes());
     $this->assertTrue($profile->deniesPublish(), 'Publishing is denied by default.');
     $this->assertSame('', $profile->getMaxModerationState());
+    $this->assertTrue(
+      $profile->deniesExternalRedirects(),
+      'External redirects are denied by default.'
+    );
+    $this->assertSame([], $profile->getAllowedRedirectHosts());
     $this->assertSame([], $profile->getEntityRules(), 'Entity rules default empty.');
   }
 
@@ -62,6 +69,7 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
     $this->assertFalse($profile->allowsConfigRead());
     $this->assertFalse($profile->allowsConfigWrite());
     $this->assertTrue($profile->deniesPublish());
+    $this->assertTrue($profile->deniesExternalRedirects());
   }
 
   /**
@@ -76,6 +84,8 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
       'denied_config_types' => ['system.', 'field.field.'],
       'deny_publish' => FALSE,
       'max_moderation_state' => 'needs_review',
+      'deny_external_redirects' => FALSE,
+      'allowed_redirect_hosts' => ['docs.example.com', 'assets.example.com'],
       'allow_delete' => FALSE,
       'entity_rules' => ['taxonomy_term' => ['allow_delete' => TRUE]],
     ])->save();
@@ -86,6 +96,11 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
     $this->assertSame(['system.', 'field.field.'], $profile->getDeniedConfigTypes());
     $this->assertFalse($profile->deniesPublish());
     $this->assertSame('needs_review', $profile->getMaxModerationState());
+    $this->assertFalse($profile->deniesExternalRedirects());
+    $this->assertSame(
+      ['docs.example.com', 'assets.example.com'],
+      $profile->getAllowedRedirectHosts()
+    );
     $this->assertSame(
       ['taxonomy_term' => ['allow_delete' => TRUE]],
       $profile->getEntityRules()

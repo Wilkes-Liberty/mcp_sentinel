@@ -6,6 +6,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Open-redirect / phishing guard (`deny_external_redirects`).** A new policy-profile
+  control blocks a governed agent from creating or updating a `redirect` entity whose
+  destination points off-domain — closing an open-redirect vector where an agent could
+  turn the site's own domain into a phishing springboard (e.g. `/login →
+  https://evil.example/login`). Enforced by a new `McpDenyExternalRedirect` validation
+  constraint attached to the `redirect` entity type; validation is the only seam that
+  sees the incoming target value (same rationale as `McpDenyPublish`), which field
+  edit-access on a JSON:API/REST write does not. The constraint reads
+  `redirect_redirect->uri`, treats `internal:`, `entity:`, `base:`, and relative targets
+  as always-allowed, and denies only a fully external URL whose host is outside the
+  allowlist. **Secure by default:** `deny_external_redirects` defaults to `TRUE`, and
+  existing profiles missing the key resolve to `TRUE`. An optional
+  `allowed_redirect_hosts` list permits specific external hosts; when empty, the site's
+  own host(s) — derived from the request host and `trusted_host_patterns` — are the
+  implicit allowlist. The constraint is attached only when the `redirect` module is
+  installed, so sites without it are unaffected. Configurable per profile at
+  Configuration governance → *Deny off-domain redirects*; `mcp_sentinel_update_10013()`
+  backfills the safe defaults onto existing profiles. New `McpDenyExternalRedirectValidatorTest`
+  kernel coverage.
+
 ## [1.6.1] - 2026-07-05
 
 ### Fixed

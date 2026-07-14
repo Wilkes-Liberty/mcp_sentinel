@@ -395,6 +395,11 @@ function mcp_sentinel_entity_field_access(
  * early-returns for non-governed, non-deny-publish, and non-moderated entities,
  * so the site-wide attachment is cheap and safe. See the McpDenyPublish
  * constraint for why the gate cannot live in field edit-access.
+ *
+ * Also attaches the McpDenyExternalRedirect constraint to the redirect entity
+ * type — but only when the redirect module is installed — so a governed agent
+ * cannot point a redirect at an off-domain target (open-redirect / phishing
+ * guard). Sites without the redirect module are unaffected.
  */
 function mcp_sentinel_entity_type_alter(array &$entity_types): void {
   foreach ($entity_types as $entity_type) {
@@ -402,6 +407,12 @@ function mcp_sentinel_entity_type_alter(array &$entity_types): void {
       && $entity_type->entityClassImplements(ContentEntityInterface::class)) {
       $entity_type->addConstraint('McpDenyPublish');
     }
+  }
+
+  // Guard on the redirect entity type existing so sites without the redirect
+  // module are unaffected by the open-redirect gate.
+  if (isset($entity_types['redirect'])) {
+    $entity_types['redirect']->addConstraint('McpDenyExternalRedirect');
   }
 }
 

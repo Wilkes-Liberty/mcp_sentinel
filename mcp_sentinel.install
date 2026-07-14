@@ -590,6 +590,39 @@ function mcp_sentinel_update_10012(): string {
 }
 
 /**
+ * Add the open-redirect guard fields to existing policy profiles.
+ *
+ * Backfills deny_external_redirects (default TRUE — secure by default) and
+ * allowed_redirect_hosts (default [] — the site's own host(s)) on every profile
+ * saved before the knob existed, so the gate is on without a re-save.
+ */
+function mcp_sentinel_update_10013(): string {
+  $defaults = [
+    'deny_external_redirects' => TRUE,
+    'allowed_redirect_hosts' => [],
+  ];
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    $changed = FALSE;
+    foreach ($defaults as $key => $value) {
+      if ($e->get($key) === NULL) {
+        $e->set($key, $value);
+        $changed = TRUE;
+      }
+    }
+    if ($changed) {
+      $e->save();
+    }
+  }
+  return 'Added open-redirect guard (deny_external_redirects, '
+    . 'allowed_redirect_hosts) at safe defaults to all policy profiles.';
+}
+
+/**
  * Implements hook_uninstall().
  *
  * Only removes what core does not clean up automatically: the module's main

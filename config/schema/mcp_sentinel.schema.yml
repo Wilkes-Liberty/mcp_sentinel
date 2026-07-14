@@ -243,6 +243,15 @@ mcp_sentinel.mcp_policy_profile.*:
     max_moderation_state:
       type: string
       label: 'Maximum moderation state an agent may set (empty = unrestricted)'
+    deny_external_redirects:
+      type: boolean
+      label: 'Deny off-domain redirect targets (open-redirect guard)'
+    allowed_redirect_hosts:
+      type: sequence
+      label: 'Allowed external redirect hosts (empty = the site''s own host(s))'
+      sequence:
+        type: string
+        label: 'Hostname'
     entity_rules:
       type: sequence
       label: 'Per-entity-type destructive overrides'
