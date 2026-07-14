@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-14
+
 ### Added
 - **Open-redirect / phishing guard (`deny_external_redirects`).** A new policy-profile
   control blocks a governed agent from creating or updating a `redirect` entity whose
