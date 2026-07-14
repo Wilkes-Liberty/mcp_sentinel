@@ -31,6 +31,12 @@ attributed to the authenticated account.
 - **Security presets & operation gates** — master on/off switch plus
   independent read / write / delete / GraphQL-mutation toggles. When disabled,
   MCP requests are refused regardless of credentials.
+- **Open-redirect / phishing guard** — deny a governed agent from creating or
+  updating a `redirect` entity whose destination points off-domain (secure by
+  default), with an optional per-profile host allowlist. Closes an open-redirect /
+  phishing vector while preserving the agent's legitimate internal redirect and
+  menu authoring. Attached only when the `redirect` module is installed, so other
+  sites are unaffected.
 - **Entity-type allow / deny lists** — restrict agents to an allowlist of
   entity types, or block sensitive ones (users are denied by default). Enforced
   through Drupal's own access system, so JSON:API and GraphQL reads honour it
