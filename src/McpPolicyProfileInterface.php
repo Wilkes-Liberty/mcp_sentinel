@@ -153,6 +153,27 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
   public function getMaxModerationState(): string;
 
   /**
+   * Whether the agent is forbidden from creating off-domain redirects.
+   *
+   * When TRUE (the safe default), a governed agent may not create or update a
+   * redirect whose destination is an external URL pointing at a host outside
+   * the allowlist. Internal, entity:, base:, and relative targets are always
+   * permitted.
+   */
+  public function deniesExternalRedirects(): bool;
+
+  /**
+   * Hostnames a governed agent may target with an external redirect.
+   *
+   * Empty means the site's own host(s) — derived from the request host and the
+   * trusted_host_patterns setting — are the implicit allowlist.
+   *
+   * @return string[]
+   *   The allowed redirect hostnames.
+   */
+  public function getAllowedRedirectHosts(): array;
+
+  /**
    * Per-entity-type destructive overrides.
    *
    * A map of entity_type ID => rule. Each rule may carry an 'allow_delete'

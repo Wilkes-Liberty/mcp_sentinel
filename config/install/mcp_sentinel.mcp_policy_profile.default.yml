@@ -31,4 +31,6 @@ allow_config_write: false
 denied_config_types: {  }
 deny_publish: true
 max_moderation_state: ''
+deny_external_redirects: true
+allowed_redirect_hosts: {  }
 entity_rules: {  }

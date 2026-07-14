@@ -30,7 +30,8 @@
   },
   "require-dev": {
     "drupal/graphql_compose": "^2.4",
-    "drupal/mcp_server": "^2.0@dev"
+    "drupal/mcp_server": "^2.0@dev",
+    "drupal/redirect": "^1.10"
   },
   "suggest": {
     "drupal/mcp_server":     "Exposes MCP Sentinel Tool plugins to MCP clients (via the mcp_sentinel_server submodule). Strongly recommended.",

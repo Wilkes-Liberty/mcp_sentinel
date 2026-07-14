@@ -68,6 +68,8 @@ use Drupal\mcp_sentinel\McpPolicyProfileListBuilder;
     'denied_config_types',
     'deny_publish',
     'max_moderation_state',
+    'deny_external_redirects',
+    'allowed_redirect_hosts',
     'entity_rules',
   ],
 )]
@@ -197,6 +199,29 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * the entity's workflow are denied. Empty applies no ceiling.
    */
   protected string $max_moderation_state = '';
+
+  /**
+   * Whether the agent is forbidden from creating off-domain redirects.
+   *
+   * When TRUE (the safe default), a governed agent may not create or update a
+   * redirect whose destination is an external URL pointing at a host outside
+   * the allowlist — an open-redirect / phishing guard. Internal, entity:,
+   * base:, and relative targets are always permitted. Existing profiles saved
+   * before this knob existed carry no value; the getter defaults to TRUE so the
+   * gate is on by default.
+   */
+  protected bool $deny_external_redirects = TRUE;
+
+  /**
+   * Hostnames a governed agent may target with an external redirect.
+   *
+   * An allowlist of bare hostnames (e.g. docs.example.com). Empty means the
+   * site's own host(s) — derived from the request host and the
+   * trusted_host_patterns setting — are the implicit allowlist.
+   *
+   * @var string[]
+   */
+  protected array $allowed_redirect_hosts = [];
 
   /**
    * Per-entity-type destructive overrides.
@@ -342,6 +367,20 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function getMaxModerationState(): string {
     return (string) $this->max_moderation_state;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function deniesExternalRedirects(): bool {
+    return (bool) $this->deny_external_redirects;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getAllowedRedirectHosts(): array {
+    return array_values(array_filter($this->allowed_redirect_hosts));
   }
 
   /**

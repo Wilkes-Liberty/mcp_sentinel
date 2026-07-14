@@ -186,6 +186,24 @@ final class McpPolicyProfileForm extends EntityForm {
       '#description' => $this->t('Optional ceiling state ID (e.g. draft, needs_review). Transitions to a higher-weight workflow state are denied. Leave empty for no ceiling.'),
       '#default_value' => $profile->getMaxModerationState(),
     ];
+    $form['config_governance']['deny_external_redirects'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Deny off-domain redirects (open-redirect guard)'),
+      '#description' => $this->t('When on (recommended), a governed agent cannot create or update a redirect whose destination points to an external host outside the allowlist below. Internal:, entity:, base:, and relative targets are always permitted. Has no effect unless the redirect module is installed.'),
+      '#default_value' => $profile->get('deny_external_redirects'),
+    ];
+    $form['config_governance']['allowed_redirect_hosts'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Allowed external redirect hosts'),
+      '#description' => $this->t("One hostname per line (e.g. docs.example.com). External redirect targets on these hosts are permitted. Leave empty to allow only the site's own host(s), derived from the request host and trusted_host_patterns."),
+      '#default_value' => implode("\n", $profile->getAllowedRedirectHosts()),
+      '#rows' => 3,
+      '#states' => [
+        'visible' => [
+          ':input[name="deny_external_redirects"]' => ['checked' => TRUE],
+        ],
+      ],
+    ];
 
     // --- Entity scope tab ----------------------------------------------------
     $lines = static fn (array $v): string => implode("\n", $v);
@@ -494,6 +512,8 @@ final class McpPolicyProfileForm extends EntityForm {
       'denied_config_types',
       'deny_publish',
       'max_moderation_state',
+      'deny_external_redirects',
+      'allowed_redirect_hosts',
       'entity_rules_delete',
     ];
     assert($entity instanceof ConfigEntityBase);
@@ -547,7 +567,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'allowed_ips',
       $split($form_state->getValue('allowed_ips'))
     );
-    foreach (['allow_config_read', 'allow_config_write', 'deny_publish'] as $key) {
+    foreach (['allow_config_read', 'allow_config_write', 'deny_publish', 'deny_external_redirects'] as $key) {
       $profile->set($key, (bool) $form_state->getValue($key));
     }
     $profile->set(
@@ -557,6 +577,10 @@ final class McpPolicyProfileForm extends EntityForm {
     $profile->set(
       'max_moderation_state',
       trim((string) $form_state->getValue('max_moderation_state'))
+    );
+    $profile->set(
+      'allowed_redirect_hosts',
+      $split($form_state->getValue('allowed_redirect_hosts'))
     );
 
     // Rebuild the per-entity-type rule map from the delete-overrides textarea,
