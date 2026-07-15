@@ -200,11 +200,23 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     return;
   }
 
-  // Publish-gate fallback (status=0) for unmoderated publishable entities. The
-  // workflow tool and field-access hook gate the moderated path; this catches a
-  // direct setPublished() on a publishable entity that is NOT under Content
-  // Moderation, forcing it unpublished so a deny_publish agent cannot publish.
+  // Publish-gate backstop (status=0) for unmoderated publishable entities.
+  //
+  // The McpDenyPublish constraint reports a denied go-live wherever the entity
+  // is validated — which JSON:API, REST and the entity forms always do — so a
+  // request through those paths is refused with a violation and never reaches
+  // here published. This remains as the backstop for the paths that never
+  // validate: a direct $entity->save() from custom code or a Drush script.
+  //
+  // Scope is delegated to the moderation gate, which excludes entities whose
+  // published status is not editorial go-live (composite children such as
+  // paragraphs, and routing metadata such as path aliases). Without that
+  // exclusion, a governed write to a published node would silently unpublish
+  // the paragraphs it renders and the alias Pathauto mints for it — data loss
+  // reported to the caller as success.
   if ($entity instanceof EntityPublishedInterface && $entity->isPublished()) {
+    /** @var \Drupal\mcp_sentinel\Service\McpModerationGate $gate */
+    $gate = \Drupal::service('mcp_sentinel.moderation_gate');
     $profile = $resolver->resolve();
     $moderation = \Drupal::hasService('content_moderation.moderation_information')
       ? \Drupal::service('content_moderation.moderation_information')
@@ -212,7 +224,10 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     $moderated = $moderation !== NULL
       && $entity instanceof ContentEntityInterface
       && $moderation->isModeratedEntity($entity);
-    if ($profile !== NULL && $profile->deniesPublish() && !$moderated) {
+    if ($profile !== NULL
+      && $profile->deniesPublish()
+      && !$moderated
+      && $gate->governsPublishedStatus($entity)) {
       $entity->setUnpublished();
     }
   }
@@ -351,10 +366,12 @@ function mcp_sentinel_entity_create_access(
  * (\Drupal\jsonapi\Controller\EntityResource::checkPatchFieldAccess() reads the
  * value from the loaded entity), so this hook would see the node's current
  * moderation_state, never the incoming target — wrongly forbidding a legitimate
- * published → draft transition on an already-published node. The moderated
- * publish gate now lives in the McpDenyPublish validation constraint (which runs
- * on the parsed entity with the new value), and the unmoderated status-flag path
- * is enforced by the presave fallback in mcp_sentinel_entity_presave().
+ * published → draft transition on an already-published node.
+ *
+ * The publish gate lives in the McpDenyPublish validation constraint, which
+ * runs on the parsed entity with the new value and covers both the moderated
+ * and the unmoderated status-flag path. mcp_sentinel_entity_presave() keeps a
+ * status=0 backstop for saves that never validate (custom code, Drush).
  */
 function mcp_sentinel_entity_field_access(
   string $operation,

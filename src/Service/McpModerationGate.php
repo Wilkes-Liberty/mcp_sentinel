@@ -5,17 +5,22 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 
 /**
- * Decides whether a target moderation state is a *published* state.
+ * Decides what the publish gate governs, and whether a transition publishes.
  *
- * This is the single source of truth for the publish gate's core question:
- * "does this transition publish?" Both the value-aware field-access hook
- * (mcp_sentinel_entity_field_access) and the workflow-transition tool
- * (McpWorkflowTransitionTool) use it, so the JSON:API write path and the
- * server-tool path agree on exactly which transitions are go-live.
+ * This is the single source of truth for the publish gate's two scope
+ * questions: "is this entity's published status ours to govern?"
+ * (::governsPublishedStatus) and "does this transition publish?"
+ * (::targetIsPublishedState). Every consumer — the value-aware field-access
+ * hook (mcp_sentinel_entity_field_access), the presave fallback
+ * (mcp_sentinel_entity_presave), the McpDenyPublish constraint, and the
+ * workflow-transition tool (McpWorkflowTransitionTool) — asks here, so the
+ * JSON:API write path and the server-tool path agree on exactly which entities
+ * and which transitions are in scope.
  *
  * The publish gate must remain conservative: only a *known, published* target
  * state counts as a publish. Anything else — Content Moderation not installed,
@@ -27,6 +32,24 @@ use Drupal\content_moderation\ModerationInformationInterface;
 final class McpModerationGate {
 
   /**
+   * Entity types whose published status the gate never governs, by name.
+   *
+   * Reserved for entity types that are structurally outside editorial
+   * publication but cannot be recognised generically. Everything not listed
+   * here, and not a composite child (see ::governsPublishedStatus), stays
+   * governed — the gate fails closed, so an unfamiliar publishable entity type
+   * is gated rather than silently exempt.
+   */
+  private const UNGOVERNED_ENTITY_TYPES = [
+    // A path alias is routing metadata, not editorial content: its status means
+    // "is this alias active", and the aliased path's own access still decides
+    // what a visitor may see. Pathauto mints one as a side effect of saving a
+    // node, so governing it would let a routine content write silently strip
+    // the page's canonical URL.
+    'path_alias',
+  ];
+
+  /**
    * Constructs the moderation gate.
    *
    * @param \Drupal\content_moderation\ModerationInformationInterface|null $moderationInformation
@@ -36,6 +59,43 @@ final class McpModerationGate {
   public function __construct(
     protected readonly ?ModerationInformationInterface $moderationInformation = NULL,
   ) {}
+
+  /**
+   * Whether the publish gate governs this entity's published status.
+   *
+   * `deny_publish` is about editorial go-live: an agent must not make content
+   * publicly visible without a human. Two kinds of publishable entity are
+   * outside that meaning, and governing them turns a routine content write into
+   * silent data loss:
+   *
+   * - **Composite children** (paragraphs, and anything else declaring
+   *   `entity_revision_parent_type_field`). Such an entity is never published
+   *   in its own right — it renders if and only if its host does, and its
+   *   status is an implementation detail of the host's composition. It is also
+   *   saved as a side effect of saving the host, so governing it means a
+   *   governed write to an already-published page silently blanks that page's
+   *   content while the write reports success.
+   * - **Routing metadata** listed in self::UNGOVERNED_ENTITY_TYPES.
+   *
+   * Neither exemption weakens the gate: the host entity's own published status
+   * is still governed, and an alias only routes to a path whose access is
+   * decided elsewhere. Anything not matching an exemption stays governed, so
+   * the default is closed.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity being saved or validated.
+   *
+   * @return bool
+   *   TRUE when the gate governs this entity's published status.
+   */
+  public function governsPublishedStatus(EntityInterface $entity): bool {
+    $entity_type = $entity->getEntityType();
+    if (in_array($entity->getEntityTypeId(), self::UNGOVERNED_ENTITY_TYPES, TRUE)) {
+      return FALSE;
+    }
+    // A composite child declares the field holding its parent's entity type.
+    return $entity_type->get('entity_revision_parent_type_field') === NULL;
+  }
 
   /**
    * Whether a target moderation state publishes the given entity.
