@@ -31,10 +31,21 @@ jobs:
       matrix:
         include:
           # The floor and the ceiling of core_version_requirement (^10.3 || ^11).
+          #
+          # phpunit is pinned per leg because the suite is written with PHP 8
+          # attributes (#[Group], #[DataProvider], #[CoversClass], ...), which
+          # only PHPUnit 10+ reads. Drupal 10.3's core-dev resolves PHPUnit 9.6
+          # by default, and 9.6 does not error on an attribute it does not
+          # understand — it ignores it, silently collecting 53 of 364 tests and
+          # calling data-provider tests with no arguments. core-dev on 10.3 also
+          # allows ^10.5, so pin that and test real Drupal 10.3 with a PHPUnit
+          # that can actually see the suite.
           - drupal: '10.3'
             php: '8.3'
+            phpunit: '^10.5'
           - drupal: '11'
             php: '8.4'
+            phpunit: '^11.5'
 
     steps:
       - name: Checkout the module
@@ -72,6 +83,7 @@ jobs:
         working-directory: drupal
         env:
           DRUPAL_VERSION: ${{ matrix.drupal }}
+          PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
           # -W (--with-all-dependencies) on both: recommended-project ships a
           # composer.lock, so each require is a *partial* update and composer
@@ -80,11 +92,27 @@ jobs:
           # resolution fails. -W lets it move them.
           composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
-          # core-dev brings PHPUnit; the rest are the contrib modules the tests
-          # enable, mirroring the module's own require-dev.
+          # core-dev brings PHPUnit; drush because the module ships Drush
+          # commands whose tests instantiate them (they extend
+          # Drush\Commands\DrushCommands); the rest are the contrib modules the
+          # tests enable, mirroring the module's own require-dev.
           composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^${DRUPAL_VERSION}" \
+            "phpunit/phpunit:${PHPUNIT_VERSION}" \
+            "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev"
+
+      - name: Report the versions actually under test
+        working-directory: drupal
+        run: |
+          # The 10.3 leg silently collected 53 of 364 tests when composer
+          # resolved PHPUnit 9.6, which ignores the suite's attributes. Print
+          # what resolved so a wrong version is visible rather than inferred
+          # from a suspiciously small test count.
+          php -r 'echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";' \
+            -d auto_prepend_file=vendor/autoload.php || true
+          vendor/bin/phpunit --version
+          vendor/bin/drush --version || true
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
