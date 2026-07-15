@@ -30,19 +30,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor and the ceiling of core_version_requirement (^10.3 || ^11).
+          # Drupal 11 only, deliberately — see issue #35.
           #
-          # phpunit is pinned per leg because the suite is written with PHP 8
-          # attributes (#[Group], #[DataProvider], #[CoversClass], ...), which
-          # only PHPUnit 10+ reads. Drupal 10.3's core-dev resolves PHPUnit 9.6
-          # by default, and 9.6 does not error on an attribute it does not
-          # understand — it ignores it, silently collecting 53 of 364 tests and
-          # calling data-provider tests with no arguments. core-dev on 10.3 also
-          # allows ^10.5, so pin that and test real Drupal 10.3 with a PHPUnit
-          # that can actually see the suite.
-          - drupal: '10.3'
-            php: '8.3'
-            phpunit: '^10.5'
+          # info.yml claims ^10.3 || ^11, but the suite cannot run on Drupal 10.
+          # It is written with PHP 8 attributes (#[Group], #[DataProvider],
+          # #[CoversClass], #[RunTestsInSeparateProcesses]), which only
+          # PHPUnit 10+ reads, and every drupal/core-dev in the 10.x range
+          # hard-requires phpunit ^9.6 — there is no combination that satisfies
+          # both. Worse, 9.6 does not error on an attribute it cannot parse: it
+          # ignores it, so a 10.3 leg collects 53 of 364 tests and reports green
+          # on a suite it silently dropped.
+          #
+          # Testing only what can actually be tested, rather than shipping a leg
+          # that lies. #35 carries the real decision: port the suite to
+          # annotations so it runs on PHPUnit 9.6, or drop the ^10.3 claim.
           - drupal: '11'
             php: '8.4'
             phpunit: '^11.5'
