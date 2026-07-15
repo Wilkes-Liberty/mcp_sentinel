@@ -96,7 +96,9 @@ jobs:
           # service container. Production runs PostgreSQL, so a storage-specific
           # regression would not surface here — Functional coverage is the
           # follow-up (#32).
-          SIMPLETEST_DB: sqlite://localhost/:memory:
+          # Quoted: the value ends in a colon, which YAML would otherwise read
+          # as a mapping key and refuse to parse the file at all.
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
         run: |
