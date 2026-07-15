@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-15
+
 ### Fixed
 - **`deny_publish` no longer silently unpublishes side-effect entities ([#30]).** The
   presave publish-gate fired on every `EntityPublishedInterface` saved during a governed
