@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **CI runs the test suite ([#32]).** The module had 364 tests and nothing executed them: CI was
+  CodeQL, `composer audit`, a CHANGELOG gate and Dependabot auto-merge, so a PR could go green,
+  merge and ship while the suite was broken. For a module whose job is enforcing a security
+  boundary, "the tests pass if someone remembers" is the wrong guarantee. A new `Tests` workflow
+  runs PHPUnit (Unit + Kernel) on every PR and on push to `1.x`, across Drupal 10.3/PHP 8.3 and
+  Drupal 11/PHP 8.4 — the floor and ceiling of `core_version_requirement`. It also adds a
+  blocking `phpcs` job (`Drupal`, `DrupalPractice`).
+
+  The workflow installs the **working copy** via a Composer path repo and asserts the symlink
+  resolved, so a silent fallback to the released package cannot let the suite pass against code
+  nobody changed. Functional tests need a webserver and are not run yet; that is a deliberate
+  first step.
+
+### Fixed
+- **`McpDenyExternalRedirectValidatorTest` never actually ran ([#32]).** All 7 tests errored on
+  `No schema for views.view.redirect`: the `redirect` module ships `views.view.redirect` in
+  `config/install`, so `installConfig(['redirect'])` required the `views` module — and, once
+  added, `image`, `options` and more via `user`'s config — to satisfy an admin listing these
+  tests never render. The class now installs only the config it needs and adds the `path_alias`
+  entity schema that resolving an `internal:`/`entity:` target consults. The open-redirect gate
+  has therefore been untested since it shipped in 1.7.0; it passes.
+- **`composer audit` never ran on push ([#32]).** Its trigger targeted branch `1.0.x`, which does
+  not exist on this repo — the branch is `1.x`. (`1.0.x` survives on the drupalcode mirror, where
+  it is still HEAD, which is likely where the value came from.) Only the `pull_request` trigger
+  had ever fired.
+- Two long-line PHPCS warnings, so the new standards gate passes on a clean tree.
+
+[#32]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/32
+
 ## [1.8.0] - 2026-07-15
 
 ### Fixed

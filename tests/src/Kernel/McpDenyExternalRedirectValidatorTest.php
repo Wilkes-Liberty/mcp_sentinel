@@ -71,7 +71,14 @@ final class McpDenyExternalRedirectValidatorTest extends KernelTestBase {
     ]);
     $this->installEntitySchema('user');
     $this->installEntitySchema('redirect');
-    $this->installConfig(['system', 'user', 'field', 'redirect', 'mcp_sentinel']);
+    // Resolving an internal: or entity: target consults the alias storage.
+    $this->installEntitySchema('path_alias');
+    // Deliberately excludes 'redirect': it ships views.view.redirect in
+    // config/install, so installing its config would require the views module
+    // — and then image, options and the rest via user's config — to satisfy an
+    // admin listing these tests never render. The redirect entity schema above
+    // is all the constraint needs.
+    $this->installConfig(['system', 'user', 'field', 'mcp_sentinel']);
 
     // Governed role with the context permission.
     $role = Role::create(['id' => 'mcp_api', 'label' => 'MCP API']);
