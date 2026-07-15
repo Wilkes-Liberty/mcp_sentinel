@@ -6,6 +6,60 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`deny_publish` no longer silently unpublishes side-effect entities ([#30]).** The
+  presave publish-gate fired on every `EntityPublishedInterface` saved during a governed
+  request — not only the entity the agent targeted. Ten entity types implement that
+  interface on a standard install, and most are not editorial content. Pathauto mints a
+  `path_alias` as a side effect of saving a node, and Paragraphs saves referenced items:
+  both were stored unpublished. An unpublished alias does not resolve, so the page lost
+  its canonical URL; unpublished paragraphs are invisible to anonymous users, so a
+  published page rendered its content to nobody. The agent never touched those entities,
+  never asked to publish anything, and the write returned `200 OK`.
+
+  On one production site this had silently hidden **85 paragraphs across 17 published
+  pages** and orphaned **56 path aliases**. It looked correct to an authenticated editor;
+  only anonymous visitors saw the gap.
+
+  The gate now asks `McpModerationGate::governsPublishedStatus()`, which excludes
+  **composite children** (anything declaring `entity_revision_parent_type_field`, such as
+  paragraphs — never published in their own right, and saved as a side effect of the
+  host) and **routing metadata** (`path_alias` — its status means "is this alias active",
+  and the aliased path's own access still applies). The rule is structural rather than a
+  list of known module names, and it fails closed: an unfamiliar publishable entity type
+  stays governed.
+
+- **A denied publish on an unmoderated entity is now reported, not silently reverted
+  ([#30]).** The `McpDenyPublish` constraint previously covered only moderated entities;
+  unmoderated ones were left to the presave backstop, which forced `status` to 0 and let
+  the write return success. A caller could not distinguish a refusal from a publish, and
+  neither could anything built on top. The constraint now applies the same go-live rule
+  to both paths — deny only when the entity is being published and was not already
+  published — and reports a violation at `status`, surfacing as a 422 through JSON:API
+  and REST exactly as the moderated path does. `mcp_sentinel_entity_presave()` keeps the
+  `status=0` backstop for saves that never validate (custom code, Drush): the constraint
+  reports, the presave enforces.
+
+### Changed
+- **`mcp_sentinel_media_create` now creates media unpublished under a deny-publish
+  profile.** Media is published by default, which the publish gate correctly reads as a
+  go-live the agent never requested. The tool now states the invariant it always relied
+  on — an agent uploads, a human publishes — instead of depending on the presave backstop
+  to rewrite the status afterwards.
+
+### Upgrading
+- A write that previously returned `200 OK` with the entity quietly unpublished now
+  returns **422**. That is the point of the fix, but clients that send `status: true` (or
+  rely on an entity type's published-by-default) and treat the silent unpublish as
+  success will start seeing errors. Set the published state explicitly on create.
+- Entities already unpublished by the old behaviour do not self-heal. Sites adopting this
+  release should audit for publishable entities that a governed agent touched —
+  paragraphs referenced by published nodes, and paths whose aliases are all unpublished —
+  and republish them. Note that `entity_reference_revisions` pins a revision: repairing a
+  paragraph needs `setNewRevision(FALSE)` or the host keeps rendering the old one.
+
+[#30]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/30
+
 ## [1.7.0] - 2026-07-14
 
 ### Added

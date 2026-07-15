@@ -137,6 +137,16 @@ final class McpMediaUploadTool extends ToolBase {
       return ExecutableResult::failure($this->t('You do not have permission to create @bundle media.', ['@bundle' => $bundle]));
     }
 
+    // Media is published by default, which under a deny-publish profile would
+    // be a go-live the agent never asked for — the publish gate reports it as a
+    // violation and the upload fails. Create the item unpublished instead, so
+    // the tool states the invariant it has always relied on (an agent uploads,
+    // a human publishes) rather than depending on the presave backstop to
+    // silently rewrite the status after the fact.
+    if ($profile->deniesPublish()) {
+      $media->setUnpublished();
+    }
+
     try {
       $media->set($source_field, $values['source_value'] ?? '');
       foreach (($values['fields'] ?? []) as $name => $value) {

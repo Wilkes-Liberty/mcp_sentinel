@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\path_alias\Entity\PathAlias;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -69,6 +71,15 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
   private const MODERATED_TYPE = 'article';
 
   /**
+   * Machine name of a content type deliberately left out of any workflow.
+   *
+   * The unmoderated path is the one the gate used to enforce silently, so it
+   * needs its own bundle: a type with no workflow publishes via the status flag
+   * alone.
+   */
+  private const UNMODERATED_TYPE = 'page';
+
+  /**
    * The exact go-live denial message the constraint emits.
    */
   private const DENY_MESSAGE = 'Publishing is denied by MCP Sentinel.';
@@ -86,6 +97,7 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     $this->installSchema('node', ['node_access']);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
+    $this->installEntitySchema('path_alias');
     $this->installEntitySchema('content_moderation_state');
     $this->installConfig(['field', 'filter', 'system', 'node', 'user', 'content_moderation', 'mcp_sentinel']);
 
@@ -113,7 +125,10 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
 
     NodeType::create(['type' => self::MODERATED_TYPE, 'name' => 'Article'])->save();
+    NodeType::create(['type' => self::UNMODERATED_TYPE, 'name' => 'Page'])->save();
 
+    // Only the article bundle joins the workflow; the page bundle stays
+    // unmoderated so its published status is the status flag itself.
     $workflow = $this->createEditorialWorkflow();
     $this->addEntityTypeAndBundleToWorkflow($workflow, 'node', self::MODERATED_TYPE);
   }
@@ -130,8 +145,8 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
   /**
    * Whether the entity's violations include the deny-publish message.
    */
-  private function hasDenyViolation(Node $node): bool {
-    foreach ($node->validate() as $violation) {
+  private function hasDenyViolation(ContentEntityInterface $entity): bool {
+    foreach ($entity->validate() as $violation) {
       if ((string) $violation->getMessage() === self::DENY_MESSAGE) {
         return TRUE;
       }
@@ -278,6 +293,131 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     $node->set('moderation_state', 'published');
     $this->assertFalse($this->hasDenyViolation($node),
       'A profile that permits publishing must not fire the deny-publish gate.');
+  }
+
+  /**
+   * Creating an unmoderated entity published is a go-live: denied, and visibly.
+   *
+   * Before the gate covered this path, the presave backstop silently forced
+   * status back to 0 and the write returned success — the caller could not tell
+   * a refusal from a publish. The violation is what makes it observable.
+   */
+  public function testUnmoderatedCreatePublishedDenied(): void {
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'New page',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+
+    $this->assertTrue($this->hasDenyViolation($node),
+      'Creating an unmoderated entity published must be reported as a denied go-live, not silently unpublished.');
+  }
+
+  /**
+   * Creating an unmoderated entity unpublished is not a go-live: allowed.
+   */
+  public function testUnmoderatedCreateUnpublishedAllowed(): void {
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'New draft page',
+      'status' => 0,
+      'uid' => 1,
+    ]);
+
+    $this->assertFalse($this->hasDenyViolation($node),
+      'Creating an unmoderated entity unpublished is not a go-live and must be allowed.');
+  }
+
+  /**
+   * Editing an already-published unmoderated entity is not a go-live: allowed.
+   *
+   * The regression that matters most: an agent updating a live page must not be
+   * refused, and must not have the page unpublished out from under it.
+   */
+  public function testUnmoderatedEditInPlacePublishedAllowed(): void {
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'Live page',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+    $node->save();
+
+    $this->createGovernedAccount();
+    $node->setTitle('Live page, edited');
+
+    $this->assertTrue($node->isPublished(), 'Sanity: the node starts published.');
+    $this->assertFalse($this->hasDenyViolation($node),
+      'Editing an already-published unmoderated entity in place is not a go-live and must be allowed.');
+  }
+
+  /**
+   * Unpublishing an unmoderated entity is never a go-live: allowed.
+   */
+  public function testUnmoderatedPublishedToUnpublishedAllowed(): void {
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'Live page',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+    $node->save();
+
+    $this->createGovernedAccount();
+    $node->setUnpublished();
+
+    $this->assertFalse($this->hasDenyViolation($node),
+      'Unpublishing is not a go-live and must be allowed.');
+  }
+
+  /**
+   * A path alias is routing metadata and is never gated.
+   *
+   * Pathauto mints one as a side effect of saving a node. Gating it meant a
+   * governed write to a published node silently stripped that page's canonical
+   * URL: the alias was stored unpublished, so it stopped resolving.
+   */
+  public function testPathAliasNotGated(): void {
+    $this->createGovernedAccount();
+    $alias = PathAlias::create([
+      'path' => '/node/1',
+      'alias' => '/live-page',
+      'status' => 1,
+    ]);
+
+    foreach ($alias->validate() as $violation) {
+      $this->assertNotSame(self::DENY_MESSAGE, (string) $violation->getMessage(),
+        'A path alias must never be gated by the publish gate.');
+    }
+
+    $alias->save();
+    $this->assertTrue($alias->isPublished(),
+      'A governed save must leave a path alias published, or the page loses its canonical URL.');
+  }
+
+  /**
+   * The presave backstop still forces an ungated, unvalidated save unpublished.
+   *
+   * The constraint reports at the validated seams (JSON:API, REST, forms); this
+   * covers the path that never validates — a direct save from custom code or a
+   * Drush script — where forcing status to 0 remains the only available guard.
+   */
+  public function testPresaveBackstopStillUnpublishesDirectSave(): void {
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'Sneaky page',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+    // Save without validating — the seam the constraint cannot cover.
+    $node->save();
+
+    $this->assertFalse($node->isPublished(),
+      'The presave backstop must still force an unvalidated governed save unpublished.');
   }
 
 }

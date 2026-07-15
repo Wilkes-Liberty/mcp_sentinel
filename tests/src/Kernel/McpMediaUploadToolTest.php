@@ -152,6 +152,8 @@ final class McpMediaUploadToolTest extends KernelTestBase {
     $this->assertNotNull($loaded, 'A media entity with the returned ID must exist.');
     $this->assertSame('Test Media Item', $loaded->label(),
       'Persisted media must carry the supplied name.');
+    $this->assertFalse($loaded->isPublished(),
+      'An upload under a deny-publish profile must be created unpublished: the agent uploads, a human publishes.');
   }
 
   /**
