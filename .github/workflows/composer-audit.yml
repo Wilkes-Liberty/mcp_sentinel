@@ -1,7 +1,10 @@
 name: composer audit
 on:
   pull_request: { branches: ['**'] }
-  push: { branches: ['1.0.x'] }
+  # The development branch is 1.x. This said '1.0.x' — a branch that does not
+  # exist here (it survives on the drupalcode mirror, where it is still HEAD),
+  # so the push trigger never fired and only the pull_request one ever ran.
+  push: { branches: ['1.x'] }
 permissions:
   contents: read
 jobs:

@@ -54,7 +54,8 @@ final class McpAdminGrantListBuilder extends EntityListBuilder {
   /**
    * {@inheritdoc}
    *
-   * Active (non-revoked, not-yet-expired) grants first, then expired, then revoked.
+   * Active (non-revoked, not-yet-expired) grants first, then expired, then
+   * revoked.
    */
   protected function getEntityIds(): array {
     return array_values(

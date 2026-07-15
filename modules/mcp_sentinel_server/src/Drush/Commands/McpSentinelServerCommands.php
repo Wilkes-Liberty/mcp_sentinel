@@ -78,7 +78,8 @@ final class McpSentinelServerCommands extends DrushCommands {
     // Read-only content auditor: content reads only, no writes. Carries the
     // content-editor role (so it resolves to the content policy) but only the
     // mcp_read scope, so every write tool is unreachable at the scope layer.
-    // Pair with the connector's "auditor" preset for reports and content audits.
+    // Pair with the connector's "auditor" preset for reports and content
+    // audits.
     'content-auditor' => ['mcp_content_editor', ['mcp_read']],
     // Read-only config auditor: config read only, no writes. Reads config for
     // governance/audits (config_get/list require mcp_config_read) while the

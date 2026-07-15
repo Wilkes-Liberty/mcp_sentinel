@@ -1,0 +1,131 @@
+name: Tests
+
+# Runs the PHPUnit suite on every PR and on push to 1.x.
+#
+# Until this existed, nothing ran the tests: a PR could go green, merge, and
+# ship while the suite was broken, and the only thing between a regression and a
+# release was whoever remembered to run PHPUnit by hand. For a module whose job
+# is enforcing a security boundary, that is the wrong guarantee — see issue #32.
+#
+# Unit + Kernel are the blocking gate. Functional tests need a webserver and are
+# not run here; that is a deliberate first step, not an oversight.
+on:
+  pull_request: { branches: ['**'] }
+  push: { branches: ['1.x'] }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phpunit:
+    name: PHPUnit (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every combination: a failure on one core version is a real
+      # result, not a reason to hide the other.
+      fail-fast: false
+      matrix:
+        include:
+          # The floor and the ceiling of core_version_requirement (^10.3 || ^11).
+          - drupal: '10.3'
+            php: '8.3'
+          - drupal: '11'
+            php: '8.4'
+
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # gd: image module. pdo_sqlite/sqlite3: the kernel-test database.
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Scaffold a Drupal site
+        env:
+          DRUPAL_VERSION: ${{ matrix.drupal }}
+        run: |
+          composer create-project "drupal/recommended-project:^${DRUPAL_VERSION}" drupal \
+            --no-interaction --no-install --no-progress
+          cd drupal
+          # Some deps are dev-stability (mcp_server is ^2.0@dev).
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.phpstan/extension-installer true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          # Install the working copy, not the released package.
+          composer config repositories.mcp_sentinel path ../module
+
+      - name: Install dependencies
+        working-directory: drupal
+        env:
+          DRUPAL_VERSION: ${{ matrix.drupal }}
+        run: |
+          composer require "drupal/mcp_sentinel:*@dev" --no-interaction --no-progress
+          # core-dev brings PHPUnit; the rest are the contrib modules the tests
+          # enable, mirroring the module's own require-dev.
+          composer require --dev "drupal/core-dev:^${DRUPAL_VERSION}" \
+            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
+            --no-interaction --no-progress
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          # A path repo can silently fall back to the registry package; if that
+          # happened the suite would pass against code nobody changed.
+          test -L web/modules/contrib/mcp_sentinel \
+            || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/mcp_sentinel
+
+      - name: PHPUnit — Unit + Kernel (blocking)
+        working-directory: drupal
+        env:
+          # Kernel tests need a database; SQLite keeps this hermetic with no
+          # service container. Production runs PostgreSQL, so a storage-specific
+          # regression would not surface here — Functional coverage is the
+          # follow-up (#32).
+          SIMPLETEST_DB: sqlite://localhost/:memory:
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+        run: |
+          vendor/bin/phpunit -c web/core/phpunit.xml.dist \
+            web/modules/contrib/mcp_sentinel/tests/src/Unit \
+            web/modules/contrib/mcp_sentinel/tests/src/Kernel
+
+  phpcs:
+    name: Drupal coding standards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: module
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install PHPCS + the Drupal standard
+        run: |
+          composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer global require --no-interaction --no-progress \
+            squizlabs/php_codesniffer drupal/coder
+
+      - name: phpcs (Drupal, DrupalPractice)
+        working-directory: module
+        run: |
+          ~/.composer/vendor/bin/phpcs --standard=Drupal,DrupalPractice \
+            --extensions=php,module,inc,install,test,profile,theme,yml \
+            .
