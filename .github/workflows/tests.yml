@@ -73,12 +73,18 @@ jobs:
         env:
           DRUPAL_VERSION: ${{ matrix.drupal }}
         run: |
-          composer require "drupal/mcp_sentinel:*@dev" --no-interaction --no-progress
+          # -W (--with-all-dependencies) on both: recommended-project ships a
+          # composer.lock, so each require is a *partial* update and composer
+          # refuses to move transitive packages the lock pins — core-dev wants
+          # phpunit, phpunit wants sebastian/diff ^6, the lock says 7.0.0, and
+          # resolution fails. -W lets it move them.
+          composer require -W --no-interaction --no-progress \
+            "drupal/mcp_sentinel:*@dev"
           # core-dev brings PHPUnit; the rest are the contrib modules the tests
           # enable, mirroring the module's own require-dev.
-          composer require --dev "drupal/core-dev:^${DRUPAL_VERSION}" \
-            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
-            --no-interaction --no-progress
+          composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:^${DRUPAL_VERSION}" \
+            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev"
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
