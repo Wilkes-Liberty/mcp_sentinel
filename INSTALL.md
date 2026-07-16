@@ -11,7 +11,7 @@ extension points.
 
 ## Requirements
 
-- Drupal 10.3+ or Drupal 11.
+- Drupal 10.6+ or Drupal 11.3+ — the branches upstream still supports.
 - PHP matching your Drupal core requirement.
 
 ### Hard dependencies (installed automatically by Composer)
