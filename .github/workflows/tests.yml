@@ -30,11 +30,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor and the ceiling of core_version_requirement (^10.3 || ^11).
-          - drupal: '10.3'
-            php: '8.3'
+          # Drupal 11 only, deliberately — see issue #35.
+          #
+          # info.yml claims ^10.3 || ^11, but the suite cannot run on Drupal 10.
+          # It is written with PHP 8 attributes (#[Group], #[DataProvider],
+          # #[CoversClass], #[RunTestsInSeparateProcesses]), which only
+          # PHPUnit 10+ reads, and every drupal/core-dev in the 10.x range
+          # hard-requires phpunit ^9.6 — there is no combination that satisfies
+          # both. Worse, 9.6 does not error on an attribute it cannot parse: it
+          # ignores it, so a 10.3 leg collects 53 of 364 tests and reports green
+          # on a suite it silently dropped.
+          #
+          # Testing only what can actually be tested, rather than shipping a leg
+          # that lies. #35 carries the real decision: port the suite to
+          # annotations so it runs on PHPUnit 9.6, or drop the ^10.3 claim.
           - drupal: '11'
             php: '8.4'
+            phpunit: '^11.5'
 
     steps:
       - name: Checkout the module
@@ -72,13 +84,36 @@ jobs:
         working-directory: drupal
         env:
           DRUPAL_VERSION: ${{ matrix.drupal }}
+          PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
-          composer require "drupal/mcp_sentinel:*@dev" --no-interaction --no-progress
-          # core-dev brings PHPUnit; the rest are the contrib modules the tests
-          # enable, mirroring the module's own require-dev.
-          composer require --dev "drupal/core-dev:^${DRUPAL_VERSION}" \
-            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
-            --no-interaction --no-progress
+          # -W (--with-all-dependencies) on both: recommended-project ships a
+          # composer.lock, so each require is a *partial* update and composer
+          # refuses to move transitive packages the lock pins — core-dev wants
+          # phpunit, phpunit wants sebastian/diff ^6, the lock says 7.0.0, and
+          # resolution fails. -W lets it move them.
+          composer require -W --no-interaction --no-progress \
+            "drupal/mcp_sentinel:*@dev"
+          # core-dev brings PHPUnit; drush because the module ships Drush
+          # commands whose tests instantiate them (they extend
+          # Drush\Commands\DrushCommands); the rest are the contrib modules the
+          # tests enable, mirroring the module's own require-dev.
+          composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:^${DRUPAL_VERSION}" \
+            "phpunit/phpunit:${PHPUNIT_VERSION}" \
+            "drush/drush:^13" \
+            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev"
+
+      - name: Report the versions actually under test
+        working-directory: drupal
+        run: |
+          # The 10.3 leg silently collected 53 of 364 tests when composer
+          # resolved PHPUnit 9.6, which ignores the suite's attributes. Print
+          # what resolved so a wrong version is visible rather than inferred
+          # from a suspiciously small test count.
+          php -r 'echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";' \
+            -d auto_prepend_file=vendor/autoload.php || true
+          vendor/bin/phpunit --version
+          vendor/bin/drush --version || true
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
@@ -96,7 +131,9 @@ jobs:
           # service container. Production runs PostgreSQL, so a storage-specific
           # regression would not surface here — Functional coverage is the
           # follow-up (#32).
-          SIMPLETEST_DB: sqlite://localhost/:memory:
+          # Quoted: the value ends in a colon, which YAML would otherwise read
+          # as a mapping key and refuse to parse the file at all.
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
         run: |
