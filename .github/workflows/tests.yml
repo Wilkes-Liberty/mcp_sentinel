@@ -119,12 +119,14 @@ jobs:
           # Print what actually resolved, so a wrong version is visible rather
           # than inferred from a suspiciously small test count.
           #
-          # -d must precede -r: php applies ini settings left to right, so with
-          # -r first the autoloader is never prepended, Composer\InstalledVersions
-          # is undefined, and the line fatals — printing the label and then
-          # nothing, which reads as an answer rather than a failure.
-          php -d auto_prepend_file=vendor/autoload.php \
-            -r 'echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";'
+          # require the autoloader inline: php ignores auto_prepend_file for -r
+          # code, so loading it that way leaves Composer\InstalledVersions
+          # undefined and the line fatals after echoing its label. With the
+          # `|| true` this step used to carry, that fatal was invisible and the
+          # next command's output landed on the "Drupal core:" line — so the
+          # step confidently reported PHPUnit's version as Drupal's. No `|| true`
+          # here: a probe that cannot answer must fail, not improvise.
+          php -r 'require "vendor/autoload.php"; echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";'
           vendor/bin/phpunit --version
           vendor/bin/drush --version || true
 
