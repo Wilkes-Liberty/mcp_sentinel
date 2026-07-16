@@ -18,6 +18,8 @@ use PHPUnit\Framework\Attributes\Group;
  * SSN, credit card) and for custom patterns.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpDlp
+ *
+ * @group mcp_sentinel
  */
 #[CoversClass(\Drupal\mcp_sentinel\Service\McpDlp::class)]
 #[Group('mcp_sentinel')]

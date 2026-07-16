@@ -2,7 +2,7 @@ name: 'MCP Sentinel GraphQL'
 type: module
 description: 'Extends MCP Sentinel governance (mutation gating, field redaction, audit, schema discovery) to the GraphQL Compose endpoint for MCP requests.'
 package: 'AI / MCP'
-core_version_requirement: ^10.3 || ^11
+core_version_requirement: ^10.6 || ^11
 
 dependencies:
   - mcp_sentinel:mcp_sentinel

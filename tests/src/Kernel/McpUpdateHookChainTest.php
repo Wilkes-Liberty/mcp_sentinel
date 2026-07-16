@@ -24,6 +24,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * on an already-updated site must not throw.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

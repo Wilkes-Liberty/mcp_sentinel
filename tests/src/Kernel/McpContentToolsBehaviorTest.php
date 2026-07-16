@@ -25,6 +25,8 @@ use Symfony\Component\HttpFoundation\Request;
  *   governance respected — ungoverned account still calls the tool.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

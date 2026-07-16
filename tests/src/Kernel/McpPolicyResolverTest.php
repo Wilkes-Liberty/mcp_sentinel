@@ -16,6 +16,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Tests the MCP policy profile entity and resolver.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpPolicyResolverTest extends KernelTestBase {

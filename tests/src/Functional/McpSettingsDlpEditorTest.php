@@ -9,6 +9,8 @@ use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Tests the DLP patterns multi-row editor on the settings form.
+ *
+ * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
 final class McpSettingsDlpEditorTest extends BrowserTestBase {

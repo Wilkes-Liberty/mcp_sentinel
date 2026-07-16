@@ -21,7 +21,7 @@
     "source": "https://git.drupalcode.org/project/mcp_sentinel"
   },
   "require": {
-    "drupal/core": "^10.3 || ^11",
+    "drupal/core": "^10.6 || ^11",
     "drupal/tool": "*",
     "drupal/key": "^1.20",
     "drupal/simple_oauth": "^6.1",

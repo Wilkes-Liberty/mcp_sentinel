@@ -30,20 +30,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Drupal 11 only, deliberately — see issue #35.
+          # The floor and the ceiling of core_version_requirement (^10.6 || ^11).
           #
-          # info.yml claims ^10.3 || ^11, but the suite cannot run on Drupal 10.
-          # It is written with PHP 8 attributes (#[Group], #[DataProvider],
-          # #[CoversClass], #[RunTestsInSeparateProcesses]), which only
-          # PHPUnit 10+ reads, and every drupal/core-dev in the 10.x range
-          # hard-requires phpunit ^9.6 — there is no combination that satisfies
-          # both. Worse, 9.6 does not error on an attribute it cannot parse: it
-          # ignores it, so a 10.3 leg collects 53 of 364 tests and reports green
-          # on a suite it silently dropped.
+          # 10.6 is the oldest Drupal branch still supported upstream (EOL
+          # 2026-12-16); 10.3 has been EOL since 2025-06-16, which is why the
+          # floor moved. §13: publish for the oldest *supported* release, not
+          # the one we happen to run — orgs upgrade slowly and a claim nobody
+          # can verify is not a claim.
           #
-          # Testing only what can actually be tested, rather than shipping a leg
-          # that lies. #35 carries the real decision: port the suite to
-          # annotations so it runs on PHPUnit 9.6, or drop the ^10.3 claim.
+          # phpunit is pinned per leg. Drupal 10's core-dev hard-requires ^9.6,
+          # and 9.6 predates PHP 8 attributes: it does not error on one it
+          # cannot read, it ignores it. That is why the suite also carries
+          # annotations (@group, @dataProvider, @runTestsInSeparateProcesses)
+          # alongside its attributes — 9.6 reads the annotations, 10/11 read the
+          # attributes, and this leg is what keeps the pair honest. Without it a
+          # 10.x leg would silently collect 53 of 364 tests and report green.
+          - drupal: '10.6'
+            php: '8.3'
+            phpunit: '^9.6'
           - drupal: '11'
             php: '8.4'
             phpunit: '^11.5'

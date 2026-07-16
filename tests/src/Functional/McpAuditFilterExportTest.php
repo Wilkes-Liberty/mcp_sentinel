@@ -12,6 +12,8 @@ use Drupal\Tests\BrowserTestBase;
  *
  * @group mcp_sentinel
  * @covers \Drupal\mcp_sentinel\Controller\McpAuditController
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpAuditFilterExportTest extends BrowserTestBase {

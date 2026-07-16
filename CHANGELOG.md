@@ -7,6 +7,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Drupal 10.6 is tested, not just claimed ([#35]).** `info.yml` declared `^10.3 || ^11` while
+  the suite could only ever run on 11, so half the support claim had never been verified. The
+  suite is written with PHP 8 attributes, which only PHPUnit 10+ reads, and every
+  `drupal/core-dev` in the 10.x range hard-requires PHPUnit `^9.6` — and 9.6 does not error on
+  an attribute it cannot parse, it **ignores** it, silently collecting 53 of 364 tests. The
+  suite now carries the equivalent annotations (`@group`, `@dataProvider`,
+  `@runTestsInSeparateProcesses`) alongside its attributes: PHPUnit 9.6 reads the annotations,
+  10/11 read the attributes. CI gained a **Drupal 10.6 / PHP 8.3 / PHPUnit 9.6** leg, so the
+  claim is now enforced rather than asserted.
+
+### Changed
+- **Core floor `^10.3` → `^10.6`.** Drupal 10.3 has been EOL since 2025-06-16; 10.6 is the
+  oldest branch still supported upstream (EOL 2026-12-16). The floor named a dead branch — stale
+  metadata that advertised a version nobody should run. Support stays as wide as upstream
+  supports, because orgs upgrade slowly and dropping support discourages adoption; it is not
+  narrowed to what we happen to run. Applies to the main module and the `server`, `graphql`, and
+  `approval` submodules.
+
+[#35]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/35
+
+### Added
 - **CI runs the test suite ([#32]).** The module had 364 tests and nothing executed them: CI was
   CodeQL, `composer audit`, a CHANGELOG gate and Dependabot auto-merge, so a PR could go green,
   merge and ship while the suite was broken. For a module whose job is enforcing a security

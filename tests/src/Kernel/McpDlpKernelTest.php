@@ -36,6 +36,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpDlp
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[CoversClass(\Drupal\mcp_sentinel\Service\McpDlp::class)]
 #[Group('mcp_sentinel')]

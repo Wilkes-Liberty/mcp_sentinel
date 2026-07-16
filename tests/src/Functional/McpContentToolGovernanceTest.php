@@ -33,6 +33,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * cookie-session CSRF token requirement.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpContentToolGovernanceTest extends BrowserTestBase {

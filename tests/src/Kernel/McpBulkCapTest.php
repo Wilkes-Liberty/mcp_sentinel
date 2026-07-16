@@ -18,6 +18,8 @@ use Symfony\Component\HttpFoundation\Request;
  * Tests result-count and response-size caps on McpBulkOperationsTool.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

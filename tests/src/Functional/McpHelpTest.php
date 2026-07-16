@@ -11,6 +11,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Tests the MCP Sentinel hook_help() overview page.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpHelpTest extends BrowserTestBase {

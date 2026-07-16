@@ -37,6 +37,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * cookie-session CSRF requirement. GET requests use Mink cookies.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpOauthChannelTest extends BrowserTestBase {

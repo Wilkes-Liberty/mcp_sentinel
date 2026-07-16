@@ -23,6 +23,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * bucket. This validates the decoupling seam used by mcp_sentinel_approval.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
