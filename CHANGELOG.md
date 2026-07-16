@@ -62,7 +62,9 @@ working range is now `^10.6 || ^11.3`, and every floor in it is exercised by CI.
   Support stays as wide as upstream supports — orgs upgrade slowly and a narrow floor
   discourages adoption — but no wider: an EOL branch is not a kindness to advertise. Applies to
   `composer.json` and to the main module plus the `server`, `graphql` and `approval`
-  submodules.
+  submodules, and to the `README` / `INSTALL` requirements — which advertised "Drupal 10.3+ or
+  11", the very claim this release corrects, and are the text the drupal.org project page
+  mirrors.
 
   **Upgrading:** sites on Drupal 11.0–11.2 will not receive this release. Those branches are
   EOL upstream, and the module never actually worked on 11.0 or 11.1 — see the fatal below.
