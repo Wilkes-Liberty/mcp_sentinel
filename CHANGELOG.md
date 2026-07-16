@@ -6,13 +6,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-- **The `README` and `INSTALL` requirements still advertised "Drupal 10.3+ or 11".** That is the
-  claim 1.9.0 corrected everywhere it is enforced — `composer.json` and the four `info.yml`
-  files — but the prose kept repeating it, and it is the text the drupal.org project page
-  mirrors. Now 10.6+ or 11.3+. Landed after the 1.9.0 tag, so it ships in the next release; the
-  1.9.0 metadata was already correct, and composer refuses a 10.3 install regardless.
-
 ## [1.9.0] - 2026-07-16
 
 This release makes the module's core-compatibility claim true. `^10.3 || ^11` was fiction in
@@ -68,8 +61,10 @@ working range is now `^10.6 || ^11.3`, and every floor in it is exercised by CI.
 
   Support stays as wide as upstream supports — orgs upgrade slowly and a narrow floor
   discourages adoption — but no wider: an EOL branch is not a kindness to advertise. Applies to
-  `composer.json` and to the main module plus the `server`, `graphql` and `approval`
-  submodules.
+  `composer.json`, to the main module plus the `server`, `graphql` and `approval` submodules,
+  and to the `README` / `INSTALL` requirements — which kept advertising "Drupal 10.3+ or 11",
+  the very claim this release corrects, and which are the text the drupal.org project page
+  mirrors.
 
   **Upgrading:** sites on Drupal 11.0–11.2 will not receive this release. Those branches are
   EOL upstream, and the module never actually worked on 11.0 or 11.1 — see the fatal below.
