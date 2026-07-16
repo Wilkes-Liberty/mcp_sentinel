@@ -2,7 +2,7 @@ name: 'MCP Sentinel'
 type: module
 description: 'Enterprise governance for AI-agent access to Drupal — policy profiles, field redaction, DLP, tamper-evident audit logging, and reliable webhooks over MCP / JSON:API / GraphQL.'
 package: 'AI / MCP'
-core_version_requirement: ^10.6 || ^11
+core_version_requirement: ^10.6 || ^11.3
 
 # Hard dependencies — modules whose APIs we call directly in PHP.
 dependencies:

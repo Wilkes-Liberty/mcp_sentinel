@@ -43,12 +43,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and removed in 12; each class documents that this converts back when the floor reaches 11.1.
 
 ### Changed
-- **Core floor `^10.3` → `^10.6`.** Drupal 10.3 has been EOL since 2025-06-16; 10.6 is the
-  oldest branch still supported upstream (EOL 2026-12-16). The floor named a dead branch — stale
-  metadata that advertised a version nobody should run. Support stays as wide as upstream
-  supports, because orgs upgrade slowly and dropping support discourages adoption; it is not
-  narrowed to what we happen to run. Applies to the main module and the `server`, `graphql`, and
-  `approval` submodules.
+- **Core requirement `^10.3 || ^11` → `^10.6 || ^11.3`.** Both halves named dead branches.
+  Drupal 10.3 has been EOL since 2025-06-16, and `^11` claimed 11.0 (EOL 2025-06-16), 11.1
+  (EOL 2025-12-10) and 11.2 (EOL 2026-06-17). Per upstream's lifecycle the only live branches
+  are **10.6** and **11.3** (both EOL 2026-12-16) and **11.4** (EOL 2027-07-07), so those are
+  what the module claims.
+
+  Support stays as wide as upstream supports — orgs upgrade slowly and a narrow floor
+  discourages adoption — but no wider: an EOL branch is not a kindness to advertise. Applies to
+  `composer.json` and to the main module plus the `server`, `graphql` and `approval`
+  submodules.
+
+  CI runs the **floor of each range** (10.6 and 11.3) as well as the ceiling (11.4). The 11
+  floor is not ceremony: 11.0 and 11.1 sat inside a released `^11` for versions while the
+  module fataled on both, and nothing caught it because the only leg ran 11.4.
 
 [#35]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/35
 

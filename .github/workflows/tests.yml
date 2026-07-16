@@ -30,13 +30,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor and the ceiling of core_version_requirement (^10.6 || ^11).
+          # The floor of each declared range, plus the ceiling
+          # (^10.6 || ^11.3).
           #
-          # 10.6 is the oldest Drupal branch still supported upstream (EOL
-          # 2026-12-16); 10.3 has been EOL since 2025-06-16, which is why the
-          # floor moved. §13: publish for the oldest *supported* release, not
-          # the one we happen to run — orgs upgrade slowly and a claim nobody
-          # can verify is not a claim.
+          # Support the oldest branch upstream still supports, not the one we
+          # happen to run: orgs upgrade slowly and a narrow floor discourages
+          # adoption. But "supported upstream" is the test — an EOL branch is
+          # not a kindness to claim, it is a lie. Per endoflife.date on
+          # 2026-07-16 the only live branches are 10.6 and 11.3 (both EOL
+          # 2026-12-16) and 11.4 (EOL 2027-07-07). 11.0/11.1/11.2 are dead,
+          # which is why the 11 floor is 11.3 and not ^11.
+          #
+          # Every floor gets a leg, because a claim CI does not exercise is not
+          # a claim. That is not theoretical: 11.0 and 11.1 sat inside a
+          # released ^11 for versions, and the module fataled on both — nobody
+          # noticed, because the only leg ran 11.4.
+          #
+          # Recheck when 10.6/11.3 go EOL on 2026-12-16.
           #
           # phpunit is pinned per leg. Drupal 10's core-dev hard-requires ^9.6,
           # and 9.6 predates PHP 8 attributes: it does not error on one it
@@ -54,6 +64,9 @@ jobs:
           - drupal: '10.6'
             php: '8.3'
             phpunit: '^9.6'
+          - drupal: '11.3'
+            php: '8.3'
+            phpunit: '^11.5'
           - drupal: '11'
             php: '8.4'
             phpunit: '^11.5'
