@@ -51,7 +51,7 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 
 ## Requirements
 
-- Drupal 10.3+ or 11
+- Drupal 10.6+ or 11.3+
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
 - [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
   signing secret and (optionally) the audit encryption key outside exported
