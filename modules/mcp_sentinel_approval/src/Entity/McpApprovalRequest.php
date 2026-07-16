@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel_approval\Entity;
 
-use Drupal\Core\Entity\Attribute\ContentEntityType;
 use Drupal\Core\Entity\ContentEntityBase;
 use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\mcp_sentinel_approval\McpApprovalRequestListBuilder;
 
 /**
  * Defines the MCP approval request content entity.
@@ -18,30 +16,36 @@ use Drupal\mcp_sentinel_approval\McpApprovalRequestListBuilder;
  * Each row records a governed destructive operation that was queued for human
  * approval instead of executing immediately. An authorized human approves or
  * denies it; on approval the stored operation is replayed.
+ *
+ * Annotation rather than a #[ContentEntityType] attribute: attribute-based
+ * entity types require Drupal 11.1, and on 10.6/11.0 an attribute yields no
+ * entity type at all. See McpPolicyProfile for the full reasoning and the
+ * condition for converting back.
+ *
+ * @ContentEntityType(
+ *   id = "mcp_approval_request",
+ *   label = @Translation("MCP approval request"),
+ *   label_collection = @Translation("MCP approval requests"),
+ *   label_singular = @Translation("MCP approval request"),
+ *   label_plural = @Translation("MCP approval requests"),
+ *   base_table = "mcp_approval_request",
+ *   admin_permission = "approve mcp sentinel operations",
+ *   entity_keys = {
+ *     "id" = "id",
+ *     "uuid" = "uuid",
+ *     "label" = "id",
+ *   },
+ *   handlers = {
+ *     "list_builder" = "Drupal\mcp_sentinel_approval\McpApprovalRequestListBuilder",
+ *     "route_provider" = {
+ *       "html" = "Drupal\Core\Entity\Routing\AdminHtmlRouteProvider",
+ *     },
+ *   },
+ *   links = {
+ *     "collection" = "/admin/reports/mcp-sentinel/approvals",
+ *   },
+ * )
  */
-#[ContentEntityType(
-  id: 'mcp_approval_request',
-  label: new TranslatableMarkup('MCP approval request'),
-  label_collection: new TranslatableMarkup('MCP approval requests'),
-  label_singular: new TranslatableMarkup('MCP approval request'),
-  label_plural: new TranslatableMarkup('MCP approval requests'),
-  base_table: 'mcp_approval_request',
-  admin_permission: 'approve mcp sentinel operations',
-  entity_keys: [
-    'id' => 'id',
-    'uuid' => 'uuid',
-    'label' => 'id',
-  ],
-  handlers: [
-    'list_builder' => McpApprovalRequestListBuilder::class,
-    'route_provider' => [
-      'html' => 'Drupal\Core\Entity\Routing\AdminHtmlRouteProvider',
-    ],
-  ],
-  links: [
-    'collection' => '/admin/reports/mcp-sentinel/approvals',
-  ],
-)]
 final class McpApprovalRequest extends ContentEntityBase implements McpApprovalRequestInterface {
 
   /**
