@@ -30,13 +30,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor and the ceiling of core_version_requirement (^10.6 || ^11).
+          # The floor of each declared range, plus the ceiling
+          # (^10.6 || ^11.3).
           #
-          # 10.6 is the oldest Drupal branch still supported upstream (EOL
-          # 2026-12-16); 10.3 has been EOL since 2025-06-16, which is why the
-          # floor moved. §13: publish for the oldest *supported* release, not
-          # the one we happen to run — orgs upgrade slowly and a claim nobody
-          # can verify is not a claim.
+          # Support the oldest branch upstream still supports, not the one we
+          # happen to run: orgs upgrade slowly and a narrow floor discourages
+          # adoption. But "supported upstream" is the test — an EOL branch is
+          # not a kindness to claim, it is a lie. Per endoflife.date on
+          # 2026-07-16 the only live branches are 10.6 and 11.3 (both EOL
+          # 2026-12-16) and 11.4 (EOL 2027-07-07). 11.0/11.1/11.2 are dead,
+          # which is why the 11 floor is 11.3 and not ^11.
+          #
+          # Every floor gets a leg, because a claim CI does not exercise is not
+          # a claim. That is not theoretical: 11.0 and 11.1 sat inside a
+          # released ^11 for versions, and the module fataled on both — nobody
+          # noticed, because the only leg ran 11.4.
+          #
+          # Recheck when 10.6/11.3 go EOL on 2026-12-16.
+          #
+          # `constraint` is spelled out per leg rather than derived from
+          # `drupal`, because the obvious derivation is wrong: ^11.3 means
+          # ">=11.3 <12" and resolves to 11.4, so an "11.3" leg built that way
+          # silently retests the ceiling. It went green doing exactly that
+          # before the version probe printed "Drupal core: 11.4.4" underneath
+          # the words "Drupal 11.3". A floor leg pins its minor (~11.3.0); the
+          # ceiling leg deliberately floats (^11).
           #
           # phpunit is pinned per leg. Drupal 10's core-dev hard-requires ^9.6,
           # and 9.6 predates PHP 8 attributes: it does not error on one it
@@ -52,9 +70,15 @@ jobs:
           # the count floor in the PHPUnit step rather than trusted — a green
           # check has already twice meant "ran almost nothing" here.
           - drupal: '10.6'
+            constraint: '~10.6.0'
             php: '8.3'
             phpunit: '^9.6'
+          - drupal: '11.3'
+            constraint: '~11.3.0'
+            php: '8.3'
+            phpunit: '^11.5'
           - drupal: '11'
+            constraint: '^11'
             php: '8.4'
             phpunit: '^11.5'
 
@@ -74,9 +98,9 @@ jobs:
 
       - name: Scaffold a Drupal site
         env:
-          DRUPAL_VERSION: ${{ matrix.drupal }}
+          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
         run: |
-          composer create-project "drupal/recommended-project:^${DRUPAL_VERSION}" drupal \
+          composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
             --no-interaction --no-install --no-progress
           cd drupal
           # Some deps are dev-stability (mcp_server is ^2.0@dev).
@@ -93,7 +117,7 @@ jobs:
       - name: Install dependencies
         working-directory: drupal
         env:
-          DRUPAL_VERSION: ${{ matrix.drupal }}
+          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
           PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
           # -W (--with-all-dependencies) on both: recommended-project ships a
@@ -108,17 +132,17 @@ jobs:
           # Drush\Commands\DrushCommands); the rest are the contrib modules the
           # tests enable, mirroring the module's own require-dev.
           composer require -W --dev --no-interaction --no-progress \
-            "drupal/core-dev:^${DRUPAL_VERSION}" \
+            "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
             "phpunit/phpunit:${PHPUNIT_VERSION}" \
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev"
 
-      - name: Report the versions actually under test
+      - name: Assert the versions actually under test
         working-directory: drupal
+        env:
+          EXPECTED_DRUPAL: ${{ matrix.drupal }}
         run: |
-          # Print what actually resolved, so a wrong version is visible rather
-          # than inferred from a suspiciously small test count.
-          #
+          set -euo pipefail
           # require the autoloader inline: php ignores auto_prepend_file for -r
           # code, so loading it that way leaves Composer\InstalledVersions
           # undefined and the line fatals after echoing its label. With the
@@ -126,9 +150,21 @@ jobs:
           # next command's output landed on the "Drupal core:" line — so the
           # step confidently reported PHPUnit's version as Drupal's. No `|| true`
           # here: a probe that cannot answer must fail, not improvise.
-          php -r 'require "vendor/autoload.php"; echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";'
+          core="$(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/core");')"
+          echo "Drupal core: ${core}"
           vendor/bin/phpunit --version
           vendor/bin/drush --version || true
+
+          # Assert, do not merely print. A leg named "11.3" resolved and tested
+          # 11.4.4 and went green: ^11.3 means ">=11.3 <12", so the floor leg
+          # quietly retested the ceiling and the range it existed to protect was
+          # covered by nothing. Printing the resolved version had already caught
+          # it — but only because a human happened to read the line. Checking it
+          # is what makes the leg mean what its name says.
+          case "${core}" in
+            "${EXPECTED_DRUPAL}".*) ;;
+            *) echo "::error::Leg claims Drupal ${EXPECTED_DRUPAL} but resolved ${core}. The leg is testing a version it does not name — fix matrix.constraint rather than this check."; exit 1 ;;
+          esac
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
