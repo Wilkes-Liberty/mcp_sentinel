@@ -43,8 +43,14 @@ jobs:
           # cannot read, it ignores it. That is why the suite also carries
           # annotations (@group, @dataProvider, @runTestsInSeparateProcesses)
           # alongside its attributes — 9.6 reads the annotations, 10/11 read the
-          # attributes, and this leg is what keeps the pair honest. Without it a
-          # 10.x leg would silently collect 53 of 364 tests and report green.
+          # attributes, and this leg is what keeps the pair honest. Drop the
+          # annotations and 9.6 stops expanding the data providers: the Unit
+          # directory alone falls from 62 tests to 53, without erroring.
+          #
+          # Both PHPUnit versions must therefore report the *same* test count.
+          # That equality is the whole point of this leg, and it is asserted by
+          # the count floor in the PHPUnit step rather than trusted — a green
+          # check has already twice meant "ran almost nothing" here.
           - drupal: '10.6'
             php: '8.3'
             phpunit: '^9.6'
@@ -110,12 +116,15 @@ jobs:
       - name: Report the versions actually under test
         working-directory: drupal
         run: |
-          # The 10.3 leg silently collected 53 of 364 tests when composer
-          # resolved PHPUnit 9.6, which ignores the suite's attributes. Print
-          # what resolved so a wrong version is visible rather than inferred
-          # from a suspiciously small test count.
-          php -r 'echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";' \
-            -d auto_prepend_file=vendor/autoload.php || true
+          # Print what actually resolved, so a wrong version is visible rather
+          # than inferred from a suspiciously small test count.
+          #
+          # -d must precede -r: php applies ini settings left to right, so with
+          # -r first the autoloader is never prepended, Composer\InstalledVersions
+          # is undefined, and the line fatals — printing the label and then
+          # nothing, which reads as an answer rather than a failure.
+          php -d auto_prepend_file=vendor/autoload.php \
+            -r 'echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";'
           vendor/bin/phpunit --version
           vendor/bin/drush --version || true
 
@@ -140,10 +149,34 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
+          # A dropped suite must fail the build, not pass quietly. See the count
+          # guard below.
+          MIN_TESTS: '350'
         run: |
-          vendor/bin/phpunit -c web/core/phpunit.xml.dist \
-            web/modules/contrib/mcp_sentinel/tests/src/Unit \
-            web/modules/contrib/mcp_sentinel/tests/src/Kernel
+          set -euo pipefail
+          # One invocation per directory: PHPUnit 9.6 takes a *single*
+          # <directory|file> argument, while 10+ accept a list. Passing both
+          # paths did not error on 9.6 — it ran tests/src/Unit, ignored
+          # tests/src/Kernel, and reported "OK (62 tests)". Green, on 17% of the
+          # suite.
+          for suite in Unit Kernel; do
+            vendor/bin/phpunit -c web/core/phpunit.xml.dist \
+              --log-junit "junit-${suite}.xml" \
+              "web/modules/contrib/mcp_sentinel/tests/src/${suite}"
+          done
+
+          # Assert the *count*, not the exit status. Both failures this workflow
+          # has already shipped — a matrix leg that scheduled zero jobs, and a
+          # runner that silently collected 62 of 364 tests — were green. An exit
+          # code only says the tests that ran passed; it cannot say which ran.
+          # JUnit XML is used because its shape is stable across 9.6 and 11,
+          # unlike the human-readable summary line.
+          total="$(grep -ho '<testcase ' junit-Unit.xml junit-Kernel.xml | wc -l | tr -d ' ')"
+          echo "Collected ${total} tests (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
+            exit 1
+          fi
 
   phpcs:
     name: Drupal coding standards
