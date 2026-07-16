@@ -8,6 +8,7 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Lock\LockBackendInterface;
@@ -405,9 +406,36 @@ class McpAuditLogger {
   }
 
   /**
+   * Returns an entity's pre-save original, across every supported core version.
+   *
+   * Drupal 11.2 added EntityInterface::getOriginal() and deprecated the magic
+   * ->original property that preceded it. Below 11.2 — which includes 10.6,
+   * 11.0 and 11.1, all inside this module's core_version_requirement — the
+   * method does not exist, so calling it is a fatal rather than a graceful
+   * miss. Probing for the method keeps the module on the supported API wherever
+   * it exists and touches the deprecated property only where nothing else is
+   * available.
+   *
+   * Remove once the floor reaches 11.2 and call getOriginal() directly.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity being saved.
+   *
+   * @return \Drupal\Core\Entity\EntityInterface|null
+   *   The original entity as loaded before this save, or NULL when there is
+   *   none (a new entity, or a save outside a presave flow).
+   */
+  public function originalOf(EntityInterface $entity): ?EntityInterface {
+    if (method_exists($entity, 'getOriginal')) {
+      return $entity->getOriginal();
+    }
+    return $entity->original ?? NULL;
+  }
+
+  /**
    * Computes a redaction-aware change diff for an entity update.
    *
-   * Compares each field on $entity against the same field on $entity->original,
+   * Compares each field on $entity against the same field on its original,
    * recording only fields whose values genuinely changed. Fields listed in
    * $redacted_fields are recorded with '[REDACTED]' for both old and new values
    * so that sensitive data is never written to the audit log. Internal Drupal
@@ -419,23 +447,24 @@ class McpAuditLogger {
    * kernel tests without triggering a full presave flow.
    *
    * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
-   *   The entity being saved. Must have a populated $entity->original.
+   *   The entity being saved. Must have a populated original.
    * @param string[] $redacted_fields
    *   Field machine names whose values must never appear in the diff.
    *
    * @return array<string, array{old: string, new: string}>
    *   A map of changed field names to their old/new string representations.
-   *   Returns an empty array when $entity->original is absent or the entity
-   *   is new.
+   *   Returns an empty array when the original is absent or the entity is new.
+   *
+   * @see \Drupal\mcp_sentinel\Service\McpAuditLogger::originalOf()
    */
   public function computeChangeDiff(FieldableEntityInterface $entity, array $redacted_fields): array {
-    // getOriginal() is set by Drupal core during presave for updates only.
+    // The original is set by Drupal core during presave for updates only.
     // isNew() check guards against entities that have no original yet.
     if ($entity->isNew()) {
       return [];
     }
 
-    $original = $entity->getOriginal();
+    $original = $this->originalOf($entity);
     if (!$original instanceof FieldableEntityInterface) {
       return [];
     }

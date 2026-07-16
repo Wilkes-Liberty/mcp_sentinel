@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\node\Entity\Node;
@@ -108,7 +107,7 @@ final class McpChangeDiffTest extends KernelTestBase {
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
   }
 
   /**
@@ -305,7 +304,14 @@ final class McpChangeDiffTest extends KernelTestBase {
     $original->set('nid', 999);
 
     // Attach original to entity as Drupal core does during presave.
-    $node->setOriginal($original);
+    // setOriginal() arrived in Drupal 11.2; below that (10.6, 11.0, 11.1) the
+    // magic property it replaced is the only way in.
+    if (method_exists($node, 'setOriginal')) {
+      $node->setOriginal($original);
+    }
+    else {
+      $node->original = $original;
+    }
 
     // Now change the title on the "new" version.
     $node->setTitle('After');

@@ -248,7 +248,7 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
   // captures exactly what was modified.
   if (!$entity->isNew()
     && $entity instanceof FieldableEntityInterface
-    && $entity->getOriginal() !== NULL
+    && $logger->originalOf($entity) !== NULL
   ) {
     $profile = $resolver->resolve();
     $redacted = $profile !== NULL ? $profile->getRedactedFields() : [];
