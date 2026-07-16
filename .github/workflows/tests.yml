@@ -161,10 +161,16 @@ jobs:
           # paths did not error on 9.6 — it ran tests/src/Unit, ignored
           # tests/src/Kernel, and reported "OK (62 tests)". Green, on 17% of the
           # suite.
+          # Absolute -c path: the Kernel tests declare
+          # @runTestsInSeparateProcesses, and a child process does not inherit
+          # this working directory. PHPUnit 11 resolves a relative config path
+          # before handing it down; 9.6 passes it through, so every child died
+          # on `Could not read "web/core/phpunit.xml.dist"`.
+          config="${PWD}/web/core/phpunit.xml.dist"
           for suite in Unit Kernel; do
-            vendor/bin/phpunit -c web/core/phpunit.xml.dist \
-              --log-junit "junit-${suite}.xml" \
-              "web/modules/contrib/mcp_sentinel/tests/src/${suite}"
+            vendor/bin/phpunit -c "${config}" \
+              --log-junit "${PWD}/junit-${suite}.xml" \
+              "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/${suite}"
           done
 
           # Assert the *count*, not the exit status. Both failures this workflow
