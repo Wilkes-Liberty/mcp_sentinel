@@ -6,11 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-07-16
+
+This release makes the module's core-compatibility claim true. `^10.3 || ^11` was fiction in
+both directions: the module could not run below Drupal 11.2 at all, while the metadata
+advertised branches that were EOL. Anyone on Drupal 11.0 or 11.1 — inside the released `^11`
+claim — had a module that fataled on the first write it was installed to govern. The real
+working range is now `^10.6 || ^11.3`, and every floor in it is exercised by CI.
+
 ### Added
-- **Drupal 10.6 is tested, not just claimed ([#35]).** `info.yml` declared `^10.3 || ^11` while
-  the suite could only ever run on 11, so half the support claim had never been verified. CI
-  gained a **Drupal 10.6 / PHP 8.3 / PHPUnit 9.6** leg, and both legs now collect the same 364
-  tests — the claim is enforced rather than asserted.
+- **Drupal 10.6 and 11.3 are tested, not just claimed ([#35]).** `info.yml` declared
+  `^10.3 || ^11` while the suite could only ever run on 11 — half the support claim had never
+  been verified. CI now runs the **floor of each declared range and the ceiling**: Drupal 10.6
+  / PHP 8.3 / PHPUnit 9.6, Drupal 11.3 / PHP 8.3, and Drupal 11 (11.4) / PHP 8.4. All three
+  collect the same 364 tests, so the claim is enforced rather than asserted.
 
   The suite is written with PHP 8 attributes, which only PHPUnit 10+ reads, while every
   `drupal/core-dev` in the 10.x range hard-requires PHPUnit `^9.6` — and 9.6 does not error on
@@ -24,6 +33,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a version probe that printed PHPUnit's version as Drupal's. All three passed. An exit code
   only says the tests that ran passed; it cannot say which ran — so the step now counts the
   testcases in the JUnit output and fails below a floor.
+
+  Each leg also **asserts the core version it resolved**. `^11.3` means ">=11.3 <12", so a leg
+  named 11.3 built from its own name installed 11.4 and quietly retested the ceiling — green,
+  while the range it existed to protect was covered by nothing. Floors now pin their minor
+  (`~10.6.0`, `~11.3.0`) and the ceiling floats (`^11`), and a leg whose resolved core does not
+  match its name fails.
+
+- **CI runs the test suite ([#32]).** The module had 364 tests and nothing executed them: CI was
+  CodeQL, `composer audit`, a CHANGELOG gate and Dependabot auto-merge, so a PR could go green,
+  merge and ship while the suite was broken. For a module whose job is enforcing a security
+  boundary, "the tests pass if someone remembers" is the wrong guarantee. A new `Tests` workflow
+  runs PHPUnit (Unit + Kernel) on every PR and on push to `1.x`. It also adds a blocking `phpcs`
+  job (`Drupal`, `DrupalPractice`).
+
+  The workflow installs the **working copy** via a Composer path repo and asserts the symlink
+  resolved, so a silent fallback to the released package cannot let the suite pass against code
+  nobody changed. Functional tests need a webserver and are not run yet; that is a deliberate
+  first step.
+
+### Changed
+- **Core requirement `^10.3 || ^11` → `^10.6 || ^11.3`.** Both halves named dead branches.
+  Drupal 10.3 has been EOL since 2025-06-16, and `^11` claimed 11.0 (EOL 2025-06-16), 11.1
+  (EOL 2025-12-10) and 11.2 (EOL 2026-06-17). Per upstream's lifecycle the only live branches
+  are **10.6** and **11.3** (both EOL 2026-12-16) and **11.4** (EOL 2027-07-07), so those are
+  what the module claims.
+
+  Support stays as wide as upstream supports — orgs upgrade slowly and a narrow floor
+  discourages adoption — but no wider: an EOL branch is not a kindness to advertise. Applies to
+  `composer.json` and to the main module plus the `server`, `graphql` and `approval`
+  submodules.
+
+  **Upgrading:** sites on Drupal 11.0–11.2 will not receive this release. Those branches are
+  EOL upstream, and the module never actually worked on 11.0 or 11.1 — see the fatal below.
+  Move to 11.3+ or to 10.6.
 
 ### Fixed
 - **The module fataled on every governed entity update on Drupal 10.6, 11.0 and 11.1 ([#35]).**
@@ -41,40 +84,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   service touching it fails (176 errors on the 10.6 leg). The types are declared with
   annotations, which both discovery mechanisms read. Annotations are deprecated in Drupal 11
   and removed in 12; each class documents that this converts back when the floor reaches 11.1.
-
-### Changed
-- **Core requirement `^10.3 || ^11` → `^10.6 || ^11.3`.** Both halves named dead branches.
-  Drupal 10.3 has been EOL since 2025-06-16, and `^11` claimed 11.0 (EOL 2025-06-16), 11.1
-  (EOL 2025-12-10) and 11.2 (EOL 2026-06-17). Per upstream's lifecycle the only live branches
-  are **10.6** and **11.3** (both EOL 2026-12-16) and **11.4** (EOL 2027-07-07), so those are
-  what the module claims.
-
-  Support stays as wide as upstream supports — orgs upgrade slowly and a narrow floor
-  discourages adoption — but no wider: an EOL branch is not a kindness to advertise. Applies to
-  `composer.json` and to the main module plus the `server`, `graphql` and `approval`
-  submodules.
-
-  CI runs the **floor of each range** (10.6 and 11.3) as well as the ceiling (11.4). The 11
-  floor is not ceremony: 11.0 and 11.1 sat inside a released `^11` for versions while the
-  module fataled on both, and nothing caught it because the only leg ran 11.4.
-
-[#35]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/35
-
-### Added
-- **CI runs the test suite ([#32]).** The module had 364 tests and nothing executed them: CI was
-  CodeQL, `composer audit`, a CHANGELOG gate and Dependabot auto-merge, so a PR could go green,
-  merge and ship while the suite was broken. For a module whose job is enforcing a security
-  boundary, "the tests pass if someone remembers" is the wrong guarantee. A new `Tests` workflow
-  runs PHPUnit (Unit + Kernel) on every PR and on push to `1.x`, across Drupal 10.6/PHP 8.3 and
-  Drupal 11/PHP 8.4 — the floor and ceiling of `core_version_requirement`. It also adds a
-  blocking `phpcs` job (`Drupal`, `DrupalPractice`).
-
-  The workflow installs the **working copy** via a Composer path repo and asserts the symlink
-  resolved, so a silent fallback to the released package cannot let the suite pass against code
-  nobody changed. Functional tests need a webserver and are not run yet; that is a deliberate
-  first step.
-
-### Fixed
 - **`McpDenyExternalRedirectValidatorTest` never actually ran ([#32]).** All 7 tests errored on
   `No schema for views.view.redirect`: the `redirect` module ships `views.view.redirect` in
   `config/install`, so `installConfig(['redirect'])` required the `views` module — and, once
@@ -89,6 +98,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Two long-line PHPCS warnings, so the new standards gate passes on a clean tree.
 
 [#32]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/32
+[#35]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/35
 
 ## [1.8.0] - 2026-07-15
 
