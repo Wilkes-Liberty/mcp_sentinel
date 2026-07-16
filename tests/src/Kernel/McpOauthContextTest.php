@@ -26,6 +26,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpOauthContext
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpOauthContextTest extends KernelTestBase {

@@ -16,6 +16,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 /**
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAccessChecker
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpAccessCheckerTest extends KernelTestBase {

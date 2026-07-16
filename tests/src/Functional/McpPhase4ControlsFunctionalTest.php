@@ -38,6 +38,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *   approach is the maximal feasible subset per the plan.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpPhase4ControlsFunctionalTest extends BrowserTestBase {

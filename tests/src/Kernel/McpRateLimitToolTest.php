@@ -13,6 +13,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Tests that governed tool plugins enforce the profile rate limit.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

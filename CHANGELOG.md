@@ -7,11 +7,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Drupal 10.6 is tested, not just claimed ([#35]).** `info.yml` declared `^10.3 || ^11` while
+  the suite could only ever run on 11, so half the support claim had never been verified. CI
+  gained a **Drupal 10.6 / PHP 8.3 / PHPUnit 9.6** leg, and both legs now collect the same 364
+  tests — the claim is enforced rather than asserted.
+
+  The suite is written with PHP 8 attributes, which only PHPUnit 10+ reads, while every
+  `drupal/core-dev` in the 10.x range hard-requires PHPUnit `^9.6` — and 9.6 does not error on
+  an attribute it cannot parse, it **ignores** it. The suite therefore carries the equivalent
+  annotations (`@group`, `@dataProvider`, `@runTestsInSeparateProcesses`) alongside its
+  attributes: 9.6 reads the annotations, 10/11 read the attributes.
+
+  The new leg also **asserts the test count** rather than the exit status. Getting here took
+  three green-but-empty runs: a matrix leg that scheduled zero jobs, a runner handed two
+  directories when PHPUnit 9.6 accepts only one (it ran 62 of 364 tests and reported `OK`), and
+  a version probe that printed PHPUnit's version as Drupal's. All three passed. An exit code
+  only says the tests that ran passed; it cannot say which ran — so the step now counts the
+  testcases in the JUnit output and fails below a floor.
+
+### Fixed
+- **The module fataled on every governed entity update on Drupal 10.6, 11.0 and 11.1 ([#35]).**
+  `mcp_sentinel.module` called `EntityInterface::getOriginal()`, which core only added in
+  **11.2**. Below that the method does not exist, so a governed update raised
+  `Call to undefined method ...::getOriginal()` — on the first write the module was there to
+  govern. 11.0 and 11.1 are inside the released `^11` claim, so this affected published
+  releases and not only the new floor. Access to the pre-save original now goes through
+  `McpAuditLogger::originalOf()`, which uses the modern API where it exists and the property it
+  replaced where it does not.
+- **Entity types were invisible below Drupal 11.1 ([#35]).** The three entity types were
+  declared with PHP attributes, but attribute-based entity type discovery arrived in **11.1**;
+  below it `EntityTypeManager` uses `AnnotatedClassDiscovery` and reads annotations only. An
+  attribute is not ignored gracefully there — the entity type simply never exists, and every
+  service touching it fails (176 errors on the 10.6 leg). The types are declared with
+  annotations, which both discovery mechanisms read. Annotations are deprecated in Drupal 11
+  and removed in 12; each class documents that this converts back when the floor reaches 11.1.
+
+### Changed
+- **Core floor `^10.3` → `^10.6`.** Drupal 10.3 has been EOL since 2025-06-16; 10.6 is the
+  oldest branch still supported upstream (EOL 2026-12-16). The floor named a dead branch — stale
+  metadata that advertised a version nobody should run. Support stays as wide as upstream
+  supports, because orgs upgrade slowly and dropping support discourages adoption; it is not
+  narrowed to what we happen to run. Applies to the main module and the `server`, `graphql`, and
+  `approval` submodules.
+
+[#35]: https://github.com/Wilkes-Liberty/mcp_sentinel/issues/35
+
+### Added
 - **CI runs the test suite ([#32]).** The module had 364 tests and nothing executed them: CI was
   CodeQL, `composer audit`, a CHANGELOG gate and Dependabot auto-merge, so a PR could go green,
   merge and ship while the suite was broken. For a module whose job is enforcing a security
   boundary, "the tests pass if someone remembers" is the wrong guarantee. A new `Tests` workflow
-  runs PHPUnit (Unit + Kernel) on every PR and on push to `1.x`, across Drupal 10.3/PHP 8.3 and
+  runs PHPUnit (Unit + Kernel) on every PR and on push to `1.x`, across Drupal 10.6/PHP 8.3 and
   Drupal 11/PHP 8.4 — the floor and ceiling of `core_version_requirement`. It also adds a
   blocking `phpcs` job (`Drupal`, `DrupalPractice`).
 

@@ -37,6 +37,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * entity::access('view') to exercise the real Drupal access gate.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[CoversFunction('mcp_sentinel_entity_field_access')]

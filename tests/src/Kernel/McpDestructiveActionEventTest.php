@@ -26,6 +26,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * write silently proceeds — the veto seam becomes a no-op.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

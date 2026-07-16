@@ -16,6 +16,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Tests OAuth-agent-channel governance via McpPolicyResolver.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpPolicyResolverOauthTest extends KernelTestBase {

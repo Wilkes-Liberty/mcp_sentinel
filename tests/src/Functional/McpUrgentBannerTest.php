@@ -9,6 +9,8 @@ use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Functional coverage for the site-wide critical urgent banner.
+ *
+ * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
 final class McpUrgentBannerTest extends BrowserTestBase {

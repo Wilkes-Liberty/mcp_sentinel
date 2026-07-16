@@ -15,6 +15,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[CoversClass(\Drupal\mcp_sentinel\Service\McpAuditLogger::class)]
 #[Group('mcp_sentinel')]

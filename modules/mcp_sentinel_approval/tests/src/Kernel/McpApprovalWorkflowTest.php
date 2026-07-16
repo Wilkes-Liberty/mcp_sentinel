@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
-use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
@@ -206,7 +205,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
       ->fields('l')
       ->condition('operation', 'approval_decision')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
     $this->assertNotEmpty($rows, 'An approval_decision audit row must be written.');
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) end($rows)['metadata']);
@@ -358,7 +357,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
       ->fields('l')
       ->condition('operation', 'approval_decision')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) end($rows)['metadata']);
     $this->assertFalse($meta['executed']);
@@ -399,7 +398,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
       ->fields('l')
       ->condition('operation', 'approval_decision')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) end($rows)['metadata']);
     $this->assertFalse($meta['executed']);

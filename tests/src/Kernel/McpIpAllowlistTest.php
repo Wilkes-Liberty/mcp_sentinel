@@ -27,6 +27,8 @@ use Symfony\Component\HttpFoundation\Request;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAccessChecker
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

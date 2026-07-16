@@ -11,6 +11,8 @@ use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Tests the reusable in-form multi-row list editor trait.
+ *
+ * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
 class McpListEditorTraitTest extends KernelTestBase {

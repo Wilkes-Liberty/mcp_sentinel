@@ -22,6 +22,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * and the hook function is invoked, simulating each config end-state in turn.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

@@ -25,6 +25,8 @@ use Symfony\Component\HttpFoundation\Request;
  * - Invalid bundle fails cleanly with a failure result (no fatal).
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

@@ -27,6 +27,8 @@ use Symfony\Component\HttpFoundation\Request;
  * - Rate limit blocks the second call within the window.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

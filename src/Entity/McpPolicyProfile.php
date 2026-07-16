@@ -5,74 +5,82 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Entity;
 
 use Drupal\Core\Config\Entity\ConfigEntityBase;
-use Drupal\Core\Entity\Attribute\ConfigEntityType;
-use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\mcp_sentinel\Form\McpPolicyProfileDeleteForm;
-use Drupal\mcp_sentinel\Form\McpPolicyProfileForm;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
-use Drupal\mcp_sentinel\McpPolicyProfileListBuilder;
 
 /**
  * The MCP Sentinel policy profile config entity.
+ *
+ * Declared as an annotation rather than a #[ConfigEntityType] attribute so the
+ * module runs on every core version it claims. Attribute-based entity types
+ * arrived in Drupal 11.1: on 10.6 and 11.0, EntityTypeManager uses
+ * AnnotatedClassDiscovery and reads annotations only, so an attribute is not
+ * ignored gracefully — the entity type simply never exists, and every service
+ * touching it fails. From 11.1 discovery is AttributeDiscoveryWithAnnotations,
+ * which reads both, so the annotation keeps working there.
+ *
+ * Revisit when the floor reaches 11.1: annotations are deprecated in Drupal 11
+ * and removed in Drupal 12, so this converts back once 10.6/11.0 are out of
+ * core_version_requirement — not before.
+ *
+ * @ConfigEntityType(
+ *   id = "mcp_policy_profile",
+ *   label = @Translation("MCP policy profile"),
+ *   label_collection = @Translation("MCP policy profiles"),
+ *   label_singular = @Translation("MCP policy profile"),
+ *   label_plural = @Translation("MCP policy profiles"),
+ *   config_prefix = "mcp_policy_profile",
+ *   admin_permission = "administer mcp sentinel",
+ *   entity_keys = {
+ *     "id" = "id",
+ *     "label" = "label",
+ *     "weight" = "weight",
+ *     "status" = "status",
+ *   },
+ *   handlers = {
+ *     "list_builder" = "Drupal\mcp_sentinel\McpPolicyProfileListBuilder",
+ *     "form" = {
+ *       "add" = "Drupal\mcp_sentinel\Form\McpPolicyProfileForm",
+ *       "edit" = "Drupal\mcp_sentinel\Form\McpPolicyProfileForm",
+ *       "delete" = "Drupal\mcp_sentinel\Form\McpPolicyProfileDeleteForm",
+ *     },
+ *     "route_provider" = {
+ *       "html" = "Drupal\Core\Entity\Routing\AdminHtmlRouteProvider",
+ *     },
+ *   },
+ *   links = {
+ *     "collection" = "/admin/config/services/mcp-sentinel/profiles",
+ *     "add-form" = "/admin/config/services/mcp-sentinel/profiles/add",
+ *     "edit-form" = "/admin/config/services/mcp-sentinel/profiles/{mcp_policy_profile}",
+ *     "delete-form" = "/admin/config/services/mcp-sentinel/profiles/{mcp_policy_profile}/delete",
+ *   },
+ *   config_export = {
+ *     "id",
+ *     "label",
+ *     "weight",
+ *     "roles",
+ *     "allow_read",
+ *     "allow_write",
+ *     "allow_delete",
+ *     "allow_graphql_mutations",
+ *     "allowed_entity_types",
+ *     "denied_entity_types",
+ *     "redacted_fields",
+ *     "rate_limit_requests",
+ *     "rate_limit_window",
+ *     "result_count_cap",
+ *     "response_size_cap",
+ *     "allowed_ips",
+ *     "allow_config_read",
+ *     "allow_config_write",
+ *     "denied_config_types",
+ *     "deny_publish",
+ *     "max_moderation_state",
+ *     "deny_external_redirects",
+ *     "allowed_redirect_hosts",
+ *     "entity_rules",
+ *   },
+ * )
  */
-#[ConfigEntityType(
-  id: 'mcp_policy_profile',
-  label: new TranslatableMarkup('MCP policy profile'),
-  label_collection: new TranslatableMarkup('MCP policy profiles'),
-  label_singular: new TranslatableMarkup('MCP policy profile'),
-  label_plural: new TranslatableMarkup('MCP policy profiles'),
-  config_prefix: 'mcp_policy_profile',
-  admin_permission: 'administer mcp sentinel',
-  entity_keys: [
-    'id' => 'id',
-    'label' => 'label',
-    'weight' => 'weight',
-    'status' => 'status',
-  ],
-  handlers: [
-    'list_builder' => McpPolicyProfileListBuilder::class,
-    'form' => [
-      'add' => McpPolicyProfileForm::class,
-      'edit' => McpPolicyProfileForm::class,
-      'delete' => McpPolicyProfileDeleteForm::class,
-    ],
-    'route_provider' => [
-      'html' => 'Drupal\Core\Entity\Routing\AdminHtmlRouteProvider',
-    ],
-  ],
-  links: [
-    'collection' => '/admin/config/services/mcp-sentinel/profiles',
-    'add-form' => '/admin/config/services/mcp-sentinel/profiles/add',
-    'edit-form' => '/admin/config/services/mcp-sentinel/profiles/{mcp_policy_profile}',
-    'delete-form' => '/admin/config/services/mcp-sentinel/profiles/{mcp_policy_profile}/delete',
-  ],
-  config_export: [
-    'id',
-    'label',
-    'weight',
-    'roles',
-    'allow_read',
-    'allow_write',
-    'allow_delete',
-    'allow_graphql_mutations',
-    'allowed_entity_types',
-    'denied_entity_types',
-    'redacted_fields',
-    'rate_limit_requests',
-    'rate_limit_window',
-    'result_count_cap',
-    'response_size_cap',
-    'allowed_ips',
-    'allow_config_read',
-    'allow_config_write',
-    'denied_config_types',
-    'deny_publish',
-    'max_moderation_state',
-    'deny_external_redirects',
-    'allowed_redirect_hosts',
-    'entity_rules',
-  ],
-)]
 final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfileInterface {
 
   /**

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_graphql\Kernel;
 
-use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\graphql\Event\OperationEvent;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
 use Drupal\KernelTests\KernelTestBase;
@@ -223,7 +222,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       ->select('mcp_sentinel_audit_log', 'l')
       ->fields('l', ['operation'])
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
 
     $operations = array_column($rows, 'operation');
     $this->assertContains(

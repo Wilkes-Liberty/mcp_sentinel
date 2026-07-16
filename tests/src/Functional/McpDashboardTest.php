@@ -9,6 +9,8 @@ use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Functional coverage for the governance dashboard, routing move, and tabs.
+ *
+ * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
 final class McpDashboardTest extends BrowserTestBase {

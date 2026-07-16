@@ -29,6 +29,8 @@ use Symfony\Component\HttpFoundation\Request;
  * - Ungoverned accounts are never blocked by the IP gate.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

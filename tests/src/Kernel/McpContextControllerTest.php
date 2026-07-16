@@ -11,6 +11,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 /**
  * @coversDefaultClass \Drupal\mcp_sentinel\Controller\McpContextController
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class McpContextControllerTest extends KernelTestBase {

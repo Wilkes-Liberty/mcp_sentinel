@@ -31,6 +31,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * unrelated core violations (e.g. transition access) never mask the result.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

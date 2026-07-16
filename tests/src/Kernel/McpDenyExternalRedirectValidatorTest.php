@@ -28,6 +28,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * result.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

@@ -25,6 +25,8 @@ use Symfony\Component\HttpFoundation\Request;
  * - Policy write-gate off denies creation and writes denied_access audit row.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

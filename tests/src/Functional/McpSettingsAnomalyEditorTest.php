@@ -9,6 +9,8 @@ use PHPUnit\Framework\Attributes\Group;
 
 /**
  * Tests the anomaly rules multi-row editor on the settings form.
+ *
+ * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
 final class McpSettingsAnomalyEditorTest extends BrowserTestBase {

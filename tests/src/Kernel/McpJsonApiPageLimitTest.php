@@ -24,6 +24,8 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
  *  - cap = 0 (unlimited) passes any limit.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

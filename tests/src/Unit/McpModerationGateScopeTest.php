@@ -26,6 +26,8 @@ use PHPUnit\Framework\Attributes\Group;
  * so an unfamiliar publishable entity is gated rather than silently exempt.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpModerationGate
+ *
+ * @group mcp_sentinel
  */
 #[CoversClass(McpModerationGate::class)]
 #[Group('mcp_sentinel')]
@@ -87,6 +89,8 @@ final class McpModerationGateScopeTest extends UnitTestCase {
 
   /**
    * The gate governs editorial content and exempts side-effect entities.
+   *
+   * @dataProvider scopeProvider
    */
   #[DataProvider('scopeProvider')]
   public function testGovernsPublishedStatus(string $entity_type_id, ?string $parent_type_field, bool $expected): void {

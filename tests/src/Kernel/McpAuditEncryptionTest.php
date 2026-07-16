@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\encrypt\EncryptionProfileInterface;
 use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\encrypt\Entity\EncryptionProfile;
@@ -35,6 +34,8 @@ use Psr\Log\LogLevel;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[CoversClass(\Drupal\mcp_sentinel\Service\McpAuditLogger::class)]
 #[Group('mcp_sentinel')]
@@ -499,7 +500,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
       ->fields('l', ['id', 'prev_hash', 'row_hash', 'metadata'])
       ->orderBy('id', 'ASC')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
 
     $this->assertCount(5, $rows);
 

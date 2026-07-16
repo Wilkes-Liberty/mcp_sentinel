@@ -30,20 +30,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Drupal 11 only, deliberately — see issue #35.
+          # The floor and the ceiling of core_version_requirement (^10.6 || ^11).
           #
-          # info.yml claims ^10.3 || ^11, but the suite cannot run on Drupal 10.
-          # It is written with PHP 8 attributes (#[Group], #[DataProvider],
-          # #[CoversClass], #[RunTestsInSeparateProcesses]), which only
-          # PHPUnit 10+ reads, and every drupal/core-dev in the 10.x range
-          # hard-requires phpunit ^9.6 — there is no combination that satisfies
-          # both. Worse, 9.6 does not error on an attribute it cannot parse: it
-          # ignores it, so a 10.3 leg collects 53 of 364 tests and reports green
-          # on a suite it silently dropped.
+          # 10.6 is the oldest Drupal branch still supported upstream (EOL
+          # 2026-12-16); 10.3 has been EOL since 2025-06-16, which is why the
+          # floor moved. §13: publish for the oldest *supported* release, not
+          # the one we happen to run — orgs upgrade slowly and a claim nobody
+          # can verify is not a claim.
           #
-          # Testing only what can actually be tested, rather than shipping a leg
-          # that lies. #35 carries the real decision: port the suite to
-          # annotations so it runs on PHPUnit 9.6, or drop the ^10.3 claim.
+          # phpunit is pinned per leg. Drupal 10's core-dev hard-requires ^9.6,
+          # and 9.6 predates PHP 8 attributes: it does not error on one it
+          # cannot read, it ignores it. That is why the suite also carries
+          # annotations (@group, @dataProvider, @runTestsInSeparateProcesses)
+          # alongside its attributes — 9.6 reads the annotations, 10/11 read the
+          # attributes, and this leg is what keeps the pair honest. Drop the
+          # annotations and 9.6 stops expanding the data providers: the Unit
+          # directory alone falls from 62 tests to 53, without erroring.
+          #
+          # Both PHPUnit versions must therefore report the *same* test count.
+          # That equality is the whole point of this leg, and it is asserted by
+          # the count floor in the PHPUnit step rather than trusted — a green
+          # check has already twice meant "ran almost nothing" here.
+          - drupal: '10.6'
+            php: '8.3'
+            phpunit: '^9.6'
           - drupal: '11'
             php: '8.4'
             phpunit: '^11.5'
@@ -106,12 +116,17 @@ jobs:
       - name: Report the versions actually under test
         working-directory: drupal
         run: |
-          # The 10.3 leg silently collected 53 of 364 tests when composer
-          # resolved PHPUnit 9.6, which ignores the suite's attributes. Print
-          # what resolved so a wrong version is visible rather than inferred
-          # from a suspiciously small test count.
-          php -r 'echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";' \
-            -d auto_prepend_file=vendor/autoload.php || true
+          # Print what actually resolved, so a wrong version is visible rather
+          # than inferred from a suspiciously small test count.
+          #
+          # require the autoloader inline: php ignores auto_prepend_file for -r
+          # code, so loading it that way leaves Composer\InstalledVersions
+          # undefined and the line fatals after echoing its label. With the
+          # `|| true` this step used to carry, that fatal was invisible and the
+          # next command's output landed on the "Drupal core:" line — so the
+          # step confidently reported PHPUnit's version as Drupal's. No `|| true`
+          # here: a probe that cannot answer must fail, not improvise.
+          php -r 'require "vendor/autoload.php"; echo "Drupal core: ", \Composer\InstalledVersions::getPrettyVersion("drupal/core"), "\n";'
           vendor/bin/phpunit --version
           vendor/bin/drush --version || true
 
@@ -136,10 +151,40 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
+          # A dropped suite must fail the build, not pass quietly. See the count
+          # guard below.
+          MIN_TESTS: '350'
         run: |
-          vendor/bin/phpunit -c web/core/phpunit.xml.dist \
-            web/modules/contrib/mcp_sentinel/tests/src/Unit \
-            web/modules/contrib/mcp_sentinel/tests/src/Kernel
+          set -euo pipefail
+          # One invocation per directory: PHPUnit 9.6 takes a *single*
+          # <directory|file> argument, while 10+ accept a list. Passing both
+          # paths did not error on 9.6 — it ran tests/src/Unit, ignored
+          # tests/src/Kernel, and reported "OK (62 tests)". Green, on 17% of the
+          # suite.
+          # Absolute -c path: the Kernel tests declare
+          # @runTestsInSeparateProcesses, and a child process does not inherit
+          # this working directory. PHPUnit 11 resolves a relative config path
+          # before handing it down; 9.6 passes it through, so every child died
+          # on `Could not read "web/core/phpunit.xml.dist"`.
+          config="${PWD}/web/core/phpunit.xml.dist"
+          for suite in Unit Kernel; do
+            vendor/bin/phpunit -c "${config}" \
+              --log-junit "${PWD}/junit-${suite}.xml" \
+              "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/${suite}"
+          done
+
+          # Assert the *count*, not the exit status. Both failures this workflow
+          # has already shipped — a matrix leg that scheduled zero jobs, and a
+          # runner that silently collected 62 of 364 tests — were green. An exit
+          # code only says the tests that ran passed; it cannot say which ran.
+          # JUnit XML is used because its shape is stable across 9.6 and 11,
+          # unlike the human-readable summary line.
+          total="$(grep -ho '<testcase ' junit-Unit.xml junit-Kernel.xml | wc -l | tr -d ' ')"
+          echo "Collected ${total} tests (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
+            exit 1
+          fi
 
   phpcs:
     name: Drupal coding standards

@@ -13,6 +13,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Tests McpExfiltrationGuard: result-count cap and response-size cap.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

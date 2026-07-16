@@ -25,6 +25,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * is a future enhancement (F10 v2) and is intentionally not covered here.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

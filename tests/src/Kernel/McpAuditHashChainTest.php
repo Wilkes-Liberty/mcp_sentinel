@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -16,6 +15,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[CoversClass(\Drupal\mcp_sentinel\Service\McpAuditLogger::class)]
 #[Group('mcp_sentinel')]
@@ -91,7 +92,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
 
     $this->assertCount(3, $rows);
 
@@ -151,7 +152,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
 
     // Helper: reproduce buildCanonical() as McpAuditLogger does (FIX I2).
     $buildCanonical = static function (array $row): string {
@@ -371,7 +372,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
-      ->fetchAll(FetchAs::Associative);
+      ->fetchAll(\PDO::FETCH_ASSOC);
 
     $this->assertCount(2, $rows);
 
