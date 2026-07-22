@@ -225,10 +225,28 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
       && $entity instanceof ContentEntityInterface
       && $moderation->isModeratedEntity($entity);
     if ($profile !== NULL
-      && $profile->deniesPublish()
+      && $profile->deniesPublishForEntityType($entity->getEntityTypeId())
       && !$moderated
       && $gate->governsPublishedStatus($entity)) {
       $entity->setUnpublished();
+      // The backstop guards the unvalidated seam, so its flip is invisible to
+      // the caller by construction — the audit row and the warning are what
+      // make it observable. A forced unpublish that leaves no trace teaches
+      // operators to distrust success responses (and let five dead redirects
+      // accumulate unnoticed on a production site).
+      /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $backstop_logger */
+      $backstop_logger = \Drupal::service('mcp_sentinel.audit_logger');
+      $backstop_logger->log('publish_gate_backstop', [
+        'entity_type' => $entity->getEntityTypeId(),
+        'bundle'      => $entity->bundle(),
+        'id'          => $entity->id() ?: '(new)',
+        'label'       => $entity->label(),
+        'note'        => 'Forced unpublished by the deny-publish presave backstop.',
+      ]);
+      \Drupal::logger('mcp_sentinel')->warning(
+        'Publish gate backstop forced @type "@label" unpublished on an unvalidated save; the caller was not told. A per-type exemption is available via entity_rules.@type.allow_publish.',
+        ['@type' => $entity->getEntityTypeId(), '@label' => (string) $entity->label()]
+      );
     }
   }
 

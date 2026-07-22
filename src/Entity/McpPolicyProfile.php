@@ -414,4 +414,12 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
     return $override === NULL ? $this->allowsWrite() : (bool) $override;
   }
 
+  /**
+   * {@inheritdoc}
+   */
+  public function deniesPublishForEntityType(string $entity_type): bool {
+    $override = $this->entity_rules[$entity_type]['allow_publish'] ?? NULL;
+    return $override === NULL ? $this->deniesPublish() : !(bool) $override;
+  }
+
 }

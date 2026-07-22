@@ -265,3 +265,6 @@ mcp_sentinel.mcp_policy_profile.*:
           allow_write:
             type: boolean
             label: 'Allow write for this entity type'
+          allow_publish:
+            type: boolean
+            label: 'Allow publishing for this entity type (overrides deny_publish)'

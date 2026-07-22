@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Per-entity-type publish overrides: `entity_rules.<type>.allow_publish`.** The publish
+  gate's scope is now tunable in site config, both directions: a present `allow_publish`
+  overrides the global `deny_publish` for that entity type only (relax one type, or gate
+  one sensitive type while publishing stays open globally). Absent means the global flag
+  decides, so defaults are unchanged and fail closed. This follows the
+  `entity_rules.<type>.allow_delete` precedent and keeps posture decisions in config —
+  visible in config export and audit — instead of module code.
+
+  Motivating case: redirect module dev-1.x made Redirect publishable (`enabled` is the
+  published key), so the gate began governing redirects by fall-through and every
+  agent-created redirect arrived disabled. Sites that consider a redirect's `enabled`
+  flag routing metadata (its agent-risk axis is the target, which
+  `deny_external_redirects` constrains) can now set
+  `entity_rules.redirect.allow_publish: true`. Sites that consider an enabled redirect
+  editorial go-live change nothing.
+
+### Fixed
+- **The presave backstop's forced unpublish is audited and logged, never silent.** When
+  the deny-publish backstop flips a governed, unvalidated save to unpublished, it now
+  writes a `publish_gate_backstop` audit row and a watchdog warning naming the entity and
+  the per-type exemption. Previously the flip was invisible — the create reported
+  success, the entity was disabled, and nothing logged; on one production site that
+  accumulated five dead redirects in two weeks before anyone noticed.
+
 ## [1.9.0] - 2026-07-16
 
 This release makes the module's core-compatibility claim true. `^10.3 || ^11` was fiction in

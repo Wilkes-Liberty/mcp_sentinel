@@ -422,4 +422,91 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
       'The presave backstop must still force an unvalidated governed save unpublished.');
   }
 
+  /**
+   * A per-type allow_publish rule relaxes the global deny for that type only.
+   *
+   * The config-plane counterpart of allow_delete's per-type override: a site
+   * decides that one entity type's published flag is not editorial go-live
+   * (e.g. redirects, whose real agent risk is the target, already constrained
+   * by deny_external_redirects) without exempting anything in code.
+   */
+  public function testEntityRuleAllowPublishRelaxesGlobalDeny(): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('entity_rules', ['node' => ['allow_publish' => TRUE]])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'Published by rule',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+
+    $this->assertFalse($this->hasDenyViolation($node),
+      'A per-type allow_publish override must relax the global deny for that type.');
+
+    // The backstop must honour the same rule on the unvalidated path.
+    $node->save();
+    $this->assertTrue($node->isPublished(),
+      'The presave backstop must honour a per-type allow_publish override.');
+  }
+
+  /**
+   * A per-type allow_publish FALSE tightens a globally permissive profile.
+   *
+   * The override works in both directions: an operator can keep publishing
+   * open globally while still gating one sensitive type.
+   */
+  public function testEntityRuleAllowPublishFalseTightensGlobalAllow(): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('deny_publish', FALSE)
+      ->set('entity_rules', ['node' => ['allow_publish' => FALSE]])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'Gated by rule',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+
+    $this->assertTrue($this->hasDenyViolation($node),
+      'A per-type allow_publish FALSE must gate the type even when the global flag permits publishing.');
+  }
+
+  /**
+   * The presave backstop's forced unpublish is audited, never silent.
+   *
+   * The backstop guards the unvalidated seam, so its flip is invisible to the
+   * caller by construction — the audit row is what makes it observable. A
+   * governance module that silently rewrites a write teaches operators to
+   * distrust success responses.
+   */
+  public function testPresaveBackstopAuditsTheForcedUnpublish(): void {
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::UNMODERATED_TYPE,
+      'title' => 'Sneaky page',
+      'status' => 1,
+      'uid' => 1,
+    ]);
+    $node->save();
+
+    $this->assertFalse($node->isPublished());
+    $count = (int) \Drupal::database()
+      ->select('mcp_sentinel_audit_log', 'a')
+      ->condition('operation', 'publish_gate_backstop')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $count,
+      'The backstop must write an audit row when it forces an entity unpublished.');
+  }
+
 }
