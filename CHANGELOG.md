@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-22
+
 ### Added
 - **Per-entity-type publish overrides: `entity_rules.<type>.allow_publish`.** The publish
   gate's scope is now tunable in site config, both directions: a present `allow_publish`
