@@ -209,4 +209,22 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function allowsWriteForEntityType(string $entity_type): bool;
 
+  /**
+   * Whether publishing an entity of the given type is denied by this profile.
+   *
+   * Resolves the per-type allow_publish override first and falls back to the
+   * global deny_publish flag: entity_rules[type]['allow_publish'] present means
+   * publishing is (dis)allowed for that type regardless of the global flag;
+   * absent means the global deniesPublish() decides. The override works in
+   * both directions, so an operator can relax one type (a redirect's `enabled`
+   * flag is routing metadata whose real risk axis, the target, is constrained
+   * by deny_external_redirects) or gate one sensitive type while keeping
+   * publishing open globally. This keeps posture decisions in site config —
+   * visible in config export and audit — instead of module code.
+   *
+   * @param string $entity_type
+   *   The entity type ID being published.
+   */
+  public function deniesPublishForEntityType(string $entity_type): bool;
+
 }

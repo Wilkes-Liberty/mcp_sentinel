@@ -93,7 +93,9 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       return;
     }
     $profile = $this->policyResolver->resolve();
-    if ($profile === NULL || !$profile->deniesPublish()) {
+    if ($profile === NULL
+      || !$profile->deniesPublishForEntityType($value->getEntityTypeId())
+    ) {
       return;
     }
 
