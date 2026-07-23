@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **The settings page now links to the governance dashboard and audit log.** Settings live
+  under Configuration and the dashboard under Reports, so an operator configuring the module
+  had no path to the dashboard — it was easy to miss. A small links row at the top of the
+  settings form now points to both, shown only to users who can view them. The dashboard's
+  quick-actions strip already links back to Settings. Discoverability only; no behaviour or
+  schema change, and the conventional Reports/Configuration placement is unchanged.
+
 ### Fixed
 - **Direct paragraph edits no longer bypass the publish gate (GitHub #46).** Under a
   deny-publish profile, a direct JSON:API write to a paragraph whose current revision was

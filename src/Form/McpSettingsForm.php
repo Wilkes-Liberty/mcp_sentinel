@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Form;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -64,6 +65,33 @@ class McpSettingsForm extends ConfigFormBase {
 
     $form['tabs'] = ['#type' => 'vertical_tabs', '#default_tab' => 'edit-status'];
     $form['#attached']['library'][] = 'mcp_sentinel/admin';
+
+    // Cross-link to the operational views. Settings live under Configuration
+    // and the governance dashboard under Reports, so without this an operator
+    // configuring the module has no path to the dashboard or audit log. Shown
+    // only to users who can view them; the dashboard's quick-actions strip
+    // provides the reverse link back to Settings.
+    if ($this->currentUser()->hasPermission('view mcp sentinel audit log')) {
+      $form['operational_links'] = [
+        '#type' => 'container',
+        '#weight' => -101,
+        '#attributes' => ['class' => ['mcp-sentinel-operational-links']],
+        'links' => [
+          '#theme' => 'links',
+          '#links' => [
+            'dashboard' => [
+              'title' => $this->t('Governance dashboard'),
+              'url' => Url::fromRoute('mcp_sentinel.dashboard'),
+            ],
+            'audit_log' => [
+              'title' => $this->t('Audit log'),
+              'url' => Url::fromRoute('mcp_sentinel.audit_log'),
+            ],
+          ],
+          '#attributes' => ['class' => ['inline']],
+        ],
+      ];
+    }
 
     // Unobtrusive, collapsed setup guide for site builders. Sits above the
     // vertical tabs (lower weight) but stays closed by default. This is a
