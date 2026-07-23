@@ -44,6 +44,26 @@ services:
       # Optional: NULL when the Content Moderation module is not installed.
       - '@?content_moderation.moderation_information'
 
+  mcp_sentinel.pinned_composite_locator:
+    class: Drupal\mcp_sentinel\Service\McpPinnedCompositeLocator
+    arguments:
+      - '@entity_type.manager'
+      - '@entity_field.manager'
+      - '@mcp_sentinel.moderation_gate'
+
+  mcp_sentinel.composite_redirect:
+    class: Drupal\mcp_sentinel\Service\McpCompositeRedirect
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.pinned_composite_locator'
+      - '@mcp_sentinel.moderation_gate'
+      - '@entity_type.manager'
+      - '@current_route_match'
+      - '@mcp_sentinel.audit_logger'
+      - '@logger.channel.mcp_sentinel'
+      # Optional: NULL when the Content Moderation module is not installed.
+      - '@?content_moderation.moderation_information'
+
   mcp_sentinel.webhook_queue_manager:
     class: Drupal\mcp_sentinel\Service\McpWebhookQueueManager
     arguments:

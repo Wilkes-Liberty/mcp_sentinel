@@ -89,12 +89,33 @@ final class McpModerationGate {
    *   TRUE when the gate governs this entity's published status.
    */
   public function governsPublishedStatus(EntityInterface $entity): bool {
-    $entity_type = $entity->getEntityType();
     if (in_array($entity->getEntityTypeId(), self::UNGOVERNED_ENTITY_TYPES, TRUE)) {
       return FALSE;
     }
-    // A composite child declares the field holding its parent's entity type.
-    return $entity_type->get('entity_revision_parent_type_field') === NULL;
+    // A composite child's published status is an implementation detail of its
+    // host's composition, not editorial go-live — so the publish gate does not
+    // govern it here. Direct writes to a composite child pinned by a published
+    // host are handled separately by McpCompositeRedirect, which keeps the pin
+    // untouched and lands the edit as a host draft (see GitHub #46).
+    return !$this->isCompositeChild($entity);
+  }
+
+  /**
+   * Whether the entity is a composite child (e.g. a paragraph).
+   *
+   * A composite child declares the entity-type key holding its parent's entity
+   * type (`entity_revision_parent_type_field`). Such an entity is never
+   * published in its own right — it renders if and only if its host does — and
+   * is saved as a side effect of saving the host.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity to test.
+   *
+   * @return bool
+   *   TRUE when the entity type is a composite (revision-parented) child.
+   */
+  public function isCompositeChild(EntityInterface $entity): bool {
+    return $entity->getEntityType()->get('entity_revision_parent_type_field') !== NULL;
   }
 
   /**

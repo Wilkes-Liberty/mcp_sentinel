@@ -10,6 +10,7 @@ use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\mcp_sentinel\Service\McpCompositeRedirect;
 use Drupal\mcp_sentinel\Service\McpModerationGate;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -53,6 +54,9 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
    *   Decides what the gate governs and whether a transition publishes.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   Loads the stored entity to read its pre-edit published status.
+   * @param \Drupal\mcp_sentinel\Service\McpCompositeRedirect $compositeRedirect
+   *   Decides whether a composite-child write must be denied (pinned by
+   *   published content and not safely draftable) — see GitHub #46.
    * @param \Drupal\content_moderation\ModerationInformationInterface|null $moderationInformation
    *   The moderation information service, or NULL when Content Moderation is
    *   not installed.
@@ -61,6 +65,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     private readonly McpPolicyResolver $policyResolver,
     private readonly McpModerationGate $moderationGate,
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    private readonly McpCompositeRedirect $compositeRedirect,
     private readonly ?ModerationInformationInterface $moderationInformation = NULL,
   ) {}
 
@@ -72,6 +77,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       $container->get('mcp_sentinel.policy_resolver'),
       $container->get('mcp_sentinel.moderation_gate'),
       $container->get('entity_type.manager'),
+      $container->get('mcp_sentinel.composite_redirect'),
       $container->has('content_moderation.moderation_information')
         ? $container->get('content_moderation.moderation_information')
         : NULL,
@@ -100,9 +106,18 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     }
 
     // Entities whose published status is not editorial go-live — composite
-    // children and routing metadata — are never gated. See
-    // McpModerationGate::governsPublishedStatus().
+    // children and routing metadata — are not gated by the moderation-state
+    // rules below. But a *direct* in-place edit of a composite child (a
+    // paragraph)
+    // pinned by a published host is itself an effective publish (GitHub #46).
+    // The redirect orchestrator classifies it: a redirectable edit is allowed
+    // here (the save hooks land it as a host draft), while one that cannot be
+    // drafted safely is denied with a 422 — never mutated in place.
     if (!$this->moderationGate->governsPublishedStatus($value)) {
+      if ($this->compositeRedirect->classify($value) === McpCompositeRedirect::DECISION_DENY) {
+        $this->context->buildViolation('Publishing is denied by MCP Sentinel: this content is pinned by published content and cannot be changed in place. A human must publish a revised version.')
+          ->addViolation();
+      }
       return;
     }
 

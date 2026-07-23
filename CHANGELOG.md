@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Direct paragraph edits no longer bypass the publish gate (GitHub #46).** Under a
+  deny-publish profile, a direct JSON:API write to a paragraph whose current revision was
+  pinned by a published host's default revision changed the live page in place — an
+  effective publish with no moderation transition, since composite children are exempt from
+  the ordinary publish gate. Such a write is now treated as publish-class. When it can be
+  drafted safely (a single, moderated, published host), the edit is saved as a new paragraph
+  revision and a host **draft** revision is created that re-pins to it: the published
+  revision is left untouched, so the live page never changes, and the edit lands as a
+  reviewable draft. When it cannot be drafted safely (multiple hosts, a nested chain, an
+  unmoderated host, or no non-published state within the profile's `max_moderation_state`),
+  the write is refused with a 422 rather than mutated in place. The host-cascade case — a
+  governed node save re-saving its own paragraphs — is unaffected, and the per-type
+  `entity_rules.paragraph.allow_publish` override opts a site out. Every redirect and refusal
+  is audited. Behavioural fix only: no config schema change, and no config export is
+  required. Needs Content Moderation, Paragraphs, and Entity Reference Revisions; a no-op on
+  sites without them.
+
 ## [1.10.0] - 2026-07-22
 
 ### Added
