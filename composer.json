@@ -29,8 +29,10 @@
     "drupal/encrypt": "^3.2"
   },
   "require-dev": {
+    "drupal/entity_reference_revisions": "^1.11",
     "drupal/graphql_compose": "^2.4",
     "drupal/mcp_server": "^2.0@dev",
+    "drupal/paragraphs": "^1.18",
     "drupal/redirect": "^1.10"
   },
   "suggest": {
