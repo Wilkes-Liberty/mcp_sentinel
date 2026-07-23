@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-07-23
+
 ### Added
 - **The settings page now links to the governance dashboard and audit log.** Settings live
   under Configuration and the dashboard under Reports, so an operator configuring the module
