@@ -200,6 +200,13 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     return;
   }
 
+  // Composite-child publish gate (GitHub #46): a direct write to a paragraph
+  // pinned by a published host is publish-class. When redirectable, force a new
+  // paragraph revision here so the pinned (live) revision is never mutated; the
+  // post-save hooks then land the edit as a host draft. Denied cases are
+  // refused with a 422 by the McpDenyPublish constraint before this runs.
+  \Drupal::service('mcp_sentinel.composite_redirect')->onPresave($entity);
+
   // Publish-gate backstop (status=0) for unmoderated publishable entities.
   //
   // The McpDenyPublish constraint reports a denied go-live wherever the entity
@@ -278,6 +285,29 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
 
   $logger->log('entity_save', $metadata);
   \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
+}
+
+/**
+ * Implements hook_entity_insert().
+ *
+ * Completes a composite-child publish redirect (GitHub #46). Create is out of
+ * scope for the redirect, so this only fires the Phase B completion for a
+ * stashed paragraph — a no-op for ordinary inserts.
+ */
+function mcp_sentinel_entity_insert(EntityInterface $entity): void {
+  \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
+}
+
+/**
+ * Implements hook_entity_update().
+ *
+ * Completes a composite-child publish redirect (GitHub #46): once the edited
+ * paragraph's new revision id is known, creates a host draft forward revision
+ * re-pinning to it, leaving the published default revision untouched. A no-op
+ * unless the presave hook stashed a redirect for this entity.
+ */
+function mcp_sentinel_entity_update(EntityInterface $entity): void {
+  \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
 }
 
 /**
