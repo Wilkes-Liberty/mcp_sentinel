@@ -49,6 +49,32 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
+   * The settings page cross-links to the dashboard, gated on view access.
+   *
+   * @covers \Drupal\mcp_sentinel\Form\McpSettingsForm
+   */
+  public function testOperationalCrossLinks(): void {
+    // A user who can view the operational reports sees the cross-links.
+    $viewer = $this->drupalCreateUser([
+      'administer mcp sentinel',
+      'view mcp sentinel audit log',
+    ]);
+    $this->drupalLogin($viewer);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->linkExists('Governance dashboard');
+    $this->assertSession()->linkByHrefExists('/admin/reports/mcp-sentinel');
+    $this->assertSession()->linkByHrefExists('/admin/reports/mcp-sentinel/audit');
+
+    // A config-only admin without report access does not see a link they
+    // could not use.
+    $configOnly = $this->drupalCreateUser(['administer mcp sentinel']);
+    $this->drupalLogin($configOnly);
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->linkNotExists('Governance dashboard');
+  }
+
+  /**
    * Tests that a webhook endpoint URL must be HTTPS.
    */
   public function testWebhookEndpointUrlMustBeHttps(): void {
