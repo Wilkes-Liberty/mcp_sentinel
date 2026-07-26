@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-07-26
+
 ### Fixed
 - **The in-place publish-gate violation now actually refuses the JSON:API
   vector** (d.o #3613146). 1.12.0 attached the violation to
