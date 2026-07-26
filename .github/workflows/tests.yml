@@ -293,7 +293,14 @@ jobs:
         run: |
           mkdir -p web/sites/simpletest/browser_output web/sites/default/files
           chmod -R 777 web/sites
-          nohup php -S 127.0.0.1:8888 -t web web/.ht.router.php > /tmp/php-server.log 2>&1 &
+          # ABSOLUTE paths for docroot and router: the built-in server
+          # resolves the router path per-request against its runtime working
+          # directory, which is not the launch directory — a relative path
+          # fatals on 'Failed opening required web/.ht.router.php' at request
+          # time, every child-site page dies, and the suite fails 96 tests
+          # with misleading login/status errors while the startup probe
+          # (served before the fatal) still passes.
+          nohup php -S 127.0.0.1:8888 -t "${PWD}/web" "${PWD}/web/.ht.router.php" > /tmp/php-server.log 2>&1 &
           # The probe must prove the server answers before tests assume it; a
           # dead server fails every test with a curl error that reads like a
           # product bug.
@@ -329,6 +336,16 @@ jobs:
             echo "::error::Collected only ${total} functional tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed."
             exit 1
           fi
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-failure-evidence
+          path: |
+            /tmp/php-server.log
+            /tmp/*.html
+          if-no-files-found: ignore
 
   phpcs:
     name: Drupal coding standards
