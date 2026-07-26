@@ -139,6 +139,51 @@ final class McpWebhookWorkerTest extends KernelTestBase {
   }
 
   /**
+   * A 3xx answer is a terminal configuration failure, never followed.
+   *
+   * #3613242: following a 301 would re-issue the signed POST as a bodyless
+   * GET (and re-send to a host the SSRF pin never validated), so redirect
+   * following is disabled on the request and a 3xx fails terminally with the
+   * Location recorded — retrying cannot fix a misconfigured URL.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerFailsTerminallyOnRedirect(): void {
+    $id = $this->seedRow();
+    $item = [
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ];
+    $history = [];
+    $worker = $this->buildWorker([
+      new Response(301, ['Location' => 'https://www.example.com/hook']),
+    ], $history);
+    $worker->processItem($item);
+
+    $row = $this->loadRow($id);
+    $this->assertSame('failed_redirect', $row['status']);
+    $this->assertSame('301', (string) $row['last_response_code']);
+    $this->assertStringContainsString('https://www.example.com/hook', (string) $row['last_response_body']);
+    // The redirect was recorded, not followed: exactly one request left the
+    // client, and redirect following was disabled on it.
+    $this->assertCount(1, $history);
+    $this->assertFalse($history[0]['options']['allow_redirects']);
+
+    // failed_redirect is terminal: a replayed queue item must not re-send.
+    $history2 = [];
+    $worker2 = $this->buildWorker([new Response(200, [], 'ok')], $history2);
+    $worker2->processItem($item);
+    $this->assertSame('failed_redirect', $this->loadRow($id)['status']);
+    $this->assertCount(0, $history2);
+  }
+
+  /**
    * A 500 response schedules a retry with backoff.
    *
    * @covers ::processItem

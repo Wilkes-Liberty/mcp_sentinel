@@ -18,6 +18,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   In-place edits of *unmoderated* published entities remain allowed — there
   is no forward-revision workflow to redirect them into; sites wanting that
   strictness deny writes for the type.
+- **Webhook deliveries are never sent through a redirect** (d.o #3613242,
+  #52). The worker now disables redirect following — a 301/302 re-issues the
+  signed POST as a bodyless GET at a host the SSRF pin never validated — and
+  a 3xx answer fails terminally as `failed_redirect` with the `Location`
+  recorded, so the delivery log names the misconfigured URL instead of a bare
+  405 after five useless retries.
+- **Rows stranded `in_progress` by a dead worker are reclaimed on cron**
+  (d.o #3613242). A claim older than an hour is reset to `pending` with the
+  attempt counter bumped, so an interrupted delivery retries instead of
+  hanging forever outside every scan.
+
+### Added
+- **Permanent delivery failures now warn on the status report**
+  (d.o #3613242). Accumulated `failed`/`failed_ssrf`/`failed_redirect` rows
+  produce a hook_requirements() warning with the count, the newest failure
+  time, and a link to the delivery log — 1968 dead deliveries once sat
+  invisible for a month.
 
 ## [1.11.0] - 2026-07-23
 

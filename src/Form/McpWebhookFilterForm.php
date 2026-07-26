@@ -29,6 +29,7 @@ final class McpWebhookFilterForm extends FormBase {
     'sent'        => 'Delivered',
     'failed'      => 'Failed',
     'failed_ssrf' => 'Failed (SSRF blocked)',
+    'failed_redirect' => 'Failed (endpoint redirects)',
   ];
 
   /**

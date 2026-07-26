@@ -203,7 +203,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     if ($row === NULL) {
       return;
     }
-    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf'], TRUE)) {
+    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf', 'failed_redirect'], TRUE)) {
       // Terminal states: already delivered or permanently failed.
       return;
     }
@@ -313,6 +313,12 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       'timeout' => 10,
       'verify'  => TRUE,
       'http_errors' => FALSE,
+      // Never follow redirects (#3613242). A 301/302 makes the HTTP client
+      // re-issue the signed POST as a bodyless GET, and any hop re-sends the
+      // request to a host the SSRF guard and CURLOPT_RESOLVE pin above never
+      // validated. A webhook receiver must be addressed by its exact URL; a
+      // 3xx answer is handled below as a terminal configuration failure.
+      'allow_redirects' => FALSE,
     ];
     if ($curlResolvePin !== []) {
       $requestOptions['curl'] = $curlResolvePin;
@@ -324,6 +330,27 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $body = substr($response->getBody()->getContents(), 0, 512);
       if ($code >= 200 && $code < 300) {
         $this->updateRow($deliveryId, 'sent', $code, $body, $newAttempts);
+        return;
+      }
+      if ($code >= 300 && $code < 400) {
+        // A redirecting endpoint is a configuration error, not a transient
+        // failure — retrying cannot fix it, and following it would rewrite
+        // the signed request (#3613242). Fail terminally and record where the
+        // endpoint pointed so the delivery log says what to fix.
+        $location = $response->getHeaderLine('Location');
+        $this->updateRow($deliveryId, 'failed_redirect', $code,
+          'Endpoint redirects to ' . ($location !== '' ? $location : '(no Location header)')
+          . ' — configure the exact receiver URL; signed webhooks are never delivered through a redirect.',
+          $newAttempts);
+        $this->logger->error(
+          'Webhook delivery @id blocked: endpoint @url answered @code redirecting to @loc. Configure the exact receiver URL.',
+          [
+            '@id' => $deliveryId,
+            '@url' => $url,
+            '@code' => $code,
+            '@loc' => $location === '' ? '(no Location header)' : $location,
+          ],
+        );
         return;
       }
       $this->scheduleRetry($deliveryId, $newAttempts, $code, $body);
