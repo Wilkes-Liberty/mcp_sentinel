@@ -51,6 +51,9 @@ final class McpWebhookQueueTest extends KernelTestBase {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
+    // Requirements descriptions build routed URLs; URL generation consults
+    // the alias repository, which needs the path_alias storage.
+    $this->installEntitySchema('path_alias');
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_webhook_delivery']);
     $this->installConfig(['mcp_sentinel']);
     NodeType::create(['type' => 'page', 'name' => 'Page'])->save();
