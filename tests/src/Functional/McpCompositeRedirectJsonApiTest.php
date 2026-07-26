@@ -358,20 +358,27 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
       $this->agent,
     );
 
-    $this->assertContains($response->getStatusCode(), [200, 204],
-      'Editing a non-publish field on the published host must be allowed. Body: ' . (string) $response->getBody());
+    // #3613146 overturned the in-place allowance this test used to ride on:
+    // a direct edit of the published host is publish-class and refused. The
+    // point of THIS test survives unchanged — the composite redirect must not
+    // fire on a host cascade — so assert the refusal comes from the publish
+    // gate (not the composite-redirect denial), nothing changed, and no
+    // forward draft was forked by the redirect orchestrator.
+    $body = (string) $response->getBody();
+    $this->assertSame(422, $response->getStatusCode(),
+      'An in-place edit of the published host is publish-class and refused (#3613146). Body: ' . $body);
+    $this->assertStringContainsString('replace the live revision', $body,
+      'The refusal must come from the publish gate.');
+    $this->assertStringNotContainsString('pinned by published content', $body,
+      'The composite-redirect denial must not fire for a direct host edit.');
 
-    // In-place edit of an already-published node is allowed by design and stays
-    // published. Content moderation always writes a new revision, so the check
-    // is that no *forward draft* was forked: the latest revision is still the
-    // published default (the composite redirect did not fire on the cascade).
     $default = $this->reload('node', (int) $node->id());
     $this->assertTrue($default->isPublished(), 'The host must stay published.');
-    $this->assertSame('Host page (edited)', $default->getTitle(),
-      'The host title edit must have applied.');
+    $this->assertSame('Host page', $default->getTitle(),
+      'The live revision must be untouched.');
     $storage = \Drupal::entityTypeManager()->getStorage('node');
     $this->assertEquals($default->getRevisionId(), $storage->getLatestRevisionId($node->id()),
-      'No forward draft revision should be forked by a host in-place edit.');
+      'No forward draft revision should be forked by a refused host edit.');
   }
 
 }
