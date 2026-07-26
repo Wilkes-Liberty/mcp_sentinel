@@ -20,18 +20,22 @@ use Symfony\Component\Validator\ConstraintValidator;
 /**
  * Validates the deny-publish gate for governed agents.
  *
- * Fires a violation only on a *go-live*, and applies the same rule to both
- * kinds of publishable entity:
+ * Fires a violation on any save that would make agent-authored content live:
  *
- * - **Moderated**: the incoming moderation_state is a published state, and the
- *   entity is either new or its stored state was not already published.
- * - **Unmoderated**: the incoming status is published, and the entity is either
- *   new or its stored status was not already published.
+ * - **Moderated**: the incoming moderation_state is a published state. That
+ *   covers the transition into publication AND the published → published save
+ *   (#3613146): a save that keeps a published state replaces the live default
+ *   revision with new content — an effective re-publish with no human in the
+ *   loop, previously allowed as an "in-place edit". The remedy rides the
+ *   violation message: submit the edit with a non-published moderation_state
+ *   (e.g. draft) to create a forward revision for human review.
+ * - **Unmoderated**: the incoming status is published, and the entity is
+ *   either new or its stored status was not already published. In-place edits
+ *   remain allowed here — an unmoderated type has no forward-revision
+ *   workflow to redirect the edit into, so gating it would leave agents no
+ *   path at all; sites wanting that strictness deny writes for the type.
  *
- * That preserves the human-publish invariant — a deny-publish agent can never
- * transition content *into* a published state — while allowing published →
- * draft, draft → draft, published → archived, and in-place edits of
- * already-published content.
+ * Published → draft, draft → draft, and published → archived always pass.
  *
  * Reporting the unmoderated case here is what makes the refusal *visible*.
  * The presave backstop can only force status back to 0, which returns HTTP 200
@@ -139,12 +143,18 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       return;
     }
 
-    // The target is a published state. This is a go-live (and therefore denied)
-    // unless the entity is already published and merely being edited in place:
-    // an existing entity whose stored state is also a published state is not
-    // transitioning into publication. When the stored state cannot be confirmed
-    // as published, fail closed and deny.
+    // The target is a published state. Under deny-publish that is always
+    // publish-class (#3613146). A new or unpublished entity is transitioning
+    // into publication; an already-published one would have its live default
+    // revision replaced with new content — observed in production as bulk
+    // in-place mutations of published nodes, with no forward revision and
+    // nothing for a human to approve. The previously-allowed "in-place edit"
+    // case gets an actionable message naming the sanctioned path.
     if (!$value->isNew() && $this->originalIsPublishedState($value)) {
+      $this->context->buildViolation($constraint->message . ' This save would replace the live revision of published content. '
+        . 'Submit the edit with a non-published moderation_state (for example "draft") to create a forward revision for human review.')
+        ->atPath('moderation_state')
+        ->addViolation();
       return;
     }
 

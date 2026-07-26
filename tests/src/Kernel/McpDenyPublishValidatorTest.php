@@ -148,8 +148,15 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
    * Whether the entity's violations include the deny-publish message.
    */
   private function hasDenyViolation(ContentEntityInterface $entity): bool {
+    return $this->hasViolationContaining($entity, self::DENY_MESSAGE);
+  }
+
+  /**
+   * Whether validating the entity yields a violation containing the text.
+   */
+  private function hasViolationContaining(ContentEntityInterface $entity, string $text): bool {
     foreach ($entity->validate() as $violation) {
-      if ((string) $violation->getMessage() === self::DENY_MESSAGE) {
+      if (str_contains((string) $violation->getMessage(), $text)) {
         return TRUE;
       }
     }
@@ -236,7 +243,7 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
    *
    * Target == the current published state (unchanged), so it is not a go-live.
    */
-  public function testEditInPlacePublishedAllowed(): void {
+  public function testEditInPlacePublishedDenied(): void {
     $this->createGovernedAccount();
     $node = Node::create([
       'type' => self::MODERATED_TYPE,
@@ -246,11 +253,40 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     ]);
     $node->save();
 
-    // Change only the title; the moderation state stays published.
+    // Change only the title; the moderation state stays published. Before
+    // #3613146 this was allowed as an "in-place edit" — which meant a save
+    // omitting moderation_state entirely replaced the live default revision
+    // with agent-authored content, bypassing the human-publish invariant.
     $node->set('title', 'Published article (edited)');
+    $this->assertTrue(
+      $this->hasViolationContaining($node, 'replace the live revision'),
+      'A deny-publish agent must NOT be able to replace the live revision of '
+      . 'published content by saving without a state transition (#3613146).');
+  }
+
+  /**
+   * The sanctioned path stays open: the same edit as a draft is allowed.
+   */
+  public function testEditAsForwardDraftAllowed(): void {
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => self::MODERATED_TYPE,
+      'title' => 'Published article',
+      'moderation_state' => 'published',
+      'uid' => 1,
+    ]);
+    $node->save();
+
+    // The identical field edit, submitted as a forward draft: the live
+    // revision stays untouched and a human publishes the revision.
+    $node->set('title', 'Published article (edited)');
+    $node->set('moderation_state', 'draft');
     $this->assertFalse($this->hasDenyViolation($node),
-      'A deny-publish agent must be allowed to edit fields on already-published '
-      . 'content without a moderation_state change.');
+      'The same edit submitted as a draft must pass — that is the remedy the '
+      . 'violation message names.');
+    $this->assertFalse(
+      $this->hasViolationContaining($node, 'replace the live revision'),
+      'The draft path must not trip the in-place gate either.');
   }
 
   /**
