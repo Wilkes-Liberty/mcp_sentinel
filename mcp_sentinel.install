@@ -176,6 +176,14 @@ function mcp_sentinel_requirements(string $phase): array {
   // was once only discovered by querying the table by hand. Surface any
   // accumulation on the status report, before the governance early-return
   // below so it shows regardless of governance health.
+  // Guard on the table: the module can be enabled while its schema is not yet
+  // (or no longer) installed — mid-install, mid-uninstall, and kernel tests
+  // that enable the module without installing the schema all reach runtime
+  // requirements in that state, and a status check must never itself crash.
+  if (!\Drupal::database()->schema()->tableExists('mcp_sentinel_webhook_delivery')) {
+    return $requirements;
+  }
+
   $failedQuery = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
     ->condition('d.status', ['failed', 'failed_ssrf', 'failed_redirect'], 'IN');
   $failedQuery->addExpression('COUNT(*)', 'n');
