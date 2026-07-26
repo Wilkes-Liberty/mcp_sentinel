@@ -344,7 +344,12 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
           $newAttempts);
         $this->logger->error(
           'Webhook delivery @id blocked: endpoint @url answered @code redirecting to @loc. Configure the exact receiver URL.',
-          ['@id' => $deliveryId, '@url' => $url, '@code' => $code, '@loc' => ($location !== '' ? $location : '(no Location header)')],
+          [
+            '@id' => $deliveryId,
+            '@url' => $url,
+            '@code' => $code,
+            '@loc' => $location === '' ? '(no Location header)' : $location,
+          ],
         );
         return;
       }
