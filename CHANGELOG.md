@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **The in-place publish-gate violation now actually refuses the JSON:API
+  vector** (d.o #3613146). 1.12.0 attached the violation to
+  `moderation_state`, but JSON:API filters violations to the fields present
+  in the PATCH payload — and this bypass is by definition a payload without
+  `moderation_state`, so the violation was silently dropped and the request
+  returned 200 (caught by the GitLab functional pipeline; the kernel suite
+  validates without filtering and stayed green). The violation is now
+  reported at the entity level, which survives the filter on every path.
+
 ## [1.12.0] - 2026-07-26
 
 ### Fixed

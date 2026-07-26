@@ -151,9 +151,17 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     // nothing for a human to approve. The previously-allowed "in-place edit"
     // case gets an actionable message naming the sanctioned path.
     if (!$value->isNew() && $this->originalIsPublishedState($value)) {
+      // Reported at the ENTITY level (no property path), deliberately. The
+      // JSON:API PATCH path validates with the payload's field list and
+      // EntityConstraintViolationList::filterByFields() drops violations
+      // attached to any field absent from the payload — and this bypass is
+      // BY DEFINITION a payload with no moderation_state, so a violation at
+      // ->atPath('moderation_state') is filtered away and the request sails
+      // through with a 200 (how 1.12.0 shipped an incomplete fix; caught by
+      // the GitLab functional pipeline). Entity-level violations survive the
+      // filter on every path.
       $this->context->buildViolation($constraint->message . ' This save would replace the live revision of published content. '
         . 'Submit the edit with a non-published moderation_state (for example "draft") to create a forward revision for human review.')
-        ->atPath('moderation_state')
         ->addViolation();
       return;
     }
