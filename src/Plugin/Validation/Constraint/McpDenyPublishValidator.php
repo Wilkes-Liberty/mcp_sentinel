@@ -151,7 +151,8 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     // nothing for a human to approve. The previously-allowed "in-place edit"
     // case gets an actionable message naming the sanctioned path.
     if (!$value->isNew() && $this->originalIsPublishedState($value)) {
-      $this->context->buildViolation('Publishing is denied by MCP Sentinel: this save would replace the live revision of published content. Submit the edit with a non-published moderation_state (for example "draft") to create a forward revision for human review.')
+      $this->context->buildViolation($constraint->message . ' This save would replace the live revision of published content. '
+        . 'Submit the edit with a non-published moderation_state (for example "draft") to create a forward revision for human review.')
         ->atPath('moderation_state')
         ->addViolation();
       return;
