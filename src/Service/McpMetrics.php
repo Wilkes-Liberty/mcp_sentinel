@@ -342,8 +342,8 @@ final class McpMetrics {
       foreach ($query->execute() as $row) {
         $byStatus[(string) $row->status] = (int) $row->cnt;
       }
-      // 'failed', 'failed_ssrf' and 'failed_redirect' are terminal
-      // failures; 'in_progress' is treated as pending for dashboard purposes.
+      // 'failed', 'failed_ssrf', 'failed_redirect' and 'failed_key' are
+      // terminal failures; 'in_progress' is pending for dashboard purposes.
       $sent = $byStatus['sent'] ?? 0;
       $failed = ($byStatus['failed'] ?? 0) + ($byStatus['failed_ssrf'] ?? 0)
         + ($byStatus['failed_redirect'] ?? 0) + ($byStatus['failed_key'] ?? 0);

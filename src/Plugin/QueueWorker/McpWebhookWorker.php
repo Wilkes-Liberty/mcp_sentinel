@@ -278,22 +278,20 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // went out unsigned exactly this way. Terminal, like the SSRF and
     // redirect classes: retrying cannot fix configuration.
     $keyId = (string) ($endpoint['secret_key'] ?? '');
-    if ($keyId !== '') {
-      $key = $this->keyRepository->getKey($keyId);
-      if ($key === NULL || (string) $key->getKeyValue() === '') {
-        $this->updateRow($deliveryId, 'failed_key', NULL,
-          "Signing key '" . $keyId . "' is missing or resolves to an empty value — delivery refused rather than sent unsigned. Fix the Key entity or remove secret_key from the endpoint.",
-          $attempts);
-        $this->logger->error(
-          'Webhook delivery @id refused: signing key @key on endpoint @endpoint is missing or resolves empty. Fix the Key entity or remove secret_key.',
-          [
-            '@id' => $deliveryId,
-            '@key' => $keyId,
-            '@endpoint' => (string) ($endpoint['id'] ?? ''),
-          ],
-        );
-        return;
-      }
+    $secret = $this->resolveSecret($endpoint);
+    if ($keyId !== '' && $secret === '') {
+      $this->updateRow($deliveryId, 'failed_key', NULL,
+        "Signing key '" . $keyId . "' is missing or resolves to an empty value — delivery refused rather than sent unsigned. Fix the Key entity or remove secret_key from the endpoint.",
+        $attempts);
+      $this->logger->error(
+        'Webhook delivery @id refused: signing key @key on endpoint @endpoint is missing or resolves empty. Fix the Key entity or remove secret_key.',
+        [
+          '@id' => $deliveryId,
+          '@key' => $keyId,
+          '@endpoint' => (string) ($endpoint['id'] ?? ''),
+        ],
+      );
+      return;
     }
 
     // Fix 3: Atomic claim — update status from 'pending' to 'in_progress'
@@ -323,7 +321,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       }
     }
     $payload = $storedPayload;
-    $secret = $this->resolveSecret($endpoint);
     $headers = [
       'Content-Type' => 'application/json',
       'User-Agent'   => 'mcp-sentinel-webhook/1.0',
