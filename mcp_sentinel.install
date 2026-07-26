@@ -193,7 +193,7 @@ function mcp_sentinel_requirements(string $phase): array {
         'title' => t('MCP Sentinel: webhook deliveries permanently failing'),
         'value' => t('@count delivery(ies) permanently failed; most recent attempt @when', [
           '@count' => (int) $failedRow['n'],
-          '@when' => \Drupal::service('date.formatter')->format((int) $failedRow['latest'], 'short'),
+          '@when' => \Drupal::service('date.formatter')->format((int) $failedRow['latest'], 'custom', 'Y-m-d H:i'),
         ]),
         'severity' => REQUIREMENT_WARNING,
         'description' => t('Webhook events are silently not reaching their destination. Inspect the <a href=":url">delivery log</a> — the per-row status and last response say why (unreachable endpoint, redirect, SSRF block, non-2xx receiver). Rows prune after the configured retention period, but the cause does not fix itself.', [
