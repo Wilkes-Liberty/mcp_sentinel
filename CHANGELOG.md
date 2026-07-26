@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-07-26
+
 ### Fixed
 - **A declared signing key that cannot be resolved now refuses the delivery
   instead of silently sending unsigned** (d.o #3613291, #56). An endpoint
