@@ -330,7 +330,7 @@ jobs:
             --log-junit "${PWD}/junit-Functional.xml" \
             "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Functional" \
             "${PWD}/web/modules/contrib/mcp_sentinel/modules/mcp_sentinel_approval/tests/src/Functional"
-          total="$(grep -ho '<testcase ' junit-Functional.xml | wc -l | tr -d ' ')"
+          total="$( (grep -ho '<testcase ' junit-Functional.xml || true) | wc -l | tr -d ' ')"
           echo "Collected ${total} functional tests (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} functional tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed."
