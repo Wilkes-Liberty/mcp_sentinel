@@ -148,8 +148,15 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
    * Whether the entity's violations include the deny-publish message.
    */
   private function hasDenyViolation(ContentEntityInterface $entity): bool {
+    return $this->hasViolationContaining($entity, self::DENY_MESSAGE);
+  }
+
+  /**
+   * Whether validating the entity yields a violation containing the text.
+   */
+  private function hasViolationContaining(ContentEntityInterface $entity, string $text): bool {
     foreach ($entity->validate() as $violation) {
-      if ((string) $violation->getMessage() === self::DENY_MESSAGE) {
+      if (str_contains((string) $violation->getMessage(), $text)) {
         return TRUE;
       }
     }
@@ -251,7 +258,8 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     // omitting moderation_state entirely replaced the live default revision
     // with agent-authored content, bypassing the human-publish invariant.
     $node->set('title', 'Published article (edited)');
-    $this->assertTrue($this->hasDenyViolation($node),
+    $this->assertTrue(
+      $this->hasViolationContaining($node, 'replace the live revision'),
       'A deny-publish agent must NOT be able to replace the live revision of '
       . 'published content by saving without a state transition (#3613146).');
   }
@@ -276,6 +284,9 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     $this->assertFalse($this->hasDenyViolation($node),
       'The same edit submitted as a draft must pass — that is the remedy the '
       . 'violation message names.');
+    $this->assertFalse(
+      $this->hasViolationContaining($node, 'replace the live revision'),
+      'The draft path must not trip the in-place gate either.');
   }
 
   /**
