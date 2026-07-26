@@ -263,10 +263,15 @@ final class McpPublishGateJsonApiTest extends BrowserTestBase {
       $this->agent,
     );
 
+    $body = (string) $response->getBody();
+
     $this->assertSame(422, $response->getStatusCode(),
       'A field edit that keeps a published state must be refused — it would '
-      . 'replace the live revision (#3613146). Body: '
-      . (string) $response->getBody());
+      . 'replace the live revision (#3613146). Body: ' . $body);
+    $this->assertStringContainsString(self::DENY_MESSAGE, $body,
+      'The 422 body must carry the Sentinel deny-publish message.');
+    $this->assertStringContainsString('Submit the edit with a non-published moderation_state', $body,
+      'The 422 body must name the forward-draft remedy.');
 
     $default = $this->reloadNode((int) $node->id());
     $this->assertSame('Live page', $default->getTitle(),
