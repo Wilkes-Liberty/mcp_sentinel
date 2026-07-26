@@ -252,6 +252,7 @@ class McpMetricsTest extends KernelTestBase {
     $this->seedDelivery('sent', $now - 100);
     $this->seedDelivery('sent', $now - 200);
     $this->seedDelivery('failed', $now - 100);
+    $this->seedDelivery('failed_key', $now - 100);
     $this->seedDelivery('pending', $now - 100);
     // Outside window: ignored.
     $this->seedDelivery('sent', $now - (8 * 86400));
@@ -259,11 +260,11 @@ class McpMetricsTest extends KernelTestBase {
     $m = \Drupal::service('mcp_sentinel.metrics');
     $health = $m->webhookHealth('24h');
     $this->assertSame(2, $health['sent']);
-    $this->assertSame(1, $health['failed']);
+    $this->assertSame(2, $health['failed']);
     $this->assertSame(1, $health['pending']);
-    $this->assertSame(4, $health['total']);
-    // Success rate = sent / (sent + failed + failed_ssrf), excludes pending.
-    $this->assertEqualsWithDelta(66.7, $health['success_rate'], 0.1);
+    $this->assertSame(5, $health['total']);
+    // Success rate = sent / (sent + terminal failures), excludes pending.
+    $this->assertEqualsWithDelta(50.0, $health['success_rate'], 0.1);
   }
 
   /**

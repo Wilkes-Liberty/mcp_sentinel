@@ -184,7 +184,7 @@ function mcp_sentinel_requirements(string $phase): array {
   // itself crash (nor swallow the other warnings).
   if (\Drupal::database()->schema()->tableExists('mcp_sentinel_webhook_delivery')) {
     $failedQuery = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
-      ->condition('d.status', ['failed', 'failed_ssrf', 'failed_redirect'], 'IN');
+      ->condition('d.status', ['failed', 'failed_ssrf', 'failed_redirect', 'failed_key'], 'IN');
     $failedQuery->addExpression('COUNT(*)', 'n');
     $failedQuery->addExpression('MAX(last_attempt)', 'latest');
     $failedRow = $failedQuery->execute()->fetchAssoc();
@@ -201,6 +201,33 @@ function mcp_sentinel_requirements(string $phase): array {
         ]),
       ];
     }
+  }
+
+  // Pre-flight every enabled endpoint's signing key (#3613291): a declared
+  // secret_key whose Key entity is missing or resolves empty means the worker
+  // will refuse every delivery for that endpoint (fail closed) — surface the
+  // misconfiguration before a single delivery is attempted.
+  $badKeys = [];
+  foreach ((array) $config->get('webhook_endpoints') as $endpoint) {
+    if (empty($endpoint['enabled'])) {
+      continue;
+    }
+    $keyId = (string) ($endpoint['secret_key'] ?? '');
+    if ($keyId === '') {
+      continue;
+    }
+    $key = \Drupal::service('key.repository')->getKey($keyId);
+    if ($key === NULL || (string) $key->getKeyValue() === '') {
+      $badKeys[] = (string) ($endpoint['id'] ?? '?') . ' → ' . $keyId;
+    }
+  }
+  if ($badKeys !== []) {
+    $requirements['mcp_sentinel_webhook_signing_keys'] = [
+      'title' => t('MCP Sentinel: webhook signing key unresolvable'),
+      'value' => t('@list', ['@list' => implode(', ', $badKeys)]),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('These enabled endpoints declare a signing key that is missing or resolves to an empty value. Every delivery for them is refused (failed_key) rather than sent unsigned. Fix the Key entity or remove secret_key from the endpoint.'),
+    ];
   }
 
   // Mirror McpOauthContext::isAgentChannel(): the agent channel can only ever
