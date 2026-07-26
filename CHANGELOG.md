@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-07-26
+
 ### Fixed
 - **A save that keeps a published moderation state can no longer replace the
   live revision of published content** (d.o #3613146, #51). Under a
