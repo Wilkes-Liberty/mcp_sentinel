@@ -57,6 +57,84 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
+   * Inserts a delivery row with the given status fields (test helper).
+   */
+  private function seedDeliveryRow(array $overrides = []): int {
+    $now = \Drupal::time()->getRequestTime();
+    return (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields($overrides + [
+        'endpoint_id'  => 'ep1',
+        'event_name'   => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload'      => '{}',
+        'status'       => 'pending',
+        'attempts'     => 0,
+        'created'      => $now,
+      ])->execute();
+  }
+
+  /**
+   * Cron reclaims rows stranded in_progress by a dead worker (#3613242).
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpWebhookQueueManager::reclaimStaleClaims
+   */
+  public function testReclaimStaleClaims(): void {
+    $now = \Drupal::time()->getRequestTime();
+    $stale = $this->seedDeliveryRow([
+      'status' => 'in_progress',
+      'attempts' => 1,
+      'last_attempt' => $now - 7200,
+    ]);
+    $fresh = $this->seedDeliveryRow([
+      'status' => 'in_progress',
+      'attempts' => 1,
+      'last_attempt' => $now - 60,
+    ]);
+
+    $reclaimed = $this->container->get('mcp_sentinel.webhook_queue_manager')
+      ->reclaimStaleClaims();
+    $this->assertSame(1, $reclaimed);
+
+    $db = $this->container->get('database');
+    $staleRow = $db->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('id', $stale)->execute()->fetchAssoc();
+    // Reclaimed: pending again, with the attempt counter bumped so a row that
+    // deterministically kills its worker still converges on MAX_ATTEMPTS.
+    $this->assertSame('pending', $staleRow['status']);
+    $this->assertSame('2', (string) $staleRow['attempts']);
+
+    $freshRow = $db->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('id', $fresh)->execute()->fetchAssoc();
+    // A live claim inside the TTL is untouched.
+    $this->assertSame('in_progress', $freshRow['status']);
+    $this->assertSame('1', (string) $freshRow['attempts']);
+  }
+
+  /**
+   * Accumulated permanent delivery failures warn on the status report.
+   *
+   * #3613242: 1968 permanently failed deliveries once accumulated with no
+   * signal anywhere; this pins the hook_requirements() surface that makes the
+   * silence loud.
+   */
+  public function testRequirementsWarnsOnPermanentFailures(): void {
+    include_once DRUPAL_ROOT . '/core/includes/install.inc';
+    \Drupal::moduleHandler()->loadInclude('mcp_sentinel', 'install');
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayNotHasKey('mcp_sentinel_webhook_failures', $requirements);
+
+    $this->seedDeliveryRow(['status' => 'failed', 'last_attempt' => \Drupal::time()->getRequestTime()]);
+    $this->seedDeliveryRow(['status' => 'failed_redirect', 'last_attempt' => \Drupal::time()->getRequestTime()]);
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_webhook_failures', $requirements);
+    $this->assertSame(REQUIREMENT_WARNING, $requirements['mcp_sentinel_webhook_failures']['severity']);
+    $this->assertStringContainsString('2', (string) $requirements['mcp_sentinel_webhook_failures']['value']);
+  }
+
+  /**
    * The delivery log table is created by the module schema.
    */
   public function testDeliveryLogTableExists(): void {

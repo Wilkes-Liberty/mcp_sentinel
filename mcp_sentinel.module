@@ -538,6 +538,11 @@ function mcp_sentinel_cron(): void {
     );
   }
 
+  // Reclaim rows stranded in_progress by a worker that died between the
+  // atomic claim and the result write, so the scan below can re-enqueue them
+  // (#3613242). Runs first: a reclaimed row becomes pending-and-due.
+  \Drupal::service('mcp_sentinel.webhook_queue_manager')->reclaimStaleClaims();
+
   // Re-enqueue pending webhook delivery rows whose backoff has elapsed, and
   // recover rows that were inserted but never successfully enqueued (e.g. if
   // the queue backend was unavailable at dispatch time). This replaces the

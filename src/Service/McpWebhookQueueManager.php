@@ -155,6 +155,41 @@ final class McpWebhookQueueManager {
   }
 
   /**
+   * Reclaims delivery rows stranded in 'in_progress' by a dead worker.
+   *
+   * The worker claims a row (pending -> in_progress) before POSTing; if the
+   * process dies between the claim and the result write (cron killed, fatal),
+   * the row stays in_progress forever — the cron re-enqueue scan only picks
+   * up 'pending' (#3613242). Any claim older than the TTL is from a dead
+   * worker (a live attempt finishes within the 10s HTTP timeout), so reset it
+   * to pending for the scan to re-enqueue. The attempt counter is incremented
+   * so a row that deterministically kills its worker still converges on the
+   * MAX_ATTEMPTS terminal failure instead of looping forever.
+   *
+   * @param int $claimTtl
+   *   Seconds after which an in_progress claim counts as abandoned.
+   *
+   * @return int
+   *   Number of rows reclaimed.
+   */
+  public function reclaimStaleClaims(int $claimTtl = 3600): int {
+    $now = $this->time->getRequestTime();
+    $reclaimed = (int) $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('status', 'in_progress')
+      ->condition('last_attempt', $now - $claimTtl, '<')
+      ->fields(['status' => 'pending'])
+      ->expression('attempts', 'attempts + 1')
+      ->execute();
+    if ($reclaimed > 0) {
+      $this->logger->warning(
+        'Reclaimed @count webhook delivery row(s) stranded in_progress by a dead worker.',
+        ['@count' => $reclaimed],
+      );
+    }
+    return $reclaimed;
+  }
+
+  /**
    * Prunes delivery rows older than the configured retention period.
    *
    * @return int

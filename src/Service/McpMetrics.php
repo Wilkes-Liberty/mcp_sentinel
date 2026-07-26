@@ -345,7 +345,7 @@ final class McpMetrics {
       // 'failed' and 'failed_ssrf' are both terminal failures; 'in_progress'
       // is treated as pending for dashboard purposes.
       $sent = $byStatus['sent'] ?? 0;
-      $failed = ($byStatus['failed'] ?? 0) + ($byStatus['failed_ssrf'] ?? 0);
+      $failed = ($byStatus['failed'] ?? 0) + ($byStatus['failed_ssrf'] ?? 0) + ($byStatus['failed_redirect'] ?? 0);
       $pending = ($byStatus['pending'] ?? 0) + ($byStatus['in_progress'] ?? 0);
       $total = $sent + $failed + $pending;
       $resolved = $sent + $failed;

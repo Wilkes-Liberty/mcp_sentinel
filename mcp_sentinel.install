@@ -170,6 +170,31 @@ function mcp_sentinel_requirements(string $phase): array {
     return $requirements;
   }
 
+  // Permanently failed webhook deliveries are otherwise invisible
+  // (#3613242): rows land in failed / failed_ssrf / failed_redirect and sit
+  // silently until retention prunes them — a month of 100% delivery failure
+  // was once only discovered by querying the table by hand. Surface any
+  // accumulation on the status report, before the governance early-return
+  // below so it shows regardless of governance health.
+  $failedQuery = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+    ->condition('d.status', ['failed', 'failed_ssrf', 'failed_redirect'], 'IN');
+  $failedQuery->addExpression('COUNT(*)', 'n');
+  $failedQuery->addExpression('MAX(last_attempt)', 'latest');
+  $failedRow = $failedQuery->execute()->fetchAssoc();
+  if ((int) ($failedRow['n'] ?? 0) > 0) {
+    $requirements['mcp_sentinel_webhook_failures'] = [
+      'title' => t('MCP Sentinel: webhook deliveries permanently failing'),
+      'value' => t('@count delivery(ies) permanently failed; most recent attempt @when', [
+        '@count' => (int) $failedRow['n'],
+        '@when' => \Drupal::service('date.formatter')->format((int) $failedRow['latest'], 'short'),
+      ]),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('Webhook events are silently not reaching their destination. Inspect the <a href=":url">delivery log</a> — the per-row status and last response say why (unreachable endpoint, redirect, SSRF block, non-2xx receiver). Rows prune after the configured retention period, but the cause does not fix itself.', [
+        ':url' => Url::fromRoute('mcp_sentinel.webhook_delivery')->toString(),
+      ]),
+    ];
+  }
+
   // Mirror McpOauthContext::isAgentChannel(): the agent channel can only ever
   // fire when at least one client_id or one scope is configured.
   $has_agent_clients = !empty($config->get('agent_oauth_clients'));
