@@ -235,9 +235,14 @@ final class McpPublishGateJsonApiTest extends BrowserTestBase {
   }
 
   /**
-   * Patching another field on a PUBLISHED node (no state change) is allowed.
+   * A PATCH omitting moderation_state must NOT mutate the live revision.
+   *
+   * #3613146: the state stays published, so nothing reads as a "transition" —
+   * but the save replaces the default (live) revision with agent-authored
+   * content. Observed in production as bulk in-place mutations of published
+   * nodes. The gate now refuses it with a 422 whose message names the remedy.
    */
-  public function testTitlePatchOnPublishedAllowed(): void {
+  public function testTitlePatchOnPublishedDenied(): void {
     $node = $this->drupalCreateNode([
       'type' => self::MODERATED_TYPE,
       'title' => 'Live page',
@@ -258,15 +263,52 @@ final class McpPublishGateJsonApiTest extends BrowserTestBase {
       $this->agent,
     );
 
-    $this->assertContains($response->getStatusCode(), [200, 204],
-      'Editing a non-publish field on an already-published node must be allowed. '
-      . 'Body: ' . (string) $response->getBody());
+    $this->assertSame(422, $response->getStatusCode(),
+      'A field edit that keeps a published state must be refused — it would '
+      . 'replace the live revision (#3613146). Body: '
+      . (string) $response->getBody());
 
     $default = $this->reloadNode((int) $node->id());
-    $this->assertSame('Live page (edited)', $default->getTitle(),
-      'The title edit must have been applied.');
+    $this->assertSame('Live page', $default->getTitle(),
+      'The live revision must be untouched.');
+  }
+
+  /**
+   * The same edit submitted as a forward draft passes, live revision intact.
+   */
+  public function testTitlePatchAsDraftAllowed(): void {
+    $node = $this->drupalCreateNode([
+      'type' => self::MODERATED_TYPE,
+      'title' => 'Live page',
+      'moderation_state' => 'published',
+    ]);
+
+    $response = $this->governedJsonApiRequest(
+      'PATCH',
+      '/jsonapi/node/article/' . $node->uuid(),
+      [
+        'data' => [
+          'type' => 'node--article',
+          'id' => $node->uuid(),
+          'attributes' => [
+            'title' => 'Live page (edited)',
+            'moderation_state' => 'draft',
+          ],
+        ],
+      ],
+      NULL,
+      $this->agent,
+    );
+
+    $this->assertContains($response->getStatusCode(), [200, 204],
+      'The identical edit as a forward draft must pass — the remedy the 422 '
+      . 'names. Body: ' . (string) $response->getBody());
+
+    $default = $this->reloadNode((int) $node->id());
+    $this->assertSame('Live page', $default->getTitle(),
+      'The default (live) revision must still carry the original content.');
     $this->assertTrue($default->isPublished(),
-      'The node must stay published.');
+      'The node must stay published; the edit lives on a forward revision.');
   }
 
 }

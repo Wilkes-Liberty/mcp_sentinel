@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A save that keeps a published moderation state can no longer replace the
+  live revision of published content** (d.o #3613146, #51). Under a
+  deny-publish profile, a PATCH omitting `moderation_state` read as "no
+  transition" and mutated the default revision in place — observed in
+  production as bulk in-place edits of published nodes with no forward
+  revision and nothing for a human to approve. Any save targeting a published
+  state is now publish-class; the 422 names the remedy (submit the edit with
+  `moderation_state: draft` to create a forward revision for human review).
+  In-place edits of *unmoderated* published entities remain allowed — there
+  is no forward-revision workflow to redirect them into; sites wanting that
+  strictness deny writes for the type.
+
 ## [1.11.0] - 2026-07-23
 
 ### Added
