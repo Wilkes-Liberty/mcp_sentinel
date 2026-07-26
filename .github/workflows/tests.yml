@@ -7,8 +7,12 @@ name: Tests
 # release was whoever remembered to run PHPUnit by hand. For a module whose job
 # is enforcing a security boundary, that is the wrong guarantee — see issue #32.
 #
-# Unit + Kernel are the blocking gate. Functional tests need a webserver and are
-# not run here; that is a deliberate first step, not an oversight.
+# Unit + Kernel run across the support matrix; Functional runs as its own
+# blocking job on the ceiling leg (#58). One functional leg is a deliberate
+# cost/coverage trade: the drupalcode GitLab pipeline still runs the full
+# suite per push to 1.x and per release commit, and 1.12.0 proved a
+# GitHub-only green is not a release gate — the JSON:API publish-gate fix
+# shipped inert because only the functional suite could see it.
 on:
   pull_request: { branches: ['**'] }
   push: { branches: ['1.x'] }
@@ -181,8 +185,8 @@ jobs:
         env:
           # Kernel tests need a database; SQLite keeps this hermetic with no
           # service container. Production runs PostgreSQL, so a storage-specific
-          # regression would not surface here — Functional coverage is the
-          # follow-up (#32).
+          # regression would not surface here — the functional job below and
+          # the drupalcode pipeline are the deeper nets.
           # Quoted: the value ends in a colon, which YAML would otherwise read
           # as a mapping key and refuse to parse the file at all.
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
@@ -222,6 +226,126 @@ jobs:
             echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
             exit 1
           fi
+
+  # Functional (BrowserTestBase) suite on the ceiling leg only. The setup
+  # steps deliberately mirror the matrix job above rather than sharing a
+  # composite action: the two jobs pin different things (the matrix pins
+  # floors and PHPUnit 9.6 quirks; this job pins the webserver contract) and
+  # coupling their evolution has already cost more than the duplication.
+  # BrowserTestBase needs a real webserver serving the docroot and a real
+  # SQLite file (the tested site runs in the server process, so :memory: is
+  # not shared); PHP's built-in server with core's .ht.router.php is the
+  # documented minimal setup. Added by #58 after 1.12.0 shipped a fix the
+  # kernel suite could not see fail.
+  phpunit-functional:
+    name: PHPUnit — Functional (Drupal 11, PHP 8.4)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          # gd: image module. pdo_sqlite/sqlite3: the test database. curl/dom:
+          # BrowserTestBase's Mink driver and response parsing.
+          extensions: gd, pdo_sqlite, sqlite3, curl, dom
+          coverage: none
+
+      - name: Scaffold a Drupal site
+        run: |
+          composer create-project "drupal/recommended-project:^11" drupal \
+            --no-interaction --no-install --no-progress
+          cd drupal
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.phpstan/extension-installer true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer config repositories.mcp_sentinel path ../module
+
+      - name: Install dependencies
+        working-directory: drupal
+        run: |
+          composer require -W --no-interaction --no-progress \
+            "drupal/mcp_sentinel:*@dev"
+          composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:^11" \
+            "phpunit/phpunit:^11.5" \
+            "drush/drush:^13" \
+            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
+            "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11"
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          test -L web/modules/contrib/mcp_sentinel \
+            || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/mcp_sentinel
+
+      - name: Start the test webserver
+        working-directory: drupal
+        run: |
+          mkdir -p web/sites/simpletest/browser_output web/sites/default/files
+          chmod -R 777 web/sites
+          # ABSOLUTE paths for docroot and router: the built-in server
+          # resolves the router path per-request against its runtime working
+          # directory, which is not the launch directory — a relative path
+          # fatals on 'Failed opening required web/.ht.router.php' at request
+          # time, every child-site page dies, and the suite fails 96 tests
+          # with misleading login/status errors while the startup probe
+          # (served before the fatal) still passes.
+          nohup php -S 127.0.0.1:8888 -t "${PWD}/web" "${PWD}/web/.ht.router.php" > /tmp/php-server.log 2>&1 &
+          # The probe must prove the server answers before tests assume it; a
+          # dead server fails every test with a curl error that reads like a
+          # product bug.
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8888/core/misc/drupal.js > /dev/null && exit 0
+            sleep 0.5
+          done
+          echo "::error::test webserver never answered"; cat /tmp/php-server.log; exit 1
+
+      - name: PHPUnit — Functional (blocking)
+        working-directory: drupal
+        env:
+          # A real file, not :memory: — the tested site runs inside the
+          # webserver process and must see the same database.
+          SIMPLETEST_DB: 'sqlite://localhost/sites/default/files/test.sqlite'
+          SIMPLETEST_BASE_URL: 'http://127.0.0.1:8888'
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          # Same doctrine as the matrix job: assert the count, not the exit
+          # status. 22 files / 103 test methods today; the floor catches a
+          # dropped directory, not normal drift.
+          MIN_TESTS: '60'
+        run: |
+          set -euo pipefail
+          config="${PWD}/web/core/phpunit.xml.dist"
+          vendor/bin/phpunit -c "${config}" \
+            --log-junit "${PWD}/junit-Functional.xml" \
+            "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Functional" \
+            "${PWD}/web/modules/contrib/mcp_sentinel/modules/mcp_sentinel_approval/tests/src/Functional"
+          total="$( (grep -ho '<testcase ' junit-Functional.xml || true) | wc -l | tr -d ' ')"
+          echo "Collected ${total} functional tests (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} functional tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed."
+            exit 1
+          fi
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: functional-failure-evidence
+          path: |
+            /tmp/php-server.log
+            /tmp/*.html
+          if-no-files-found: ignore
 
   phpcs:
     name: Drupal coding standards
