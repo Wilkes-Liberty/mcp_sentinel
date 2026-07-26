@@ -121,7 +121,7 @@ class McpWebhookDeliveryController extends ControllerBase {
       ];
 
       $operations = [];
-      if (in_array($row->status, ['failed', 'failed_ssrf', 'failed_redirect', 'sent'], TRUE)) {
+      if (in_array($row->status, ['failed', 'failed_ssrf', 'failed_redirect', 'failed_key', 'sent'], TRUE)) {
         $operations['replay'] = [
           'title' => $this->t('Replay'),
           'url' => Url::fromRoute('mcp_sentinel.webhook_replay', [
@@ -194,7 +194,7 @@ class McpWebhookDeliveryController extends ControllerBase {
    */
   private function statusBadgeClass(string $status): string {
     return match ($status) {
-      'failed', 'failed_ssrf', 'failed_redirect' => 'mcp-badge--crit',
+      'failed', 'failed_ssrf', 'failed_redirect', 'failed_key' => 'mcp-badge--crit',
       'pending', 'in_progress' => 'mcp-badge--warn',
       default => 'mcp-badge--ok',
     };

@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A declared signing key that cannot be resolved now refuses the delivery
+  instead of silently sending unsigned** (d.o #3613291, #56). An endpoint
+  with no `secret_key` still sends unsigned by design; one whose configured
+  Key entity is missing or resolves to an empty value is misconfigured, and
+  1.12.x sent every such delivery without `X-MCP-Signature` — silently
+  voiding an explicitly configured security control. The worker now fails
+  the row terminally as `failed_key` naming the key, and the status report
+  pre-flights every enabled endpoint's key so the misconfiguration is
+  visible before a single delivery is attempted.
+
 ## [1.12.1] - 2026-07-26
 
 ### Fixed

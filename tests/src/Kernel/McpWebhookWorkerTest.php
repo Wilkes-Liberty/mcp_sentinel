@@ -379,6 +379,67 @@ final class McpWebhookWorkerTest extends KernelTestBase {
   }
 
   /**
+   * A declared signing key that is missing refuses the delivery, fail closed.
+   *
+   * #3613291: an endpoint with no secret_key sends unsigned by design; one
+   * that declares a key which cannot be resolved must not silently degrade
+   * to unsigned — a month of production deliveries once did exactly that.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerRefusesMissingSigningKey(): void {
+    $id = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200)], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => 'does_not_exist',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+    $row = $this->loadRow($id);
+    $this->assertSame('failed_key', $row['status']);
+    $this->assertStringContainsString('does_not_exist', (string) $row['last_response_body']);
+    // Refused means REFUSED: nothing left the client.
+    $this->assertCount(0, $history);
+  }
+
+  /**
+   * A declared signing key that resolves to an empty value also refuses.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerRefusesEmptySigningKey(): void {
+    Key::create([
+      'id' => 'empty_secret',
+      'label' => 'Empty secret',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => ''],
+    ])->save();
+    $id = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200)], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => 'empty_secret',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+    $row = $this->loadRow($id);
+    $this->assertSame('failed_key', $row['status']);
+    $this->assertCount(0, $history);
+  }
+
+  /**
    * The HMAC signature header is set when a Key-backed secret is configured.
    *
    * @covers ::processItem

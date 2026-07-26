@@ -138,6 +138,39 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
+   * Requirements pre-flight warns when an enabled endpoint's key is bad.
+   *
+   * #3613291: the worker refuses deliveries for an unresolvable signing key;
+   * this surfaces the misconfiguration on the status report before a single
+   * delivery is attempted.
+   */
+  public function testRequirementsWarnsOnUnresolvableSigningKey(): void {
+    include_once DRUPAL_ROOT . '/core/includes/install.inc';
+    \Drupal::moduleHandler()->loadInclude('mcp_sentinel', 'install');
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayNotHasKey('mcp_sentinel_webhook_signing_keys', $requirements);
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'bad',
+          'label' => 'Bad key endpoint',
+          'url' => 'https://example.com/hook',
+          'secret_key' => 'does_not_exist',
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])->save();
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_webhook_signing_keys', $requirements);
+    $this->assertSame(REQUIREMENT_WARNING, $requirements['mcp_sentinel_webhook_signing_keys']['severity']);
+    $this->assertStringContainsString('does_not_exist', (string) $requirements['mcp_sentinel_webhook_signing_keys']['value']);
+  }
+
+  /**
    * The delivery log table is created by the module schema.
    */
   public function testDeliveryLogTableExists(): void {

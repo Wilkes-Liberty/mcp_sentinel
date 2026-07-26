@@ -203,7 +203,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     if ($row === NULL) {
       return;
     }
-    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf', 'failed_redirect'], TRUE)) {
+    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf', 'failed_redirect', 'failed_key'], TRUE)) {
       // Terminal states: already delivered or permanently failed.
       return;
     }
@@ -268,6 +268,32 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $curlResolvePin = [
         CURLOPT_RESOLVE => [self::curlResolveEntry($host, $port, $resolvedIp)],
       ];
+    }
+
+    // Fail closed on an unresolvable signing key (#3613291). An endpoint
+    // with no secret_key sends unsigned by design; one that DECLARES a
+    // secret_key whose Key entity is missing or resolves to an empty value
+    // is misconfigured, and sending anyway silently voids an explicitly
+    // configured security control — a month of production deliveries once
+    // went out unsigned exactly this way. Terminal, like the SSRF and
+    // redirect classes: retrying cannot fix configuration.
+    $keyId = (string) ($endpoint['secret_key'] ?? '');
+    if ($keyId !== '') {
+      $key = $this->keyRepository->getKey($keyId);
+      if ($key === NULL || (string) $key->getKeyValue() === '') {
+        $this->updateRow($deliveryId, 'failed_key', NULL,
+          "Signing key '" . $keyId . "' is missing or resolves to an empty value — delivery refused rather than sent unsigned. Fix the Key entity or remove secret_key from the endpoint.",
+          $attempts);
+        $this->logger->error(
+          'Webhook delivery @id refused: signing key @key on endpoint @endpoint is missing or resolves empty. Fix the Key entity or remove secret_key.',
+          [
+            '@id' => $deliveryId,
+            '@key' => $keyId,
+            '@endpoint' => (string) ($endpoint['id'] ?? ''),
+          ],
+        );
+        return;
+      }
     }
 
     // Fix 3: Atomic claim — update status from 'pending' to 'in_progress'
