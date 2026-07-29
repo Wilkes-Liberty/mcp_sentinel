@@ -42,3 +42,4 @@ forbidden_role_permissions:
   - 'masquerade as any user'
   - 'administer site configuration'
 acknowledged_role_permissions: {  }
+allow_raw_sql: false

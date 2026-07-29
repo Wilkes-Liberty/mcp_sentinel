@@ -102,6 +102,11 @@ services:
   mcp_sentinel.exfiltration_guard:
     class: Drupal\mcp_sentinel\Service\McpExfiltrationGuard
 
+  mcp_sentinel.raw_sql_guard:
+    class: Drupal\mcp_sentinel\Service\McpRawSqlGuard
+    arguments:
+      - '@entity_type.manager'
+
   mcp_sentinel.jsonapi_page_limit_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber
     arguments:

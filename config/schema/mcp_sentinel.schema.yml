@@ -280,3 +280,6 @@ mcp_sentinel.mcp_policy_profile.*:
       sequence:
         type: string
         label: 'role_id:permission'
+    allow_raw_sql:
+      type: boolean
+      label: 'Allow raw SQL through the governed Drush command (off by default)'

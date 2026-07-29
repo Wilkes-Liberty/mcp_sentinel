@@ -709,6 +709,32 @@ function mcp_sentinel_update_10013(): string {
 }
 
 /**
+ * Add the raw-SQL capability to existing policy profiles, off.
+ *
+ * Backfills allow_raw_sql = FALSE on every profile saved before the knob
+ * existed. An upgrade must never hand an existing profile a capability it
+ * never asked for, so this is written unconditionally at FALSE rather than
+ * inferred from anything the site already has.
+ */
+function mcp_sentinel_update_10014(): string {
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  $count = 0;
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    if ($e->get('allow_raw_sql') === NULL) {
+      $e->set('allow_raw_sql', FALSE)->save();
+      $count++;
+    }
+  }
+  return "Added allow_raw_sql (FALSE — raw SQL refused) to {$count} policy profile(s). "
+    . 'Raw SQL now runs only through drush mcp-sentinel:sql-query, which enforces the '
+    . 'profile and records every statement in the audit chain.';
+}
+
+/**
  * Add escape-hatch permission assertions to existing policy profiles.
  *
  * Writes the shipped forbidden list into every profile that predates the knob

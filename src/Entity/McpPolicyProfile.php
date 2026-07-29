@@ -80,6 +80,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "entity_rules",
  *     "forbidden_role_permissions",
  *     "acknowledged_role_permissions",
+ *     "allow_raw_sql",
  *   },
  * )
  */
@@ -289,6 +290,16 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   protected array $acknowledged_role_permissions = [];
 
   /**
+   * Whether raw SQL is permitted through the governed Drush command.
+   *
+   * Defaults to FALSE here rather than relying on the config default, so a
+   * profile saved before this knob existed — where the key is simply absent —
+   * reads as "off" instead of as NULL. Fail closed on the property, not only
+   * in the update hook.
+   */
+  protected bool $allow_raw_sql = FALSE;
+
+  /**
    * {@inheritdoc}
    */
   public function getRoles(): array {
@@ -478,6 +489,13 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function getAcknowledgedRolePermissions(): array {
     return array_values(array_filter($this->acknowledged_role_permissions));
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsRawSql(): bool {
+    return (bool) $this->allow_raw_sql;
   }
 
 }

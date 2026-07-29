@@ -255,4 +255,19 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function getAcknowledgedRolePermissions(): array;
 
+  /**
+   * Whether this profile permits raw SQL through the governed Drush command.
+   *
+   * FALSE by default and on every profile that predates the knob. Raw SQL runs
+   * underneath the entity API, so even the governed path
+   * (mcp-sentinel:sql-query, checked by McpRawSqlGuard) is a narrower boundary
+   * than an entity read: it constrains which tables and columns a statement
+   * may touch, not what an expression over an allowed column can reconstruct.
+   * Turning it on is therefore meant to be a deliberate, exported, reviewable
+   * decision rather than something a profile inherits.
+   *
+   * @see \Drupal\mcp_sentinel\Service\McpRawSqlGuard
+   */
+  public function allowsRawSql(): bool;
+
 }
