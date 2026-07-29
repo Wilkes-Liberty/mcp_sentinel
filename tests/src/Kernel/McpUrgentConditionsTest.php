@@ -38,6 +38,7 @@ class McpUrgentConditionsTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -46,15 +47,15 @@ class McpUrgentConditionsTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installConfig(['mcp_sentinel']);
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log']);
+    $this->installConfig(['audit_chain', 'mcp_sentinel']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
   }
 
   /**
    * Seeds one audit_log row.
    */
   private function seedAudit(string $op, int $ts): void {
-    \Drupal::database()->insert('mcp_sentinel_audit_log')
+    \Drupal::database()->insert('audit_chain_log')
       ->fields([
         'timestamp'    => $ts,
         'uid'          => 1,
@@ -122,8 +123,8 @@ class McpUrgentConditionsTest extends KernelTestBase {
    * @covers ::evaluate
    */
   public function testEncryptionProfileSetButUnresolvableFires(): void {
-    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', 'does_not_exist')->save();
+    \Drupal::configFactory()->getEditable('audit_chain.settings')
+      ->set('encryption_profile', 'does_not_exist')->save();
     $conditions = $this->evaluate();
     $keys = array_column($conditions, 'key');
     $this->assertContains('encryption_unresolvable', $keys);

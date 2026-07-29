@@ -6,6 +6,7 @@ core_version_requirement: ^10.6 || ^11.3
 
 # Hard dependencies — modules whose APIs we call directly in PHP.
 dependencies:
+  - audit_chain:audit_chain
   - drupal:user
   - drupal:node
   - drupal:jsonapi

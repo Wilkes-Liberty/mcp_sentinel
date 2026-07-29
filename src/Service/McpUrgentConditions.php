@@ -229,7 +229,11 @@ final class McpUrgentConditions {
    *   The condition list, modified by reference.
    */
   private function evaluateEncryption(ImmutableConfig $config, array &$conditions): void {
-    $profileId = (string) ($config->get('audit_encryption_profile') ?? '');
+    // The chain owns this setting now; reading the stale mcp_sentinel key
+    // would report "no encryption configured" on a site that has it enabled.
+    $profileId = (string) ($this->configFactory
+      ->get('audit_chain.settings')
+      ->get('encryption_profile') ?? '');
     if ($profileId === '') {
       return;
     }
@@ -256,7 +260,8 @@ final class McpUrgentConditions {
       return;
     }
     $since = $this->time->getRequestTime() - self::RECENT_WINDOW;
-    $recent = (int) $this->database->select('mcp_sentinel_audit_log', 'l')
+    $recent = (int) $this->database->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->condition('l.timestamp', $since, '>=')
       ->countQuery()
       ->execute()

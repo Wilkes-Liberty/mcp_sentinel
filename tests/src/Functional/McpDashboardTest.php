@@ -96,7 +96,7 @@ final class McpDashboardTest extends BrowserTestBase {
   public function testSixChartsRenderWithData(): void {
     $now = \Drupal::time()->getRequestTime();
     foreach (['entity_save', 'entity_save', 'denied_access'] as $op) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp' => $now - 60,
         'uid' => 1,
         'operation' => $op,

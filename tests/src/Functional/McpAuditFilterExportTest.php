@@ -41,7 +41,7 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
    *   Unix timestamp, or NULL to use REQUEST_TIME.
    */
   private function seedRow(string $operation, string $entity_type = 'node', int $uid = 1, ?int $timestamp = NULL): void {
-    \Drupal::database()->insert('mcp_sentinel_audit_log')
+    \Drupal::database()->insert('audit_chain_log')
       ->fields([
         'timestamp'    => $timestamp ?? \Drupal::time()->getRequestTime(),
         'uid'          => $uid,

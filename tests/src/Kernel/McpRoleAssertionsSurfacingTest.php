@@ -47,6 +47,7 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -56,8 +57,8 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log']);
-    $this->installConfig(['mcp_sentinel', 'user']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installConfig(['audit_chain', 'mcp_sentinel', 'user']);
   }
 
   /**
@@ -116,8 +117,7 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
   public function testStatusReportRaisesAnError(): void {
     $this->violatingRole();
 
-    require_once $this->root . '/core/includes/install.inc';
-    $requirements = \Drupal::moduleHandler()->invoke('mcp_sentinel', 'requirements', ['runtime']);
+    $requirements = $this->runtimeRequirements();
 
     $this->assertArrayHasKey('mcp_sentinel_role_escape_hatch', $requirements);
     $this->assertSame(
@@ -138,7 +138,7 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
     $this->violatingRole();
 
     $rows = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l', ['operation'])
       ->condition('l.operation', 'role_escape_hatch')
       ->execute()
@@ -162,7 +162,7 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
     Role::load('authenticated')->grantPermission('bypass node access')->save();
 
     $rows = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l', ['entity_id'])
       ->condition('l.operation', 'role_escape_hatch')
       ->execute()
@@ -179,7 +179,7 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
     $role->grantPermission('access content')->save();
 
     $count = (int) $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->condition('l.operation', 'role_escape_hatch')
       ->countQuery()
       ->execute()
@@ -203,8 +203,25 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
     );
     $this->assertNotContains('role_escape_hatch', $keys);
 
-    $requirements = \Drupal::moduleHandler()->invoke('mcp_sentinel', 'requirements', ['runtime']);
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayNotHasKey('mcp_sentinel_role_escape_hatch', $requirements);
+  }
+
+  /**
+   * Invokes hook_requirements() in a way that works on every supported core.
+   *
+   * The hook lives in the .install file, which ModuleHandler does not load for
+   * invoke(). On Drupal 11 another test had usually loaded it already and this
+   * happened to work; on 10.6 it returned NULL and the assertion died on a
+   * non-array. Load it explicitly instead of depending on whatever ran first.
+   *
+   * @return array
+   *   The runtime requirements.
+   */
+  private function runtimeRequirements(): array {
+    require_once $this->root . '/core/includes/install.inc';
+    \Drupal::moduleHandler()->loadInclude('mcp_sentinel', 'install');
+    return (array) \Drupal::moduleHandler()->invoke('mcp_sentinel', 'requirements', ['runtime']);
   }
 
 }

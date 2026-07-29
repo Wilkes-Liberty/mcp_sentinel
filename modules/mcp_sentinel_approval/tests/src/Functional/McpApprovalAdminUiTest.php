@@ -34,6 +34,7 @@ final class McpApprovalAdminUiTest extends BrowserTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
     'mcp_sentinel_approval',
   ];

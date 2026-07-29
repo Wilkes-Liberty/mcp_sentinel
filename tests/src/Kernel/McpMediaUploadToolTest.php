@@ -58,6 +58,7 @@ final class McpMediaUploadToolTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -67,8 +68,8 @@ final class McpMediaUploadToolTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installEntitySchema('user');
@@ -215,7 +216,7 @@ final class McpMediaUploadToolTest extends KernelTestBase {
 
     // A denied_access audit row must have been written.
     $count = (int) \Drupal::database()
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->condition('l.operation', 'denied_access')
       ->countQuery()->execute()->fetchField();
     $this->assertGreaterThan(0, $count,

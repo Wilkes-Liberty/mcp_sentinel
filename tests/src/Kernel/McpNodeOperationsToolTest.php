@@ -55,6 +55,7 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -64,8 +65,8 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
@@ -147,7 +148,7 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
     // An audit row must have been written (entity_save from hook_entity_presave
     // or a tool-level log — at least 1 row proves the audit path fired).
     $count = (int) \Drupal::database()
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->countQuery()->execute()->fetchField();
     $this->assertGreaterThan(0, $count,
       'At least one audit row must exist after a successful create operation.');
@@ -169,7 +170,7 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
     $nid = (string) $node->id();
 
     // Clear audit log so we can count only the rows from the update.
-    \Drupal::database()->delete('mcp_sentinel_audit_log')->execute();
+    \Drupal::database()->delete('audit_chain_log')->execute();
 
     $tool = \Drupal::service('plugin.manager.tool')
       ->createInstance('mcp_sentinel_node_operations');
@@ -189,7 +190,7 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
 
     // An audit row must have been written for the update.
     $count = (int) \Drupal::database()
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->countQuery()->execute()->fetchField();
     $this->assertGreaterThan(0, $count,
       'At least one audit row must be written for a successful update operation.');
@@ -277,7 +278,7 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
 
     // A denied_access audit row must have been written.
     $count = (int) \Drupal::database()
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->condition('l.operation', 'denied_access')
       ->countQuery()->execute()->fetchField();
     $this->assertGreaterThan(0, $count,

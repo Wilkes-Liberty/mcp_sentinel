@@ -37,6 +37,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -45,7 +46,8 @@ final class McpAuditLoggerTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log', 'mcp_sentinel_content_locks']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['mcp_sentinel']);
   }
 
@@ -62,7 +64,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     ]);
 
     $row = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->execute()
       ->fetchAssoc();
@@ -93,7 +95,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     ]);
 
     $row = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->execute()
       ->fetchAssoc();
@@ -113,7 +115,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '8']);
 
     $row = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->execute()
       ->fetchAssoc();
@@ -130,7 +132,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '1']);
 
     $count = (int) $this->container->get('database')
-      ->select('mcp_sentinel_audit_log')->countQuery()->execute()->fetchField();
+      ->select('audit_chain_log')->countQuery()->execute()->fetchField();
     $this->assertSame(0, $count);
   }
 
@@ -140,12 +142,12 @@ final class McpAuditLoggerTest extends KernelTestBase {
   public function testPruneOldEntries(): void {
     $database = $this->container->get('database');
     $now = $this->container->get('datetime.time')->getRequestTime();
-    $database->insert('mcp_sentinel_audit_log')->fields([
+    $database->insert('audit_chain_log')->fields([
       'timestamp' => $now - (100 * 86400),
       'uid' => 0,
       'operation' => 'old',
     ])->execute();
-    $database->insert('mcp_sentinel_audit_log')->fields([
+    $database->insert('audit_chain_log')->fields([
       'timestamp' => $now,
       'uid' => 0,
       'operation' => 'fresh',
@@ -154,7 +156,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     // Retention defaults to 90 days; the 100-day-old row should be pruned.
     $pruned = $this->container->get('mcp_sentinel.audit_logger')->pruneOldEntries();
     $this->assertSame(1, $pruned);
-    $remaining = (int) $database->select('mcp_sentinel_audit_log')->countQuery()->execute()->fetchField();
+    $remaining = (int) $database->select('audit_chain_log')->countQuery()->execute()->fetchField();
     $this->assertSame(1, $remaining);
   }
 

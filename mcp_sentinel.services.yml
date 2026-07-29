@@ -12,16 +12,9 @@ services:
   mcp_sentinel.audit_logger:
     class: Drupal\mcp_sentinel\Service\McpAuditLogger
     arguments:
-      - '@database'
-      - '@current_user'
-      - '@request_stack'
       - '@config.factory'
-      - '@datetime.time'
-      - '@key.repository'
-      - '@lock'
-      - '@logger.channel.mcp_sentinel_audit'
-      - '@encryption'
-      - '@entity_type.manager'
+      - '@request_stack'
+      - '@audit_chain.logger'
       - '@mcp_sentinel.dlp'
 
   mcp_sentinel.policy_resolver:

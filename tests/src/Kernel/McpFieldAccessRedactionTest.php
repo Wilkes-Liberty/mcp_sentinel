@@ -68,6 +68,7 @@ final class McpFieldAccessRedactionTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -84,8 +85,8 @@ final class McpFieldAccessRedactionTest extends KernelTestBase {
 
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installConfig(['filter', 'node', 'mcp_sentinel']);

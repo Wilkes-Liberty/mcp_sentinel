@@ -37,6 +37,7 @@ final class McpApprovalUiTest extends BrowserTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
     'mcp_sentinel_approval',
   ];
@@ -123,7 +124,7 @@ final class McpApprovalUiTest extends BrowserTestBase {
     $this->assertSame(McpApprovalRequestInterface::STATUS_APPROVED, $reloaded->getStatus());
 
     // Audit row for the decision.
-    $count = (int) \Drupal::database()->select('mcp_sentinel_audit_log', 'l')
+    $count = (int) \Drupal::database()->select('audit_chain_log', 'l')
       ->condition('operation', 'approval_decision')
       ->countQuery()
       ->execute()

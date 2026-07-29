@@ -37,6 +37,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -46,7 +47,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installConfig(['mcp_sentinel']);
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
   }
 
   /**
@@ -86,7 +87,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   public function testDisabledRuleNeverFires(): void {
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -120,7 +121,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   public function testRuleFiredWhenThresholdExceeded(): void {
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 11; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -156,7 +157,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   public function testRuleNotFiredBelowThreshold(): void {
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -196,7 +197,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
 
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -231,7 +232,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     $now = \Drupal::time()->getRequestTime();
     // Insert rows outside the window (2 hours ago).
     for ($i = 0; $i < 20; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now - 7200,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -268,7 +269,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   public function testExactMatchDoesNotMatchRelatedOp(): void {
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -302,7 +303,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   public function testExactMatchMatchesExactOp(): void {
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -315,7 +316,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     }
     // Also insert rows for a different operation to confirm no cross-match.
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_save',
@@ -351,7 +352,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     $now = \Drupal::time()->getRequestTime();
     // Insert 3 entity_save rows.
     for ($i = 0; $i < 3; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_save',
@@ -364,7 +365,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     }
     // Insert 4 entity_delete rows.
     for ($i = 0; $i < 4; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',
@@ -377,7 +378,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     }
     // Insert 2 denied_access rows (must NOT be counted).
     for ($i = 0; $i < 2; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'denied_access',
@@ -413,7 +414,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   public function testDebounceStateUpdatedOnFire(): void {
     $now = \Drupal::time()->getRequestTime();
     for ($i = 0; $i < 5; $i++) {
-      \Drupal::database()->insert('mcp_sentinel_audit_log')->fields([
+      \Drupal::database()->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'denied_access',

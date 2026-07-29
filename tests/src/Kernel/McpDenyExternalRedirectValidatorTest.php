@@ -53,6 +53,7 @@ final class McpDenyExternalRedirectValidatorTest extends KernelTestBase {
     'simple_oauth',
     'encrypt',
     'redirect',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -67,8 +68,8 @@ final class McpDenyExternalRedirectValidatorTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installEntitySchema('user');

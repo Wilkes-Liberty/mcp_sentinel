@@ -61,6 +61,7 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
     'graphql',
     'graphql_compose',
@@ -76,7 +77,7 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
     $this->installConfig(['mcp_sentinel']);
     // Saving mcp_sentinel.settings in these tests fires the ConfigEvents::SAVE
     // audit subscriber, which reads/writes the audit log; install its schema.
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
   }
 
   /**

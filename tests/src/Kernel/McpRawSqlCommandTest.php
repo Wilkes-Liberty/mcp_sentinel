@@ -56,6 +56,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -75,10 +76,10 @@ final class McpRawSqlCommandTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
-    $this->installConfig(['mcp_sentinel']);
+    $this->installConfig(['audit_chain', 'mcp_sentinel']);
 
     NodeType::create(['type' => 'page', 'name' => 'Page'])->save();
     Node::create(['type' => 'page', 'title' => 'First'])->save();
@@ -123,7 +124,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $logger = $this->container->get('mcp_sentinel.audit_logger');
     $rows = [];
     $result = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id')
       ->execute();

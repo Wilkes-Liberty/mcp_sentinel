@@ -49,6 +49,7 @@ final class McpOauthChannelTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
+    'audit_chain',
     'mcp_sentinel',
     'node',
     'serialization',
@@ -207,7 +208,7 @@ final class McpOauthChannelTest extends BrowserTestBase {
    * A governed agent's write is audited in the database.
    *
    * Verifies that a governed write (allow_write=TRUE via PATCH) triggers the
-   * audit logger and a row is written to mcp_sentinel_audit_log.
+   * audit logger and a row is written to audit_chain_log.
    */
   public function testBearerTokenWithAgentScopeIsGovernedAndAudited(): void {
     $this->enableRoleFallbackGovernance();
@@ -221,11 +222,11 @@ final class McpOauthChannelTest extends BrowserTestBase {
     ]);
 
     $db = $this->container->get('database');
-    if (!$db->schema()->tableExists('mcp_sentinel_audit_log')) {
+    if (!$db->schema()->tableExists('audit_chain_log')) {
       $this->markTestSkipped('Audit log table not available in this test environment.');
     }
 
-    $before = (int) $db->select('mcp_sentinel_audit_log', 'a')
+    $before = (int) $db->select('audit_chain_log', 'a')
       ->countQuery()
       ->execute()
       ->fetchField();
@@ -247,7 +248,7 @@ final class McpOauthChannelTest extends BrowserTestBase {
     $this->assertContains($response->getStatusCode(), [200, 204],
       'Governed PATCH must succeed to produce an audit row.');
 
-    $after = (int) $db->select('mcp_sentinel_audit_log', 'a')
+    $after = (int) $db->select('audit_chain_log', 'a')
       ->countQuery()
       ->execute()
       ->fetchField();

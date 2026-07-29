@@ -43,6 +43,7 @@ final class McpPinnedCompositeLocatorTest extends KernelTestBase {
     'encrypt',
     'entity_reference_revisions',
     'paragraphs',
+    'audit_chain',
     'mcp_sentinel',
   ];
 

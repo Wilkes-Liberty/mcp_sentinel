@@ -42,6 +42,7 @@ final class McpIpAllowlistTest extends KernelTestBase {
     'serialization', 'jsonapi', 'tool', 'key',
     'image', 'options', 'path_alias', 'consumers', 'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 

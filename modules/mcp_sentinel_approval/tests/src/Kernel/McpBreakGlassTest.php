@@ -50,7 +50,8 @@ final class McpBreakGlassTest extends KernelTestBase {
     $this->installEntitySchema('oauth2_token');
     $this->installEntitySchema('mcp_approval_request');
     $this->installEntitySchema('mcp_admin_grant');
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log', 'mcp_sentinel_content_locks']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['mcp_sentinel', 'mcp_sentinel_approval']);
 
     // The break-glass role must exist on the site.

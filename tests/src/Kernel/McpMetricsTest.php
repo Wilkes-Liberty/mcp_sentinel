@@ -10,7 +10,7 @@ use PHPUnit\Framework\Attributes\Group;
 /**
  * Kernel tests for the McpMetrics dashboard-data service.
  *
- * Seeds rows directly into mcp_sentinel_audit_log and
+ * Seeds rows directly into audit_chain_log and
  * mcp_sentinel_webhook_delivery, then asserts window-bounded aggregation.
  * This class runs WITHOUT the approval submodule to prove approvalSummary()
  * degrades gracefully when mcp_approval_request is undefined.
@@ -42,6 +42,7 @@ class McpMetricsTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -50,9 +51,9 @@ class McpMetricsTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installConfig(['mcp_sentinel']);
+    $this->installConfig(['audit_chain', 'mcp_sentinel']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_webhook_delivery',
     ]);
   }
@@ -61,7 +62,7 @@ class McpMetricsTest extends KernelTestBase {
    * Seeds one audit_log row.
    */
   private function seedAudit(string $op, int $ts, array $meta = [], int $uid = 1): void {
-    \Drupal::database()->insert('mcp_sentinel_audit_log')
+    \Drupal::database()->insert('audit_chain_log')
       ->fields([
         'timestamp'    => $ts,
         'uid'          => $uid,
@@ -302,9 +303,15 @@ class McpMetricsTest extends KernelTestBase {
    * @covers ::activeControls
    */
   public function testActiveControlsReflectsConfig(): void {
+    // The chain's controls live in audit_chain.settings since the extraction;
+    // DLP is still MCP policy and stays here. activeControls() must read each
+    // from its real home, or an upgraded site would report no signing key and
+    // no encryption while both are configured.
+    \Drupal::configFactory()->getEditable('audit_chain.settings')
+      ->set('hash_key', 'some_key')
+      ->set('stream_enabled', TRUE)
+      ->save();
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
-      ->set('audit_hash_key', 'some_key')
-      ->set('siem_enabled', TRUE)
       ->set('dlp_enabled', TRUE)
       ->save();
     /** @var \Drupal\mcp_sentinel\Service\McpMetrics $m */

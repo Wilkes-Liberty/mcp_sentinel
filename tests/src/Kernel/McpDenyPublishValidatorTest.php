@@ -64,6 +64,7 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
     'encrypt',
     'workflows',
     'content_moderation',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -92,8 +93,8 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
@@ -536,7 +537,7 @@ final class McpDenyPublishValidatorTest extends KernelTestBase {
 
     $this->assertFalse($node->isPublished());
     $count = (int) \Drupal::database()
-      ->select('mcp_sentinel_audit_log', 'a')
+      ->select('audit_chain_log', 'a')
       ->condition('operation', 'publish_gate_backstop')
       ->countQuery()
       ->execute()

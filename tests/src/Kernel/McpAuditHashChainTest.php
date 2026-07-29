@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -44,6 +45,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -52,8 +54,8 @@ final class McpAuditHashChainTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installConfig(['mcp_sentinel']);
@@ -88,7 +90,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       'label' => 'Third',
     ]);
 
-    $rows = $db->select('mcp_sentinel_audit_log', 'l')
+    $rows = $db->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
@@ -148,7 +150,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       'label' => 'Beta',
     ]);
 
-    $rows = $db->select('mcp_sentinel_audit_log', 'l')
+    $rows = $db->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
@@ -159,6 +161,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       $metadata = json_decode((string) ($row['metadata'] ?? ''), TRUE) ?? [];
       ksort($metadata);
       $payload = [
+        'channel' => McpAuditLogger::CHANNEL,
         'bundle'       => $row['bundle'],
         'entity_id'    => (string) ($row['entity_id'] ?? ''),
         'entity_label' => isset($row['entity_label'])
@@ -176,6 +179,9 @@ final class McpAuditHashChainTest extends KernelTestBase {
           ? (string) $row['user_agent']
           : NULL,
       ];
+      // audit_chain sorts the payload once the channel is present, so the key
+      // order stays deterministic whichever keys a row carries.
+      ksort($payload);
       return (string) json_encode(
         $payload,
         JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
@@ -231,7 +237,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
     $logger->log('entity_save', ['entity_type' => 'node', 'id' => '2', 'label' => 'Untouched']);
     $logger->log('entity_save', ['entity_type' => 'node', 'id' => '3', 'label' => 'AlsoUntouched']);
 
-    $rows = $db->select('mcp_sentinel_audit_log', 'l')
+    $rows = $db->select('audit_chain_log', 'l')
       ->fields('l', ['id'])
       ->orderBy('id', 'ASC')
       ->execute()
@@ -239,7 +245,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
 
     // Tamper the metadata of the second row.
     $tampered_id = (int) $rows[1];
-    $db->update('mcp_sentinel_audit_log')
+    $db->update('audit_chain_log')
       ->fields(['metadata' => json_encode(['tampered' => TRUE])])
       ->condition('id', $tampered_id)
       ->execute();
@@ -276,14 +282,14 @@ final class McpAuditHashChainTest extends KernelTestBase {
     $now = $this->container->get('datetime.time')->getRequestTime();
 
     // Insert two pre-update_10003 rows directly (NULL prev_hash + row_hash).
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now - 200,
       'uid'       => 0,
       'operation' => 'legacy_op',
       'prev_hash' => NULL,
       'row_hash'  => NULL,
     ])->execute();
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now - 100,
       'uid'       => 0,
       'operation' => 'legacy_op2',
@@ -313,7 +319,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
     $now = $this->container->get('datetime.time')->getRequestTime();
 
     // Only legacy rows, no chained rows at all.
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now - 200,
       'uid'       => 0,
       'operation' => 'legacy_only',
@@ -348,8 +354,8 @@ final class McpAuditHashChainTest extends KernelTestBase {
       'key_provider_settings' => ['key_value' => $key_value],
     ])->save();
 
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_hash_key', 'mcp_test_audit_key')
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'mcp_test_audit_key')
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -368,7 +374,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       'label'       => 'HMAC row 2',
     ]);
 
-    $rows = $db->select('mcp_sentinel_audit_log', 'l')
+    $rows = $db->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
@@ -381,6 +387,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
       $metadata = json_decode((string) ($row['metadata'] ?? ''), TRUE) ?? [];
       ksort($metadata);
       $payload = [
+        'channel' => McpAuditLogger::CHANNEL,
         'bundle'       => $row['bundle'],
         'entity_id'    => (string) ($row['entity_id'] ?? ''),
         'entity_label' => isset($row['entity_label'])
@@ -398,6 +405,12 @@ final class McpAuditHashChainTest extends KernelTestBase {
           ? (string) $row['user_agent']
           : NULL,
       ];
+      // audit_chain sorts the payload once a channel is present, so the key
+      // order stays deterministic whichever keys a row carries. This helper
+      // duplicates production logic and has now drifted from it twice — if it
+      // drifts again, replace it with a call to the real canonical builder
+      // rather than patching the copy.
+      ksort($payload);
       return (string) json_encode(
         $payload,
         JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
@@ -452,8 +465,8 @@ final class McpAuditHashChainTest extends KernelTestBase {
       'key_provider_settings' => ['key_value' => $key_value],
     ])->save();
 
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_hash_key', 'mcp_tamper_key')
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'mcp_tamper_key')
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -462,14 +475,14 @@ final class McpAuditHashChainTest extends KernelTestBase {
     $logger->log('entity_save', ['entity_type' => 'node', 'id' => '30', 'label' => 'Intact']);
     $logger->log('entity_save', ['entity_type' => 'node', 'id' => '31', 'label' => 'ToTamper']);
 
-    $ids = $db->select('mcp_sentinel_audit_log', 'l')
+    $ids = $db->select('audit_chain_log', 'l')
       ->fields('l', ['id'])
       ->orderBy('id', 'ASC')
       ->execute()
       ->fetchCol();
 
     $tampered_id = (int) $ids[1];
-    $db->update('mcp_sentinel_audit_log')
+    $db->update('audit_chain_log')
       ->fields(['entity_label' => 'Tampered'])
       ->condition('id', $tampered_id)
       ->execute();
