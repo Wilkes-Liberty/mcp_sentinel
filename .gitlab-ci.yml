@@ -29,3 +29,28 @@ variables:
   _AUTORUN_PREVIOUS_MINOR: 'all'
   # Forward-compat signal on the upcoming minor, available on demand.
   OPT_IN_TEST_NEXT_MINOR: '1'
+
+################
+# Project overrides
+################
+
+# The previous-major lane is pinned by the shared templates to Drupal 10's
+# MINIMUM PHP (PHP_VERSION: $CORE_PREVIOUS_PHP_MIN, currently 8.1). On 8.1 the
+# build cannot resolve at all: drupal/mcp_server sits in require-dev and needs
+# PHP ^8.3, so composer exits 2 before a single test runs, and phpunit
+# (previous major) never even starts. See #3613940.
+#
+# Drupal 10.6 supports PHP 8.1 through 8.4, so 10.6-on-8.3 is a legitimate and
+# representative configuration — and the only one where this suite can build.
+# The module's RUNTIME requirements carry no 8.3 constraint; this is a limitation
+# of the test build, not of the module.
+#
+# Two things this deliberately does NOT do, both recorded rather than hidden:
+#  - It does not test Drupal 10.6 on PHP 8.1. That combination stays unverified.
+#    mcp_server cannot install there at any 2.x version, so the
+#    mcp_sentinel_server tests are unrunnable on 8.1 regardless of CI config.
+#  - It does not settle whether the supported PHP floor should simply be 8.3.
+#    That narrows the support surface and is a maintainer decision, not a CI fix.
+composer (previous major):
+  variables:
+    PHP_VERSION: '8.3'
