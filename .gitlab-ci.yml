@@ -16,3 +16,16 @@ include:
 variables:
   _GITLAB_TEMPLATES_REPO: project/gitlab_templates
   _GITLAB_TEMPLATES_REF: main
+  # This module declares `^10.6 || ^11.3`, but the default phpunit job runs
+  # against current core only — so neither floor was ever exercised and the
+  # green badge did not mean what it appeared to. OPT_IN_* surfaces the job;
+  # _AUTORUN_* ('all') makes it run instead of waiting for someone to press it.
+  #
+  # PREVIOUS_MAJOR = newest 10.x satisfying the constraint (10.6, the D10 floor).
+  # PREVIOUS_MINOR = prior minor of the current major (11.3, the D11 floor).
+  OPT_IN_TEST_PREVIOUS_MAJOR: '1'
+  OPT_IN_TEST_PREVIOUS_MINOR: '1'
+  _AUTORUN_PREVIOUS_MAJOR: 'all'
+  _AUTORUN_PREVIOUS_MINOR: 'all'
+  # Forward-compat signal on the upcoming minor, available on demand.
+  OPT_IN_TEST_NEXT_MINOR: '1'
