@@ -230,6 +230,32 @@ function mcp_sentinel_requirements(string $phase): array {
     ];
   }
 
+  // Escape-hatch permissions on governed roles (#65). Reported at ERROR, not
+  // WARNING, and deliberately before the governance early-return below: unlike
+  // a misconfiguration, this is a control that *looks* configured while not
+  // being a boundary at all — the profile still advertises its deny lists and
+  // redactions while the role can step around them without making an MCP
+  // request. A live case had the agent role holding 'bypass file gate'
+  // alongside 18 profile permissions, and nothing surfaced it.
+  $roleViolations = \Drupal::service('mcp_sentinel.role_assertions')->violations();
+  if ($roleViolations !== []) {
+    $assertions = \Drupal::service('mcp_sentinel.role_assertions');
+    $items = array_map(
+      static fn(array $violation): string => $assertions->describe($violation),
+      $roleViolations,
+    );
+    $requirements['mcp_sentinel_role_escape_hatch'] = [
+      'title' => t('MCP Sentinel: governed role holds an escape-hatch permission'),
+      'value' => t('@count governed-role violation(s)', ['@count' => count($roleViolations)]),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => [
+        '#theme' => 'item_list',
+        '#items' => $items,
+        '#prefix' => '<p>' . t("A policy profile constrains what an agent may do through the MCP channel. These permissions let the same role act <em>outside</em> that channel, where no policy, redaction or audit applies — so the profile below is not the boundary it appears to be. Revoke the permission, or record the exception in the profile's <code>acknowledged_role_permissions</code>.") . '</p>',
+      ],
+    ];
+  }
+
   // Mirror McpOauthContext::isAgentChannel(): the agent channel can only ever
   // fire when at least one client_id or one scope is configured.
   $has_agent_clients = !empty($config->get('agent_oauth_clients'));
@@ -680,6 +706,42 @@ function mcp_sentinel_update_10013(): string {
   }
   return 'Added open-redirect guard (deny_external_redirects, '
     . 'allowed_redirect_hosts) at safe defaults to all policy profiles.';
+}
+
+/**
+ * Add escape-hatch permission assertions to existing policy profiles.
+ *
+ * Writes the shipped forbidden list into every profile that predates the knob
+ * so the protection is inherited without an operator authoring it, and seeds an
+ * empty acknowledgement list. The list is written explicitly rather than left
+ * to the entity's property default, so it is visible in config export and in
+ * the config diff — an assertion nobody can see is one nobody reviews.
+ */
+function mcp_sentinel_update_10015(): string {
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  $count = 0;
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    $changed = FALSE;
+    if ($e->get('forbidden_role_permissions') === NULL) {
+      $e->set('forbidden_role_permissions', McpPolicyProfile::DEFAULT_FORBIDDEN_ROLE_PERMISSIONS);
+      $changed = TRUE;
+    }
+    if ($e->get('acknowledged_role_permissions') === NULL) {
+      $e->set('acknowledged_role_permissions', []);
+      $changed = TRUE;
+    }
+    if ($changed) {
+      $e->save();
+      $count++;
+    }
+  }
+  return "Added escape-hatch permission assertions to {$count} policy profile(s). "
+    . 'Check Reports → Status report: a governed role that already holds one of these '
+    . 'permissions is now reported as an error, and was previously invisible.';
 }
 
 /**

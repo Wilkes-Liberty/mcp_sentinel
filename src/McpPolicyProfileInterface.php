@@ -227,4 +227,32 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function deniesPublishForEntityType(string $entity_type): bool;
 
+  /**
+   * Permissions a role governed by this profile must not hold.
+   *
+   * These are escape hatches: each one lets its holder act outside the MCP
+   * channel, where no policy profile, redaction or audit applies. A governed
+   * role holding one does not weaken the profile, it makes the profile's
+   * guarantees untrue — so this is asserted rather than assumed.
+   *
+   * @return string[]
+   *   Permission machine names.
+   *
+   * @see \Drupal\mcp_sentinel\Service\McpRoleAssertions
+   */
+  public function getForbiddenRolePermissions(): array;
+
+  /**
+   * Deliberate grants that suppress a forbidden-permission violation.
+   *
+   * Entries are `role_id:permission`. An acknowledgement records an exception
+   * in exported configuration, where a reviewer sees it, instead of the
+   * alternative — deleting the rule that raised it, which loses the fact that
+   * a decision was ever made.
+   *
+   * @return string[]
+   *   `role_id:permission` strings.
+   */
+  public function getAcknowledgedRolePermissions(): array;
+
 }
