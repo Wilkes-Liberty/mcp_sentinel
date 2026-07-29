@@ -138,6 +138,7 @@ governance the resolver selects per request. Read its gates and limits via:
 | `getMaxModerationState()` | ceiling moderation state ID the agent may set (empty = no ceiling) |
 | `getForbiddenRolePermissions()` | permissions a governed role must not hold (escape hatches; ships populated) |
 | `getAcknowledgedRolePermissions()` | `role_id:permission` grants deliberately accepted, recorded in config |
+| `allowsRawSql()` | raw-SQL gate for `mcp-sentinel:sql-query` (default off; see README → Raw SQL) |
 
 Profiles are configuration entities, so they are exportable, deployable, and
 overridable per environment. Do not store secrets in a profile — use Key
@@ -184,6 +185,7 @@ content **publishing**. Both layers are additive and default to the safe value
 |---------|---------|
 | `mcp-sentinel:status` | Posture summary; non-zero exit when the `config_governance` guard is critical (never fail open). |
 | `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
+| `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only governed raw-SQL path. Refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement; every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
 | `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. |
 | `mcp-sentinel:agent-provision <tier> --env=<env>` | Idempotently provision a tier's role, dedicated agent account, and OAuth consumer (deterministic `client_id` = `<tier>-<env>`). Secrets stay a human action. |
 | `mcp-sentinel:break-glass <uid>` | Raise an always-gated approval request to grant the time-boxed `mcp_admin` role (auto-revoked at `break_glass_ttl_seconds`). |
@@ -204,6 +206,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom) |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |
+| `mcp_sentinel.raw_sql_guard` | `McpRawSqlGuard` | `check($sql, $profile)` → refusal reasons (`[]` = permitted). Resolves `denied_entity_types` and `redacted_fields` down to physical tables and columns via the entity table mapping; fail-closed on anything it cannot resolve |
 | `mcp_sentinel.anomaly_detector` | `McpAnomalyDetector` | evaluate anomaly rules over the audit stream |
 | `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks |

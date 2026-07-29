@@ -328,6 +328,49 @@ ddev drush php:eval "
   read-only for the agent.
 - `denied_entity_types: [user]` — agents must not create or update user
   accounts.
+- `allow_raw_sql` is left unset (i.e. `FALSE`) — raw SQL is refused. Leave it
+  that way on production. The deny lists above are enforced above the entity
+  API, so a raw statement is a different and weaker boundary: it reaches the
+  tables behind those entity types directly. If a workflow genuinely needs SQL,
+  see §3.7 rather than reaching for the connector's old ungoverned path, which
+  no longer exists.
+
+### 3.7 Raw SQL (only if a workflow requires it)
+
+`drush sql:query` cannot be governed by Drupal at all — Drush caps its
+bootstrap below the level at which module command files are discovered, so no
+hook in any module runs on its path. Anything holding the SSH key can therefore
+read every table regardless of policy, which is why the connector no longer
+uses it.
+
+The governed replacement is `drush mcp-sentinel:sql-query`. Enabling it takes a
+deliberate change on **both** sides:
+
+```bash
+# Drupal: opt the profile in.
+ddev drush php:eval "
+  \Drupal\mcp_sentinel\Entity\McpPolicyProfile::load('agent_prod')
+    ->set('allow_raw_sql', TRUE)->save();
+"
+```
+
+```jsonc
+// Connector: opt the site in (config/config.json).
+"drushSsh": {
+  "rawSql": "governed",
+  "allowedCommands": ["mcp-sentinel:sql-query"]  // only if you pin this list
+}
+```
+
+What the agent gets is narrow on purpose: a single `SELECT`, over tables
+belonging to entity types the profile allows, with no reference to a redacted
+field's column anywhere in the statement, no `SELECT *` on a table carrying
+one, and no expressions beyond `COUNT()`. Every attempt is written to the audit
+chain with its statement text — refusals included — and the command refuses to
+run at all if audit logging is off.
+
+Prefer the entity-API tools where they can answer the question. Raw SQL is a
+reporting escape hatch, not a read plane.
 
 ### 3.6 JSON:API write plane
 

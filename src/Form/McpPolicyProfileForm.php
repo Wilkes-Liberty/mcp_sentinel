@@ -243,6 +243,13 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 3,
     ];
 
+    $form['config_governance']['allow_raw_sql'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Allow raw SQL (governed Drush command)'),
+      '#description' => $this->t('Off by default. When on, this profile may run single SELECT statements through <code>drush mcp-sentinel:sql-query</code>, which refuses any statement touching a denied entity type or a redacted field and records every attempt in the audit chain. Raw SQL is a narrower boundary than an entity read even when governed — leave this off unless a reviewed workflow needs it.'),
+      '#default_value' => $profile->get('allow_raw_sql'),
+    ];
+
     // --- Entity scope tab ----------------------------------------------------
     $lines = static fn (array $v): string => implode("\n", $v);
     $form['entity_scope'] = [
@@ -576,6 +583,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'allowed_redirect_hosts',
       'forbidden_role_permissions',
       'acknowledged_role_permissions',
+      'allow_raw_sql',
       'entity_rules_delete',
     ];
     assert($entity instanceof ConfigEntityBase);
@@ -629,7 +637,13 @@ final class McpPolicyProfileForm extends EntityForm {
       'allowed_ips',
       $split($form_state->getValue('allowed_ips'))
     );
-    foreach (['allow_config_read', 'allow_config_write', 'deny_publish', 'deny_external_redirects'] as $key) {
+    foreach ([
+      'allow_config_read',
+      'allow_config_write',
+      'deny_publish',
+      'deny_external_redirects',
+      'allow_raw_sql',
+    ] as $key) {
       $profile->set($key, (bool) $form_state->getValue($key));
     }
     $profile->set(

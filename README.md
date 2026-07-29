@@ -49,6 +49,20 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 > policy, no redaction and no audit row. Each profile therefore also asserts
 > which permissions its governed roles must **not** hold; see
 > [Escape-hatch permission assertions](#escape-hatch-permission-assertions).
+> **What governance does not cover: shell access to the server.** Everything
+> above governs requests that reach Drupal. A process with SSH access to the
+> web server does not make requests — it runs `drush`, and most Drush commands
+> never load Drupal's module system at all. `drush sql:query` is the clearest
+> case: it declares a bootstrap ceiling below the level at which module command
+> files are discovered, so no hook, subscriber or policy check in *any* Drupal
+> module can fire for it. The same is true of `sql:cli`, `sql:dump` and
+> `php:eval`. This is a property of Drush, not a gap this module can close: an
+> entity type on `denied_entity_types` is still readable through raw SQL by
+> anything holding the SSH key. Treat the shell as an **operator** channel,
+> keep the agent's credentials off it, and constrain it there — the companion
+> connector's per-site `allowedCommands` is the control. For the one case where
+> an agent genuinely needs to read with SQL, see
+> [Raw SQL](#raw-sql-opt-in-governed-and-recorded) below.
 >
 > A governance module should never be a silent no-op, so when the module is
 > **enabled but cannot govern any request** — both `agent_scopes` and
@@ -814,6 +828,60 @@ your deploy — by then every role and profile is in its final state.
 the acknowledgement is exported configuration, so the decision is visible in
 review and in the config diff, and every *other* forbidden permission stays
 asserted for that role.
+## Raw SQL (opt-in, governed, and recorded)
+
+Raw SQL runs underneath the entity API. Nothing that makes `denied_entity_types`
+or `redacted_fields` mean anything is on its path, so a statement reading a
+field table directly returns data the same profile would refuse through JSON:API
+or a Tool plugin. Adding entity types to a deny list does not change that — the
+boundary is in the wrong place.
+
+`drush mcp-sentinel:sql-query` is the governed replacement. It is a
+module-provided command, so Drupal is fully bootstrapped when it runs and the
+policy profile, the statement guard and the audit chain all apply:
+
+```bash
+# Refused: the shipped profile does not allow raw SQL.
+drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'
+
+# After enabling allow_raw_sql on the profile:
+drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'
+drush mcp-sentinel:sql-query --profile=auditor 'SELECT COUNT(*) FROM node_field_data'
+```
+
+**The capability ships off.** `allow_raw_sql` is `FALSE` on the default profile
+and on every profile upgraded from an earlier release. Turning it on is an
+exported configuration change — a decision somebody made and a reviewer can see.
+
+**What the guard permits**, checked against the *same* profile that governs the
+entity API:
+
+- a single `SELECT` — no stacked statements, no comments, no `INTO`
+- only tables belonging to an entity type the profile allows. Every other table
+  is refused, core's included: the `config` table alone carries every
+  configuration object (Key provider values among them), and it is not an
+  entity table, so no entity-type deny list would ever have covered it
+- no reference to a column backing a redacted field — anywhere, not only in the
+  select list. `WHERE mail LIKE 'a%'` never returns the value but recovers it a
+  character at a time
+- select lists limited to columns, `table.column`, `*`, and `COUNT()`. Arbitrary
+  expressions are refused because `SUBSTR(mail, 1, 3)` defeats output masking
+- `SELECT *` refused on any table carrying a redacted column
+- the profile's `result_count_cap` applies, as it does to any other response
+
+**Every invocation is written to the audit chain with the statement text** —
+refusals as `raw_sql_denied`, permitted statements as `raw_sql_query` — whether
+or not read logging is enabled. If audit logging is off, the command refuses to
+run at all: a capability justified by being recorded is not run unrecorded.
+
+**What this costs.** The tool is far narrower than `drush sql:query`: no joins
+onto denied types, no expressions, no aggregates beyond `COUNT()`, no `SELECT *`
+on a table holding a redacted column. Existing operator queries will need
+rewriting or belong on the operator's own shell. And the guard is deliberately
+not a SQL parser — a parser would invite the belief that raw SQL is *fully*
+governed, and it is not: an expression over an allowed column can still say more
+than an entity read would. That residual risk is why the capability is off by
+default rather than merely guarded.
 
 ### Drush commands
 
@@ -821,6 +889,7 @@ asserted for that role.
 |---------|---------|
 | `drush mcp-sentinel:status` | Print the active policy plus audit and lock counts. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
+| `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. Refused unless the profile sets `allow_raw_sql`; every attempt is audited. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
 | `drush mcp-sentinel:audit-purge` | Delete audit entries past the retention window (also runs on cron). |
 | `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |

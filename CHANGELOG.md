@@ -33,6 +33,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   form and profile form now **refuse** to govern an admin role at all. One
   already configured is still governed at runtime and reported loudly —
   dropping it would leave the agent's traffic ungoverned, which is worse.
+### Fixed
+- **Raw SQL is no longer a hole straight through the policy profile** (#64).
+  An agent reaching `drush sql:query` over the connector's SSH bridge read the
+  database underneath the entity API: no `denied_entity_types`, no
+  `redacted_fields`, no DLP, and nothing in the audit log — so a `profile`
+  entity denied by every shipped profile was still readable through
+  `profile__field_nda_date`, and a private-file path was still listable out of
+  `file_managed`. Adding entity types to the deny list never could have fixed
+  it, and neither could a hook: `sql:query` caps its bootstrap below the level
+  at which Drupal discovers module command files, so no module code runs on
+  that path at all. Raw SQL now runs only through
+  `drush mcp-sentinel:sql-query`, a module-provided command where the profile
+  applies — refused outright unless the profile opts in with the new
+  `allow_raw_sql` (**off by default and after upgrade**), refused when the
+  statement touches a denied entity type, a non-entity table, or a redacted
+  field's column, and written to the tamper-evident chain with its statement
+  text whether it was permitted or refused. Enabling it is now an exported,
+  reviewable decision instead of an inherited default. The governed path is
+  deliberately much narrower than `sql:query` — single `SELECT`s over entity
+  tables, no expressions, no `SELECT *` on a table carrying a redacted column —
+  and the trust model in `README.md` now states plainly that shell access
+  (`sql:cli`, `sql:dump`, `php:eval`) is outside Drupal governance entirely,
+  which it had previously been silent about.
 
 ## [1.13.0] - 2026-07-26
 
