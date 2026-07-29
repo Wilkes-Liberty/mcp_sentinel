@@ -27,6 +27,9 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *    written within the last 24 hours.
  *  - endpoint_key_unresolvable (critical): an enabled webhook endpoint's
  *    secret_key does not resolve via the Key repository.
+ *  - role_escape_hatch (critical): a governed role holds a permission its
+ *    policy profile forbids, or is an admin role — the profile's guarantees
+ *    are not true for that role.
  *  - operator_broadcast (config severity): the dashboard_broadcast message is
  *    non-empty.
  */
@@ -57,6 +60,8 @@ final class McpUrgentConditions {
    *   The entity type manager (loads the EncryptionProfile entity).
    * @param \Drupal\key\KeyRepositoryInterface $keyRepository
    *   The Key repository (resolves webhook endpoint secret keys).
+   * @param \Drupal\mcp_sentinel\Service\McpRoleAssertions $roleAssertions
+   *   The role-assertion service (escape-hatch permissions on governed roles).
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -65,6 +70,7 @@ final class McpUrgentConditions {
     private readonly TimeInterface $time,
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly KeyRepositoryInterface $keyRepository,
+    private readonly McpRoleAssertions $roleAssertions,
   ) {}
 
   /**
@@ -82,9 +88,53 @@ final class McpUrgentConditions {
     $this->evaluateMasterSwitch($config, $conditions);
     $this->evaluateConfigGovernance($config, $conditions);
     $this->evaluateEndpoints($config, $conditions);
+    $this->evaluateRoleAssertions($conditions);
     $this->evaluateBroadcast($config, $conditions);
 
     return $conditions;
+  }
+
+  /**
+   * Adds role_escape_hatch for each governed role holding a forbidden grant.
+   *
+   * Critical, not warning: unlike the other conditions here — which say a
+   * control is misconfigured — this one says a control that appears configured
+   * is not actually a boundary. The profile still reports its deny lists and
+   * redactions on the dashboard while the role can step around them entirely.
+   *
+   * @param array $conditions
+   *   The condition list, modified by reference.
+   */
+  private function evaluateRoleAssertions(array &$conditions): void {
+    foreach ($this->roleAssertions->violations() as $violation) {
+      $conditions[] = [
+        'severity' => 'critical',
+        'key' => 'role_escape_hatch',
+        'message' => $this->roleAssertions->describe($violation),
+        'url' => $this->roleUrl($violation['role']),
+      ];
+    }
+  }
+
+  /**
+   * Returns the permission-edit path for a role, or the roles collection.
+   *
+   * Links straight at the screen where the grant is revoked; falls back to the
+   * roles collection when the specific route cannot be built.
+   *
+   * @param string $roleId
+   *   The role ID.
+   *
+   * @return string|null
+   *   An internal path, or NULL when neither route can be built.
+   */
+  private function roleUrl(string $roleId): ?string {
+    try {
+      return Url::fromRoute('entity.user_role.edit_permissions_form', ['user_role' => $roleId])->toString();
+    }
+    catch (\Throwable $e) {
+      return $this->routeUrl('entity.user_role.collection');
+    }
   }
 
   /**

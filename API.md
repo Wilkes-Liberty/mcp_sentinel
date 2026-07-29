@@ -136,6 +136,8 @@ governance the resolver selects per request. Read its gates and limits via:
 | `getDeniedConfigTypes()` | config name-prefix denylist (deny always wins, e.g. `system.`) |
 | `deniesPublish()` | publish gate — when `TRUE` (default) the agent cannot publish content |
 | `getMaxModerationState()` | ceiling moderation state ID the agent may set (empty = no ceiling) |
+| `getForbiddenRolePermissions()` | permissions a governed role must not hold (escape hatches; ships populated) |
+| `getAcknowledgedRolePermissions()` | `role_id:permission` grants deliberately accepted, recorded in config |
 
 Profiles are configuration entities, so they are exportable, deployable, and
 overridable per environment. Do not store secrets in a profile — use Key
@@ -181,6 +183,7 @@ content **publishing**. Both layers are additive and default to the safe value
 | Command | Purpose |
 |---------|---------|
 | `mcp-sentinel:status` | Posture summary; non-zero exit when the `config_governance` guard is critical (never fail open). |
+| `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
 | `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. |
 | `mcp-sentinel:agent-provision <tier> --env=<env>` | Idempotently provision a tier's role, dedicated agent account, and OAuth consumer (deterministic `client_id` = `<tier>-<env>`). Secrets stay a human action. |
 | `mcp-sentinel:break-glass <uid>` | Raise an always-gated approval request to grant the time-boxed `mcp_admin` role (auto-revoked at `break_glass_ttl_seconds`). |
@@ -205,6 +208,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks |
 | `mcp_sentinel.metrics` | `McpMetrics` | governance-dashboard data; reads existing stores only, every audit/webhook query window-bounded |
+| `mcp_sentinel.role_assertions` | `McpRoleAssertions` | `violations()` → governed roles holding forbidden permissions, resolving *effective* permissions (role ∪ `authenticated`) and treating `is_admin` as its own violation; `isAdminRole()` backs the forms' refusal to govern one |
 | `mcp_sentinel.urgent_conditions` | `McpUrgentConditions` | `evaluate()` → critical/warning/info conditions + operator broadcast for the dashboard banner (pure read) |
 | `mcp_sentinel.chart_renderer` | `McpChartRenderer` | `render($type, $series, $options)` → a `drupal/charts` element when `charts` is enabled, else an inline-SVG fallback (empty-state on empty series) |
 

@@ -12,6 +12,8 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\StorageInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpRoleAssertions;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -50,12 +52,19 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
    * @param \Drupal\Core\Config\StorageInterface $configStorage
    *   The active config storage, used to revert a denied write without
    *   re-dispatching ConfigEvents::SAVE.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleAssertions $roleAssertions
+   *   The role-assertion service, used to notice a governed role gaining an
+   *   escape-hatch permission.
+   * @param \Psr\Log\LoggerInterface $logger
+   *   The mcp_sentinel logger channel.
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,
     private readonly McpAuditLogger $auditLogger,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly StorageInterface $configStorage,
+    private readonly McpRoleAssertions $roleAssertions,
+    private readonly LoggerInterface $logger,
   ) {}
 
   /**
@@ -63,8 +72,74 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
    */
   public static function getSubscribedEvents(): array {
     return [
-      ConfigEvents::SAVE => ['onConfigSave', 0],
+      ConfigEvents::SAVE => [
+        ['onConfigSave', 0],
+        ['onRoleSave', -10],
+      ],
     ];
+  }
+
+  /**
+   * Reports a governed role gaining a permission its profile forbids.
+   *
+   * Unlike onConfigSave() this deliberately does NOT early-return for
+   * ungoverned requests: the grant that matters is the one a human admin or a
+   * config import makes, not one an agent makes. The live case behind #65 was
+   * exactly that — `bypass file gate` sitting in an exported role config,
+   * invisible to the module until someone read the YAML.
+   *
+   * It records and shouts; it does not block. Refusing the save would break
+   * config import and would put this module in the way of an operator changing
+   * their own site's permissions. The gate that *fails* is
+   * `drush mcp-sentinel:role-audit`, which a deploy runs after import — by
+   * which point every role and profile is in its final state, so it also
+   * avoids the ordering problem this listener has (during an import a role may
+   * be saved before the profile that governs it).
+   *
+   * @param \Drupal\Core\Config\ConfigCrudEvent $event
+   *   The config CRUD event.
+   */
+  public function onRoleSave(ConfigCrudEvent $event): void {
+    $name = $event->getConfig()->getName();
+    if (!str_starts_with($name, 'user.role.')) {
+      return;
+    }
+    $roleId = substr($name, strlen('user.role.'));
+    // Read the permissions out of the config being saved, not by re-loading the
+    // role: this event fires before the entity static cache is refreshed, so a
+    // load here returns the pre-save permissions and the check sees nothing.
+    $data = $event->getConfig()->getRawData();
+    $permissions = (array) ($data['permissions'] ?? []);
+    $isAdmin = (bool) ($data['is_admin'] ?? FALSE);
+
+    // Never let the detector break the save it is watching. This listener fires
+    // on *every* role save, including ones core makes while modules are being
+    // installed or uninstalled — moments when this module's own audit table or
+    // profile storage may not exist yet, or may already be gone. The
+    // authoritative checks are the status report and
+    // `drush mcp-sentinel:role-audit`, both of which run against a settled
+    // site; this one is an early warning, and an early warning that can fatal
+    // an install is worse than no early warning.
+    try {
+      $violations = $this->roleAssertions->violationsForSavedRole($roleId, $permissions, $isAdmin);
+      foreach ($violations as $violation) {
+        $this->logger->error($this->roleAssertions->describe($violation));
+        $this->auditLogger->log('role_escape_hatch', [
+          'entity_type' => 'user_role',
+          'id' => $violation['role'],
+          'permission' => $violation['permission'],
+          'profile' => $violation['profile'],
+          'via' => $violation['via'],
+          'detected_on_save_of' => $name,
+        ]);
+      }
+    }
+    catch (\Throwable $e) {
+      $this->logger->warning(
+        'MCP Sentinel could not check role @role for escape-hatch permissions on save: @message. The status report and drush mcp-sentinel:role-audit still cover it.',
+        ['@role' => $roleId, '@message' => $e->getMessage()],
+      );
+    }
   }
 
   /**

@@ -268,3 +268,15 @@ mcp_sentinel.mcp_policy_profile.*:
           allow_publish:
             type: boolean
             label: 'Allow publishing for this entity type (overrides deny_publish)'
+    forbidden_role_permissions:
+      type: sequence
+      label: 'Permissions a governed role must not hold'
+      sequence:
+        type: string
+        label: 'Permission machine name'
+    acknowledged_role_permissions:
+      type: sequence
+      label: 'Acknowledged deliberate grants (role_id:permission)'
+      sequence:
+        type: string
+        label: 'role_id:permission'

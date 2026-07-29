@@ -6,6 +6,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **A policy profile now asserts that its governed roles hold no escape-hatch
+  permission** (#65). A profile constrained what the agent could do through the
+  MCP channel and said nothing about what its Drupal role could do outside it —
+  and the module could not see the difference. Found live: an agent role held
+  `bypass file gate` alongside 18 profile permissions, which meant gated
+  private files were fetchable straight off `/system/files/…` with no MCP
+  request, so no policy, no redaction and no audit row. The profile still
+  reported its deny lists and redactions on the dashboard the whole time.
+  Profiles now carry `forbidden_role_permissions` (shipped populated, so the
+  protection is inherited rather than authored) and
+  `acknowledged_role_permissions`, so a deliberate grant is *recorded in
+  exported configuration* instead of being tolerated by deleting the rule that
+  caught it. Violations raise a critical dashboard condition, an ERROR on the
+  status report, a non-zero exit from the new `drush mcp-sentinel:role-audit`
+  (the deploy gate — run it after `config:import`), and an audit-chain entry
+  the moment a role save introduces one.
+
+  Two things decide whether the check is worth anything, and both are covered:
+  it resolves **effective** permissions, so a bypass granted to `authenticated`
+  — held by every governed role while appearing in none of their permission
+  arrays — is caught and attributed correctly; and an `is_admin` role is
+  reported as its own violation rather than scanned, because its permission
+  array is empty by design while it implicitly holds everything. The settings
+  form and profile form now **refuse** to govern an admin role at all. One
+  already configured is still governed at runtime and reported loudly —
+  dropping it would leave the agent's traffic ungoverned, which is worse.
+
 ## [1.13.0] - 2026-07-26
 
 ### Fixed

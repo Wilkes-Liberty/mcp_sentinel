@@ -42,6 +42,14 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 > `config_get`/`config_list` tools require — grant it to a read-only auditor or a
 > dev/config consumer; `mcp_config` is the config *write* scope `config_set`
 > requires — grant it only to a dev/config consumer.)
+> **A profile governs the channel, not the role.** A policy profile constrains
+> what the agent may do *through MCP*. It says nothing about what the governed
+> Drupal role may do outside it — and a role holding `bypass file gate` fetches
+> gated private files straight off `/system/files/…` with no MCP request, so no
+> policy, no redaction and no audit row. Each profile therefore also asserts
+> which permissions its governed roles must **not** hold; see
+> [Escape-hatch permission assertions](#escape-hatch-permission-assertions).
+>
 > A governance module should never be a silent no-op, so when the module is
 > **enabled but cannot govern any request** — both `agent_scopes` and
 > `agent_oauth_clients` empty (with the role fallback unusable), or no policy
@@ -745,11 +753,74 @@ Sentinel audit log*, so they are noticed promptly. Warning/info conditions are
 shown on the dashboard only. Dismissal is per-user and the banner reappears
 while the condition still holds.
 
+## Escape-hatch permission assertions
+
+A policy profile constrains the **MCP channel**. The governed Drupal **role** is
+a separate boundary, and some permissions walk straight around the first one:
+
+- `bypass file gate` — File Gate declines its veto for any account holding it,
+  so gated private files are fetchable at `/system/files/…` directly.
+- `bypass node access`, `administer users`, `administer permissions`,
+  `masquerade as any user`, `administer site configuration` — each reads or
+  writes outside the agent channel, where no policy, redaction or audit applies.
+
+A role holding one of these does not make the profile *weaker*; it makes the
+profile's guarantees **untrue**. So each profile asserts them:
+
+```yaml
+forbidden_role_permissions:
+  - 'bypass file gate'
+  - 'bypass node access'
+  - 'administer users'
+  - 'administer permissions'
+  - 'masquerade as any user'
+  - 'administer site configuration'
+acknowledged_role_permissions: []   # 'role_id:permission' — deliberate grants
+```
+
+The list ships populated, so the protection is inherited without authoring it,
+and it is per-profile configuration — add the escape hatches your own contrib
+modules define.
+
+**Effective permissions, not listed ones.** Every governed account is
+authenticated, so a bypass granted to the `authenticated` role is held by every
+governed role while appearing in none of their permission arrays. The check
+resolves both, and says which it found — the fix differs (revoke it from the
+agent role, or from every logged-in user).
+
+**Admin roles are refused, not scanned.** An `is_admin` role holds every
+permission implicitly, including ones a module installed tomorrow will define,
+so no list can enumerate it and no profile can constrain it. The settings form
+and the profile form **reject** an admin role outright. An admin role already
+configured is still governed at runtime and reported loudly — un-governing it
+would leave the agent's traffic ungoverned entirely, which is worse.
+
+**Where violations appear:**
+
+| Surface | Behaviour |
+|---------|-----------|
+| Governance dashboard | Critical banner condition, counted in "needs attention" |
+| **Reports → Status report** | `MCP Sentinel: governed role holds an escape-hatch permission`, at ERROR |
+| `drush mcp-sentinel:role-audit` | Non-zero exit — the deploy-time gate |
+| On role save | Logged at error and written to the audit chain as `role_escape_hatch` |
+
+The role-save check records; it does not block. Refusing the save would break
+config import and put this module in the way of an operator changing their own
+site's permissions. Run `drush mcp-sentinel:role-audit` after `config:import` in
+your deploy — by then every role and profile is in its final state.
+
+**Recording a deliberate exception.** Add `role_id:permission` to
+`acknowledged_role_permissions` rather than deleting the rule that caught it —
+the acknowledgement is exported configuration, so the decision is visible in
+review and in the config diff, and every *other* forbidden permission stays
+asserted for that role.
+
 ### Drush commands
 
 | Command | Purpose |
 |---------|---------|
 | `drush mcp-sentinel:status` | Print the active policy plus audit and lock counts. |
+| `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
 | `drush mcp-sentinel:audit-purge` | Delete audit entries past the retention window (also runs on cron). |
 | `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |

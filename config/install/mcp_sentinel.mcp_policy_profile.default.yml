@@ -34,3 +34,11 @@ max_moderation_state: ''
 deny_external_redirects: true
 allowed_redirect_hosts: {  }
 entity_rules: {  }
+forbidden_role_permissions:
+  - 'bypass file gate'
+  - 'bypass node access'
+  - 'administer users'
+  - 'administer permissions'
+  - 'masquerade as any user'
+  - 'administer site configuration'
+acknowledged_role_permissions: {  }

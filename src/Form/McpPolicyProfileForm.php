@@ -8,11 +8,27 @@ use Drupal\Core\Config\Entity\ConfigEntityBase;
 use Drupal\Core\Entity\EntityForm;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\mcp_sentinel\Service\McpRoleAssertions;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
  * Add/edit form for an MCP policy profile.
  */
 final class McpPolicyProfileForm extends EntityForm {
+
+  /**
+   * The role-assertion service.
+   */
+  protected McpRoleAssertions $roleAssertions;
+
+  /**
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container): static {
+    $instance = parent::create($container);
+    $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
+    return $instance;
+  }
 
   /**
    * {@inheritdoc}
@@ -203,6 +219,28 @@ final class McpPolicyProfileForm extends EntityForm {
           ':input[name="deny_external_redirects"]' => ['checked' => TRUE],
         ],
       ],
+    ];
+
+    // --- Role assertions tab -------------------------------------------------
+    $form['role_assertions'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Role assertions'),
+      '#group' => 'tabs',
+      '#description' => $this->t('A policy profile constrains what the agent may do <em>through the MCP channel</em>. These assertions cover what its Drupal role can do <em>outside</em> it — where no policy, redaction or audit applies. Violations are reported on the governance dashboard and the status report, and fail <code>drush mcp-sentinel:role-audit</code>.'),
+    ];
+    $form['role_assertions']['forbidden_role_permissions'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Permissions a governed role must not hold'),
+      '#description' => $this->t('One permission machine name per line. Add the escape hatches your own contrib modules define — anything that lets its holder read or write outside the agent channel.'),
+      '#default_value' => implode("\n", $profile->getForbiddenRolePermissions()),
+      '#rows' => 6,
+    ];
+    $form['role_assertions']['acknowledged_role_permissions'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Acknowledged deliberate grants'),
+      '#description' => $this->t('One <code>role_id:permission</code> per line (e.g. <code>mcp_content_editor:bypass file gate</code>). Use this to record a considered exception, rather than deleting the rule that caught it — the acknowledgement is exported configuration, so a reviewer sees the decision.'),
+      '#default_value' => implode("\n", $profile->getAcknowledgedRolePermissions()),
+      '#rows' => 3,
     ];
 
     // --- Entity scope tab ----------------------------------------------------
@@ -421,6 +459,28 @@ final class McpPolicyProfileForm extends EntityForm {
    */
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     parent::validateForm($form, $form_state);
+
+    // Refuse to govern an admin role at all, at the point the choice is made.
+    //
+    // An is_admin role holds every permission implicitly, including any a
+    // module installed tomorrow will define, so no profile can constrain it and
+    // no forbidden-permission list can enumerate it. Blocking it here — rather
+    // than only reporting it afterwards — is the difference between a control
+    // and a complaint.
+    //
+    // Note the runtime does NOT drop such a role from governance if one is
+    // already configured (see McpRoleAssertions): un-governing it would leave
+    // the agent's traffic entirely ungoverned, which is worse than governing it
+    // imperfectly and shouting about it on the status report.
+    foreach (array_filter((array) $form_state->getValue('roles')) as $roleId) {
+      if ($this->roleAssertions->isAdminRole((string) $roleId)) {
+        $form_state->setErrorByName('roles', $this->t(
+          "Role %role is an administrator role, so it holds every permission on the site and cannot be constrained by a policy profile. Govern a purpose-built role instead.",
+          ['%role' => $roleId],
+        ));
+      }
+    }
+
     $raw = (string) $form_state->getValue('allowed_ips');
     $lines = array_values(array_filter(array_map('trim', explode("\n", $raw))));
     foreach ($lines as $line) {
@@ -514,6 +574,8 @@ final class McpPolicyProfileForm extends EntityForm {
       'max_moderation_state',
       'deny_external_redirects',
       'allowed_redirect_hosts',
+      'forbidden_role_permissions',
+      'acknowledged_role_permissions',
       'entity_rules_delete',
     ];
     assert($entity instanceof ConfigEntityBase);
@@ -581,6 +643,14 @@ final class McpPolicyProfileForm extends EntityForm {
     $profile->set(
       'allowed_redirect_hosts',
       $split($form_state->getValue('allowed_redirect_hosts'))
+    );
+    $profile->set(
+      'forbidden_role_permissions',
+      $split($form_state->getValue('forbidden_role_permissions'))
+    );
+    $profile->set(
+      'acknowledged_role_permissions',
+      $split($form_state->getValue('acknowledged_role_permissions'))
     );
 
     // Rebuild the per-entity-type rule map from the delete-overrides textarea,

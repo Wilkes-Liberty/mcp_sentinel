@@ -78,10 +78,31 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "deny_external_redirects",
  *     "allowed_redirect_hosts",
  *     "entity_rules",
+ *     "forbidden_role_permissions",
+ *     "acknowledged_role_permissions",
  *   },
  * )
  */
 final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfileInterface {
+
+  /**
+   * Permissions a governed role must not hold, unless acknowledged.
+   *
+   * Each of these lets its holder act outside the MCP channel, where no policy
+   * profile, redaction or audit applies — so holding one makes the profile's
+   * guarantees untrue rather than merely weaker. Shipped as the default so an
+   * operator inherits the protection without authoring it; the list is
+   * per-profile configuration, so a site can extend it with the escape hatches
+   * its own contrib modules define.
+   */
+  public const DEFAULT_FORBIDDEN_ROLE_PERMISSIONS = [
+    'bypass file gate',
+    'bypass node access',
+    'administer users',
+    'administer permissions',
+    'masquerade as any user',
+    'administer site configuration',
+  ];
 
   /**
    * The machine name.
@@ -243,6 +264,29 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * @var array<string, array{allow_delete?: bool, allow_write?: bool}>
    */
   protected array $entity_rules = [];
+
+  /**
+   * Permissions the governed role must not hold.
+   *
+   * Defaults to the shipped list rather than to an empty array: a profile
+   * written before this existed, or hand-authored without the key, must
+   * inherit the protection instead of asserting nothing.
+   *
+   * @var string[]
+   */
+  protected array $forbidden_role_permissions = self::DEFAULT_FORBIDDEN_ROLE_PERMISSIONS;
+
+  /**
+   * Deliberate grants, as `role_id:permission` strings.
+   *
+   * An acknowledgement suppresses one violation for one role. It exists so a
+   * considered exception is *recorded in exported configuration* — visible in
+   * review and in the config diff — rather than tolerated by deleting the rule
+   * that caught it.
+   *
+   * @var string[]
+   */
+  protected array $acknowledged_role_permissions = [];
 
   /**
    * {@inheritdoc}
@@ -420,6 +464,20 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   public function deniesPublishForEntityType(string $entity_type): bool {
     $override = $this->entity_rules[$entity_type]['allow_publish'] ?? NULL;
     return $override === NULL ? $this->deniesPublish() : !(bool) $override;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getForbiddenRolePermissions(): array {
+    return array_values(array_filter($this->forbidden_role_permissions));
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getAcknowledgedRolePermissions(): array {
+    return array_values(array_filter($this->acknowledged_role_permissions));
   }
 
 }

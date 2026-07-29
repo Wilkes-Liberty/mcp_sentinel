@@ -10,6 +10,7 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\mcp_sentinel\Service\McpDlp;
+use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -34,12 +35,18 @@ class McpSettingsForm extends ConfigFormBase {
   protected EncryptionProfileManagerInterface $encryptionProfileManager;
 
   /**
+   * The role-assertion service.
+   */
+  protected McpRoleAssertions $roleAssertions;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
     $instance = parent::create($container);
     $instance->entityTypeManager = $container->get('entity_type.manager');
     $instance->encryptionProfileManager = $container->get('encrypt.encryption_profile.manager');
+    $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
     return $instance;
   }
 
@@ -662,6 +669,21 @@ class McpSettingsForm extends ConfigFormBase {
    */
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     parent::validateForm($form, $form_state);
+
+    // Refuse to govern an admin role. It holds every permission implicitly, so
+    // no policy profile constrains it and no forbidden-permission list can
+    // enumerate what it might use — "governed" would be a label, not a fact.
+    // Rejected here rather than only reported afterwards; see
+    // McpRoleAssertions for why an already-configured admin role is still
+    // governed at runtime instead of being silently dropped.
+    foreach (array_filter((array) $form_state->getValue('governed_roles')) as $roleId) {
+      if ($this->roleAssertions->isAdminRole((string) $roleId)) {
+        $form_state->setErrorByName('governed_roles', $this->t(
+          'Role %role is an administrator role, so it holds every permission on the site and cannot be constrained by a policy profile. Govern a purpose-built role instead.',
+          ['%role' => $roleId],
+        ));
+      }
+    }
 
     // Validate the DLP patterns multi-row editor.
     $dlp_rows = (array) ($form_state->getValue('dlp_patterns_rows') ?? []);

@@ -11,6 +11,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drush\Attributes as CLI;
@@ -53,6 +54,8 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly TimeInterface $time,
     #[Autowire(service: 'mcp_sentinel.urgent_conditions')]
     private readonly McpUrgentConditions $urgentConditions,
+    #[Autowire(service: 'mcp_sentinel.role_assertions')]
+    private readonly McpRoleAssertions $roleAssertions,
   ) {
     parent::__construct();
   }
@@ -250,6 +253,30 @@ final class McpSentinelCommands extends DrushCommands {
       'Audit log hash chain BROKEN at row id %d. One or more rows have been tampered with.',
       (int) $result['broken_at'],
     ));
+    return self::EXIT_FAILURE;
+  }
+
+  /**
+   * Assert that no governed role holds an escape-hatch permission.
+   *
+   * The deploy-time gate for #65. Exits non-zero on any violation so a pipeline
+   * step fails on it: a permission grant that walks around the policy is
+   * usually introduced by a config import, which is exactly the moment nobody
+   * is reading the status report.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:role-audit', aliases: ['mcps:role-audit'])]
+  #[CLI\Usage(name: 'drush mcp-sentinel:role-audit', description: 'Fail if a governed role holds a permission its policy profile forbids.')]
+  public function roleAudit(): int {
+    $violations = $this->roleAssertions->violations();
+
+    if ($violations === []) {
+      $this->logger()->success('No governed role holds a forbidden permission.');
+      return self::EXIT_SUCCESS;
+    }
+
+    foreach ($violations as $violation) {
+      $this->logger()->error($this->roleAssertions->describe($violation));
+    }
     return self::EXIT_FAILURE;
   }
 

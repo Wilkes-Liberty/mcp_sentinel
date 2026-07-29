@@ -118,7 +118,30 @@ final class McpPolicyResolver {
       return NULL;
     }
 
-    $roles = $account->getRoles();
+    return $this->resolveForRoles($account->getRoles());
+  }
+
+  /**
+   * Returns the profile that governs an arbitrary set of role IDs.
+   *
+   * Split out of resolve() so callers that have no account and no request —
+   * notably the governed raw-SQL Drush command, which runs on the CLI where
+   * there is no OAuth channel to key on — resolve a profile through exactly
+   * the same weighting and tie-breaking as an HTTP request would, instead of
+   * reimplementing it and drifting.
+   *
+   * This deliberately does NOT consult isGoverned(): it answers "which profile
+   * covers these roles", not "is this request governed". Callers that need the
+   * latter must ask separately.
+   *
+   * @param string[] $roles
+   *   Role IDs to match profiles against.
+   *
+   * @return \Drupal\mcp_sentinel\McpPolicyProfileInterface|null
+   *   The highest-weight matching profile, the role-less default profile when
+   *   nothing matches, or NULL when no profile exists at all.
+   */
+  public function resolveForRoles(array $roles): ?McpPolicyProfileInterface {
     $best = NULL;
     $default = NULL;
     foreach ($this->loadProfiles() as $profile) {

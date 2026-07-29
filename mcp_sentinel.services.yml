@@ -117,6 +117,8 @@ services:
       - '@mcp_sentinel.audit_logger'
       - '@config.factory'
       - '@config.storage'
+      - '@mcp_sentinel.role_assertions'
+      - '@logger.channel.mcp_sentinel'
     tags:
       - { name: event_subscriber }
 
@@ -155,6 +157,12 @@ services:
       - '@mcp_sentinel.audit_logger'
       - '@logger.channel.mcp_sentinel'
 
+  mcp_sentinel.role_assertions:
+    class: Drupal\mcp_sentinel\Service\McpRoleAssertions
+    arguments:
+      - '@entity_type.manager'
+      - '@mcp_sentinel.policy_resolver'
+
   mcp_sentinel.urgent_conditions:
     class: Drupal\mcp_sentinel\Service\McpUrgentConditions
     arguments:
@@ -164,6 +172,7 @@ services:
       - '@datetime.time'
       - '@entity_type.manager'
       - '@key.repository'
+      - '@mcp_sentinel.role_assertions'
 
   mcp_sentinel.chart_renderer:
     class: Drupal\mcp_sentinel\Service\McpChartRenderer
