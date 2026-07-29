@@ -54,6 +54,7 @@ final class McpChangeDiffTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -65,8 +66,8 @@ final class McpChangeDiffTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
     $this->installEntitySchema('path_alias');
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
@@ -103,7 +104,7 @@ final class McpChangeDiffTest extends KernelTestBase {
    */
   private function fetchAuditRows(): array {
     return $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
@@ -149,7 +150,7 @@ final class McpChangeDiffTest extends KernelTestBase {
 
     // Clear the log so we start fresh for the update assertion.
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     // Update the title — this triggers hook_entity_presave as an update.
@@ -187,7 +188,7 @@ final class McpChangeDiffTest extends KernelTestBase {
     $node->save();
 
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     // Change both title (not redacted) and promote (redacted by the profile).
@@ -230,7 +231,7 @@ final class McpChangeDiffTest extends KernelTestBase {
     $node->save();
 
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     // Update only the title; leave 'sticky' alone.

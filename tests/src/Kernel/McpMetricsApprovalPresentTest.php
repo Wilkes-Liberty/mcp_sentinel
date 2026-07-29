@@ -42,6 +42,7 @@ class McpMetricsApprovalPresentTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
     'mcp_sentinel_approval',
   ];
@@ -52,8 +53,8 @@ class McpMetricsApprovalPresentTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installConfig(['mcp_sentinel']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_webhook_delivery',
     ]);
     $this->installEntitySchema('mcp_approval_request');

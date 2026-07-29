@@ -248,6 +248,15 @@ in.
 
 ## Tamper-evident audit log
 
+> **The chain itself lives in [Audit Chain](https://www.drupal.org/project/audit_chain)**
+> (`drupal/audit_chain`), a required dependency since 1.14. Hashing, HMAC
+> signing, at-rest encryption and verification are its job; MCP Sentinel is the
+> policy in front of it and writes under the `mcp_sentinel` channel. If you want
+> tamper-evident audit for something that has nothing to do with AI agents —
+> personnel-record reads, permission grants, break-glass logins — depend on
+> Audit Chain directly rather than on this module.
+
+
 Every audit row stores a `prev_hash` and a `row_hash` (a hash of the prior row's
 hash concatenated with a canonical JSON of this row's content). The hash is
 HMAC-SHA256 when `audit_hash_key` is set to a Key entity ID (use a File or

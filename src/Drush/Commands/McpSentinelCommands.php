@@ -70,7 +70,9 @@ final class McpSentinelCommands extends DrushCommands {
     $bool = static fn(?bool $v): string => $v ? 'yes' : 'no';
     $list = static fn(?array $v): string => $v ? implode(', ', $v) : '(none)';
 
-    $audit_count = (int) $this->database->select('mcp_sentinel_audit_log')->countQuery()->execute()->fetchField();
+    $audit_count = (int) $this->database->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
+      ->countQuery()->execute()->fetchField();
     $lock_count = (int) $this->database->select('mcp_sentinel_content_locks')->countQuery()->execute()->fetchField();
 
     $rows = [
@@ -234,7 +236,8 @@ final class McpSentinelCommands extends DrushCommands {
     // write this same state key with the same shape so the widget stays live.
     // Shape read by chainIntegrity(): ok, broken_at, time (-> verified_at).
     $rowCount = (int) $this->database
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->countQuery()
       ->execute()
       ->fetchField();

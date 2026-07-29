@@ -69,6 +69,12 @@ class McpSettingsForm extends ConfigFormBase {
    */
   public function buildForm(array $form, FormStateInterface $form_state): array {
     $config = $this->config('mcp_sentinel.settings');
+    // The chain's own knobs live in audit_chain.settings since the chain was
+    // extracted. They stay on this form — an operator configuring MCP auditing
+    // should not have to know which module owns the table — but they are read
+    // from and written to their real home, never mirrored. A mirrored copy is
+    // a copy that drifts, and a drifted signing key reads as tampering.
+    $chainConfig = $this->config('audit_chain.settings');
 
     $form['tabs'] = ['#type' => 'vertical_tabs', '#default_tab' => 'edit-status'];
     $form['#attached']['library'][] = 'mcp_sentinel/admin';
@@ -218,15 +224,15 @@ class McpSettingsForm extends ConfigFormBase {
       '#description'   => $this->t('Select a <a href=":url">Key</a> to sign the audit hash chain with HMAC-SHA256 instead of plain SHA-256. Recommended: use a File or Environment key provider so the secret never appears in exported configuration.', [
         ':url' => '/admin/config/system/keys',
       ]),
-      '#default_value' => $config->get('audit_hash_key') ?? '',
+      '#default_value' => $chainConfig->get('hash_key') ?? '',
       '#empty_option'  => $this->t('- None (plain SHA-256) -'),
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
     $form['audit']['siem_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable SIEM streaming'),
-      '#description'   => $this->t('When enabled, each audit write is also emitted to the <code>mcp_sentinel_audit</code> logger channel as a structured JSON record. Route this channel to syslog or Monolog to stream events to a SIEM without DB polling.'),
-      '#default_value' => $config->get('siem_enabled') ?? FALSE,
+      '#description'   => $this->t('When enabled, each audit write is also emitted to the <code>audit_chain</code> logger channel as a structured JSON record (<code>audit_chain_event</code>). Route this channel to syslog or Monolog to stream events to a SIEM without DB polling.'),
+      '#default_value' => $chainConfig->get('stream_enabled') ?? FALSE,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
 
@@ -242,7 +248,7 @@ class McpSettingsForm extends ConfigFormBase {
         ':url' => '/admin/config/system/encryption/profiles',
       ]),
       '#options'       => $profile_options,
-      '#default_value' => $config->get('audit_encryption_profile') ?? '',
+      '#default_value' => $chainConfig->get('encryption_profile') ?? '',
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
 
@@ -875,6 +881,14 @@ class McpSettingsForm extends ConfigFormBase {
    * {@inheritdoc}
    */
   public function submitForm(array &$form, FormStateInterface $form_state): void {
+    // Written straight to audit_chain.settings — see buildForm() on why these
+    // three are not stored here as well.
+    $this->configFactory()->getEditable('audit_chain.settings')
+      ->set('hash_key', (string) ($form_state->getValue('audit_hash_key') ?? ''))
+      ->set('stream_enabled', (bool) $form_state->getValue('siem_enabled'))
+      ->set('encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
+      ->save();
+
     $split = static fn (string $v): array => array_values(array_filter(array_map('trim', explode("\n", $v))));
 
     // Assemble the DLP patterns sequence-of-maps from the row editor, dropping
@@ -953,9 +967,6 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_enabled', (bool) $form_state->getValue('audit_enabled'))
       ->set('audit_log_reads', (bool) $form_state->getValue('audit_log_reads'))
       ->set('audit_retention_days', (int) $form_state->getValue('audit_retention_days'))
-      ->set('audit_hash_key', $form_state->getValue('audit_hash_key'))
-      ->set('siem_enabled', (bool) $form_state->getValue('siem_enabled'))
-      ->set('audit_encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
       ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
       ->set('dlp_patterns', $dlp_patterns)

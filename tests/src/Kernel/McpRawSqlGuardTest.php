@@ -50,6 +50,7 @@ final class McpRawSqlGuardTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -170,7 +171,10 @@ final class McpRawSqlGuardTest extends KernelTestBase {
    * of entity types would never have covered it.
    */
   public function testNonEntityTablesAreRefused(): void {
-    foreach (['config', 'sessions', 'key_value', 'mcp_sentinel_audit_log', 'information_schema.tables'] as $table) {
+    // audit_chain_log is the sharpest of these: it is the tamper-evident record
+    // of what the agent did, so reading it through the very channel it audits
+    // must be refused like any other non-entity table.
+    foreach (['config', 'sessions', 'key_value', 'audit_chain_log', 'information_schema.tables'] as $table) {
       $errors = $this->guard->check("SELECT * FROM {$table}", $this->profile());
       $this->assertNotSame([], $errors, "Expected '{$table}' to be refused.");
     }

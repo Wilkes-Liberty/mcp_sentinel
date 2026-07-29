@@ -56,7 +56,7 @@ final class McpUninstallTest extends BrowserTestBase {
 
     // All three tables must exist after install.
     foreach ([
-      'mcp_sentinel_audit_log',
+      'audit_chain_log',
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
     ] as $table) {
@@ -72,7 +72,6 @@ final class McpUninstallTest extends BrowserTestBase {
     $schema = $this->container->get('database')->schema();
 
     foreach ([
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
     ] as $table) {
@@ -81,6 +80,15 @@ final class McpUninstallTest extends BrowserTestBase {
         "Table '$table' must be removed after uninstall — no orphaned tables allowed."
       );
     }
+
+    // audit_chain_log is owned by audit_chain and deliberately survives: an
+    // audit trail that erases itself when the module it was auditing is
+    // uninstalled is not an audit trail. Removing the entries is an explicit
+    // act, not a side effect.
+    $this->assertTrue(
+      $schema->tableExists('audit_chain_log'),
+      'audit_chain_log must survive uninstalling mcp_sentinel — audit_chain owns it.'
+    );
   }
 
   /**
@@ -162,7 +170,6 @@ final class McpUninstallTest extends BrowserTestBase {
     // Tables gone.
     $schema = $this->container->get('database')->schema();
     foreach ([
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
     ] as $table) {
@@ -171,6 +178,11 @@ final class McpUninstallTest extends BrowserTestBase {
         "Table '$table' must not exist after uninstall."
       );
     }
+    // Audit entries outlive the module that wrote them; see above.
+    $this->assertTrue(
+      $schema->tableExists('audit_chain_log'),
+      'audit_chain_log is audit_chain\'s table and must remain.'
+    );
 
     // Config gone (both profiles).
     $configNames = $this->container->get('config.factory')

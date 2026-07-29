@@ -15,7 +15,7 @@ use Drupal\Core\State\StateInterface;
  * Each cron run evaluates all enabled rules. Rules that exceed their threshold
  * fire an alert. Debounce prevents repeated alerts within the configured
  * window. All queries hit the indexed 'operation' + 'timestamp' columns of
- * mcp_sentinel_audit_log.
+ * the audit chain.
  *
  * Debounce state is stored under the key:
  *   mcp_sentinel.anomaly_last_alert.{rule_id}
@@ -129,7 +129,8 @@ final class McpAnomalyDetector {
    */
   private function countOps(string $pattern, int $since): int {
     $query = $this->database
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->condition('l.timestamp', $since, '>');
 
     if (str_ends_with($pattern, '*')) {

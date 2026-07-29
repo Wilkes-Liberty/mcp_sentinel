@@ -53,6 +53,7 @@ final class McpRoleAssertionsTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -69,8 +70,8 @@ final class McpRoleAssertionsTest extends KernelTestBase {
     $this->installEntitySchema('user');
     // Role saves are watched by McpConfigSaveSubscriber::onRoleSave(), which
     // records a violation in the audit log — so these tests need the table.
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log']);
-    $this->installConfig(['mcp_sentinel', 'user']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installConfig(['audit_chain', 'mcp_sentinel', 'user']);
     $this->assertions = $this->container->get('mcp_sentinel.role_assertions');
   }
 

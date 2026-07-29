@@ -61,6 +61,7 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
     'encrypt',
     'workflows',
     'content_moderation',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -80,8 +81,8 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
@@ -201,7 +202,7 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
 
     // An entity_save audit row must have been written.
     $count = (int) \Drupal::database()
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->countQuery()->execute()->fetchField();
     $this->assertGreaterThan(0, $count,
       'At least one audit row must be written after a successful transition.');

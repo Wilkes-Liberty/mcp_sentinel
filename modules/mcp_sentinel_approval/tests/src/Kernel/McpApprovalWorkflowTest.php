@@ -52,6 +52,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
     'mcp_sentinel_approval',
   ];
@@ -65,8 +66,8 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     $this->installEntitySchema('node');
     $this->installEntitySchema('path_alias');
     $this->installEntitySchema('mcp_approval_request');
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
@@ -201,7 +202,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
 
     // An audit row for the decision exists.
     $rows = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->condition('operation', 'approval_decision')
       ->execute()
@@ -240,7 +241,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     $this->assertTrue($first['executed']);
 
     $auditCountBefore = (int) $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->condition('operation', 'approval_decision')
       ->countQuery()->execute()->fetchField();
 
@@ -254,7 +255,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     finally {
       // No second audit row was written by the rejected re-decision.
       $auditCountAfter = (int) $this->container->get('database')
-        ->select('mcp_sentinel_audit_log', 'l')
+        ->select('audit_chain_log', 'l')
         ->condition('operation', 'approval_decision')
         ->countQuery()->execute()->fetchField();
       $this->assertSame($auditCountBefore, $auditCountAfter);
@@ -304,7 +305,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
 
     // No "approved" audit row was written.
     $approved = (int) $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->condition('operation', 'approval_decision')
       ->countQuery()->execute()->fetchField();
     $this->assertSame(0, $approved);
@@ -353,7 +354,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     $this->assertSame(McpApprovalRequestInterface::STATUS_APPROVED, $reloaded->getStatus());
 
     $rows = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->condition('operation', 'approval_decision')
       ->execute()
@@ -394,7 +395,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     $this->assertSame(McpApprovalRequestInterface::STATUS_APPROVED, $reloaded->getStatus());
 
     $rows = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->condition('operation', 'approval_decision')
       ->execute()

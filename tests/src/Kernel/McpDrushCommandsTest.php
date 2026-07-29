@@ -61,6 +61,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -75,8 +76,8 @@ final class McpDrushCommandsTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
     ]);
@@ -150,7 +151,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
 
     // Tamper: overwrite the row_hash with garbage.
     $this->container->get('database')
-      ->update('mcp_sentinel_audit_log')
+      ->update('audit_chain_log')
       ->fields(['row_hash' => 'tampered'])
       ->execute();
 
@@ -260,13 +261,13 @@ final class McpDrushCommandsTest extends KernelTestBase {
     $now = $this->container->get('datetime.time')->getRequestTime();
 
     // Row older than 30 days.
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now - (40 * 86400),
       'uid' => 0,
       'operation' => 'old_op',
     ])->execute();
     // Fresh row.
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now,
       'uid' => 0,
       'operation' => 'fresh_op',
@@ -279,7 +280,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
       'audit-purge must return EXIT_SUCCESS.'
     );
 
-    $remaining = (int) $db->select('mcp_sentinel_audit_log')
+    $remaining = (int) $db->select('audit_chain_log')
       ->countQuery()->execute()->fetchField();
     $this->assertSame(1, $remaining,
       'audit-purge must delete rows past the retention window.');
@@ -296,7 +297,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
     $db = $this->container->get('database');
     $now = $this->container->get('datetime.time')->getRequestTime();
 
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now - (400 * 86400),
       'uid' => 0,
       'operation' => 'ancient',
@@ -309,7 +310,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
       'audit-purge with retention=0 must still return EXIT_SUCCESS.'
     );
 
-    $remaining = (int) $db->select('mcp_sentinel_audit_log')
+    $remaining = (int) $db->select('audit_chain_log')
       ->countQuery()->execute()->fetchField();
     $this->assertSame(1, $remaining,
       'audit-purge must not delete any rows when retention_days is 0 (forever).');
@@ -432,7 +433,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
 
     // Tamper: overwrite row_hash with garbage so verifyChain() returns FALSE.
     $this->container->get('database')
-      ->update('mcp_sentinel_audit_log')
+      ->update('audit_chain_log')
       ->fields(['row_hash' => 'tampered'])
       ->execute();
 
@@ -468,7 +469,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
     $now = $this->container->get('datetime.time')->getRequestTime();
 
     // Insert an audit row and a lock row so the counts are non-zero.
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now,
       'uid' => 0,
       'operation' => 'entity_save',
@@ -482,7 +483,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
     ])->execute();
 
     // Verify count queries that status() uses.
-    $auditCount = (int) $db->select('mcp_sentinel_audit_log')
+    $auditCount = (int) $db->select('audit_chain_log')
       ->countQuery()->execute()->fetchField();
     $lockCount = (int) $db->select('mcp_sentinel_content_locks')
       ->countQuery()->execute()->fetchField();

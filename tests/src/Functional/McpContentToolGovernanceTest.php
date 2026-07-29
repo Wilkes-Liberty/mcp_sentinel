@@ -45,6 +45,7 @@ final class McpContentToolGovernanceTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
+    'audit_chain',
     'mcp_sentinel',
     'node',
     'serialization',
@@ -124,9 +125,9 @@ final class McpContentToolGovernanceTest extends BrowserTestBase {
     McpPolicyProfile::load('default');
 
     $db = $this->container->get('database');
-    $auditAvailable = $db->schema()->tableExists('mcp_sentinel_audit_log');
+    $auditAvailable = $db->schema()->tableExists('audit_chain_log');
     $before = $auditAvailable
-      ? (int) $db->select('mcp_sentinel_audit_log', 'a')
+      ? (int) $db->select('audit_chain_log', 'a')
         ->countQuery()
         ->execute()
         ->fetchField()
@@ -149,7 +150,7 @@ final class McpContentToolGovernanceTest extends BrowserTestBase {
       'Governed update must succeed when allow_write is TRUE.');
 
     if ($auditAvailable) {
-      $after = (int) $db->select('mcp_sentinel_audit_log', 'a')
+      $after = (int) $db->select('audit_chain_log', 'a')
         ->countQuery()
         ->execute()
         ->fetchField();

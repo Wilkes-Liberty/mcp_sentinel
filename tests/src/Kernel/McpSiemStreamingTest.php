@@ -44,6 +44,7 @@ final class McpSiemStreamingTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -52,11 +53,11 @@ final class McpSiemStreamingTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
-    $this->installConfig(['mcp_sentinel']);
+    $this->installConfig(['audit_chain', 'mcp_sentinel']);
   }
 
   /**
@@ -65,12 +66,12 @@ final class McpSiemStreamingTest extends KernelTestBase {
    * @covers ::log
    */
   public function testNoSiemEmitWhenDisabled(): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('siem_enabled', FALSE)
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', FALSE)
       ->save();
 
     $spy = new TestLogger();
-    $this->container->set('logger.channel.mcp_sentinel_audit', $spy);
+    $this->container->set('logger.channel.audit_chain', $spy);
 
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
       'entity_type' => 'node',
@@ -94,17 +95,22 @@ final class McpSiemStreamingTest extends KernelTestBase {
    * @covers ::log
    */
   public function testSiemEmitOnAuditWrite(): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('siem_enabled', TRUE)
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
       ->save();
 
     $spy = new TestLogger();
-    $this->container->set('logger.channel.mcp_sentinel_audit', $spy);
+    $this->container->set('logger.channel.audit_chain', $spy);
 
     // Force the audit logger to be rebuilt so it picks up the swapped-in spy.
     // A config save can eagerly construct the audit logger (the config-save
     // event subscriber depends on it), so resetting guarantees a fresh instance
     // wired to the spy channel.
+    // Reset both: the stream is emitted by audit_chain.logger, which holds the
+    // logger channel injected at construction, and mcp_sentinel.audit_logger
+    // wraps it. Resetting only the outer one would leave the inner instance
+    // still wired to the real channel.
+    $this->container->set('audit_chain.logger', NULL);
     $this->container->set('mcp_sentinel.audit_logger', NULL);
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
       'entity_type' => 'node',
@@ -120,15 +126,20 @@ final class McpSiemStreamingTest extends KernelTestBase {
     $this->assertSame('info', $record['level'], 'SIEM record must be logged at info level.');
 
     // Message must be the stable sentinel string (no per-row interpolation).
-    $this->assertSame('mcp_sentinel_audit_event', $record['message'], 'SIEM message must be the stable sentinel string.');
+    // It is audit_chain's now: the stream belongs to the chain, not to the MCP
+    // policy in front of it.
+    $this->assertSame('audit_chain_event', $record['message'], 'SIEM message must be the stable sentinel string.');
 
     $ctx = $record['context'];
 
-    // Structured context must include all expected keys.
-    foreach (['operation', 'uid', 'entity_type', 'bundle', 'entity_id', 'timestamp', 'row_hash'] as $key) {
+    // Structured context must include all expected keys. 'channel' is the one
+    // the extraction added; every other key predates it and must not have been
+    // dropped in the move.
+    foreach (['channel', 'operation', 'uid', 'entity_type', 'bundle', 'entity_id', 'timestamp', 'row_hash'] as $key) {
       $this->assertArrayHasKey($key, $ctx, "SIEM context must contain '{$key}'.");
     }
 
+    $this->assertSame('mcp_sentinel', $ctx['channel'], "Context 'channel' must identify the consumer.");
     $this->assertSame('entity_save', $ctx['operation'], "Context 'operation' must match.");
     $this->assertSame('node', $ctx['entity_type'], "Context 'entity_type' must match.");
     $this->assertSame('article', $ctx['bundle'], "Context 'bundle' must match.");
@@ -145,14 +156,19 @@ final class McpSiemStreamingTest extends KernelTestBase {
    * @covers ::log
    */
   public function testSiemRecordRowHashMatchesAuditLog(): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('siem_enabled', TRUE)
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
       ->save();
 
     $spy = new TestLogger();
-    $this->container->set('logger.channel.mcp_sentinel_audit', $spy);
+    $this->container->set('logger.channel.audit_chain', $spy);
 
     // Force a fresh audit logger wired to the spy (see the emit-on-write test).
+    // Reset both: the stream is emitted by audit_chain.logger, which holds the
+    // logger channel injected at construction, and mcp_sentinel.audit_logger
+    // wraps it. Resetting only the outer one would leave the inner instance
+    // still wired to the real channel.
+    $this->container->set('audit_chain.logger', NULL);
     $this->container->set('mcp_sentinel.audit_logger', NULL);
     $logger = $this->container->get('mcp_sentinel.audit_logger');
     $db = $this->container->get('database');
@@ -162,7 +178,7 @@ final class McpSiemStreamingTest extends KernelTestBase {
 
     $this->assertCount(2, $spy->records, 'Two audit writes must produce two SIEM records.');
 
-    $rows = $db->select('mcp_sentinel_audit_log', 'l')
+    $rows = $db->select('audit_chain_log', 'l')
       ->fields('l', ['row_hash'])
       ->orderBy('id', 'ASC')
       ->execute()
@@ -190,13 +206,18 @@ final class McpSiemStreamingTest extends KernelTestBase {
    * @covers ::log
    */
   public function testNoSiemEmitWhenAuditDisabled(): void {
+    // Streaming is on at the chain, auditing is off at the MCP policy in front
+    // of it — the point being that the policy short-circuits before the chain
+    // is ever reached, so nothing is streamed.
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
+      ->save();
     $this->config('mcp_sentinel.settings')
       ->set('audit_enabled', FALSE)
-      ->set('siem_enabled', TRUE)
       ->save();
 
     $spy = new TestLogger();
-    $this->container->set('logger.channel.mcp_sentinel_audit', $spy);
+    $this->container->set('logger.channel.audit_chain', $spy);
 
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '1']);
 

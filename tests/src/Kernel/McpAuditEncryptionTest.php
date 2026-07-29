@@ -64,6 +64,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
     'simple_oauth',
     'encrypt',
     'encrypt_test',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -72,8 +73,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installConfig(['mcp_sentinel']);
@@ -116,8 +117,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   public function testMetadataStoredAsCiphertext(): void {
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -131,7 +132,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
       'secret_note' => 'do not store plaintext',
     ]);
 
-    $row = $db->select('mcp_sentinel_audit_log', 'l')
+    $row = $db->select('audit_chain_log', 'l')
       ->fields('l', ['metadata'])
       ->execute()
       ->fetchAssoc();
@@ -159,8 +160,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   public function testDecodeMetadataRoundTrips(): void {
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -175,7 +176,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
       'nested' => ['foo' => 'bar'],
     ]);
 
-    $row = $db->select('mcp_sentinel_audit_log', 'l')
+    $row = $db->select('audit_chain_log', 'l')
       ->fields('l', ['metadata'])
       ->execute()
       ->fetchAssoc();
@@ -202,8 +203,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   public function testVerifyChainPassesWithEncryption(): void {
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -239,8 +240,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   public function testNoEncryptionWhenNoProfileConfigured(): void {
     // Ensure no profile is set (default).
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', '')
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', '')
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -252,7 +253,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
       'plaintext_key' => 'plaintext_value',
     ]);
 
-    $row = $db->select('mcp_sentinel_audit_log', 'l')
+    $row = $db->select('audit_chain_log', 'l')
       ->fields('l', ['metadata'])
       ->execute()
       ->fetchAssoc();
@@ -278,7 +279,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
     $now = $this->container->get('datetime.time')->getRequestTime();
 
     // Insert a plaintext row directly (simulating a pre-encryption audit row).
-    $db->insert('mcp_sentinel_audit_log')->fields([
+    $db->insert('audit_chain_log')->fields([
       'timestamp' => $now,
       'uid' => 0,
       'operation' => 'legacy_op',
@@ -287,13 +288,13 @@ final class McpAuditEncryptionTest extends KernelTestBase {
 
     // Now enable encryption.
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
 
-    $row = $db->select('mcp_sentinel_audit_log', 'l')
+    $row = $db->select('audit_chain_log', 'l')
       ->fields('l', ['metadata'])
       ->execute()
       ->fetchAssoc();
@@ -311,8 +312,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   public function testVerifyChainDetectsTamperingWithEncryption(): void {
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -321,7 +322,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
     $logger->log('entity_save', ['entity_type' => 'node', 'id' => '1', 'label' => 'First']);
     $logger->log('entity_save', ['entity_type' => 'node', 'id' => '2', 'label' => 'Second']);
 
-    $ids = $db->select('mcp_sentinel_audit_log', 'l')
+    $ids = $db->select('audit_chain_log', 'l')
       ->fields('l', ['id'])
       ->orderBy('id', 'ASC')
       ->execute()
@@ -329,7 +330,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
 
     // Tamper the row_hash of the first row to break the chain.
     $tampered_id = (int) $ids[0];
-    $db->update('mcp_sentinel_audit_log')
+    $db->update('audit_chain_log')
       ->fields(['row_hash' => 'tampered_hash_value'])
       ->condition('id', $tampered_id)
       ->execute();
@@ -355,8 +356,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
     // Create a real profile so encodeMetadata() gets past the profile-load
     // guard and actually attempts to call encrypt().
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     // Replace the encrypt service in the container with a fake that always
@@ -410,10 +411,14 @@ final class McpAuditEncryptionTest extends KernelTestBase {
       }
 
     };
-    // Rebuild the audit_logger service with the spy channel injected by
-    // directly replacing the channel in the container.
-    $this->container->set('logger.channel.mcp_sentinel_audit', $spy_logger);
-    // Re-instantiate the audit logger so it picks up both swapped services.
+    // Encryption and its failure warning belong to audit_chain now, so the spy
+    // goes on that channel. Both services must be reset: audit_chain.logger
+    // holds the encrypt service and the logger channel from construction, and
+    // resetting only the mcp_sentinel wrapper would leave the inner instance
+    // still wired to the real ones — the failure would never be simulated and
+    // the test would pass against working encryption.
+    $this->container->set('logger.channel.audit_chain', $spy_logger);
+    $this->container->set('audit_chain.logger', NULL);
     $this->container->set('mcp_sentinel.audit_logger', NULL);
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -428,14 +433,14 @@ final class McpAuditEncryptionTest extends KernelTestBase {
     ]);
 
     // (a) A row must have been written.
-    $count = (int) $db->select('mcp_sentinel_audit_log', 'l')
+    $count = (int) $db->select('audit_chain_log', 'l')
       ->countQuery()
       ->execute()
       ->fetchField();
     $this->assertSame(1, $count, 'A row must be written even when encrypt() throws.');
 
     // (b) The metadata column must be the plaintext JSON fallback.
-    $stored = (string) $db->select('mcp_sentinel_audit_log', 'l')
+    $stored = (string) $db->select('audit_chain_log', 'l')
       ->fields('l', ['metadata'])
       ->execute()
       ->fetchField();
@@ -479,8 +484,8 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    */
   public function testMultipleEncryptedRowsHaveValidChain(): void {
     $profile_id = $this->createTestEncryptionProfile();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_encryption_profile', $profile_id)
+    $this->config('audit_chain.settings')
+      ->set('encryption_profile', $profile_id)
       ->save();
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
@@ -496,7 +501,7 @@ final class McpAuditEncryptionTest extends KernelTestBase {
       ]);
     }
 
-    $rows = $db->select('mcp_sentinel_audit_log', 'l')
+    $rows = $db->select('audit_chain_log', 'l')
       ->fields('l', ['id', 'prev_hash', 'row_hash', 'metadata'])
       ->orderBy('id', 'ASC')
       ->execute()

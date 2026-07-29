@@ -31,6 +31,7 @@ final class McpConfigSaveSubscriberTest extends KernelTestBase {
   protected static $modules = [
     'system', 'user', 'field', 'tool', 'key', 'serialization',
     'consumers', 'simple_oauth', 'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -40,7 +41,8 @@ final class McpConfigSaveSubscriberTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_audit_log', 'mcp_sentinel_content_locks']);
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['mcp_sentinel']);
 
     // Make the current user a governed agent via the role fallback.
@@ -71,7 +73,7 @@ final class McpConfigSaveSubscriberTest extends KernelTestBase {
    */
   private function auditCount(string $operation): int {
     return (int) $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->condition('l.operation', $operation)
       ->countQuery()
       ->execute()

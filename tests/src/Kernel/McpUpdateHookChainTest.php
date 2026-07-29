@@ -52,6 +52,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -60,8 +61,8 @@ final class McpUpdateHookChainTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
     ]);
@@ -183,6 +184,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $schema = $this->container->get('database')->schema();
 
     // Drop the columns to simulate a pre-10003 install.
+    $this->createLegacyAuditTable();
     if ($schema->fieldExists('mcp_sentinel_audit_log', 'prev_hash')) {
       $schema->dropField('mcp_sentinel_audit_log', 'prev_hash');
     }
@@ -211,7 +213,10 @@ final class McpUpdateHookChainTest extends KernelTestBase {
    * Update_10003 is idempotent (columns already present).
    */
   public function testUpdate10003IsIdempotent(): void {
-    // Columns already exist from setUp schema install.
+    // Run it twice on the same simulated pre-1.14 site: the second run must
+    // find the columns already present and return rather than throw.
+    $this->createLegacyAuditTable();
+    mcp_sentinel_update_10003();
     $message = mcp_sentinel_update_10003();
     $this->assertIsString($message,
       'update_10003 must return a string even when columns already exist.');
@@ -497,21 +502,22 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     // allow_write, etc.) because those keys no longer exist in the config
     // schema. The hook uses them as optional fallbacks and gracefully defaults
     // when they are absent — that is the correct post-schema-removal behavior.
-    // Drop hash columns to simulate pre-10003.
     $schema = $this->container->get('database')->schema();
-    foreach (['prev_hash', 'row_hash'] as $col) {
-      if ($schema->fieldExists('mcp_sentinel_audit_log', $col)) {
-        if ($col === 'row_hash' && $schema->indexExists('mcp_sentinel_audit_log', 'row_hash')) {
-          $schema->dropIndex('mcp_sentinel_audit_log', 'row_hash');
-        }
-        $schema->dropField('mcp_sentinel_audit_log', $col);
-      }
-    }
 
+    // No hash columns are dropped here. 10003 adds them to the *legacy*
+    // mcp_sentinel_audit_log, which createLegacyAuditTable() below creates
+    // without them — that is the pre-10003 state. audit_chain_log is a
+    // different table owned by a different module, and stripping its hash
+    // columns to "simulate" an old site breaks the chain the rest of the suite
+    // depends on.
     // Drop delivery table to simulate pre-10007.
     if ($schema->tableExists('mcp_sentinel_webhook_delivery')) {
       $schema->dropTable('mcp_sentinel_webhook_delivery');
     }
+
+    // A site upgrading through the whole chain still has the pre-extraction
+    // audit table when 10003 runs; 10016 is what finally moves it.
+    $this->createLegacyAuditTable();
 
     // Apply the chain in order — each must not throw.
     mcp_sentinel_update_10001();
@@ -570,6 +576,39 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $verify = $logger->verifyChain();
     $this->assertTrue($verify['ok'],
       'Full update chain: audit hash chain must be intact after applying all hooks.');
+  }
+
+  /**
+   * Recreates the pre-1.14 audit table, without its hash columns.
+   *
+   * Update 10003 predates the extraction of the chain into audit_chain, so it
+   * only ever runs on a site that still has this table. Simulating that site is
+   * the only way to test the hook at all now that a fresh install never creates
+   * it — and the hook still has to work, because an upgrade from 1.11 runs
+   * every hook in order.
+   */
+  private function createLegacyAuditTable(): void {
+    $schema = $this->container->get('database')->schema();
+    if ($schema->tableExists('mcp_sentinel_audit_log')) {
+      return;
+    }
+    $schema->createTable('mcp_sentinel_audit_log', [
+      'description' => 'Pre-1.14 audit log (fixture).',
+      'fields' => [
+        'id'           => ['type' => 'serial', 'unsigned' => TRUE, 'not null' => TRUE],
+        'timestamp'    => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+        'uid'          => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+        'operation'    => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+        'entity_type'  => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
+        'bundle'       => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
+        'entity_id'    => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
+        'entity_label' => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
+        'ip_address'   => ['type' => 'varchar', 'length' => 45, 'not null' => FALSE],
+        'user_agent'   => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
+        'metadata'     => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
+      ],
+      'primary key' => ['id'],
+    ]);
   }
 
 }

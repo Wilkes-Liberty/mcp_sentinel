@@ -50,6 +50,7 @@ final class McpPhase4ControlsFunctionalTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
+    'audit_chain',
     'mcp_sentinel',
     'node',
     'serialization',
@@ -307,7 +308,7 @@ final class McpPhase4ControlsFunctionalTest extends BrowserTestBase {
    */
   public function testAnomalyAlertLoggedAfterCron(): void {
     $db = $this->container->get('database');
-    if (!$db->schema()->tableExists('mcp_sentinel_audit_log')) {
+    if (!$db->schema()->tableExists('audit_chain_log')) {
       $this->markTestSkipped(
         'Audit log table not available in this test environment.'
       );
@@ -317,7 +318,7 @@ final class McpPhase4ControlsFunctionalTest extends BrowserTestBase {
 
     // Seed 5 entity_delete rows within the last 60 seconds.
     for ($i = 0; $i < 5; $i++) {
-      $db->insert('mcp_sentinel_audit_log')->fields([
+      $db->insert('audit_chain_log')->fields([
         'timestamp'   => $now,
         'uid'         => 1,
         'operation'   => 'entity_delete',

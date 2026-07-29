@@ -30,6 +30,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     'serialization', 'jsonapi', 'tool', 'key',
     'image', 'options', 'path_alias', 'consumers', 'simple_oauth',
     'encrypt', 'taxonomy',
+    'audit_chain',
     'mcp_sentinel',
   ];
 

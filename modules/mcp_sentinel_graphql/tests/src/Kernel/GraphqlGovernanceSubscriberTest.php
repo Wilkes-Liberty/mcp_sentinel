@@ -58,6 +58,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -67,8 +68,8 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installConfig(['mcp_sentinel']);
@@ -201,7 +202,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
    *
    * The subscriber audits the attempt BEFORE throwing so that blocked
    * operations are still recorded. A 'graphql_mutation' row must appear in
-   * mcp_sentinel_audit_log even though the mutation was denied.
+   * audit_chain_log even though the mutation was denied.
    *
    * @covers ::onOperation
    */
@@ -219,7 +220,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     }
 
     $rows = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l', ['operation'])
       ->execute()
       ->fetchAll(\PDO::FETCH_ASSOC);

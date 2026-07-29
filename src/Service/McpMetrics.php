@@ -16,7 +16,7 @@ use Psr\Log\LoggerInterface;
 /**
  * Single source of governance-dashboard data.
  *
- * Aggregates from existing stores only — mcp_sentinel_audit_log,
+ * Aggregates from existing stores only — the audit chain,
  * mcp_sentinel_webhook_delivery, approval entities (NULL-safe when the
  * submodule is absent), anomaly @state, and config. Every audit/webhook query
  * is bounded to the selected window via the already-indexed timestamp/created
@@ -434,7 +434,8 @@ final class McpMetrics {
   public function chainIntegrity(): array {
     return $this->guard(__FUNCTION__, NULL, ['ok' => NULL, 'broken_at' => NULL, 'verified_at' => NULL, 'rows' => 0], function (): array {
       $last = $this->state->get('mcp_sentinel.last_verify');
-      $rows = (int) $this->database->select('mcp_sentinel_audit_log', 'l')
+      $rows = (int) $this->database->select('audit_chain_log', 'l')
+        ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
         ->countQuery()->execute()->fetchField();
       if (!is_array($last)) {
         return ['ok' => NULL, 'broken_at' => NULL, 'verified_at' => NULL, 'rows' => $rows];
@@ -467,11 +468,15 @@ final class McpMetrics {
     ];
     return $this->guard(__FUNCTION__, NULL, $default, function (): array {
       $config = $this->configFactory->get('mcp_sentinel.settings');
+      $chainConfig = $this->configFactory->get('audit_chain.settings');
       [$rateLimit, $ipAllowlist] = $this->profileControls();
       return [
-        'hash_chain' => (string) ($config->get('audit_hash_key') ?? '') !== '',
-        'encryption' => (string) ($config->get('audit_encryption_profile') ?? '') !== '',
-        'siem' => (bool) $config->get('siem_enabled'),
+        // Read from audit_chain.settings: these controls moved with the chain,
+        // and reporting them from the old keys would show every site as having
+        // no signing key and no encryption the moment it upgraded.
+        'hash_chain' => (string) ($chainConfig->get('hash_key') ?? '') !== '',
+        'encryption' => (string) ($chainConfig->get('encryption_profile') ?? '') !== '',
+        'siem' => (bool) $chainConfig->get('stream_enabled'),
         'dlp' => (bool) $config->get('dlp_enabled'),
         'rate_limit' => $rateLimit,
         'ip_allowlist' => $ipAllowlist,
@@ -493,7 +498,8 @@ final class McpMetrics {
    *   The bounded query, ready for further conditions/aggregation.
    */
   private function auditBaseQuery(int $since): object {
-    return $this->database->select('mcp_sentinel_audit_log', 'l')
+    return $this->database->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->condition('l.timestamp', $since, '>=');
   }
 

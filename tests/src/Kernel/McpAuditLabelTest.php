@@ -54,6 +54,7 @@ final class McpAuditLabelTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -62,8 +63,8 @@ final class McpAuditLabelTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installConfig(['mcp_sentinel']);
@@ -87,7 +88,7 @@ final class McpAuditLabelTest extends KernelTestBase {
     ]);
 
     $row = $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->execute()
       ->fetchAssoc();

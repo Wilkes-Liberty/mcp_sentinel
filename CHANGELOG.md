@@ -56,6 +56,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the trust model in `README.md` now states plainly that shell access
   (`sql:cli`, `sql:dump`, `php:eval`) is outside Drupal governance entirely,
   which it had previously been silent about.
+### Changed
+- **The tamper-evident audit chain moved into its own project**
+  (`drupal/audit_chain`, #66). It was a general-purpose facility living inside
+  an AI-governance module: hash-chained, optionally encrypted, independently
+  verifiable — and wanted by personnel-record reads, permission grants,
+  configuration changes and break-glass logins, none of which should have to
+  install MCP governance to get it. The name was actively misleading to an
+  enterprise buyer evaluating audit posture.
+
+  `McpAuditLogger` keeps its entire public surface and is now the MCP policy in
+  front of the shared chain: which operations are suppressed, what a change diff
+  contains, how redaction and DLP apply. Callers and submodules need no change.
+
+  `mcp_sentinel_update_10016()` migrates existing entries. It copies the signing
+  key and encryption profile into `audit_chain.settings` **first** — a keyed
+  chain read under a different key is indistinguishable from a tampered one —
+  then copies the rows verbatim, `prev_hash` and `row_hash` exactly as written,
+  under an empty channel. They are deliberately **not** re-chained: hashes
+  recomputed by a migration prove only that the migration ran, and would
+  silently repair a chain broken beforehand. The old table is left in place to
+  drop by hand after `drush audit-chain:verify` confirms the chain still holds.
+
+  Retention and every read path cover that legacy channel alongside the current
+  one, so the audit log, the dashboard counts and the anomaly rules do not
+  appear to lose their history the moment the update runs.
 
 ## [1.13.0] - 2026-07-26
 

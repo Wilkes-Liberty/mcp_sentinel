@@ -5,6 +5,7 @@
  * Install, update, and uninstall functions for MCP Sentinel.
  */
 
+use Drupal\Core\Utility\UpdateException;
 use Drupal\Core\Url;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
@@ -13,46 +14,16 @@ use Drupal\user\Entity\Role;
 /**
  * Implements hook_schema().
  *
- * Defines three tables that hold runtime governance state rather than
- * configuration. On uninstall, core drops all three automatically from this
+ * Defines the two tables that hold runtime governance state rather than
+ * configuration. On uninstall, core drops both automatically from this
  * definition (see mcp_sentinel_uninstall()).
  */
 function mcp_sentinel_schema(): array {
-  // Tamper-evident audit trail of every governed MCP operation. Each row stores
-  // who (uid), what (operation/entity_*), and the request context (ip/user
-  // agent) plus free-form 'metadata' (the change diff, optionally encrypted).
-  // prev_hash/row_hash form the hash chain: row_hash covers the row's contents
-  // and the previous row's hash, so any insertion, deletion, or edit breaks the
-  // chain and is detectable by the integrity verifier.
-  $schema['mcp_sentinel_audit_log'] = [
-    'description' => 'Audit log for all MCP agent operations.',
-    'fields' => [
-      'id'           => ['type' => 'serial', 'unsigned' => TRUE, 'not null' => TRUE],
-      'timestamp'    => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
-      'uid'          => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
-      'operation'    => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
-      'entity_type'  => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
-      'bundle'       => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
-      'entity_id'    => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
-      'entity_label' => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
-      'ip_address'   => ['type' => 'varchar', 'length' => 45, 'not null' => FALSE],
-      'user_agent'   => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
-      'metadata'     => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
-      'prev_hash'    => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
-      'row_hash'     => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
-    ],
-    'primary key' => ['id'],
-    // Indexes back the audit log's filter facets (time window, user, operation,
-    // entity type) and the chain verifier's row_hash lookups.
-    'indexes' => [
-      'timestamp'   => ['timestamp'],
-      'uid'         => ['uid'],
-      'operation'   => ['operation'],
-      'entity_type' => ['entity_type'],
-      'row_hash'    => ['row_hash'],
-    ],
-  ];
-
+  // The audit trail itself is no longer defined here: it moved to the
+  // audit_chain module, which owns the audit_chain_log table and the hash
+  // chain over it. mcp_sentinel writes to it under the 'mcp_sentinel' channel.
+  // Update 10016 migrates the rows; see McpAuditLogger.
+  //
   // Durable record of each webhook delivery attempt, decoupled from the queue
   // so deliveries survive a queue flush and can be replayed. 'status' tracks
   // the lifecycle (pending/delivered/failed); 'attempts' and 'next_attempt'
@@ -390,6 +361,14 @@ function mcp_sentinel_update_10002(): string {
 function mcp_sentinel_update_10003(): string {
   $schema = \Drupal::database()->schema();
   $table = 'mcp_sentinel_audit_log';
+
+  // A site installed at 1.14 or later never had this table — the chain lives in
+  // audit_chain now — so there is nothing to add columns to. Historical update
+  // hooks still have to run in order on a site upgrading from before that, and
+  // they must no-op rather than fatal on a site that skipped it.
+  if (!$schema->tableExists($table)) {
+    return 'No legacy audit table on this site; the audit chain lives in audit_chain.';
+  }
 
   if (!$schema->fieldExists($table, 'prev_hash')) {
     $schema->addField($table, 'prev_hash', [
@@ -771,14 +750,106 @@ function mcp_sentinel_update_10015(): string {
 }
 
 /**
+ * Move audit entries into the shared audit_chain table.
+ *
+ * Two things have to happen in this order, or the migrated rows stop
+ * verifying:
+ *
+ *  1. The signing key and encryption profile move to audit_chain's settings
+ *     first. The chain is keyed, so a row rehashed or read under a different
+ *     key is indistinguishable from a tampered one.
+ *  2. The rows are copied **verbatim** — prev_hash and row_hash exactly as
+ *     written, and with an empty channel. They are NOT re-chained. Re-chaining
+ *     would have been a one-line convenience and it would have destroyed the
+ *     evidence: hashes recomputed by a migration prove only that the migration
+ *     ran, and would silently repair a chain that had been broken beforehand.
+ *     audit_chain omits the channel from the canonical payload when it is
+ *     empty precisely so these rows keep verifying against their original
+ *     hashes.
+ *
+ * Rows are copied in id order so the chain's sequence is preserved. The old
+ * table is left in place for the operator to inspect and drop; this hook does
+ * not delete anything it cannot recreate.
+ */
+function mcp_sentinel_update_10016(&$sandbox = NULL): string {
+  $database = \Drupal::database();
+  if (!$database->schema()->tableExists('mcp_sentinel_audit_log')) {
+    return 'No legacy audit table to migrate.';
+  }
+  if (!$database->schema()->tableExists('audit_chain_log')) {
+    throw new UpdateException(
+      'The audit_chain module must be installed before this update runs: its table holds the migrated entries.'
+    );
+  }
+
+  $sandbox = is_array($sandbox) ? $sandbox : [];
+  $sandbox += [
+    'initialized' => FALSE,
+    'last_legacy_id' => 0,
+    'migrated' => 0,
+    'total' => 0,
+    '#finished' => 0,
+  ];
+
+  if (!$sandbox['initialized']) {
+    $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+    $chainSettings = \Drupal::configFactory()->getEditable('audit_chain.settings');
+    $chainSettings
+      ->set('hash_key', (string) ($settings->get('audit_hash_key') ?? ''))
+      ->set('encryption_profile', (string) ($settings->get('audit_encryption_profile') ?? ''))
+      ->set('stream_enabled', (bool) $settings->get('siem_enabled'))
+      ->save();
+
+    $sandbox['total'] = (int) $database->select('mcp_sentinel_audit_log', 'l')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $sandbox['initialized'] = TRUE;
+    if ($sandbox['total'] === 0) {
+      $sandbox['#finished'] = 1;
+      return 'No legacy audit entries to migrate; copied audit-chain settings.';
+    }
+  }
+
+  $rows = $database->select('mcp_sentinel_audit_log', 'l')
+    ->fields('l')
+    ->condition('id', (int) $sandbox['last_legacy_id'], '>')
+    ->orderBy('id', 'ASC')
+    ->range(0, 200)
+    ->execute();
+  foreach ($rows as $row) {
+    $row = (array) $row;
+    $sandbox['last_legacy_id'] = (int) $row['id'];
+    unset($row['id']);
+    $database->insert('audit_chain_log')
+      ->fields(['channel' => ''] + $row)
+      ->execute();
+    $sandbox['migrated']++;
+  }
+
+  $sandbox['#finished'] = min(1, $sandbox['migrated'] / $sandbox['total']);
+  if ($sandbox['migrated'] >= $sandbox['total']) {
+    $sandbox['#finished'] = 1;
+    return "Migrated {$sandbox['migrated']} audit entries into audit_chain_log, verbatim and unre-chained, and copied the signing key and encryption profile into audit_chain.settings. "
+      . 'Run drush audit-chain:verify to confirm the chain still verifies, then drop mcp_sentinel_audit_log by hand once satisfied.';
+  }
+
+  return "Migrated {$sandbox['migrated']} of {$sandbox['total']} legacy audit entries into audit_chain_log.";
+}
+
+/**
  * Implements hook_uninstall().
  *
  * Only removes what core does not clean up automatically: the module's main
  * settings object and the 'mcp_api' role created on install. The hook_schema()
- * tables (audit_log, webhook_delivery, content_locks) and the module's config
- * entities (policy profiles, and the approval submodule's request entity) are
- * dropped by core's uninstall machinery, so they are intentionally not handled
- * here.
+ * tables (webhook_delivery, content_locks) and the module's config entities
+ * (policy profiles, and the approval submodule's request entity) are dropped by
+ * core's uninstall machinery, so they are intentionally not handled here.
+ *
+ * The audit entries are deliberately NOT deleted. They live in audit_chain's
+ * table now, which this module does not own — and an audit trail that erases
+ * itself when the thing it was auditing is uninstalled is not an audit trail.
+ * Remove them explicitly, or uninstall audit_chain, if that is really wanted.
  */
 function mcp_sentinel_uninstall(): void {
   \Drupal::configFactory()->getEditable('mcp_sentinel.settings')->delete();

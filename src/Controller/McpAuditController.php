@@ -328,7 +328,8 @@ class McpAuditController extends ControllerBase {
    */
   private function buildFilteredQuery(Request $request): SelectInterface {
     $query = $this->database
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->fields('l');
 
     $operation = trim((string) $request->query->get('operation', ''));

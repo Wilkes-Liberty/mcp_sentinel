@@ -25,6 +25,7 @@ final class McpPolicyProfileConfigFieldsTest extends KernelTestBase {
   protected static $modules = [
     'system', 'user', 'field', 'tool', 'key', 'serialization',
     'consumers', 'simple_oauth', 'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 

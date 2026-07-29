@@ -123,7 +123,7 @@ class McpDashboardController extends ControllerBase {
       ],
       '#cache' => [
         'contexts' => ['user.permissions', 'url.query_args:window'],
-        'tags' => ['mcp_sentinel_audit_log', 'config:mcp_sentinel.settings'],
+        'tags' => ['audit_chain_log', 'config:mcp_sentinel.settings'],
         // The dashboard reflects volatile audit/state data; keep it briefly
         // cached so the urgent banner and counts stay fresh.
         'max-age' => 60,
@@ -608,7 +608,8 @@ class McpDashboardController extends ControllerBase {
     try {
       $result = $this->auditLogger->verifyChain();
       $rows = (int) $this->database
-        ->select('mcp_sentinel_audit_log', 'l')
+        ->select('audit_chain_log', 'l')
+        ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
         ->countQuery()
         ->execute()
         ->fetchField();

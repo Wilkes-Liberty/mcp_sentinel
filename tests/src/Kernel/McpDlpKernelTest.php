@@ -66,6 +66,7 @@ final class McpDlpKernelTest extends KernelTestBase {
     'consumers',
     'simple_oauth',
     'encrypt',
+    'audit_chain',
     'mcp_sentinel',
   ];
 
@@ -77,8 +78,8 @@ final class McpDlpKernelTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
     $this->installEntitySchema('path_alias');
+    $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', [
-      'mcp_sentinel_audit_log',
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
@@ -118,7 +119,7 @@ final class McpDlpKernelTest extends KernelTestBase {
    */
   private function fetchAuditRows(): array {
     return $this->container->get('database')
-      ->select('mcp_sentinel_audit_log', 'l')
+      ->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute()
@@ -233,7 +234,7 @@ final class McpDlpKernelTest extends KernelTestBase {
     $node->save();
 
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     // Update the title to include an email address.
@@ -284,7 +285,7 @@ final class McpDlpKernelTest extends KernelTestBase {
     $node->save();
 
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     $node->setTitle('Email test@example.com is here');
@@ -327,7 +328,7 @@ final class McpDlpKernelTest extends KernelTestBase {
     $node->save();
 
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     $node->setTitle('Ungoverned update with user@example.com');
@@ -360,7 +361,7 @@ final class McpDlpKernelTest extends KernelTestBase {
     $node->save();
 
     $this->container->get('database')
-      ->truncate('mcp_sentinel_audit_log')
+      ->truncate('audit_chain_log')
       ->execute();
 
     $node->setTitle('Contact dlpoff@example.com');
