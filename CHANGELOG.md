@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-07-30
+
 ### Changed
 - **`composer.json` now declares `"php": ">=8.3"`.** It previously specified no PHP
   constraint at all, so the effective floor came only from whatever core happened to
