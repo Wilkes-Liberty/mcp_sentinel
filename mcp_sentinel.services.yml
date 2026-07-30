@@ -14,7 +14,13 @@ services:
     arguments:
       - '@config.factory'
       - '@request_stack'
-      - '@audit_chain.logger'
+      # Optional at compile time so the container still builds when audit_chain
+      # is not yet enabled. A required reference here made the 2.0.0 upgrade
+      # unrecoverable: the code landed before `drush updatedb` could install the
+      # dependency, the container would not compile, and drush could not run to
+      # fix it because drush needs the same container. McpAuditLogger fails
+      # closed at runtime instead — it never records nothing quietly.
+      - '@?audit_chain.logger'
       - '@mcp_sentinel.dlp'
 
   mcp_sentinel.policy_resolver:
