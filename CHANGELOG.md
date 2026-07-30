@@ -4,6 +4,35 @@ All notable changes to MCP Sentinel are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **`composer.json` now declares `"php": ">=8.1"`.** It previously specified no PHP
+  constraint at all, so the effective floor came only from whatever core happened to
+  require, leaving the supported surface implied rather than stated. Composer will now
+  refuse an install below 8.1 with a clear message instead of failing further down the
+  dependency graph.
+
+### Fixed
+- **The Drupal 10.6 test lane could not build, so `^10.6` was advertised and never
+  exercised** (d.o [#3613940](https://www.drupal.org/project/mcp_sentinel/issues/3613940)).
+  CI ran against current core only; opting the previous-major and previous-minor jobs in
+  showed 11.3 passing 520/520 and 10.6 failing at `composer` with exit 2 —
+  `drupal/mcp_server` sits in `require-dev` and needs PHP ^8.3, while the shared templates
+  pin that lane to Drupal 10's *minimum* PHP (8.1). Because the build stage failed,
+  `phpunit (previous major)` never started and reported nothing at all, so the lane
+  contributed no signal while appearing to exist.
+
+  The `^10.6` claim itself was never false — `mcp_server` is a test-only dependency and the
+  runtime requirements carry no 8.3 constraint, so a 10.6 site on PHP 8.1 installs and runs
+  fine. What was broken was the ability to *verify* it. That lane now runs on PHP 8.3, a
+  supported and representative 10.6 configuration.
+
+  Two limits are recorded in `.gitlab-ci.yml` rather than papered over: Drupal 10.6 on PHP
+  8.1 remains unverified, because `mcp_server` cannot install there at any 2.x version; and
+  whether the supported floor should simply become PHP 8.3 is left as a maintainer decision,
+  since narrowing support is not something a CI fix should quietly decide.
+
 ## [2.0.0] - 2026-07-29
 
 **Breaking.** This release takes a new required dependency and moves three
