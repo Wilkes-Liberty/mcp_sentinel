@@ -109,15 +109,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `phpunit (previous major)` never started and reported nothing at all, so the lane
   contributed no signal while appearing to exist.
 
-  The `^10.6` claim itself was never false — `mcp_server` is a test-only dependency and the
-  runtime requirements carry no 8.3 constraint, so a 10.6 site on PHP 8.1 installs and runs
-  fine. What was broken was the ability to *verify* it. That lane now runs on PHP 8.3, a
+  The `^10.6` claim itself was never false — 10.6 supports PHP 8.3 and the module runs
+  there. What was broken was the ability to *verify* it. That lane now runs on PHP 8.3, a
   supported and representative 10.6 configuration.
 
-  Two limits are recorded in `.gitlab-ci.yml` rather than papered over: Drupal 10.6 on PHP
-  8.1 remains unverified, because `mcp_server` cannot install there at any 2.x version; and
-  whether the supported floor should simply become PHP 8.3 is left as a maintainer decision,
-  since narrowing support is not something a CI fix should quietly decide.
+  **Correction to an earlier draft of this entry**, which said the runtime requirements
+  carried no 8.3 constraint and that a 10.6 site on PHP 8.1 would install and run fine. That
+  was wrong in two independent ways, and a PHP floor is a support claim, so it is corrected
+  here rather than quietly edited:
+
+  - `drupal/simple_oauth ^6.1` is a **runtime** requirement, not a test-only one. It pulls
+    `league/oauth2-server` and `lcobucci/jwt`, both declaring
+    `php: ~8.2.0 || ~8.3.0 || ~8.4.0 || ~8.5.0`. PHP 8.1 cannot resolve at all.
+  - The module's own code uses typed class constants (`public const string NAME = …`), which
+    are PHP 8.3 syntax. On 8.1 or 8.2 that is a parse error — the module does not merely
+    fail to install, it cannot load.
+
+  So `>=8.3` is not a narrowing for CI's convenience; it is what the code requires. The open
+  question was only ever 8.2 versus 8.3, and reaching 8.2 would mean dropping those type
+  declarations while Drupal 11.3 — this module's D11 floor — requires 8.3 regardless. That
+  trade is tracked rather than settled here.
+
+  One limit stays recorded in `.gitlab-ci.yml` rather than papered over: `drupal/mcp_server`
+  sits in `require-dev` and needs PHP ^8.3, so the `mcp_sentinel_server` tests could not run
+  below 8.3 even if the rest of the module could.
 
 ## [2.0.0] - 2026-07-29
 
