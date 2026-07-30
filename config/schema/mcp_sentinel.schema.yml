@@ -272,10 +272,10 @@ mcp_sentinel.mcp_policy_profile.*:
         label: 'Permission machine name'
     acknowledged_role_permissions:
       type: sequence
-      label: 'Acknowledged deliberate grants (role_id:permission)'
+      label: 'Acknowledged deliberate grants (role_id:permission or role_id:permission@environment)'
       sequence:
         type: string
-        label: 'role_id:permission'
+        label: 'role_id:permission or role_id:permission@environment'
     allow_raw_sql:
       type: boolean
       label: 'Allow raw SQL through the governed Drush command (off by default)'
