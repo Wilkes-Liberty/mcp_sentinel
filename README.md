@@ -74,6 +74,11 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 ## Requirements
 
 - Drupal 10.6+ or 11.3+
+- **PHP 8.3+.** Two independent reasons, either sufficient on its own: the module's
+  own code uses typed class constants, which are 8.3 syntax and a parse error below
+  it; and `drupal/simple_oauth` is a runtime dependency whose chain
+  (`league/oauth2-server`, `lcobucci/jwt`) requires 8.2 or newer. A Drupal 10.6 site
+  on PHP 8.1 or 8.2 cannot run this module, even though 10.6 itself supports those.
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
 - [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
   signing secret and (optionally) the audit encryption key outside exported
