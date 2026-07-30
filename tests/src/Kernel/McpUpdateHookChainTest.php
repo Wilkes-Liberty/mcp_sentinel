@@ -579,6 +579,42 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10018 clears the audit settings left as silent no-ops after 10016.
+   *
+   * 10016 copied them into audit_chain.settings but, before the clear step was
+   * added, left the originals in mcp_sentinel.settings. Nothing read them; the
+   * form wrote to audit_chain.settings. Editing the leftovers looked like a
+   * successful key rotation and was not.
+   */
+  public function testUpdate10018ClearsSilentNoOpAuditSettings(): void {
+    // Write the leftover keys through the storage layer. The config API
+    // rejects them now that they are off the schema — that is the point of
+    // removing them — so the only way to simulate a site that already ran
+    // 10016 is to put the raw data back the way active config still holds it.
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.settings') ?: [];
+    $data['audit_hash_key'] = 'stale_key';
+    $data['audit_encryption_profile'] = 'stale_profile';
+    $data['siem_enabled'] = TRUE;
+    $storage->write('mcp_sentinel.settings', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+
+    $message = mcp_sentinel_update_10018();
+    $this->assertStringContainsString('audit_hash_key', $message);
+    $this->assertStringContainsString('siem_enabled', $message);
+
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $settings = $this->config('mcp_sentinel.settings');
+    $this->assertNull($settings->get('audit_hash_key'));
+    $this->assertNull($settings->get('audit_encryption_profile'));
+    $this->assertNull($settings->get('siem_enabled'));
+
+    // Idempotent: a second run is a no-op, not an error.
+    $again = mcp_sentinel_update_10018();
+    $this->assertStringContainsString('No leftover', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

@@ -800,6 +800,17 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
       ->set('stream_enabled', (bool) $settings->get('siem_enabled'))
       ->save();
 
+    // Clear the copies left behind in mcp_sentinel.settings. Nothing reads them
+    // after this migration, so leaving them is a silent no-op: an operator who
+    // edits audit_hash_key in a config export (or a stale form default) would
+    // believe they had rotated the signing key when they had not. The form
+    // writes straight to audit_chain.settings; these keys must not exist here.
+    $settings
+      ->clear('audit_hash_key')
+      ->clear('audit_encryption_profile')
+      ->clear('siem_enabled')
+      ->save();
+
     $sandbox['total'] = (int) $database->select('mcp_sentinel_audit_log', 'l')
       ->countQuery()
       ->execute()
@@ -807,7 +818,7 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
     $sandbox['initialized'] = TRUE;
     if ($sandbox['total'] === 0) {
       $sandbox['#finished'] = 1;
-      return 'No legacy audit entries to migrate; copied audit-chain settings.';
+      return 'No legacy audit entries to migrate; copied audit-chain settings and cleared the moved keys from mcp_sentinel.settings.';
     }
   }
 
@@ -830,11 +841,43 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
   $sandbox['#finished'] = min(1, $sandbox['migrated'] / $sandbox['total']);
   if ($sandbox['migrated'] >= $sandbox['total']) {
     $sandbox['#finished'] = 1;
-    return "Migrated {$sandbox['migrated']} audit entries into audit_chain_log, verbatim and not re-chained, and copied the signing key and encryption profile into audit_chain.settings. "
+    return "Migrated {$sandbox['migrated']} audit entries into audit_chain_log, verbatim and not re-chained, copied the signing key and encryption profile into audit_chain.settings, and cleared the moved keys from mcp_sentinel.settings. "
       . 'Run drush audit-chain:verify to confirm the chain still verifies, then drop mcp_sentinel_audit_log by hand once satisfied.';
   }
 
   return "Migrated {$sandbox['migrated']} of {$sandbox['total']} legacy audit entries into audit_chain_log.";
+}
+
+/**
+ * Clear the audit settings left behind as silent no-ops after update 10016.
+ *
+ * 10016 copied audit_hash_key, audit_encryption_profile and siem_enabled into
+ * audit_chain.settings but (before the clear step was added to 10016) left the
+ * originals in mcp_sentinel.settings. Nothing reads them; the settings form
+ * writes straight to audit_chain.settings. Editing the leftover keys — or a
+ * config export that still contains them — is a silent no-op: the operator
+ * believes they have rotated the signing key when they have not.
+ *
+ * Sites that already ran 10016 before the clear step need this hook. Sites
+ * that have not yet run 10016 get the clear there and this becomes a no-op.
+ *
+ * Numbered 10018 (not 10017) so it lands cleanly alongside the sibling update
+ * that installs audit_chain when the 2.0.0 upgrade left it disabled.
+ */
+function mcp_sentinel_update_10018(): string {
+  $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $cleared = [];
+  foreach (['audit_hash_key', 'audit_encryption_profile', 'siem_enabled'] as $key) {
+    if ($settings->get($key) !== NULL) {
+      $settings->clear($key);
+      $cleared[] = $key;
+    }
+  }
+  if ($cleared === []) {
+    return 'No leftover audit settings to clear from mcp_sentinel.settings.';
+  }
+  $settings->save();
+  return 'Cleared silent no-op keys from mcp_sentinel.settings: ' . implode(', ', $cleared) . '. They live in audit_chain.settings now.';
 }
 
 /**

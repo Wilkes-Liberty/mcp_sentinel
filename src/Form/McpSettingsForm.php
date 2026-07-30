@@ -54,7 +54,11 @@ class McpSettingsForm extends ConfigFormBase {
    * {@inheritdoc}
    */
   protected function getEditableConfigNames(): array {
-    return ['mcp_sentinel.settings'];
+    // audit_chain.settings is written on submit for the three audit fields
+    // (hash key, SIEM stream, encryption profile). ConfigFormBase requires
+    // every name that submitForm() calls getEditable() on to appear here —
+    // otherwise the form cache / override handling is incomplete.
+    return ['mcp_sentinel.settings', 'audit_chain.settings'];
   }
 
   /**
@@ -218,10 +222,14 @@ class McpSettingsForm extends ConfigFormBase {
       '#max' => 3650,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
+    // The three fields below are presented on this form for the operator, but
+    // they are pure write-throughs to audit_chain.settings. They must never
+    // become stored copies in mcp_sentinel.settings again — that is how
+    // update 10016 left silent no-ops behind (fixed by 10018).
     $form['audit']['audit_hash_key'] = [
       '#type'          => 'key_select',
       '#title'         => $this->t('Audit hash signing key (HMAC-SHA256)'),
-      '#description'   => $this->t('Select a <a href=":url">Key</a> to sign the audit hash chain with HMAC-SHA256 instead of plain SHA-256. Recommended: use a File or Environment key provider so the secret never appears in exported configuration.', [
+      '#description'   => $this->t('Select a <a href=":url">Key</a> to sign the audit hash chain with HMAC-SHA256 instead of plain SHA-256. Recommended: use a File or Environment key provider so the secret never appears in exported configuration. Stored in <code>audit_chain.settings</code>.', [
         ':url' => '/admin/config/system/keys',
       ]),
       '#default_value' => $chainConfig->get('hash_key') ?? '',
@@ -231,7 +239,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['audit']['siem_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable SIEM streaming'),
-      '#description'   => $this->t('When enabled, each audit write is also emitted to the <code>audit_chain</code> logger channel as a structured JSON record (<code>audit_chain_event</code>). Route this channel to syslog or Monolog to stream events to a SIEM without DB polling.'),
+      '#description'   => $this->t('When enabled, each audit write is also emitted to the <code>audit_chain</code> logger channel as a structured JSON record (<code>audit_chain_event</code>). Route this channel to syslog or Monolog to stream events to a SIEM without DB polling. Stored in <code>audit_chain.settings:stream_enabled</code> — not a local copy.'),
       '#default_value' => $chainConfig->get('stream_enabled') ?? FALSE,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
@@ -244,7 +252,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['audit']['audit_encryption_profile'] = [
       '#type'          => 'select',
       '#title'         => $this->t('Audit metadata encryption profile'),
-      '#description'   => $this->t('Select an <a href=":url">Encryption Profile</a> to encrypt audit metadata at rest. When set, the metadata column is encrypted on write and decrypted on read. Pre-existing plaintext rows remain readable (decryption failure gracefully falls back to JSON decode). Changing the profile later prevents decryption (and tamper-verification) of rows already encrypted under the previous profile — export or re-encrypt existing audit rows before rotating.', [
+      '#description'   => $this->t('Select an <a href=":url">Encryption Profile</a> to encrypt audit metadata at rest. When set, the metadata column is encrypted on write and decrypted on read. Pre-existing plaintext rows remain readable (decryption failure gracefully falls back to JSON decode). Changing the profile later prevents decryption (and tamper-verification) of rows already encrypted under the previous profile — export or re-encrypt existing audit rows before rotating. Stored in <code>audit_chain.settings</code>.', [
         ':url' => '/admin/config/system/encryption/profiles',
       ]),
       '#options'       => $profile_options,

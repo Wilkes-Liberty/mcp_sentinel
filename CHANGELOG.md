@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Update 10016 no longer leaves the moved audit settings behind as silent
+  no-ops.** It copied `audit_hash_key`, `audit_encryption_profile` and
+  `siem_enabled` into `audit_chain.settings` but left the originals in
+  `mcp_sentinel.settings`. Nothing read them; the settings form already wrote
+  straight to `audit_chain.settings`. Editing the leftovers — or a config
+  export that still contained them — looked like a successful key rotation and
+  was not. 10016 now clears them after the copy; a new update 10018 clears
+  them for sites that already ran 10016; they are gone from the install YAML
+  and the config schema. The form still presents SIEM streaming (and the hash
+  key / encryption profile) under Audit Logging — that is the right place for
+  the operator — and records them only in `audit_chain.settings`.
+  `getEditableConfigNames()` now declares `audit_chain.settings` so the form
+  matches what `submitForm()` actually writes.
+
 ## [2.0.1] - 2026-07-30
 
 ### Changed
