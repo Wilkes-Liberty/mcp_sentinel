@@ -6,7 +6,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **`composer.json` now declares `"php": ">=8.3"`.** It previously specified no PHP
+  constraint at all, so the effective floor came only from whatever core happened to
+  require, leaving the supported surface implied rather than stated. Composer will now
+  refuse an install below 8.3 with a clear message instead of failing further down the
+  dependency graph.
+
 ### Fixed
+- **Expired break-glass grants were never revoked on SQLite sites, and nothing said so.**
+  `McpBreakGlassManager::reapExpired()` selected the grants to revoke with
+  `->condition('revoked', FALSE)`. An entity query passes its condition value to the
+  database layer unchanged, and only the pgsql driver casts booleans there (working
+  around [PHP #48383](https://bugs.php.net/bug.php?id=48383)). SQLite does not: a PHP
+  `FALSE` binds as a string, becomes `''`, and `revoked = ''` matches no row whose stored
+  value is `0`. MySQL hid the same defect by coercing `''` to `0`.
+
+  So on SQLite the cron reaper found nothing, revoked nothing, raised no error, and the
+  time-boxed `mcp_admin` role stayed granted indefinitely — an expiry mechanism reporting
+  success while doing nothing. The second occurrence failed the other way:
+  `hasOtherActiveGrant()` used the same condition, so it answered "no other grant" every
+  time, and a user who renewed a grant before the first lapsed had the role pulled out
+  from under the renewal. Both now bind the stored integer.
+
+  Neither had ever run anywhere. `McpBreakGlassTest` errored on a container problem
+  before reaching its assertions, and the GitHub test lane does not run the submodule
+  suites at all — so the one venue that could have caught this was reporting a different
+  failure instead. The overlapping-grant case had no test; it has one now.
+
 - **The drupalcode pipeline was red on `1.x` and on the released 2.0.0 tag.** Four of the
   six failing jobs are addressed here. `phpcs` reported one
   `Squiz.Arrays.ArrayDeclaration.CloseBraceNewLine` in `McpRoleAssertions`. `cspell`
@@ -25,14 +52,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The redness was ours, not an upstream CI-template change: the first red pipeline is the
   commit that edited `.gitlab-ci.yml`, and `phpcs` and `phpunit` were still green in it.
 
-### Changed
-- **`composer.json` now declares `"php": ">=8.1"`.** It previously specified no PHP
-  constraint at all, so the effective floor came only from whatever core happened to
-  require, leaving the supported surface implied rather than stated. Composer will now
-  refuse an install below 8.1 with a clear message instead of failing further down the
-  dependency graph.
-
-### Fixed
 - **The Drupal 10.6 test lane could not build, so `^10.6` was advertised and never
   exercised** (d.o [#3613940](https://www.drupal.org/project/mcp_sentinel/issues/3613940)).
   CI ran against current core only; opting the previous-major and previous-minor jobs in
