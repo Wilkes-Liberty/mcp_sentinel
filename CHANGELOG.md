@@ -38,8 +38,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   six failing jobs are addressed here. `phpcs` reported one
   `Squiz.Arrays.ArrayDeclaration.CloseBraceNewLine` in `McpRoleAssertions`. `cspell`
   reported twenty issues from vocabulary the raw-SQL work introduced; the real terms are
-  now in the project dictionary, and `unre-chained` in the update-hook message — a
-  coinage rather than vocabulary — now reads "not re-chained". `phpstan` reported six
+  now in the project dictionary, and one coinage in the update-hook message — a made-up
+  word rather than vocabulary — now reads "not re-chained". `phpstan` reported six
   `DependencySerializationTrait does not support private properties`: `McpWebhookWorker`
   and `McpApprovalDecisionForm` inherit the trait and could not have their injected
   services restored after a serialize round-trip, so they are now `protected readonly`.

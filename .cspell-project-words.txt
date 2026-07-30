@@ -1,7 +1,10 @@
 Acquia
 analysable
+analysed
+analysing
 autowires
 behaviour
+behavioural
 bodyless
 bookmarkable
 breakglass
@@ -17,6 +20,7 @@ cweagans
 dblink
 defence
 desync
+drupalcode
 drush
 eccdeac
 endcode
@@ -25,6 +29,7 @@ entrancy
 eslint
 etype
 exfiltration
+fataled
 fataling
 fatals
 fieldable
@@ -60,9 +65,9 @@ phpstan
 phpunit
 PKCE
 preg
-reentrancy
 Recognised
 redactions
+reentrancy
 refinable
 relock
 replayable
@@ -100,5 +105,6 @@ updb
 varchar
 vocabs
 webcms
+webonyx
 xaxis
 yaxis
