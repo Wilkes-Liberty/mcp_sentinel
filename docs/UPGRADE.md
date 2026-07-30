@@ -4,6 +4,49 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## 2.0.0 requires the `audit_chain` module
+
+**Affects:** any install upgrading from 1.x to 2.0.x.
+
+2.0.0 moved the tamper-evident audit chain into its own project, so `audit_chain`
+became a hard dependency.
+
+From **2.0.2** onward the module handles this itself: the service reference is
+optional at compile time, `drush updatedb` installs `audit_chain` if it is
+missing, and the status report names the module if it is ever disabled. The
+ordinary sequence works:
+
+```bash
+composer require drupal/mcp_sentinel:^2.0
+drush updatedb -y
+```
+
+### If you are landing 2.0.0 or 2.0.1 specifically
+
+Those two releases fail hard when `audit_chain` is not already enabled. The
+container cannot compile:
+
+```
+The service "mcp_sentinel.audit_logger" has a dependency on
+a non-existent service "audit_chain.logger".
+```
+
+The front end returns 500 and `drush` cannot recover the site, because drush
+needs the same container. **Rolling back makes it worse** — at 1.13 `audit_chain`
+is only a transitive requirement, so `composer require drupal/mcp_sentinel:^1.13`
+removes it.
+
+Install and enable the dependency *before* the code that needs it:
+
+```bash
+composer require drupal/audit_chain:^1.0.1
+drush en audit_chain -y
+composer require drupal/mcp_sentinel:^2.0
+drush updatedb -y
+```
+
+Upgrading straight to 2.0.2 or later avoids this entirely.
+
 ## OAuth scope machine ids standardized to underscores (`mcp_read` / `mcp_write`)
 
 **Affects:** any install that created OAuth scopes using the colon form
