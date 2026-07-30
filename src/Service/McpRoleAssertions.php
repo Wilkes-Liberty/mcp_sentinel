@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Site\Settings;
 use Drupal\user\RoleInterface;
 
 /**
@@ -52,10 +53,16 @@ final class McpRoleAssertions {
    *   The policy resolver — supplies the governed role set and the profile
    *   covering each role, so this check uses exactly the same notion of
    *   "governed" as enforcement does.
+   * @param \Drupal\Core\Site\Settings $settings
+   *   Site settings. The environment name for scoped acknowledgements is read
+   *   from here (`mcp_sentinel.environment`), never from config — exported
+   *   config travels between environments, and an environment recorded in
+   *   config is how prod would come to believe it is dev.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly McpPolicyResolver $policyResolver,
+    private readonly Settings $settings,
   ) {}
 
   /**
@@ -208,7 +215,7 @@ final class McpRoleAssertions {
       if (!$heldDirectly && !$heldByAll) {
         continue;
       }
-      if (in_array($roleId . ':' . $permission, $acknowledged, TRUE)) {
+      if ($this->isAcknowledged($roleId, $permission, $acknowledged)) {
         // A deliberate grant, recorded in exported configuration. It stops
         // being a finding and becomes a decision somebody signed.
         continue;
@@ -223,6 +230,47 @@ final class McpRoleAssertions {
     }
 
     return $violations;
+  }
+
+  /**
+   * Whether a role/permission pair is acknowledged on this environment.
+   *
+   * Grammar:
+   *  - `role_id:permission` — applies on every environment.
+   *  - `role_id:permission@environment` — applies only when
+   *    `$settings['mcp_sentinel.environment']` equals `environment`.
+   *
+   * Fails closed: with no environment declared in settings.php, a scoped
+   * acknowledgement does not apply and the violation is reported. A site that
+   * forgets to set it gets the strict answer, never the permissive one.
+   *
+   * VIOLATION_IS_ADMIN is never acknowledged — that path returns before this
+   * method is called. An is_admin role cannot be signed into compliance.
+   *
+   * @param string $roleId
+   *   The governed role ID.
+   * @param string $permission
+   *   The permission machine name.
+   * @param string[] $acknowledged
+   *   Entries from the profile's acknowledged_role_permissions.
+   *
+   * @return bool
+   *   TRUE when the pair is acknowledged for this environment.
+   */
+  private function isAcknowledged(string $roleId, string $permission, array $acknowledged): bool {
+    $unscoped = $roleId . ':' . $permission;
+    if (in_array($unscoped, $acknowledged, TRUE)) {
+      return TRUE;
+    }
+
+    // settings.php only — never config. Exported config travels dev → prod.
+    $environment = (string) ($this->settings->get('mcp_sentinel.environment') ?? '');
+    if ($environment === '') {
+      // Fail closed: scoped entries need an environment to match against.
+      return FALSE;
+    }
+
+    return in_array($unscoped . '@' . $environment, $acknowledged, TRUE);
   }
 
   /**

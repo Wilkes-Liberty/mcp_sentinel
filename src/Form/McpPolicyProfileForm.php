@@ -238,9 +238,9 @@ final class McpPolicyProfileForm extends EntityForm {
     $form['role_assertions']['acknowledged_role_permissions'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Acknowledged deliberate grants'),
-      '#description' => $this->t('One <code>role_id:permission</code> per line (e.g. <code>mcp_content_editor:bypass file gate</code>). Use this to record a considered exception, rather than deleting the rule that caught it — the acknowledgement is exported configuration, so a reviewer sees the decision.'),
+      '#description' => $this->t("One entry per line. Unscoped <code>role_id:permission</code> applies on every environment (e.g. <code>mcp_content_editor:bypass file gate</code>). Scoped <code>role_id:permission@environment</code> applies only when <code>\$settings['mcp_sentinel.environment']</code> in settings.php matches (e.g. <code>mcp_config_editor:administer site configuration@dev</code>). With no environment declared, a scoped entry does not apply — the violation is reported. The environment name comes from settings.php, never from config, so a grant allowed on one environment cannot travel with a config export. Use this to record a considered exception rather than deleting the rule that caught it."),
       '#default_value' => implode("\n", $profile->getAcknowledgedRolePermissions()),
-      '#rows' => 3,
+      '#rows' => 4,
     ];
 
     $form['config_governance']['allow_raw_sql'] = [

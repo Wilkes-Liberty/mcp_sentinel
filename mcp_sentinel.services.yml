@@ -160,6 +160,9 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@mcp_sentinel.policy_resolver'
+      # Environment name for scoped acknowledgements comes from settings.php
+      # ($settings['mcp_sentinel.environment']), never from config.
+      - '@settings'
 
   mcp_sentinel.urgent_conditions:
     class: Drupal\mcp_sentinel\Service\McpUrgentConditions

@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Environment-scoped role-permission acknowledgements.** A grant that is
+  legitimate on one environment and a violation on another can now be recorded
+  as `role_id:permission@environment` (for example
+  `mcp_config_editor:administer site configuration@dev`). Unscoped
+  `role_id:permission` entries keep working on every environment. The
+  environment name is read from `$settings['mcp_sentinel.environment']` in
+  settings.php — never from config — so a grant allowed on one environment
+  cannot travel with a config export. With no environment declared, a scoped
+  acknowledgement does not apply and the violation is reported (fail closed).
+  `VIOLATION_IS_ADMIN` stays outside this: an is_admin role cannot be
+  acknowledged into compliance.
+
 ## [2.0.1] - 2026-07-30
 
 ### Changed
