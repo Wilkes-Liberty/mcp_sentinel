@@ -37,7 +37,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     module, rather than succeeding unaudited. A governance module that quietly stops
     recording is the failure it exists to prevent;
   - `hook_requirements()` reports the missing module at ERROR on the status report;
-  - a new update hook installs `audit_chain`, so `drush updatedb` self-heals.
+  - `drush updatedb` self-heals: whichever update hook is reached first installs
+    `audit_chain`. Update 10016 does it before migrating (it runs earlier and used to
+    throw, which would have stopped the self-heal ever reaching the sites that needed
+    it); update 10017 covers sites with no legacy audit table for 10016 to migrate.
 
   `docs/UPGRADE.md` documents the ordering as well, for anyone landing 2.0.0 or 2.0.1
   specifically. A new kernel test installs the module without `audit_chain` and asserts

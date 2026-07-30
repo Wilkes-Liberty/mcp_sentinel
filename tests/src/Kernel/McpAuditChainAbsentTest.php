@@ -131,6 +131,38 @@ final class McpAuditChainAbsentTest extends KernelTestBase {
   }
 
   /**
+   * The audit_chain install is reachable on the path that actually needs it.
+   *
+   * Update hooks run in ascending order, and 10016 — which migrates the legacy
+   * audit table — runs before 10017, the hook written to install audit_chain.
+   * While 10016 threw on a missing chain, the self-healing update never ran on
+   * the one upgrade path it existed for: a 1.13 site with rows to migrate.
+   *
+   * Asserted on the source rather than by running updatedb, because reaching
+   * the real failure needs a site mid-upgrade with a legacy table present. The
+   * ordering is the whole defect, so pin it here rather than trusting a reader
+   * to notice that 10016 < 10017.
+   */
+  public function testEarlierUpdateInstallsAuditChainRatherThanThrowingPastIt(): void {
+    $source = file_get_contents(
+      $this->container->get('extension.list.module')->getPath('mcp_sentinel') . '/mcp_sentinel.install'
+    );
+    $migration = substr($source, (int) strpos($source, 'function mcp_sentinel_update_10016'));
+    $migration = substr($migration, 0, (int) strpos($migration, 'function mcp_sentinel_update_10017'));
+
+    $install = strpos($migration, "install(['audit_chain'])");
+    $throw = strpos($migration, 'throw new UpdateException');
+
+    $this->assertNotFalse($install, 'Update 10016 must install audit_chain itself.');
+    $this->assertNotFalse($throw, 'Guard: the migration should still fail closed if that does not work.');
+    $this->assertLessThan(
+      $throw,
+      $install,
+      'Update 10016 must try installing audit_chain before it throws, or the later self-healing update is unreachable.',
+    );
+  }
+
+  /**
    * The status report names the missing module, not a missing service.
    *
    * The original failure said "the service mcp_sentinel.audit_logger has a

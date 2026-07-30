@@ -791,9 +791,21 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
   if (!$database->schema()->tableExists('mcp_sentinel_audit_log')) {
     return 'No legacy audit table to migrate.';
   }
+  // Install audit_chain here rather than leaving it to update 10017.
+  //
+  // Update hooks run in ascending order, so 10017 — which exists precisely to
+  // install this module — runs *after* this one. On the upgrade path that
+  // motivated it (1.13 → 2.0 with audit_chain not yet enabled) this hook is
+  // reached first, and throwing here meant 10017 never ran at all: the
+  // self-healing update healed nothing in the one case it was written for.
+  // A site with no legacy table returned above and never noticed.
+  if (!\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    \Drupal::service('module_installer')->install(['audit_chain']);
+    $database = \Drupal::database();
+  }
   if (!$database->schema()->tableExists('audit_chain_log')) {
     throw new UpdateException(
-      'The audit_chain module must be installed before this update runs: its table holds the migrated entries.'
+      'The audit_chain module must be installed before this update runs: its table holds the migrated entries. Installing it automatically did not produce the audit_chain_log table — enable the module manually (drush en audit_chain) and re-run database updates.'
     );
   }
 
@@ -869,6 +881,12 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
  * is the point: a required-dependency addition that bricks a site on the wrong
  * order is a landmine, and the error names a service rather than the module to
  * enable.
+ *
+ * This hook covers the sites 10016 returns early on — the ones with no legacy
+ * `mcp_sentinel_audit_log` table to migrate. Sites that *do* have one reach
+ * 10016 first, and update hooks run in ascending order, so 10016 installs
+ * audit_chain itself rather than throwing past this hook. Both paths end up
+ * with the module enabled; this one is not the only route to it.
  */
 function mcp_sentinel_update_10017(): string {
   if (\Drupal::moduleHandler()->moduleExists('audit_chain')) {
