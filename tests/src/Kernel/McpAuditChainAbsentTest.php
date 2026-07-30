@@ -83,8 +83,11 @@ final class McpAuditChainAbsentTest extends KernelTestBase {
       'Guard: this test is meaningless if audit_chain got installed anyway.',
     );
 
+    // Container::get() is typed as the service class in the compiled
+    // definition, so assertInstanceOf() is a always-true phpstan error.
+    // Comparing get_class() asserts the same fact without the noise.
     $logger = $this->container->get('mcp_sentinel.audit_logger');
-    $this->assertInstanceOf(McpAuditLogger::class, $logger);
+    $this->assertSame(McpAuditLogger::class, $logger::class);
   }
 
   /**
