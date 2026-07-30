@@ -223,36 +223,40 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
-   * Update_10004: adds audit_hash_key setting with empty default.
+   * Update_10004: seeds audit_chain.settings:hash_key, not a removed key.
+   *
+   * The key used to live on mcp_sentinel.settings; it moved in 2.0.0. The hook
+   * still has to run on upgrade paths under current code without writing a
+   * schema-less key.
    */
   public function testUpdate10004AddsAuditHashKeySetting(): void {
-    $this->config('mcp_sentinel.settings')->clear('audit_hash_key')->save();
+    $this->config('audit_chain.settings')->clear('hash_key')->save();
 
     $message = mcp_sentinel_update_10004();
     $this->assertIsString($message);
-    $this->assertStringContainsString('audit_hash_key', $message);
+    $this->assertStringContainsString('audit_chain.settings', $message);
 
     $this->assertSame(
       '',
-      $this->config('mcp_sentinel.settings')->get('audit_hash_key'),
-      'update_10004 must set audit_hash_key to empty string by default.'
+      $this->config('audit_chain.settings')->get('hash_key'),
+      'update_10004 must seed audit_chain.settings:hash_key to empty string by default.',
     );
   }
 
   /**
-   * Update_10004 is idempotent (key already set).
+   * Update_10004 is idempotent (key already set on audit_chain).
    */
   public function testUpdate10004IsIdempotent(): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_hash_key', 'existing_key')
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'existing_key')
       ->save();
 
     mcp_sentinel_update_10004();
 
     $this->assertSame(
       'existing_key',
-      $this->config('mcp_sentinel.settings')->get('audit_hash_key'),
-      'update_10004 must not overwrite an existing audit_hash_key.'
+      $this->config('audit_chain.settings')->get('hash_key'),
+      'update_10004 must not overwrite an existing audit_chain hash_key.',
     );
   }
 
@@ -479,7 +483,6 @@ final class McpUpdateHookChainTest extends KernelTestBase {
       ->set('webhook_secret_key', '')
       ->set('webhook_url', '')
       ->set('webhook_endpoints', [])
-      ->clear('audit_hash_key')
       ->clear('dlp_enabled')
       ->clear('dlp_mask_mode')
       ->clear('dlp_patterns')

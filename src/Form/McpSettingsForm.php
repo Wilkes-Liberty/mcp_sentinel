@@ -223,9 +223,9 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
     // The three fields below are presented on this form for the operator, but
-    // they are pure write-throughs to audit_chain.settings. They must never
-    // become stored copies in mcp_sentinel.settings again — that is how
-    // update 10016 left silent no-ops behind (fixed by 10018).
+    // each is written only to audit_chain.settings. They must never become
+    // stored copies in mcp_sentinel.settings again — that is how update 10016
+    // left silent no-ops behind (fixed by 10018).
     $form['audit']['audit_hash_key'] = [
       '#type'          => 'key_select',
       '#title'         => $this->t('Audit hash signing key (HMAC-SHA256)'),

@@ -396,13 +396,22 @@ function mcp_sentinel_update_10003(): string {
 
 /**
  * Add audit_hash_key setting for HMAC-keyed audit hash chain.
+ *
+ * Historically this wrote mcp_sentinel.settings:audit_hash_key. That key moved
+ * to audit_chain.settings:hash_key in 2.0.0 and was removed from this module's
+ * schema (see update 10018). Sites that already ran the original 10004 keep
+ * whatever they had until 10016/10018 clear it. On a path that still executes
+ * 10004 under current code, seed the living home instead of a removed key.
  */
 function mcp_sentinel_update_10004(): string {
-  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
-  if ($config->get('audit_hash_key') === NULL) {
-    $config->set('audit_hash_key', '')->save();
+  if (\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    $chain = \Drupal::configFactory()->getEditable('audit_chain.settings');
+    if ($chain->get('hash_key') === NULL) {
+      $chain->set('hash_key', '')->save();
+    }
+    return 'audit_hash_key lives in audit_chain.settings:hash_key (moved in 2.0.0); ensured the default is present.';
   }
-  return 'Added audit_hash_key setting (empty = plain SHA-256 fallback; set to a Key entity ID to use HMAC-SHA256).';
+  return 'audit_hash_key no longer lives on mcp_sentinel.settings (moved to audit_chain in 2.0.0).';
 }
 
 /**

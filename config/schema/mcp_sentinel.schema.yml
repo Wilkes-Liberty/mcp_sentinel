@@ -83,8 +83,8 @@ mcp_sentinel.settings:
     # audit_hash_key, siem_enabled and audit_encryption_profile lived here
     # until 2.0.0, then moved to audit_chain.settings. They are intentionally
     # absent from this schema so a leftover copy cannot pass config validation
-    # as if it were still live. The settings form still presents them — as pure
-    # write-throughs to audit_chain.settings.
+    # as if it were still live. The settings form still presents them and
+    # writes them only to audit_chain.settings.
     dlp_enabled:
       type: boolean
       label: 'DLP value-pattern scanning enabled'
