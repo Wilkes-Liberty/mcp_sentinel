@@ -143,6 +143,15 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   /**
    * Constructs a new McpWebhookWorker.
    *
+   * The injected services are protected and NOT readonly, both deliberately.
+   * PluginBase brings in DependencySerializationTrait, whose __wakeup() cannot
+   * restore a private property declared in a child class — and on PHP below
+   * 8.4 cannot reinitialize a readonly one either, because it is out of the
+   * declaring scope. A queue worker is serialized into the queue and woken on
+   * the other side, so either modifier means the database connection and HTTP
+   * client come back unusable at the point of use rather than at the point of
+   * the mistake. menu_autopilot 1.0.1 fixed the same defect on a form.
+   *
    * @param array $configuration
    *   The plugin configuration.
    * @param string $plugin_id
@@ -164,11 +173,11 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     array $configuration,
     $plugin_id,
     $plugin_definition,
-    protected readonly Connection $database,
-    protected readonly ClientInterface $httpClient,
-    protected readonly KeyRepositoryInterface $keyRepository,
-    protected readonly TimeInterface $time,
-    protected readonly LoggerInterface $logger,
+    protected Connection $database,
+    protected ClientInterface $httpClient,
+    protected KeyRepositoryInterface $keyRepository,
+    protected TimeInterface $time,
+    protected LoggerInterface $logger,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }

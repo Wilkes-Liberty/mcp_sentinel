@@ -24,6 +24,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * writes an audit row for the decision.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]

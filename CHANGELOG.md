@@ -14,6 +14,34 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dependency graph.
 
 ### Fixed
+- **`readonly` injected services were a fatal on every supported PHP below 8.4.**
+  `McpWebhookWorker` and `McpApprovalDecisionForm` declared their injected services
+  `readonly`. Both inherit `DependencySerializationTrait` from a parent — `PluginBase` and
+  `FormBase` — and on PHP < 8.4 that trait's `__wakeup()` cannot reinitialize a readonly
+  property declared in a child class, because it is out of the declaring scope. A queue
+  worker is serialized into the queue and woken on the other side; Drupal caches form
+  objects and unserializes them on rebuild. So the database connection, HTTP client and
+  approval executor came back unusable at the point of use rather than at the point of the
+  mistake. `menu_autopilot` 1.0.1 fixed the identical defect on a form.
+
+  This had been latent: the property widening that made these `protected` (fixing the
+  companion "does not support private properties" rule) is what let the readonly rule
+  become visible, and it only reports on PHP below 8.4 — which is the whole supported range
+  below the current ceiling.
+
+- **The `mcp_sentinel_server` unit suite errored on the entire Drupal 10.6 lane.**
+  `ToolScopeResolverTest` carried `#[DataProvider]` and `#[Group]` attributes with no
+  matching annotations. Drupal 10.6 pins PHPUnit to `^9.6`, which predates PHP 8 attributes
+  and ignores them rather than erroring — so it collected the test with no data sets and
+  called a three-argument method with none:
+  `ArgumentCountError: Too few arguments ... 0 passed and exactly 3 expected`. Four kernel
+  tests in the submodules were likewise missing `@runTestsInSeparateProcesses` next to the
+  attribute. All six now carry both spellings.
+
+  `^10.6` is a declared support claim, and this suite has never passed there. Nothing could
+  see it: GitHub did not run the submodule suites at all, and the drupalcode previous-major
+  lane has never built.
+
 - **Expired break-glass grants were never revoked on SQLite sites, and nothing said so.**
   `McpBreakGlassManager::reapExpired()` selected the grants to revoke with
   `->condition('revoked', FALSE)`. An entity query passes its condition value to the
