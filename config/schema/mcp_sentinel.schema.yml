@@ -80,15 +80,11 @@ mcp_sentinel.settings:
     governed_role_fallback:
       type: boolean
       label: 'Treat governed roles as governed even without an OAuth agent token (local dev)'
-    audit_hash_key:
-      type: string
-      label: 'Audit hash signing key — Key entity ID (HMAC-SHA256)'
-    siem_enabled:
-      type: boolean
-      label: 'SIEM streaming enabled'
-    audit_encryption_profile:
-      type: string
-      label: 'Audit encryption profile — Encryption Profile entity ID'
+    # audit_hash_key, siem_enabled and audit_encryption_profile lived here
+    # until 2.0.0, then moved to audit_chain.settings. They are intentionally
+    # absent from this schema so a leftover copy cannot pass config validation
+    # as if it were still live. The settings form still presents them and
+    # writes them only to audit_chain.settings.
     dlp_enabled:
       type: boolean
       label: 'DLP value-pattern scanning enabled'
@@ -276,10 +272,10 @@ mcp_sentinel.mcp_policy_profile.*:
         label: 'Permission machine name'
     acknowledged_role_permissions:
       type: sequence
-      label: 'Acknowledged deliberate grants (role_id:permission)'
+      label: 'Acknowledged deliberate grants (role_id:permission or role_id:permission@environment)'
       sequence:
         type: string
-        label: 'role_id:permission'
+        label: 'role_id:permission or role_id:permission@environment'
     allow_raw_sql:
       type: boolean
       label: 'Allow raw SQL through the governed Drush command (off by default)'

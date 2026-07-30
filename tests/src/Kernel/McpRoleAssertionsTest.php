@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
@@ -236,6 +237,113 @@ final class McpRoleAssertionsTest extends KernelTestBase {
     $role->grantPermission('administer users')->save();
 
     $this->assertCount(1, $this->assertions->violations());
+  }
+
+  /**
+   * A scoped acknowledgement applies only when the environment matches.
+   *
+   * The environment is read from settings.php, never from config, so a grant
+   * allowed on one environment cannot travel with a config export to another.
+   */
+  public function testEnvironmentScopedAcknowledgementAppliesOnlyOnMatch(): void {
+    $this->defaultProfile([
+      'acknowledged_role_permissions' => [
+        'mcp_agent:administer site configuration@dev',
+      ],
+    ]);
+    $role = $this->governedRole();
+    $role->grantPermission('administer site configuration')->save();
+
+    // No environment declared → fail closed: scoped entry does not apply.
+    $this->setEnvironment(NULL);
+    $this->assertCount(
+      1,
+      $this->assertions->violations(),
+      'With no environment declared, a scoped acknowledgement must not suppress the violation.',
+    );
+
+    // Matching environment → suppressed.
+    $this->setEnvironment('dev');
+    $this->assertSame(
+      [],
+      $this->assertions->violations(),
+      'A scoped acknowledgement must suppress the violation on the matching environment.',
+    );
+
+    // Different environment → still a violation.
+    $this->setEnvironment('prod');
+    $this->assertCount(
+      1,
+      $this->assertions->violations(),
+      'A scoped acknowledgement must not apply on a different environment.',
+    );
+  }
+
+  /**
+   * An unscoped acknowledgement still applies on every environment.
+   */
+  public function testUnscopedAcknowledgementAppliesEverywhere(): void {
+    $this->defaultProfile([
+      'acknowledged_role_permissions' => ['mcp_agent:administer users'],
+    ]);
+    $role = $this->governedRole();
+    $role->grantPermission('administer users')->save();
+
+    $this->setEnvironment('prod');
+    $this->assertSame([], $this->assertions->violations());
+
+    $this->setEnvironment(NULL);
+    $this->assertSame([], $this->assertions->violations());
+  }
+
+  /**
+   * An is_admin role cannot be acknowledged into compliance.
+   */
+  public function testIsAdminCannotBeAcknowledged(): void {
+    $this->defaultProfile([
+      // Even an unscoped acknowledgement of the role's implicit '*' does not
+      // apply: VIOLATION_IS_ADMIN returns before the acknowledgement check.
+      'acknowledged_role_permissions' => ['mcp_agent:*', 'mcp_agent:*@dev'],
+    ]);
+    $role = $this->governedRole(['is_admin' => TRUE]);
+    $role->save();
+    $this->setEnvironment('dev');
+
+    $violations = $this->assertions->violations();
+    $this->assertCount(1, $violations);
+    $this->assertSame(McpRoleAssertions::VIOLATION_IS_ADMIN, $violations[0]['type']);
+  }
+
+  /**
+   * Sets or clears $settings['mcp_sentinel.environment'] for the test.
+   *
+   * Rebuilds the role_assertions service so it sees the new Settings object —
+   * Settings is immutable once constructed.
+   *
+   * @param string|null $environment
+   *   The environment name, or NULL to leave it unset.
+   */
+  private function setEnvironment(?string $environment): void {
+    $values = Settings::getAll();
+    if ($environment === NULL) {
+      unset($values['mcp_sentinel.environment']);
+    }
+    else {
+      $values['mcp_sentinel.environment'] = $environment;
+    }
+    // Settings is immutable once constructed, and the container holds a
+    // specific instance. Replace both the static instance and the service.
+    $settings = new Settings($values);
+    $this->container->set('settings', $settings);
+    $this->container->set(
+      'mcp_sentinel.role_assertions',
+      new McpRoleAssertions(
+        $this->container->get('entity_type.manager'),
+        $this->container->get('mcp_sentinel.policy_resolver'),
+        $settings,
+      ),
+    );
+    $this->assertions = $this->container->get('mcp_sentinel.role_assertions');
   }
 
   /**

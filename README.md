@@ -803,7 +803,7 @@ forbidden_role_permissions:
   - 'administer permissions'
   - 'masquerade as any user'
   - 'administer site configuration'
-acknowledged_role_permissions: []   # 'role_id:permission' — deliberate grants
+acknowledged_role_permissions: []   # 'role_id:permission' or 'role_id:permission@environment'
 ```
 
 The list ships populated, so the protection is inherited without authoring it,
@@ -842,6 +842,32 @@ your deploy — by then every role and profile is in its final state.
 the acknowledgement is exported configuration, so the decision is visible in
 review and in the config diff, and every *other* forbidden permission stays
 asserted for that role.
+
+**Environment-scoped exceptions.** Some grants are legitimate on one environment
+and a violation on another — for example a config-editor role that needs
+`administer site configuration` on dev (where config is authored) but must not
+have it on prod. Scope the acknowledgement:
+
+```yaml
+acknowledged_role_permissions:
+  - 'mcp_config_editor:administer site configuration@dev'
+```
+
+The environment name comes from **settings.php**, never from config:
+
+```php
+// settings.php (per environment; not exported)
+$settings['mcp_sentinel.environment'] = 'dev';
+```
+
+Unscoped entries keep working on every environment. With no environment
+declared, a scoped entry does **not** apply — the violation is reported. A site
+that forgets to set it gets the strict answer, never the permissive one. The
+module ships the mechanism; environment *names* belong to the site.
+
+An `is_admin` role cannot be acknowledged into compliance: it holds every
+permission implicitly, so no list can enumerate it.
+
 ## Raw SQL (opt-in, governed, and recorded)
 
 Raw SQL runs underneath the entity API. Nothing that makes `denied_entity_types`

@@ -19,8 +19,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for now.
 - **`/.github` is `export-ignore` in `.gitattributes`**, so Actions workflows no
   longer ship inside the drupal.org release tarball.
+### Added
+- **Environment-scoped role-permission acknowledgements.** A grant that is
+  legitimate on one environment and a violation on another can now be recorded
+  as `role_id:permission@environment` (for example
+  `mcp_config_editor:administer site configuration@dev`). Unscoped
+  `role_id:permission` entries keep working on every environment. The
+  environment name is read from `$settings['mcp_sentinel.environment']` in
+  settings.php — never from config — so a grant allowed on one environment
+  cannot travel with a config export. With no environment declared, a scoped
+  acknowledgement does not apply and the violation is reported (fail closed).
+  `VIOLATION_IS_ADMIN` stays outside this: an is_admin role cannot be
+  acknowledged into compliance.
 
 ### Fixed
+- **Update 10016 no longer leaves the moved audit settings behind as silent
+  no-ops.** It copied `audit_hash_key`, `audit_encryption_profile` and
+  `siem_enabled` into `audit_chain.settings` but left the originals in
+  `mcp_sentinel.settings`. Nothing read them; the settings form already wrote
+  straight to `audit_chain.settings`. Editing the leftovers — or a config
+  export that still contained them — looked like a successful key rotation and
+  was not. 10016 now clears them after the copy; a new update 10018 clears
+  them for sites that already ran 10016; they are gone from the install YAML
+  and the config schema. The form still presents SIEM streaming (and the hash
+  key / encryption profile) under Audit Logging — that is the right place for
+  the operator — and records them only in `audit_chain.settings`.
+  `getEditableConfigNames()` now declares `audit_chain.settings` so the form
+  matches what `submitForm()` actually writes.
 - **The 2.0.0 upgrade no longer takes the site down when `audit_chain` is not already
   enabled.** `mcp_sentinel.audit_logger` held a required reference to
   `audit_chain.logger`, so the natural sequence —

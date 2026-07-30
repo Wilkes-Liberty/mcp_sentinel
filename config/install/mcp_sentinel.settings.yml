@@ -18,9 +18,6 @@ agent_scopes:
   - 'mcp_config'
   - 'mcp_config_read'
 governed_role_fallback: false
-audit_hash_key: ''
-siem_enabled: false
-audit_encryption_profile: ''
 dlp_enabled: false
 dlp_mask_mode: redact
 dlp_patterns:
