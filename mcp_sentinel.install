@@ -135,6 +135,21 @@ function mcp_sentinel_requirements(string $phase): array {
     return $requirements;
   }
 
+  // Checked first, and deliberately before the governance early-return below:
+  // without audit_chain this module cannot record anything at all, which is
+  // true whether or not governance is switched on. McpAuditLogger throws rather
+  // than recording nothing quietly, so in this state governed writes are
+  // refused — the status report has to say why.
+  if (!\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    $requirements['mcp_sentinel_audit_chain_missing'] = [
+      'title' => t('MCP Sentinel: audit_chain is not enabled'),
+      'value' => t('Required module missing'),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('MCP Sentinel records every governed operation through the <code>audit_chain</code> module, which is not enabled. Governed operations are refused rather than performed unaudited. Run <code>drush en audit_chain</code> and then <code>drush updatedb</code>.'),
+    ];
+    return $requirements;
+  }
+
   $config = \Drupal::config('mcp_sentinel.settings');
   if (!$config->get('enabled')) {
     // The operator has explicitly turned governance off; nothing to warn about.
@@ -776,9 +791,21 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
   if (!$database->schema()->tableExists('mcp_sentinel_audit_log')) {
     return 'No legacy audit table to migrate.';
   }
+  // Install audit_chain here rather than leaving it to update 10017.
+  //
+  // Update hooks run in ascending order, so 10017 — which exists precisely to
+  // install this module — runs *after* this one. On the upgrade path that
+  // motivated it (1.13 → 2.0 with audit_chain not yet enabled) this hook is
+  // reached first, and throwing here meant 10017 never ran at all: the
+  // self-healing update healed nothing in the one case it was written for.
+  // A site with no legacy table returned above and never noticed.
+  if (!\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    \Drupal::service('module_installer')->install(['audit_chain']);
+    $database = \Drupal::database();
+  }
   if (!$database->schema()->tableExists('audit_chain_log')) {
     throw new UpdateException(
-      'The audit_chain module must be installed before this update runs: its table holds the migrated entries.'
+      'The audit_chain module must be installed before this update runs: its table holds the migrated entries. Installing it automatically did not produce the audit_chain_log table — enable the module manually (drush en audit_chain) and re-run database updates.'
     );
   }
 
@@ -835,6 +862,40 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
   }
 
   return "Migrated {$sandbox['migrated']} of {$sandbox['total']} legacy audit entries into audit_chain_log.";
+}
+
+/**
+ * Install audit_chain if the 2.0.0 upgrade landed without it.
+ *
+ * 2.0.0 added audit_chain as a hard dependency, and the natural upgrade order
+ * — `composer require drupal/mcp_sentinel:^2.0 && drush updatedb` — put the new
+ * code on the site before anything could install it. The container then could
+ * not compile (mcp_sentinel.audit_logger referenced a service that did not
+ * exist), the front end returned 500, and drush could not be used to recover
+ * because drush needs the same container. Rolling back made it worse: at 1.13
+ * audit_chain is only a transitive requirement, so `composer require ^1.13`
+ * removed it.
+ *
+ * The service reference is optional now, so the container builds and this hook
+ * can run. Enabling the module here rather than only documenting the ordering
+ * is the point: a required-dependency addition that bricks a site on the wrong
+ * order is a landmine, and the error names a service rather than the module to
+ * enable.
+ *
+ * This hook covers the sites 10016 returns early on — the ones with no legacy
+ * `mcp_sentinel_audit_log` table to migrate. Sites that *do* have one reach
+ * 10016 first, and update hooks run in ascending order, so 10016 installs
+ * audit_chain itself rather than throwing past this hook. Both paths end up
+ * with the module enabled; this one is not the only route to it.
+ */
+function mcp_sentinel_update_10017(): string {
+  if (\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    return 'The audit_chain module is already enabled.';
+  }
+
+  \Drupal::service('module_installer')->install(['audit_chain']);
+
+  return 'Installed the audit_chain module, which MCP Sentinel requires to record audit entries.';
 }
 
 /**

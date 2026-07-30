@@ -20,6 +20,47 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`/.github` is `export-ignore` in `.gitattributes`**, so Actions workflows no
   longer ship inside the drupal.org release tarball.
 
+### Fixed
+- **The 2.0.0 upgrade no longer takes the site down when `audit_chain` is not already
+  enabled.** `mcp_sentinel.audit_logger` held a required reference to
+  `audit_chain.logger`, so the natural sequence —
+
+  ```bash
+  composer require drupal/mcp_sentinel:^2.0
+  drush updatedb
+  ```
+
+  — put the new code on the site before anything could install the dependency. The
+  container then could not compile:
+
+  ```
+  The service "mcp_sentinel.audit_logger" has a dependency on
+  a non-existent service "audit_chain.logger".
+  ```
+
+  The front end returned 500 and drush could not be used to recover, because drush needs
+  the same container. Rolling back made it worse: at 1.13 `audit_chain` is only a
+  transitive requirement, so `composer require ^1.13` removed it. Anyone running a
+  routine `composer update` followed by `drush updatedb` in a deploy took production
+  down, with an error naming a service rather than a module to enable.
+
+  Four changes, because documenting the ordering is not a fix:
+
+  - the service reference is optional (`@?audit_chain.logger`), so the container builds;
+  - `McpAuditLogger` fails **closed** — a governed write with no chain throws naming the
+    module, rather than succeeding unaudited. A governance module that quietly stops
+    recording is the failure it exists to prevent;
+  - `hook_requirements()` reports the missing module at ERROR on the status report;
+  - `drush updatedb` self-heals: whichever update hook is reached first installs
+    `audit_chain`. Update 10016 does it before migrating (it runs earlier and used to
+    throw, which would have stopped the self-heal ever reaching the sites that needed
+    it); update 10017 covers sites with no legacy audit table for 10016 to migrate.
+
+  `docs/UPGRADE.md` documents the ordering as well, for anyone landing 2.0.0 or 2.0.1
+  specifically. A new kernel test installs the module without `audit_chain` and asserts
+  the container compiles and every path fails honestly — the state is reproduced rather
+  than described.
+
 ## [2.0.1] - 2026-07-30
 
 ### Changed
