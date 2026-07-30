@@ -4,7 +4,26 @@ All notable changes to MCP Sentinel are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-07-29
+
+**Breaking.** This release takes a new required dependency and moves three
+settings and one table out of this module. Sites upgrade cleanly — update 10016
+migrates the audit entries and copies the settings across — but anything
+automating those config keys, or querying `mcp_sentinel_audit_log` directly,
+has to change.
+
+| Was | Is now |
+|-----|--------|
+| `mcp_sentinel.settings:audit_hash_key` | `audit_chain.settings:hash_key` |
+| `mcp_sentinel.settings:audit_encryption_profile` | `audit_chain.settings:encryption_profile` |
+| `mcp_sentinel.settings:siem_enabled` | `audit_chain.settings:stream_enabled` |
+| `mcp_sentinel_audit_log` table | `audit_chain_log`, channel `mcp_sentinel` |
+| SIEM message `mcp_sentinel_audit_event` | `audit_chain_event` |
+
+Requires [`drupal/audit_chain`](https://www.drupal.org/project/audit_chain)
+`^1.0.1`. `McpAuditLogger`'s public methods are unchanged; its constructor is
+not, so anything instantiating it directly rather than using the service must
+be updated.
 
 ### Added
 - **A policy profile now asserts that its governed roles hold no escape-hatch
