@@ -914,6 +914,9 @@ function mcp_sentinel_update_10018(): string {
   }
   $settings->save();
   return 'Cleared silent no-op keys from mcp_sentinel.settings: ' . implode(', ', $cleared) . '. They live in audit_chain.settings now.';
+}
+
+/**
  * Install audit_chain if the 2.0.0 upgrade landed without it.
  *
  * 2.0.0 added audit_chain as a hard dependency, and the natural upgrade order
