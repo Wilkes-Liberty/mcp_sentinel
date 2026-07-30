@@ -138,6 +138,32 @@ final class McpRawSqlCommandTest extends KernelTestBase {
   }
 
   /**
+   * Explains an unexpected refusal, for use as an assertion message.
+   *
+   * The command refuses for six different reasons and every one of them
+   * returns the same exit code, so a bare "1 is identical to 0" names none of
+   * them. The reason is already on the audit row -- and for a driver error, so
+   * is the message -- so read it back rather than making the next reader guess.
+   *
+   * @return string
+   *   The recorded refusal reason, or a note that none was recorded.
+   */
+  private function refusalDiagnostic(): string {
+    $rows = $this->auditRows();
+    $last = end($rows);
+    if ($last === FALSE || $last['operation'] !== 'raw_sql_denied') {
+      return 'Refused, but no raw_sql_denied audit row was recorded.';
+    }
+    $reasons = implode('; ', $last['metadata']['reasons'] ?? []);
+    $detail = (string) ($last['metadata']['detail'] ?? '');
+    return sprintf(
+      'Refused: %s%s',
+      $reasons !== '' ? $reasons : '(no reason recorded)',
+      $detail !== '' ? ' -- ' . $detail : '',
+    );
+  }
+
+  /**
    * The shipped default refuses raw SQL.
    *
    * This is the #64 regression: with the capability absent or off, no raw
@@ -166,7 +192,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $this->setRawSqlCapability(TRUE);
 
     $result = $this->commands->sqlQuery('SELECT nid, title FROM node_field_data');
-    $this->assertSame(McpSentinelSqlCommands::EXIT_SUCCESS, $result);
+    $this->assertSame(McpSentinelSqlCommands::EXIT_SUCCESS, $result, $this->refusalDiagnostic());
 
     $payload = json_decode(trim($this->output->fetch()), TRUE);
     $this->assertIsArray($payload);
@@ -249,6 +275,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $this->assertSame(
       McpSentinelSqlCommands::EXIT_SUCCESS,
       $this->commands->sqlQuery('SELECT nid FROM node_field_data'),
+      $this->refusalDiagnostic(),
     );
 
     $payload = json_decode(trim($this->output->fetch()), TRUE);

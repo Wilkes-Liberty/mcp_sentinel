@@ -32,7 +32,7 @@ final class McpBreakGlassTest extends KernelTestBase {
     'system', 'user', 'field', 'tool', 'key', 'serialization',
     'file', 'image', 'options',
     'consumers', 'simple_oauth', 'encrypt',
-    'mcp_sentinel', 'mcp_sentinel_approval',
+    'audit_chain', 'mcp_sentinel', 'mcp_sentinel_approval',
   ];
 
   /**
