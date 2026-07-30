@@ -458,13 +458,16 @@ final class McpRawSqlGuard {
     if (!$storage instanceof SqlEntityStorageInterface) {
       return NULL;
     }
+    // The catch is load-bearing and the instanceof that used to follow it was
+    // not: getTableMapping() is declared to return a TableMappingInterface on
+    // both supported core branches, but a storage handler is free to throw
+    // while computing one.
     try {
-      $mapping = $storage->getTableMapping();
+      return $storage->getTableMapping();
     }
     catch (\Throwable) {
       return NULL;
     }
-    return $mapping instanceof TableMappingInterface ? $mapping : NULL;
   }
 
 }

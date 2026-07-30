@@ -66,7 +66,7 @@ final class McpPublishGateJsonApiTest extends BrowserTestBase {
   /**
    * A governed deny-publish agent account.
    *
-   * @var \Drupal\user\Entity\User
+   * @var \Drupal\user\UserInterface
    */
   private $agent;
 

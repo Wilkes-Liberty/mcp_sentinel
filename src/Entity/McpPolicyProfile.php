@@ -257,12 +257,17 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * Per-entity-type destructive overrides.
    *
    * A map of entity_type ID => rule, where a rule is an associative array that
-   * may carry 'allow_delete' and/or 'allow_write' booleans. A present override
-   * supersedes the corresponding global flag for that entity type only; an
-   * absent override (or absent key) falls back to the global flag. Empty means
-   * every type follows the global allow_delete / allow_write flags.
+   * may carry 'allow_delete', 'allow_write' and/or 'allow_publish' booleans. A
+   * present override supersedes the corresponding global flag for that entity
+   * type only; an absent override (or absent key) falls back to the global
+   * flag. Empty means every type follows the global allow_delete / allow_write
+   * / deny_publish flags.
    *
-   * @var array<string, array{allow_delete?: bool, allow_write?: bool}>
+   * Note that 'allow_publish' is stated the positive way round while the global
+   * flag it overrides (deny_publish) is negative, so
+   * deniesPublishForEntityType() inverts it.
+   *
+   * @var array<string, array{allow_delete?: bool, allow_write?: bool, allow_publish?: bool}>
    */
   protected array $entity_rules = [];
 

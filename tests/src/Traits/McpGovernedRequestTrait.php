@@ -7,7 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Traits;
 use Drupal\consumers\Entity\Consumer;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\user\Entity\Role;
-use Drupal\user\Entity\User;
+use Drupal\user\UserInterface;
 use GuzzleHttp\RequestOptions;
 use Psr\Http\Message\ResponseInterface;
 
@@ -63,15 +63,15 @@ trait McpGovernedRequestTrait {
    * @param string[] $permissions
    *   Extra permissions to grant the account.
    *
-   * @return \Drupal\user\Entity\User
+   * @return \Drupal\user\UserInterface
    *   The newly created governed agent account.
    */
-  protected function createGovernedAgentAccount(array $permissions = []): User {
+  protected function createGovernedAgentAccount(array $permissions = []): UserInterface {
     if (!Role::load('mcp_api')) {
       Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
     }
 
-    /** @var \Drupal\user\Entity\User $account */
+    /** @var \Drupal\user\UserInterface $account */
     // @phpstan-ignore-next-line
     $account = $this->drupalCreateUser($permissions);
     $account->addRole('mcp_api');
@@ -180,7 +180,7 @@ trait McpGovernedRequestTrait {
    *   Optional request body (JSON:API document; will be JSON-encoded).
    * @param string|null $token
    *   Bearer token string, or NULL to skip Bearer auth.
-   * @param \Drupal\user\Entity\User|null $account
+   * @param \Drupal\user\UserInterface|null $account
    *   User account to authenticate with via HTTP Basic auth; requires the
    *   basic_auth module to be enabled. Ignored when $token is non-NULL.
    * @param array<string, mixed> $query
@@ -194,7 +194,7 @@ trait McpGovernedRequestTrait {
     string $path,
     array $body = [],
     ?string $token = NULL,
-    ?User $account = NULL,
+    ?UserInterface $account = NULL,
     array $query = [],
   ): ResponseInterface {
     /** @var \GuzzleHttp\ClientInterface $client */

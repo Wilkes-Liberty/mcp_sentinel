@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_approval;
 
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityListBuilder;
@@ -157,8 +158,18 @@ final class McpApprovalRequestListBuilder extends EntityListBuilder {
 
   /**
    * {@inheritdoc}
+   *
+   * The $cacheability parameter arrived in Drupal 11.3, which is this module's
+   * D11 floor, so core passes it on every supported 11.x site and an override
+   * without it silently drops what core handed down. It is optional here so the
+   * signature stays valid on 10.6, where core calls this with one argument.
+   *
+   * These operations vary with nothing but the entity's own pending state, and
+   * the list builder already carries that entity's cache tags — so there is
+   * nothing to add. Accepting the parameter is what matters: it keeps the
+   * override honest about the contract rather than quietly narrowing it.
    */
-  public function getDefaultOperations(EntityInterface $entity): array {
+  public function getDefaultOperations(EntityInterface $entity, ?CacheableMetadata $cacheability = NULL): array {
     /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $entity */
     $operations = [];
     if ($entity->isPending()) {

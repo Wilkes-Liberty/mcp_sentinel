@@ -771,7 +771,7 @@ function mcp_sentinel_update_10015(): string {
  * table is left in place for the operator to inspect and drop; this hook does
  * not delete anything it cannot recreate.
  */
-function mcp_sentinel_update_10016(&$sandbox = NULL): string {
+function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
   $database = \Drupal::database();
   if (!$database->schema()->tableExists('mcp_sentinel_audit_log')) {
     return 'No legacy audit table to migrate.';
@@ -782,7 +782,7 @@ function mcp_sentinel_update_10016(&$sandbox = NULL): string {
     );
   }
 
-  $sandbox = is_array($sandbox) ? $sandbox : [];
+  $sandbox ??= [];
   $sandbox += [
     'initialized' => FALSE,
     'last_legacy_id' => 0,

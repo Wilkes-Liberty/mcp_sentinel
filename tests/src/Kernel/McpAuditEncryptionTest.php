@@ -112,8 +112,11 @@ final class McpAuditEncryptionTest extends KernelTestBase {
   /**
    * When a profile is configured, the DB metadata column is ciphertext.
    *
+   * Covers ::log alone. The encoding moved to audit_chain in 2.0.0, so
+   * McpAuditLogger has no encodeMetadata() left to name — the annotation
+   * claimed coverage of a method that is not there.
+   *
    * @covers ::log
-   * @covers ::encodeMetadata
    */
   public function testMetadataStoredAsCiphertext(): void {
     $profile_id = $this->createTestEncryptionProfile();
@@ -350,10 +353,9 @@ final class McpAuditEncryptionTest extends KernelTestBase {
    *   (c) A warning was emitted to the audit logger channel.
    *
    * @covers ::log
-   * @covers ::encodeMetadata
    */
   public function testEncryptionFailureWritesPlaintextRowAndEmitsWarning(): void {
-    // Create a real profile so encodeMetadata() gets past the profile-load
+    // Create a real profile so audit_chain's encoder gets past the profile-load
     // guard and actually attempts to call encrypt().
     $profile_id = $this->createTestEncryptionProfile();
     $this->config('audit_chain.settings')

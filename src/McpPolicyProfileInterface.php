@@ -176,11 +176,12 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
   /**
    * Per-entity-type destructive overrides.
    *
-   * A map of entity_type ID => rule. Each rule may carry an 'allow_delete'
-   * and/or 'allow_write' boolean that overrides the corresponding global flag
-   * for that entity type only. Empty means every type follows the global flags.
+   * A map of entity_type ID => rule. Each rule may carry an 'allow_delete',
+   * 'allow_write' and/or 'allow_publish' boolean that overrides the
+   * corresponding global flag for that entity type only. Empty means every type
+   * follows the global flags.
    *
-   * @return array<string, array{allow_delete?: bool, allow_write?: bool}>
+   * @return array<string, array{allow_delete?: bool, allow_write?: bool, allow_publish?: bool}>
    *   The per-entity-type rule map.
    */
   public function getEntityRules(): array;
