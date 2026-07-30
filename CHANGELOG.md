@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **The drupalcode pipeline was red on `1.x` and on the released 2.0.0 tag.** Four of the
+  six failing jobs are addressed here. `phpcs` reported one
+  `Squiz.Arrays.ArrayDeclaration.CloseBraceNewLine` in `McpRoleAssertions`. `cspell`
+  reported twenty issues from vocabulary the raw-SQL work introduced; the real terms are
+  now in the project dictionary, and `unre-chained` in the update-hook message — a
+  coinage rather than vocabulary — now reads "not re-chained". `phpstan` reported six
+  `DependencySerializationTrait does not support private properties`: `McpWebhookWorker`
+  and `McpApprovalDecisionForm` inherit the trait and could not have their injected
+  services restored after a serialize round-trip, so they are now `protected readonly`.
+  `phpunit` errored twice because `McpBreakGlassTest` called
+  `installSchema('audit_chain', …)` without listing `audit_chain` in `$modules`;
+  `KernelTestBase` does not resolve `info.yml` dependencies, so the container failed to
+  compile before `setUp()` ran. That was test-only — the module declares the dependency
+  and real installs resolve it.
+
+  The redness was ours, not an upstream CI-template change: the first red pipeline is the
+  commit that edited `.gitlab-ci.yml`, and `phpcs` and `phpunit` were still green in it.
+
 ### Changed
 - **`composer.json` now declares `"php": ">=8.1"`.** It previously specified no PHP
   constraint at all, so the effective floor came only from whatever core happened to
