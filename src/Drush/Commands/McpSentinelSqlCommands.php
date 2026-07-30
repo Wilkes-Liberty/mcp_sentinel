@@ -117,11 +117,25 @@ final class McpSentinelSqlCommands extends DrushCommands {
       return $this->refuse($query, $profile, $errors);
     }
 
+    // Hand the approved statement to Drupal with its entity tables in {table}
+    // form. The guard's allowlist is built from logical, unprefixed table
+    // names, and Drupal applies the site's table prefix to {table} and to
+    // nothing else — so on a prefixed site an unbraced statement passes
+    // governance and then cannot execute, while a hand-prefixed one is refused
+    // as an unknown table. Bracing is what lets the same operator input work on
+    // prefixed and unprefixed installs alike.
+    $executable = $this->rawSqlGuard->braceKnownTables($query);
+    if ($executable === NULL) {
+      return $this->refuse($query, $profile, [
+        'The statement could not be resolved to prefixed table names. Name each table plainly, without backticks or quotes.',
+      ]);
+    }
+
     $cap = $profile->getResultCountCap();
     $limit = ($cap > 0) ? $cap + 1 : 0;
 
     try {
-      $statement = $this->database->query($query);
+      $statement = $this->database->query($executable);
       $rows = [];
       while (($row = $statement->fetchAssoc()) !== FALSE) {
         $rows[] = $row;

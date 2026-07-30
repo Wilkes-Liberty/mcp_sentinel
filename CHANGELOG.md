@@ -14,6 +14,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   dependency graph.
 
 ### Fixed
+- **The governed raw-SQL command could not work on a site with a table prefix.**
+  `McpRawSqlGuard` builds its allowlist from `TableMappingInterface::getTableNames()`, which
+  returns *logical* table names carrying no prefix. `McpSentinelSqlCommands::sqlQuery()` then
+  executed the operator's statement literally, and Drupal applies the site's table prefix to
+  `{table}` syntax and to nothing else.
+
+  So on a prefixed install there was no input that worked: an unprefixed statement passed
+  governance and then failed to execute, and a hand-prefixed one was refused as an unknown
+  table. The command now rewrites the entity tables the guard resolved into `{table}` form
+  before executing, so the same operator input works on prefixed and unprefixed sites and
+  still matches the allowlist. Single-quoted literals are copied through untouched, using
+  the same pattern the guard uses to blank them, so `WHERE title = 'from node_field_data'`
+  is left alone. A table the rewrite cannot brace — identifier quoting, which the guard
+  strips before its own check — is a refusal rather than a passthrough.
+
+  This surfaced as two drupalcode-only test failures. Drupal's kernel tests apply a table
+  prefix on MySQL but isolate SQLite with an attached database, where an unprefixed name
+  still resolves — so the suite passed on every SQLite venue and failed only where the
+  defect was real.
+
 - **`readonly` injected services were a fatal on every supported PHP below 8.4.**
   `McpWebhookWorker` and `McpApprovalDecisionForm` declared their injected services
   `readonly`. Both inherit `DependencySerializationTrait` from a parent — `PluginBase` and

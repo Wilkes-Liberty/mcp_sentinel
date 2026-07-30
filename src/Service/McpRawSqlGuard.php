@@ -250,6 +250,83 @@ final class McpRawSqlGuard {
   }
 
   /**
+   * Rewrites the entity tables a statement names into Drupal's {table} syntax.
+   *
+   * Call this only on a statement check() has already approved; it assumes the
+   * structural refusals have run.
+   *
+   * Drupal applies the site's table prefix to `{table}` and to nothing else, so
+   * a statement naming `node_field_data` literally executes against an
+   * unprefixed name. The guard's allowlist, meanwhile, is built from
+   * TableMappingInterface::getTableNames(), which returns *logical* names —
+   * also unprefixed. On a site with a table prefix configured the two cannot
+   * both be satisfied: an unprefixed statement passes the guard and then fails
+   * to execute, and a prefixed one is refused as an unknown table. Bracing the
+   * names the guard already resolved is what makes the pair agree.
+   *
+   * Single-quoted literals are copied through untouched, using the same
+   * pattern normalise() uses to blank them, so the two agree by construction
+   * about what is a literal — otherwise `WHERE title = 'from node_field_data'`
+   * would have a brace inserted inside a string.
+   *
+   * @param string $sql
+   *   The statement, exactly as the caller supplied it.
+   *
+   * @return string|null
+   *   The rewritten statement, or NULL when some table the guard resolved
+   *   could not be braced. NULL is a refusal, not a reason to run the original:
+   *   the caller cannot know whether the unbraced name would resolve, and
+   *   guessing is how a governed statement ends up reading an ungoverned table.
+   */
+  public function braceKnownTables(string $sql): ?string {
+    $map = $this->tableMap();
+
+    $expected = [];
+    foreach ($this->referencedTables($this->normalise($sql)) as $table) {
+      if (isset($map[$table])) {
+        $expected[$table] = TRUE;
+      }
+    }
+
+    $braced = [];
+    // PREG_SPLIT_DELIM_CAPTURE puts the captured literals at the odd indices,
+    // so the even ones are everything outside a literal.
+    $parts = preg_split("/('(?:[^']|'')*')/", $sql, -1, PREG_SPLIT_DELIM_CAPTURE);
+    if ($parts === FALSE) {
+      return NULL;
+    }
+    foreach ($parts as $index => $part) {
+      if ($index % 2 === 1) {
+        continue;
+      }
+      $parts[$index] = preg_replace_callback(
+        '/\b(from|join)(\s+)([a-z0-9_]+(?:\.[a-z0-9_]+)?)/i',
+        static function (array $matches) use ($map, &$braced): string {
+          $name = strtolower($matches[3]);
+          // A schema-qualified name is never in the map, so it is never
+          // braced — and check() has already refused the statement anyway.
+          if (!isset($map[$name])) {
+            return $matches[0];
+          }
+          $braced[$name] = TRUE;
+          return $matches[1] . $matches[2] . '{' . $matches[3] . '}';
+        },
+        (string) $part,
+      ) ?? $part;
+    }
+
+    // Fail closed on any table the guard resolved that this did not brace —
+    // backtick or double-quote identifier quoting, for instance, which
+    // normalise() strips before the allowlist check but which is still present
+    // here.
+    if (array_diff_key($expected, $braced) !== []) {
+      return NULL;
+    }
+
+    return implode('', $parts);
+  }
+
+  /**
    * Extracts every table named by a FROM or JOIN clause.
    *
    * Scans the whole statement, so tables introduced by a UNION arm or by a
