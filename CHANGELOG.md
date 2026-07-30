@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Rewrote `CONTRIBUTING.md` for a public project.** It previously contained
+  only an internal Jira-key branch/commit policy and a pointer to a private
+  repo. Contributors now get coding standards, tests, changelog, and security-
+  reporting guidance modeled on the other published modules. Internal tracker
+  keys stay out of public history.
+
+### Added
+- **`SECURITY.md`** with a private disclosure route. Notes that Drupal Security
+  Team advisory coverage is not yet in place, so reports go to the maintainers
+  for now.
+- **`/.github` is `export-ignore` in `.gitattributes`**, so Actions workflows no
+  longer ship inside the drupal.org release tarball.
+
 ## [2.0.1] - 2026-07-30
 
 ### Changed
