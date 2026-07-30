@@ -293,10 +293,14 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $this->commands->sqlQuery('SELECT title FROM node_field_data');
 
     $this->assertCount(3, $this->auditRows());
-    $this->assertSame(
-      ['ok' => TRUE, 'broken_at' => NULL],
-      $this->container->get('mcp_sentinel.audit_logger')->verifyChain(),
-    );
+
+    // Asserted field by field rather than against the whole array: audit_chain
+    // owns this shape and has added keys to it (an unsigned-rows verdict), so a
+    // whole-array comparison here would fail on a change that does not affect
+    // what this test is about.
+    $result = $this->container->get('mcp_sentinel.audit_logger')->verifyChain();
+    $this->assertTrue($result['ok']);
+    $this->assertNull($result['broken_at']);
   }
 
 }

@@ -84,9 +84,19 @@ class McpAuditLogger {
    *   The config factory service.
    * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
    *   The request stack, read only for the X-MCP-Client forensic label.
-   * @param \Drupal\audit_chain\AuditChainLoggerInterface $auditChain
+   * @param \Drupal\audit_chain\AuditChainLoggerInterface|null $auditChain
    *   The shared tamper-evident chain. Owns hashing, signing, encryption and
    *   verification; this class owns the MCP policy in front of them.
+   *
+   *   Injected optionally (`@?audit_chain.logger`) so the container can still
+   *   compile when the audit_chain module is not enabled. That is not a
+   *   supported state — audit_chain is a hard dependency in the .info.yml — but
+   *   a *required* service reference made the 2.0.0 upgrade unrecoverable: the
+   *   new code landed before `drush updatedb` could install the dependency, the
+   *   container would not compile, the site returned 500, and drush could not
+   *   run to fix it because drush needs the same container. Optional injection
+   *   keeps the container buildable so the update hook can self-heal; every
+   *   method that needs the chain then fails closed rather than proceeding.
    * @param \Drupal\mcp_sentinel\Service\McpDlp|null $dlp
    *   The DLP service. When provided, non-redacted field values in the change
    *   diff are passed through DLP scanning before storage in the audit log.
@@ -96,7 +106,7 @@ class McpAuditLogger {
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
-    private readonly AuditChainLoggerInterface $auditChain,
+    private readonly ?AuditChainLoggerInterface $auditChain,
     private readonly ?McpDlp $dlp = NULL,
   ) {}
 
@@ -135,7 +145,33 @@ class McpAuditLogger {
       $metadata['mcp_client'] = $mcpClient;
     }
 
-    $this->auditChain->log(self::CHANNEL, $operation, $metadata);
+    $this->requireChain()->log(self::CHANNEL, $operation, $metadata);
+  }
+
+  /**
+   * Returns the audit chain, or refuses to continue without it.
+   *
+   * Deliberately a throw rather than a no-op. Everything this module gates is
+   * supposed to leave a record, so a governed write that succeeds with no audit
+   * entry is worse than a governed write that fails: the first is invisible,
+   * the second is loud and reversible. An audit logger that quietly stops
+   * recording is precisely the failure the module exists to prevent.
+   *
+   * @return \Drupal\audit_chain\AuditChainLoggerInterface
+   *   The chain.
+   *
+   * @throws \RuntimeException
+   *   When the audit_chain module is not enabled.
+   */
+  private function requireChain(): AuditChainLoggerInterface {
+    if ($this->auditChain === NULL) {
+      throw new \RuntimeException(
+        'MCP Sentinel cannot record audit entries because the audit_chain module is not enabled. '
+        . 'Enable it (drush en audit_chain) and re-run database updates. '
+        . 'Governed operations are refused rather than performed unaudited.'
+      );
+    }
+    return $this->auditChain;
   }
 
   /**
@@ -149,6 +185,11 @@ class McpAuditLogger {
    * each row's prev_hash must equal the immediately preceding chained row's
    * row_hash.
    *
+   * The shape is audit_chain's, not this module's, and it grows: newer versions
+   * add a 'reason' distinguishing tampering from rows written without the
+   * signing key, plus counts. Read the keys you need rather than comparing the
+   * whole array, or a purely additive change upstream reads as a failure here.
+   *
    * @return array{ok: bool, broken_at: int|null}
    *   'ok' TRUE if the chain is intact; FALSE if any row fails verification.
    *   'broken_at' is the row id of the first broken link, or NULL if ok.
@@ -157,7 +198,7 @@ class McpAuditLogger {
     // Verification walks the whole chain, not just this channel's rows: the
     // entries are interleaved with every other consumer's, so a per-channel
     // walk could not tell a deletion from a gap. A break anywhere is a break.
-    return $this->auditChain->verify();
+    return $this->requireChain()->verify();
   }
 
   /**
@@ -182,7 +223,9 @@ class McpAuditLogger {
    *   Decoded metadata, or an empty array on failure.
    */
   public function decodeMetadata(string $stored): array {
-    return $this->auditChain->decodeMetadata($stored);
+    // No throw here: this is a display helper with no security meaning, and
+    // with no chain there are no rows whose metadata could need decoding.
+    return $this->auditChain?->decodeMetadata($stored) ?? [];
   }
 
   /**
@@ -430,6 +473,13 @@ class McpAuditLogger {
     // invalidated every historical hash. Without this second call, retention
     // would silently stop applying to every entry written before the upgrade,
     // and a site with a 90-day policy would quietly keep years of them.
+    // Cron path: with no chain there is nothing to prune, and taking the whole
+    // cron run down over it helps nobody. hook_requirements() is what reports
+    // the missing module.
+    if ($this->auditChain === NULL) {
+      return 0;
+    }
+
     return $this->auditChain->prune(self::CHANNEL, $days)
       + $this->auditChain->prune(self::LEGACY_CHANNEL, $days);
   }
