@@ -164,11 +164,11 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     array $configuration,
     $plugin_id,
     $plugin_definition,
-    private readonly Connection $database,
-    private readonly ClientInterface $httpClient,
-    private readonly KeyRepositoryInterface $keyRepository,
-    private readonly TimeInterface $time,
-    private readonly LoggerInterface $logger,
+    protected readonly Connection $database,
+    protected readonly ClientInterface $httpClient,
+    protected readonly KeyRepositoryInterface $keyRepository,
+    protected readonly TimeInterface $time,
+    protected readonly LoggerInterface $logger,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }

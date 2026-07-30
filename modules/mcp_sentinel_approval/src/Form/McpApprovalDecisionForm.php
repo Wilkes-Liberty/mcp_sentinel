@@ -36,7 +36,7 @@ final class McpApprovalDecisionForm extends ConfirmFormBase {
    *   The approval executor service.
    */
   public function __construct(
-    private readonly McpApprovalExecutor $executor,
+    protected readonly McpApprovalExecutor $executor,
   ) {}
 
   /**
