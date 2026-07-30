@@ -214,7 +214,8 @@ final class McpRoleAssertionsTest extends KernelTestBase {
     $role = $this->governedRole();
     $role->grantPermission('administer users')->save();
 
-    $this->assertSame([], $this->assertions->violations());
+    $acknowledgedOnly = $this->assertions->violations();
+    $this->assertSame([], $acknowledgedOnly);
 
     // A different forbidden permission is still reported: the acknowledgement
     // records one decision, it does not switch the assertion off.

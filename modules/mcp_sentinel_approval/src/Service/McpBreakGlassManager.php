@@ -33,6 +33,21 @@ final class McpBreakGlassManager {
   private const DEFAULT_TTL = 3600;
 
   /**
+   * The stored 'revoked' value for a live grant, as an int rather than FALSE.
+   *
+   * An entity query passes its condition value to the database layer unchanged,
+   * and only the pgsql driver casts booleans (Connection::query(), working
+   * around https://bugs.php.net/bug.php?id=48383). SQLite does not: a PHP FALSE
+   * binds as PARAM_STR, becomes '', and `revoked = ''` matches no row whose
+   * stored value is 0. MySQL hides it by coercing '' to 0.
+   *
+   * So `->condition('revoked', FALSE)` made this reaper a silent no-op on every
+   * SQLite site — expired grants were never revoked and nothing errored, which
+   * is the worst way for a break-glass expiry to fail. Bind the stored integer.
+   */
+  private const NOT_REVOKED = 0;
+
+  /**
    * Constructs an McpBreakGlassManager.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
@@ -116,7 +131,8 @@ final class McpBreakGlassManager {
     $now = $this->time->getRequestTime();
     $ids = $storage->getQuery()
       ->accessCheck(FALSE)
-      ->condition('revoked', FALSE)
+      // 0, not FALSE: see self::NOT_REVOKED.
+      ->condition('revoked', self::NOT_REVOKED)
       ->condition('expires', $now, '<=')
       ->execute();
     if (!$ids) {
@@ -165,7 +181,8 @@ final class McpBreakGlassManager {
     $ids = $storage->getQuery()
       ->accessCheck(FALSE)
       ->condition('uid', $uid)
-      ->condition('revoked', FALSE)
+      // 0, not FALSE: see self::NOT_REVOKED.
+      ->condition('revoked', self::NOT_REVOKED)
       ->condition('expires', $now, '>')
       ->condition('id', $excludeGrantId, '<>')
       ->range(0, 1)

@@ -18,6 +18,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *
  * @coversDefaultClass \Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
@@ -32,7 +34,7 @@ final class McpBreakGlassTest extends KernelTestBase {
     'system', 'user', 'field', 'tool', 'key', 'serialization',
     'file', 'image', 'options',
     'consumers', 'simple_oauth', 'encrypt',
-    'mcp_sentinel', 'mcp_sentinel_approval',
+    'audit_chain', 'mcp_sentinel', 'mcp_sentinel_approval',
   ];
 
   /**
@@ -98,6 +100,49 @@ final class McpBreakGlassTest extends KernelTestBase {
     $this->assertSame(1, $this->manager()->reapExpired());
     $user = User::load($user->id());
     $this->assertFalse($user->hasRole(McpBreakGlassManager::ROLE_ID), 'Role revoked after expiry.');
+  }
+
+  /**
+   * An overlapping grant keeps the role when the earlier one expires.
+   *
+   * The reaper asks hasOtherActiveGrant() before removing the role, and that
+   * question is answered by a second entity query with its own 'revoked'
+   * condition. Nothing exercised it, so the same bind defect that made
+   * reapExpired() a silent no-op would have made this one answer "no other
+   * grant" every time -- and the reaper would have pulled the role out from
+   * under a grant that had not expired yet. Renewing a break-glass grant
+   * before the first lapses is the ordinary case, not an exotic one.
+   *
+   * @covers ::reapExpired
+   */
+  public function testStillActiveOverlappingGrantKeepsTheRole(): void {
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 100)->save();
+    $user = User::create(['name' => 'overlap', 'status' => 1]);
+    $user->save();
+    $uid = (int) $user->id();
+
+    // First grant: expires at now + 100.
+    $this->assertTrue($this->manager()->grant($uid)['granted']);
+
+    // Renewed 50s later, so the second grant runs to now + 150.
+    $this->now += 50;
+    $this->assertTrue($this->manager()->grant($uid)['granted']);
+
+    // Past the first expiry but not the second: the lapsed grant is reaped,
+    // and the role stays because the renewal still covers this user.
+    $this->now += 60;
+    $this->assertSame(1, $this->manager()->reapExpired(), 'The lapsed grant is revoked.');
+    $user = User::load($uid);
+    $this->assertTrue(
+      $user->hasRole(McpBreakGlassManager::ROLE_ID),
+      'The role survives while a later grant is still active.',
+    );
+
+    // Past the second expiry: nothing covers the user, so the role goes.
+    $this->now += 100;
+    $this->assertSame(1, $this->manager()->reapExpired(), 'The renewal is revoked in turn.');
+    $user = User::load($uid);
+    $this->assertFalse($user->hasRole(McpBreakGlassManager::ROLE_ID), 'Role revoked once no grant covers the user.');
   }
 
   /**

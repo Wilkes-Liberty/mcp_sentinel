@@ -194,7 +194,12 @@ jobs:
           SYMFONY_DEPRECATIONS_HELPER: weak
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
-          MIN_TESTS: '350'
+          #
+          # 469 collect today: 62 Unit + 368 Kernel in the top-level module,
+          # plus 10 (approval) + 14 (graphql) + 8 + 7 (server) in the
+          # submodules. The floor sits just under that, so losing any one
+          # submodule suite — the smallest is 7 tests — trips it.
+          MIN_TESTS: '460'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
@@ -208,10 +213,35 @@ jobs:
           # before handing it down; 9.6 passes it through, so every child died
           # on `Could not read "web/core/phpunit.xml.dist"`.
           config="${PWD}/web/core/phpunit.xml.dist"
-          for suite in Unit Kernel; do
+          module="${PWD}/web/modules/contrib/mcp_sentinel"
+
+          # The submodules' own tests are collected too. Until this loop existed
+          # the step ran the top-level tests/src only, so mcp_sentinel_approval,
+          # _graphql and _server had NO gate on GitHub at all — and the count
+          # floor could not notice, because it was computed over the same two
+          # directories it was guarding. The drupalcode pipeline runs the whole
+          # tree, which is exactly how "GitHub green, d.o red" kept happening.
+          # A break-glass expiry defect lived in that gap and ran nowhere.
+          #
+          # Discovered rather than listed, so a submodule added later is tested
+          # without anyone remembering to edit this file.
+          suites=()
+          for dir in "${module}"/tests/src/Unit "${module}"/tests/src/Kernel \
+                     "${module}"/modules/*/tests/src/Unit "${module}"/modules/*/tests/src/Kernel; do
+            [ -d "${dir}" ] && suites+=("${dir}")
+          done
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "::error::No test directories found under ${module}. The path is wrong, or the checkout is not what it should be."
+            exit 1
+          fi
+
+          i=0
+          for dir in "${suites[@]}"; do
+            i=$((i + 1))
+            echo "--- ${dir#"${module}/"}"
             vendor/bin/phpunit -c "${config}" \
-              --log-junit "${PWD}/junit-${suite}.xml" \
-              "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/${suite}"
+              --log-junit "${PWD}/junit-${i}.xml" \
+              "${dir}"
           done
 
           # Assert the *count*, not the exit status. Both failures this workflow
@@ -220,8 +250,8 @@ jobs:
           # code only says the tests that ran passed; it cannot say which ran.
           # JUnit XML is used because its shape is stable across 9.6 and 11,
           # unlike the human-readable summary line.
-          total="$(grep -ho '<testcase ' junit-Unit.xml junit-Kernel.xml | wc -l | tr -d ' ')"
-          echo "Collected ${total} tests (floor ${MIN_TESTS})."
+          total="$(cat junit-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          echo "Collected ${total} tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
             exit 1
@@ -371,4 +401,144 @@ jobs:
         run: |
           ~/.composer/vendor/bin/phpcs --standard=Drupal,DrupalPractice \
             --extensions=php,module,inc,install,test,profile,theme,yml \
+            .
+
+  # phpstan and cspell exist on the drupalcode pipeline and, until now, only
+  # there. Two of the three linters that went red on d.o had no GitHub gate at
+  # all, which is the concrete mechanism behind a branch reading green on
+  # GitHub and red on drupal.org — a PR could not see the failure it was
+  # causing. Both jobs run the project's own config files, so the two venues
+  # check the same thing rather than two similar things.
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      # phpstan-drupal needs a real Drupal tree to resolve core classes, so
+      # this scaffolds the same way the PHPUnit job does. Analysing the module
+      # on its own reports hundreds of "class not found" errors and tells you
+      # nothing about the module.
+      - name: Scaffold a Drupal site
+        run: |
+          composer create-project "drupal/recommended-project:^11" drupal \
+            --no-interaction --no-install --no-progress
+          cd drupal
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.phpstan/extension-installer true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer config repositories.mcp_sentinel path ../module
+
+      - name: Install dependencies
+        working-directory: drupal
+        run: |
+          composer require -W --no-interaction --no-progress \
+            "drupal/mcp_sentinel:*@dev"
+          # The same contrib set the tests enable: phpstan resolves types
+          # against these, and a missing one turns a real error into a
+          # "class not found" that hides it.
+          composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:^11" \
+            "phpstan/phpstan:^2" \
+            "phpstan/extension-installer:^1.4" \
+            "mglaman/phpstan-drupal:^2" \
+            "phpstan/phpstan-deprecation-rules:^2" \
+            "drush/drush:^13" \
+            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
+            "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11"
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          test -L web/modules/contrib/mcp_sentinel \
+            || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/mcp_sentinel
+
+      - name: phpstan
+        working-directory: drupal
+        run: |
+          set -euo pipefail
+          # The module's own phpstan.neon.dist, so this and the drupalcode
+          # phpstan job answer the same question.
+          vendor/bin/phpstan analyze web/modules/contrib/mcp_sentinel \
+            -c web/modules/contrib/mcp_sentinel/phpstan.neon.dist \
+            --autoload-file=vendor/autoload.php \
+            --no-progress \
+            --memory-limit=2G
+
+  cspell:
+    name: cspell
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # .cspell.json alone is NOT what drupalcode runs. Its cspell job first
+      # rewrites the config via gitlab_templates' scripts/prepare-cspell.php,
+      # which layers in Drupal core's two dictionaries plus a fixed list of
+      # cspell's built-in ones. Without them, `isset`, `endfor`, `phar` and
+      # `fputcsv` all read as misspellings: running the bare project config
+      # here reported 21 issues that d.o does not have.
+      #
+      # A gate that cries wolf is worse than no gate, so this mirrors that
+      # preparation instead of approximating it. It is a reimplementation of
+      # someone else's script and can drift — if this job and the d.o cspell
+      # job ever disagree, the d.o job is right and this one needs re-syncing
+      # against prepare-cspell.php.
+      - name: Assemble the dictionary set drupalcode uses
+        env:
+          CORE_BRANCH: '11.x'
+        run: |
+          set -euo pipefail
+          mkdir -p .cspell-ci
+          for d in drupal-dictionary dictionary; do
+            curl -sfL --retry 3 \
+              "https://git.drupalcode.org/project/drupal/-/raw/${CORE_BRANCH}/core/misc/cspell/${d}.txt" \
+              -o ".cspell-ci/${d}.txt"
+          done
+          wc -l .cspell-ci/*.txt
+
+          python3 - <<'PY'
+          import json, os
+          cfg = json.load(open('.cspell.json'))
+          # The list in gitlab_templates/scripts/prepare-cspell.php.
+          builtin = ['companies', 'fonts', 'html', 'php', 'softwareTerms', 'misc',
+                     'typescript', 'node', 'css', 'bash', 'filetypes', 'npm',
+                     'lorem-ipsum', 'sql', 'fullstack']
+          core = ['drupal-dictionary', 'dictionary']
+          cfg['dictionaries'] = list(dict.fromkeys(
+              cfg.get('dictionaries', []) + builtin + core))
+          cfg['dictionaryDefinitions'] = [
+              {'name': n, 'path': os.path.abspath(f'.cspell-ci/{n}.txt')} for n in core
+          ] + cfg.get('dictionaryDefinitions', [])
+          # Keep the project dictionary's relative path resolvable: the merged
+          # config is written to the repo root, same as .cspell.json.
+          json.dump(cfg, open('.cspell-ci.json', 'w'), indent=2)
+          print('dictionaries:', ', '.join(cfg['dictionaries']))
+          PY
+
+      - name: cspell
+        run: |
+          set -euo pipefail
+          npx --yes cspell@8 lint -c .cspell-ci.json \
+            --no-progress --show-suggestions --show-context \
+            --exclude '.cspell-ci/**' --exclude '.cspell-ci.json' \
             .

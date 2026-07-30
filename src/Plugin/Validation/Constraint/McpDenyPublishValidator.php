@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Plugin\Validation\Constraint;
 
-use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
@@ -181,10 +180,12 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $entity
    *   The entity being validated.
-   * @param \Symfony\Component\Validator\Constraint $constraint
-   *   The McpDenyPublish constraint carrying the message.
+   * @param \Drupal\mcp_sentinel\Plugin\Validation\Constraint\McpDenyPublish $constraint
+   *   The McpDenyPublish constraint carrying the message. Typed concretely
+   *   rather than as the base Constraint: validate() has already narrowed it,
+   *   and only McpDenyPublish declares the $message property read below.
    */
-  private function validateUnmoderated(ContentEntityInterface $entity, Constraint $constraint): void {
+  private function validateUnmoderated(ContentEntityInterface $entity, McpDenyPublish $constraint): void {
     if (!$entity instanceof EntityPublishedInterface || !$entity->isPublished()) {
       return;
     }
@@ -242,8 +243,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     if ($this->moderationInformation === NULL) {
       return FALSE;
     }
-    $original = $this->moderationInformation->getOriginalState($entity);
-    return $original instanceof ContentModerationState && $original->isPublishedState();
+    return $this->moderationInformation->getOriginalState($entity)->isPublishedState();
   }
 
 }

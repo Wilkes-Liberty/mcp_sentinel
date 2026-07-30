@@ -7,13 +7,99 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
-- **`composer.json` now declares `"php": ">=8.1"`.** It previously specified no PHP
+- **`composer.json` now declares `"php": ">=8.3"`.** It previously specified no PHP
   constraint at all, so the effective floor came only from whatever core happened to
   require, leaving the supported surface implied rather than stated. Composer will now
-  refuse an install below 8.1 with a clear message instead of failing further down the
+  refuse an install below 8.3 with a clear message instead of failing further down the
   dependency graph.
 
 ### Fixed
+- **The governed raw-SQL command could not work on a site with a table prefix.**
+  `McpRawSqlGuard` builds its allowlist from `TableMappingInterface::getTableNames()`, which
+  returns *logical* table names carrying no prefix. `McpSentinelSqlCommands::sqlQuery()` then
+  executed the operator's statement literally, and Drupal applies the site's table prefix to
+  `{table}` syntax and to nothing else.
+
+  So on a prefixed install there was no input that worked: an unprefixed statement passed
+  governance and then failed to execute, and a hand-prefixed one was refused as an unknown
+  table. The command now rewrites the entity tables the guard resolved into `{table}` form
+  before executing, so the same operator input works on prefixed and unprefixed sites and
+  still matches the allowlist. Single-quoted literals are copied through untouched, using
+  the same pattern the guard uses to blank them, so `WHERE title = 'from node_field_data'`
+  is left alone. A table the rewrite cannot brace — identifier quoting, which the guard
+  strips before its own check — is a refusal rather than a passthrough.
+
+  This surfaced as two drupalcode-only test failures. Drupal's kernel tests apply a table
+  prefix on MySQL but isolate SQLite with an attached database, where an unprefixed name
+  still resolves — so the suite passed on every SQLite venue and failed only where the
+  defect was real.
+
+- **`readonly` injected services were a fatal on every supported PHP below 8.4.**
+  `McpWebhookWorker` and `McpApprovalDecisionForm` declared their injected services
+  `readonly`. Both inherit `DependencySerializationTrait` from a parent — `PluginBase` and
+  `FormBase` — and on PHP < 8.4 that trait's `__wakeup()` cannot reinitialize a readonly
+  property declared in a child class, because it is out of the declaring scope. A queue
+  worker is serialized into the queue and woken on the other side; Drupal caches form
+  objects and unserializes them on rebuild. So the database connection, HTTP client and
+  approval executor came back unusable at the point of use rather than at the point of the
+  mistake. `menu_autopilot` 1.0.1 fixed the identical defect on a form.
+
+  This had been latent: the property widening that made these `protected` (fixing the
+  companion "does not support private properties" rule) is what let the readonly rule
+  become visible, and it only reports on PHP below 8.4 — which is the whole supported range
+  below the current ceiling.
+
+- **The `mcp_sentinel_server` unit suite errored on the entire Drupal 10.6 lane.**
+  `ToolScopeResolverTest` carried `#[DataProvider]` and `#[Group]` attributes with no
+  matching annotations. Drupal 10.6 pins PHPUnit to `^9.6`, which predates PHP 8 attributes
+  and ignores them rather than erroring — so it collected the test with no data sets and
+  called a three-argument method with none:
+  `ArgumentCountError: Too few arguments ... 0 passed and exactly 3 expected`. Four kernel
+  tests in the submodules were likewise missing `@runTestsInSeparateProcesses` next to the
+  attribute. All six now carry both spellings.
+
+  `^10.6` is a declared support claim, and this suite has never passed there. Nothing could
+  see it: GitHub did not run the submodule suites at all, and the drupalcode previous-major
+  lane has never built.
+
+- **Expired break-glass grants were never revoked on SQLite sites, and nothing said so.**
+  `McpBreakGlassManager::reapExpired()` selected the grants to revoke with
+  `->condition('revoked', FALSE)`. An entity query passes its condition value to the
+  database layer unchanged, and only the pgsql driver casts booleans there (working
+  around [PHP #48383](https://bugs.php.net/bug.php?id=48383)). SQLite does not: a PHP
+  `FALSE` binds as a string, becomes `''`, and `revoked = ''` matches no row whose stored
+  value is `0`. MySQL hid the same defect by coercing `''` to `0`.
+
+  So on SQLite the cron reaper found nothing, revoked nothing, raised no error, and the
+  time-boxed `mcp_admin` role stayed granted indefinitely — an expiry mechanism reporting
+  success while doing nothing. The second occurrence failed the other way:
+  `hasOtherActiveGrant()` used the same condition, so it answered "no other grant" every
+  time, and a user who renewed a grant before the first lapsed had the role pulled out
+  from under the renewal. Both now bind the stored integer.
+
+  Neither had ever run anywhere. `McpBreakGlassTest` errored on a container problem
+  before reaching its assertions, and the GitHub test lane does not run the submodule
+  suites at all — so the one venue that could have caught this was reporting a different
+  failure instead. The overlapping-grant case had no test; it has one now.
+
+- **The drupalcode pipeline was red on `1.x` and on the released 2.0.0 tag.** Four of the
+  six failing jobs are addressed here. `phpcs` reported one
+  `Squiz.Arrays.ArrayDeclaration.CloseBraceNewLine` in `McpRoleAssertions`. `cspell`
+  reported twenty issues from vocabulary the raw-SQL work introduced; the real terms are
+  now in the project dictionary, and one coinage in the update-hook message — a made-up
+  word rather than vocabulary — now reads "not re-chained". `phpstan` reported six
+  `DependencySerializationTrait does not support private properties`: `McpWebhookWorker`
+  and `McpApprovalDecisionForm` inherit the trait and could not have their injected
+  services restored after a serialize round-trip, so they are now `protected readonly`.
+  `phpunit` errored twice because `McpBreakGlassTest` called
+  `installSchema('audit_chain', …)` without listing `audit_chain` in `$modules`;
+  `KernelTestBase` does not resolve `info.yml` dependencies, so the container failed to
+  compile before `setUp()` ran. That was test-only — the module declares the dependency
+  and real installs resolve it.
+
+  The redness was ours, not an upstream CI-template change: the first red pipeline is the
+  commit that edited `.gitlab-ci.yml`, and `phpcs` and `phpunit` were still green in it.
+
 - **The Drupal 10.6 test lane could not build, so `^10.6` was advertised and never
   exercised** (d.o [#3613940](https://www.drupal.org/project/mcp_sentinel/issues/3613940)).
   CI ran against current core only; opting the previous-major and previous-minor jobs in

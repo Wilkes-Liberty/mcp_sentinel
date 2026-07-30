@@ -6,7 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
-use Drupal\node\Entity\Node;
+use Drupal\node\NodeInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
 use Drupal\Tests\BrowserTestBase;
@@ -69,7 +69,7 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
   /**
    * A governed deny-publish agent account.
    *
-   * @var \Drupal\user\Entity\User
+   * @var \Drupal\user\UserInterface
    */
   private $agent;
 
@@ -150,7 +150,7 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
    * @param string $moderationState
    *   The node's moderation state ('published' by default).
    *
-   * @return array{node: \Drupal\node\Entity\Node, paragraph: \Drupal\paragraphs\Entity\Paragraph}
+   * @return array{node: \Drupal\node\NodeInterface, paragraph: \Drupal\paragraphs\Entity\Paragraph}
    *   The saved node and paragraph.
    */
   private function createPageWithParagraph(string $text, string $moderationState = 'published'): array {
@@ -176,25 +176,40 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
   }
 
   /**
-   * Reloads the default revision of an entity fresh from storage.
+   * Reloads a node's default revision fresh from storage.
+   *
+   * Node-typed rather than generic: every caller here immediately asks a
+   * node-specific question (getRevisionId(), isPublished(), getTitle()), and a
+   * helper returning the bare EntityInterface just pushes a cast onto each of
+   * them.
+   *
+   * @param int $id
+   *   The node ID.
+   *
+   * @return \Drupal\node\NodeInterface
+   *   The reloaded node.
    */
-  private function reload(string $entityType, int $id) {
-    $storage = \Drupal::entityTypeManager()->getStorage($entityType);
+  private function reloadNode(int $id): NodeInterface {
+    $storage = \Drupal::entityTypeManager()->getStorage('node');
     $storage->resetCache([$id]);
-    return $storage->load($id);
+    /** @var \Drupal\node\NodeInterface $node */
+    $node = $storage->load($id);
+    return $node;
   }
 
   /**
    * The text rendered by a node's default (published) revision.
    */
-  private function pinnedText(Node $node): string {
+  private function pinnedText(NodeInterface $node): string {
     $storage = \Drupal::entityTypeManager()->getStorage('node');
-    /** @var \Drupal\node\Entity\Node $default */
+    /** @var \Drupal\node\NodeInterface $default */
     $default = $storage->loadUnchanged($node->id());
+    /** @var \Drupal\entity_reference_revisions\Plugin\Field\FieldType\EntityReferenceRevisionsItem $item */
     $item = $default->get(self::HOST_FIELD)->get(0);
+    /** @var \Drupal\Core\Entity\RevisionableStorageInterface $paraStorage */
     $paraStorage = \Drupal::entityTypeManager()->getStorage('paragraph');
     /** @var \Drupal\paragraphs\Entity\Paragraph $pinned */
-    $pinned = $paraStorage->loadRevision($item->target_revision_id);
+    $pinned = $paraStorage->loadRevision((int) $item->get('target_revision_id')->getValue());
     return (string) $pinned->get(self::PARA_FIELD)->value;
   }
 
@@ -205,7 +220,7 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
    */
   public function testDirectParagraphPatchRedirectsToDraft(): void {
     ['node' => $node, 'paragraph' => $paragraph] = $this->createPageWithParagraph('original');
-    $defaultRevisionId = $this->reload('node', (int) $node->id())->getRevisionId();
+    $defaultRevisionId = $this->reloadNode((int) $node->id())->getRevisionId();
     $this->assertSame('original', $this->pinnedText($node), 'Sanity: the live page renders the original text.');
 
     $response = $this->governedJsonApiRequest(
@@ -234,13 +249,16 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
     $latestRevisionId = $storage->getLatestRevisionId($node->id());
     $this->assertNotEquals($defaultRevisionId, $latestRevisionId,
       'A host draft forward revision must have been created.');
-    /** @var \Drupal\node\Entity\Node $latest */
+    /** @var \Drupal\node\NodeInterface $latest */
     $latest = $storage->loadRevision($latestRevisionId);
     $this->assertSame('draft', $latest->get('moderation_state')->value,
       'The forward revision must be a draft.');
+    /** @var \Drupal\Core\Entity\RevisionableStorageInterface $paraStorage */
     $paraStorage = \Drupal::entityTypeManager()->getStorage('paragraph');
+    /** @var \Drupal\entity_reference_revisions\Plugin\Field\FieldType\EntityReferenceRevisionsItem $draftItem */
+    $draftItem = $latest->get(self::HOST_FIELD)->get(0);
     /** @var \Drupal\paragraphs\Entity\Paragraph $draftPara */
-    $draftPara = $paraStorage->loadRevision($latest->get(self::HOST_FIELD)->get(0)->target_revision_id);
+    $draftPara = $paraStorage->loadRevision((int) $draftItem->get('target_revision_id')->getValue());
     $this->assertSame('edited', $draftPara->get(self::PARA_FIELD)->value,
       'The draft revision must carry the edited paragraph text.');
   }
@@ -299,7 +317,9 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
     // The paragraph must be unchanged in place.
     $paraStorage = \Drupal::entityTypeManager()->getStorage('paragraph');
     $paraStorage->resetCache([$paragraph->id()]);
-    $this->assertSame('original', $paraStorage->loadUnchanged($paragraph->id())->get(self::PARA_FIELD)->value,
+    /** @var \Drupal\paragraphs\Entity\Paragraph $reloadedPara */
+    $reloadedPara = $paraStorage->loadUnchanged($paragraph->id());
+    $this->assertSame('original', $reloadedPara->get(self::PARA_FIELD)->value,
       'The pinned paragraph must not have been mutated.');
     $this->assertSame('original', $this->pinnedText($node),
       'The live render must be unchanged.');
@@ -373,7 +393,7 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
     $this->assertStringNotContainsString('pinned by published content', $body,
       'The composite-redirect denial must not fire for a direct host edit.');
 
-    $default = $this->reload('node', (int) $node->id());
+    $default = $this->reloadNode((int) $node->id());
     $this->assertTrue($default->isPublished(), 'The host must stay published.');
     $this->assertSame('Host page', $default->getTitle(),
       'The live revision must be untouched.');

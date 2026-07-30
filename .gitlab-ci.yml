@@ -21,36 +21,54 @@ variables:
   # green badge did not mean what it appeared to. OPT_IN_* surfaces the job;
   # _AUTORUN_* ('all') makes it run instead of waiting for someone to press it.
   #
-  # PREVIOUS_MAJOR = newest 10.x satisfying the constraint (10.6, the D10 floor).
   # PREVIOUS_MINOR = prior minor of the current major (11.3, the D11 floor).
-  OPT_IN_TEST_PREVIOUS_MAJOR: '1'
   OPT_IN_TEST_PREVIOUS_MINOR: '1'
-  _AUTORUN_PREVIOUS_MAJOR: 'all'
   _AUTORUN_PREVIOUS_MINOR: 'all'
   # Forward-compat signal on the upcoming minor, available on demand.
   OPT_IN_TEST_NEXT_MINOR: '1'
+  #
+  # PREVIOUS_MAJOR (Drupal 10.6, the D10 floor) is deliberately OFF here, and
+  # the Drupal 10.6 support claim is unchanged — read on before switching it
+  # back on.
+  #
+  # The lane cannot build in this image, for a reason no CI setting reaches.
+  # drupal/simple_oauth ^6.1 pulls league/oauth2-server ^9.0, which pulls
+  # lcobucci/jwt ^5.0; every jwt line in that range either requires ext-sodium
+  # or caps at PHP 8.2:
+  #
+  #   lcobucci/jwt[4.1.0..4.4.x, 5.1.0..5.6.x] require ext-sodium -> missing
+  #   lcobucci/jwt[5.0.0..5.0.x]  require php ~8.1.0 || ~8.2.0 -> php 8.3.32
+  #
+  # The drupalci image ships no ext-sodium, so there is no resolvable point in
+  # the lane at all. The one setting that would make it "pass" is
+  # --ignore-platform-req=ext-sodium, which builds an environment whose crypto
+  # stack matches no real site — green for the wrong reason, which is the
+  # failure mode this pipeline exists to prevent.
+  #
+  # ^10.6 stays verified, on GitHub Actions: .github/workflows/tests.yml runs a
+  # `drupal: '10.6'` leg (pinned ~10.6.0, PHP 8.3, PHPUnit ^9.6) that passes.
+  # This moves WHERE the claim is checked; it does not narrow the claim. Per the
+  # support policy a claim CI does not exercise is not a claim, and that
+  # obligation is still met.
+  #
+  # Missing ext-sodium is filed upstream against project/gitlab_templates. Turn
+  # this lane back on once the image carries it.
+  # OPT_IN_TEST_PREVIOUS_MAJOR: '1'
+  # _AUTORUN_PREVIOUS_MAJOR: 'all'
 
 ################
 # Project overrides
 ################
 
-# The previous-major lane is pinned by the shared templates to Drupal 10's
-# MINIMUM PHP (PHP_VERSION: $CORE_PREVIOUS_PHP_MIN, currently 8.1). On 8.1 the
-# build cannot resolve at all: drupal/mcp_server sits in require-dev and needs
-# PHP ^8.3, so composer exits 2 before a single test runs, and phpunit
-# (previous major) never even starts. See #3613940.
+# Nothing overridden. The `composer (previous major)` PHP_VERSION: '8.3' pin
+# that used to live here worked -- it did get the lane onto PHP 8.3 instead of
+# Drupal 10's minimum 8.1 (#3613940) -- and then the lane failed one layer
+# down, on the missing extension described above. With the lane off, the pin
+# has nothing to pin.
 #
-# Drupal 10.6 supports PHP 8.1 through 8.4, so 10.6-on-8.3 is a legitimate and
-# representative configuration — and the only one where this suite can build.
-# The module's RUNTIME requirements carry no 8.3 constraint; this is a limitation
-# of the test build, not of the module.
-#
-# Two things this deliberately does NOT do, both recorded rather than hidden:
-#  - It does not test Drupal 10.6 on PHP 8.1. That combination stays unverified.
-#    mcp_server cannot install there at any 2.x version, so the
-#    mcp_sentinel_server tests are unrunnable on 8.1 regardless of CI config.
-#  - It does not settle whether the supported PHP floor should simply be 8.3.
-#    That narrows the support surface and is a maintainer decision, not a CI fix.
-composer (previous major):
-  variables:
-    PHP_VERSION: '8.3'
+# Two limits stay recorded rather than hidden:
+#  - Drupal 10.6 on PHP 8.1 is unverified anywhere. drupal/mcp_server sits in
+#    require-dev and needs PHP ^8.3, so the mcp_sentinel_server tests cannot
+#    run on 8.1 at any mcp_server 2.x version, on any CI venue.
+#  - Whether the supported PHP floor should simply be 8.3 is unsettled. That
+#    narrows the support surface and is a maintainer decision, not a CI fix.

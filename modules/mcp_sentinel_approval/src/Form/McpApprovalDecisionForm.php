@@ -32,11 +32,19 @@ final class McpApprovalDecisionForm extends ConfirmFormBase {
   /**
    * Constructs the form.
    *
+   * Protected and NOT readonly, both deliberately. FormBase brings in
+   * DependencySerializationTrait, whose __wakeup() cannot restore a private
+   * property from a child class — and on PHP below 8.4 cannot reinitialize a
+   * readonly one either, because it is out of the declaring scope. Drupal
+   * caches form objects and unserializes them on rebuild, so either modifier
+   * is a fatal on supported PHP rather than a style preference.
+   * menu_autopilot 1.0.1 fixed the same defect.
+   *
    * @param \Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor $executor
    *   The approval executor service.
    */
   public function __construct(
-    private readonly McpApprovalExecutor $executor,
+    protected McpApprovalExecutor $executor,
   ) {}
 
   /**

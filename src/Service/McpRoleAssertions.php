@@ -184,13 +184,15 @@ final class McpRoleAssertions {
     // enumerate. The governed role inherits that from 'authenticated' too: if
     // every logged-in user is an admin, so is the agent.
     if ($isAdmin || $inheritedAdmin) {
-      return [[
-        'role' => $roleId,
-        'permission' => '*',
-        'type' => self::VIOLATION_IS_ADMIN,
-        'profile' => $profile->id(),
-        'via' => $isAdmin ? 'direct' : 'authenticated',
-      ]];
+      return [
+        [
+          'role' => $roleId,
+          'permission' => '*',
+          'type' => self::VIOLATION_IS_ADMIN,
+          'profile' => $profile->id(),
+          'via' => $isAdmin ? 'direct' : 'authenticated',
+        ],
+      ];
     }
 
     $forbidden = $profile->getForbiddenRolePermissions();

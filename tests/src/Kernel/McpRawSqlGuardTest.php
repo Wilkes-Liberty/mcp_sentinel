@@ -313,4 +313,72 @@ final class McpRawSqlGuardTest extends KernelTestBase {
     $this->assertNotSame([], $this->guard->check($sql, $this->profile()));
   }
 
+  /**
+   * Entity tables are rewritten into {table} so Drupal can prefix them.
+   *
+   * The allowlist is built from logical table names, which carry no prefix,
+   * while Drupal prefixes {table} and nothing else. Unbraced, a statement that
+   * passes governance cannot execute on a site with a table prefix -- and a
+   * hand-prefixed one is refused as an unknown table, so no input works at all.
+   * This rewrite is what makes the two agree.
+   *
+   * @covers ::braceKnownTables
+   */
+  public function testEntityTablesAreBracedForPrefixing(): void {
+    $this->assertSame(
+      'SELECT nid FROM {node_field_data}',
+      $this->guard->braceKnownTables('SELECT nid FROM node_field_data'),
+    );
+    $this->assertSame(
+      'SELECT n.nid FROM {node_field_data} n JOIN {node} b ON b.nid = n.nid',
+      $this->guard->braceKnownTables('SELECT n.nid FROM node_field_data n JOIN node b ON b.nid = n.nid'),
+    );
+  }
+
+  /**
+   * A table name inside a literal is not braced.
+   *
+   * Literals are blanked by normalise() before the allowlist check, so the
+   * rewrite has to treat them the same way or it would insert a brace into the
+   * middle of a string the caller typed.
+   *
+   * @covers ::braceKnownTables
+   */
+  public function testLiteralsAreNotBraced(): void {
+    $this->assertSame(
+      "SELECT title FROM {node_field_data} WHERE title = 'FROM node_field_data'",
+      $this->guard->braceKnownTables("SELECT title FROM node_field_data WHERE title = 'FROM node_field_data'"),
+    );
+  }
+
+  /**
+   * A table the rewrite cannot brace is a refusal, not a passthrough.
+   *
+   * Identifier quoting is stripped by normalise() before the allowlist check,
+   * so a quoted name resolves for governance but is not matched by the rewrite.
+   * Returning the original would run an unbraced name against a prefixed site
+   * and fail confusingly -- and, worse, would mean a governed statement
+   * executing against a name the rewrite never confirmed.
+   *
+   * @covers ::braceKnownTables
+   */
+  public function testTableThatCannotBeBracedFailsClosed(): void {
+    $this->assertNull($this->guard->braceKnownTables('SELECT nid FROM "node_field_data"'));
+  }
+
+  /**
+   * A statement naming no entity table is returned unchanged.
+   *
+   * These are refused by check() long before the rewrite runs; this pins that
+   * the rewrite itself invents nothing.
+   *
+   * @covers ::braceKnownTables
+   */
+  public function testNonEntityTablesAreNotBraced(): void {
+    $this->assertSame(
+      'SELECT 1 FROM information_schema.tables',
+      $this->guard->braceKnownTables('SELECT 1 FROM information_schema.tables'),
+    );
+  }
+
 }

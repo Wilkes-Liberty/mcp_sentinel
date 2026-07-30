@@ -34,6 +34,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * addCacheContexts() calls can be inspected.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
 #[RunTestsInSeparateProcesses]
 final class GraphqlFieldResultsAlterTest extends KernelTestBase {

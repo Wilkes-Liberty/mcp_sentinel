@@ -1,6 +1,11 @@
 Acquia
+analysable
+analysed
+analysing
 autowires
 behaviour
+behavioural
+bodyless
 bookmarkable
 breakglass
 Cerda
@@ -12,8 +17,10 @@ cspell
 curlopt
 cust
 cweagans
+dblink
 defence
 desync
+drupalcode
 drush
 eccdeac
 endcode
@@ -22,6 +29,7 @@ entrancy
 eslint
 etype
 exfiltration
+fataled
 fataling
 fatals
 fieldable
@@ -44,6 +52,8 @@ mcps
 memoise
 memoises
 memorise
+normalise
+normalised
 normalises
 nosniff
 optimised
@@ -55,8 +65,9 @@ phpstan
 phpunit
 PKCE
 preg
-reentrancy
 Recognised
+redactions
+reentrancy
 refinable
 relock
 replayable
@@ -67,6 +78,7 @@ serialised
 SIEM
 sixteenbytekey
 spoofable
+sqlq
 stylelint
 symfony
 synthesise
@@ -75,6 +87,7 @@ tempstore
 textareas
 toctou
 topsecret
+unanalysable
 uncacheable
 uncaches
 unconfigured
@@ -92,5 +105,6 @@ updb
 varchar
 vocabs
 webcms
+webonyx
 xaxis
 yaxis

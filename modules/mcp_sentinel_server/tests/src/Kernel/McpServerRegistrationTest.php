@@ -26,6 +26,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *
  * @group mcp_sentinel
  * @group mcp_sentinel_server
+ *
+ * @runTestsInSeparateProcesses
  */
 #[Group('mcp_sentinel')]
 #[Group('mcp_sentinel_server')]
