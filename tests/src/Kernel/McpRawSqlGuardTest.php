@@ -338,9 +338,9 @@ final class McpRawSqlGuardTest extends KernelTestBase {
   /**
    * A table name inside a literal is not braced.
    *
-   * normalise() blanks single-quoted literals before the allowlist check, so
-   * the rewrite has to treat them the same way or it would insert a brace into
-   * the middle of a string the caller typed.
+   * Literals are blanked by normalise() before the allowlist check, so the
+   * rewrite has to treat them the same way or it would insert a brace into the
+   * middle of a string the caller typed.
    *
    * @covers ::braceKnownTables
    */
@@ -354,8 +354,8 @@ final class McpRawSqlGuardTest extends KernelTestBase {
   /**
    * A table the rewrite cannot brace is a refusal, not a passthrough.
    *
-   * normalise() strips identifier quoting before the allowlist check, so a
-   * quoted name resolves for governance but is not matched by the rewrite.
+   * Identifier quoting is stripped by normalise() before the allowlist check,
+   * so a quoted name resolves for governance but is not matched by the rewrite.
    * Returning the original would run an unbraced name against a prefixed site
    * and fail confusingly -- and, worse, would mean a governed statement
    * executing against a name the rewrite never confirmed.
@@ -369,8 +369,8 @@ final class McpRawSqlGuardTest extends KernelTestBase {
   /**
    * A statement naming no entity table is returned unchanged.
    *
-   * check() refuses these long before the rewrite runs; this pins that the
-   * rewrite itself invents nothing.
+   * These are refused by check() long before the rewrite runs; this pins that
+   * the rewrite itself invents nothing.
    *
    * @covers ::braceKnownTables
    */
