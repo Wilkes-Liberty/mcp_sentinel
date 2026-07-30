@@ -66,9 +66,21 @@ variables:
 # down, on the missing extension described above. With the lane off, the pin
 # has nothing to pin.
 #
-# Two limits stay recorded rather than hidden:
-#  - Drupal 10.6 on PHP 8.1 is unverified anywhere. drupal/mcp_server sits in
-#    require-dev and needs PHP ^8.3, so the mcp_sentinel_server tests cannot
-#    run on 8.1 at any mcp_server 2.x version, on any CI venue.
-#  - Whether the supported PHP floor should simply be 8.3 is unsettled. That
-#    narrows the support surface and is a maintainer decision, not a CI fix.
+# On the PHP floor, which an earlier version of this comment got wrong: >=8.3
+# is not a CI convenience, it is what the code requires. Two independent
+# reasons, either one sufficient on its own:
+#
+#  - drupal/simple_oauth ^6.1 is a RUNTIME requirement, not a test-only one. It
+#    pulls league/oauth2-server and lcobucci/jwt, both declaring
+#    php: ~8.2.0 || ~8.3.0 || ~8.4.0 || ~8.5.0. PHP 8.1 does not resolve.
+#  - The module uses typed class constants (public const string NAME = ...),
+#    which are PHP 8.3 syntax. Below 8.3 that is a parse error -- the module
+#    cannot load, never mind install.
+#
+# So the open question is 8.2 versus 8.3, not 8.1 versus 8.3. Reaching 8.2
+# would mean dropping those type declarations, while Drupal 11.3 -- this
+# module's D11 floor -- requires 8.3 regardless. Tracked, not settled here.
+#
+# One limit stays recorded rather than hidden: drupal/mcp_server sits in
+# require-dev and needs PHP ^8.3, so the mcp_sentinel_server tests could not
+# run below 8.3 on any venue even if the rest of the module could.

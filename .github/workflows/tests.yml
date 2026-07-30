@@ -396,12 +396,20 @@ jobs:
           composer global require --no-interaction --no-progress \
             squizlabs/php_codesniffer drupal/coder
 
-      - name: phpcs (Drupal, DrupalPractice)
+      - name: phpcs
         working-directory: module
         run: |
-          ~/.composer/vendor/bin/phpcs --standard=Drupal,DrupalPractice \
-            --extensions=php,module,inc,install,test,profile,theme,yml \
-            .
+          # The module's own phpcs.xml.dist, not a standard spelled out here.
+          # This job used to pass --standard=Drupal,DrupalPractice with its own
+          # --extensions list, so the committed ruleset and the enforced one
+          # could drift apart invisibly: editing phpcs.xml.dist changed what a
+          # developer runs locally and nothing about what CI checked. The
+          # drupalcode phpcs job reads the file, so this now asks the same
+          # question rather than a similar one.
+          #
+          # Verified equivalent when this changed: both invocations scanned the
+          # same 192 files and both were clean.
+          ~/.composer/vendor/bin/phpcs --standard=phpcs.xml.dist -p
 
   # phpstan and cspell exist on the drupalcode pipeline and, until now, only
   # there. Two of the three linters that went red on d.o had no GitHub gate at
