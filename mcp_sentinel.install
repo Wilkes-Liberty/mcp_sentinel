@@ -135,6 +135,21 @@ function mcp_sentinel_requirements(string $phase): array {
     return $requirements;
   }
 
+  // Checked first, and deliberately before the governance early-return below:
+  // without audit_chain this module cannot record anything at all, which is
+  // true whether or not governance is switched on. McpAuditLogger throws rather
+  // than recording nothing quietly, so in this state governed writes are
+  // refused — the status report has to say why.
+  if (!\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    $requirements['mcp_sentinel_audit_chain_missing'] = [
+      'title' => t('MCP Sentinel: audit_chain is not enabled'),
+      'value' => t('Required module missing'),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('MCP Sentinel records every governed operation through the <code>audit_chain</code> module, which is not enabled. Governed operations are refused rather than performed unaudited. Run <code>drush en audit_chain</code> and then <code>drush updatedb</code>.'),
+    ];
+    return $requirements;
+  }
+
   $config = \Drupal::config('mcp_sentinel.settings');
   if (!$config->get('enabled')) {
     // The operator has explicitly turned governance off; nothing to warn about.
@@ -835,6 +850,34 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
   }
 
   return "Migrated {$sandbox['migrated']} of {$sandbox['total']} legacy audit entries into audit_chain_log.";
+}
+
+/**
+ * Install audit_chain if the 2.0.0 upgrade landed without it.
+ *
+ * 2.0.0 added audit_chain as a hard dependency, and the natural upgrade order
+ * — `composer require drupal/mcp_sentinel:^2.0 && drush updatedb` — put the new
+ * code on the site before anything could install it. The container then could
+ * not compile (mcp_sentinel.audit_logger referenced a service that did not
+ * exist), the front end returned 500, and drush could not be used to recover
+ * because drush needs the same container. Rolling back made it worse: at 1.13
+ * audit_chain is only a transitive requirement, so `composer require ^1.13`
+ * removed it.
+ *
+ * The service reference is optional now, so the container builds and this hook
+ * can run. Enabling the module here rather than only documenting the ordering
+ * is the point: a required-dependency addition that bricks a site on the wrong
+ * order is a landmine, and the error names a service rather than the module to
+ * enable.
+ */
+function mcp_sentinel_update_10017(): string {
+  if (\Drupal::moduleHandler()->moduleExists('audit_chain')) {
+    return 'The audit_chain module is already enabled.';
+  }
+
+  \Drupal::service('module_installer')->install(['audit_chain']);
+
+  return 'Installed the audit_chain module, which MCP Sentinel requires to record audit entries.';
 }
 
 /**
