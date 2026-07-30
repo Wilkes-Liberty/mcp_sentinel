@@ -29,6 +29,23 @@ parameters:
     # unless something reflects on them, so PHPUnit 9 ignores them and the suite
     # passes there. Reassess when the supported floor rises above Drupal 10.
     - "#Attribute class PHPUnit.*Attributes.* does not exist#"
+    # getOriginal()/setOriginal() arrived in Drupal 11.2; on the Drupal 10.6
+    # floor the original entity is reached through the ->original property. The
+    # method_exists() guards are that fallback, so they are only "always true"
+    # when analysed against 11 -- on 10.6 they are the branch that runs. They
+    # go when the floor rises above Drupal 10, not before.
+    -
+      identifier: function.alreadyNarrowedType
+      message: "#method_exists\\(\\) with .* and '(get|set)Original' will always evaluate to true#"
+    # Drupal 11 replaced fetchAll()'s int $mode with a FetchAs enum that Drupal
+    # 10.6 does not have. \PDO::FETCH_ASSOC is accepted at runtime on both, so
+    # it is the only spelling valid across the range this module supports; the
+    # enum would compile-fail on the 10.6 floor. Analysing against 11 therefore
+    # reports the portable form as a type error. Reassess when the floor rises
+    # above Drupal 10.
+    -
+      identifier: argument.type
+      message: '#fetchAll\(\) expects Drupal\\Core\\Database\\Statement\\FetchAs\|null, int given#'
     # The GraphQL governance test builds operation fixtures via methods the
     # webonyx/graphql-php library marks @internal — unavoidable in tests.
     -
