@@ -1,6 +1,8 @@
 Acquia
+analysable
 autowires
 behaviour
+bodyless
 bookmarkable
 breakglass
 Cerda
@@ -12,6 +14,7 @@ cspell
 curlopt
 cust
 cweagans
+dblink
 defence
 desync
 drush
@@ -44,6 +47,8 @@ mcps
 memoise
 memoises
 memorise
+normalise
+normalised
 normalises
 nosniff
 optimised
@@ -57,6 +62,7 @@ PKCE
 preg
 reentrancy
 Recognised
+redactions
 refinable
 relock
 replayable
@@ -67,6 +73,7 @@ serialised
 SIEM
 sixteenbytekey
 spoofable
+sqlq
 stylelint
 symfony
 synthesise
@@ -75,6 +82,7 @@ tempstore
 textareas
 toctou
 topsecret
+unanalysable
 uncacheable
 uncaches
 unconfigured
