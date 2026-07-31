@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\media\MediaTypeInterface;
@@ -302,6 +303,15 @@ final class McpMediaUploadToolTest extends KernelTestBase {
     $tool->setInputValue('source_value', '1');
     $result = $tool->access($account, TRUE);
 
+    // access() returns bool|AccessResultInterface; the TRUE argument is what
+    // selects the object. Asserted rather than assumed, so the checks below
+    // cannot fail with "method on bool" if that ever changes.
+    //
+    // Narrowed to the concrete AccessResult, not AccessResultInterface: the
+    // interface declares isForbidden() but not getCacheMaxAge(), which comes
+    // from the cacheability side. Asserting the interface alone trades one
+    // static error for another.
+    $this->assertInstanceOf(AccessResult::class, $result);
     $this->assertTrue($result->isForbidden(),
       'McpMediaUploadTool must deny a governed account whose IP is not in the allowlist.');
     $this->assertSame(0, $result->getCacheMaxAge(),

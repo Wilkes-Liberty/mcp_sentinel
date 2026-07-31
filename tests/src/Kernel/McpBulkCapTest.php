@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Access\AccessResult;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -169,7 +170,6 @@ final class McpBulkCapTest extends KernelTestBase {
     $this->assertTrue($tool->getResultStatus(),
       'Tool must succeed; message: ' . (string) $tool->getResultMessage()
       . '; failed: ' . $failedInfo);
-    $this->assertIsArray($data);
     $this->assertArrayHasKey('succeeded', $data);
     $this->assertCount(2, $data['succeeded'],
       'Succeeded list must be truncated to the cap of 2. Failed: ' . $failedInfo);
@@ -202,7 +202,6 @@ final class McpBulkCapTest extends KernelTestBase {
     $this->assertTrue($tool->getResultStatus(),
       'Tool must succeed; message was: ' . (string) $tool->getResultMessage());
     $data = $tool->getResult()->getContextValues();
-    $this->assertIsArray($data);
     $this->assertCount(5, $data['succeeded'] ?? [],
       'All 5 succeeded must be returned when cap is 0 (unlimited).');
     $this->assertArrayNotHasKey('_result_truncated', $data,
@@ -242,7 +241,6 @@ final class McpBulkCapTest extends KernelTestBase {
       'Bulk write must report success even when the response-size cap is exceeded; '
       . 'message: ' . (string) $tool->getResultMessage());
     $data = $tool->getResult()->getContextValues();
-    $this->assertIsArray($data);
     // The truncation signal must be present so the agent knows it was cut.
     $this->assertTrue($data['_size_truncated'] ?? FALSE,
       '_size_truncated must be TRUE when payload was truncated to honour the size cap.');
@@ -275,6 +273,15 @@ final class McpBulkCapTest extends KernelTestBase {
     $tool->setInputValue('confirm', TRUE);
     $result = $tool->access($account, TRUE);
 
+    // access() returns bool|AccessResultInterface; the TRUE argument is what
+    // selects the object. Asserted rather than assumed, so the checks below
+    // cannot fail with "method on bool" if that ever changes.
+    //
+    // Narrowed to the concrete AccessResult, not AccessResultInterface: the
+    // interface declares isForbidden() but not getCacheMaxAge(), which comes
+    // from the cacheability side. Asserting the interface alone trades one
+    // static error for another.
+    $this->assertInstanceOf(AccessResult::class, $result);
     $this->assertTrue($result->isForbidden(),
       'McpBulkOperationsTool must deny a governed account whose IP is not in the allowlist.');
     $this->assertSame(0, $result->getCacheMaxAge(),
