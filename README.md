@@ -244,7 +244,10 @@ MCP policy profiles → Configuration governance**.
   Tier provisioning is one command: `drush mcp-sentinel:agent-provision <tier>
   --env=<env>`. The `mcp_admin` role is never standing — request it with
   `drush mcp-sentinel:break-glass <uid>`, which raises an approval; on approval
-  it is granted for `break_glass_ttl_seconds` and auto-revoked on cron.
+  it is granted for `break_glass_ttl_seconds` and auto-revoked on cron. The role
+  is a non-admin, five-permission operator break-glass set (not superuser); grants
+  refuse if the site still flags it `is_admin`. Agent capability changes stay on
+  the policy profile, not this role.
 
 **Upgrade note.** The new profile fields are added at their safe defaults by an
 update hook (`drush updatedb`); run `drush mcp-sentinel:setup` to expose the
