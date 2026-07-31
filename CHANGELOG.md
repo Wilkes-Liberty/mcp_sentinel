@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **PHPStan is green again on `1.x`.** The workflow installs `phpstan/phpstan:^2` and
+  `mglaman/phpstan-drupal:^2` unpinned, so a new release started reporting eight errors on
+  code nobody had touched — a green badge that decayed on its own rather than a regression
+  anyone introduced.
+
+  Three classes, all in tests, all real rather than noise:
+
+  - `$tool->access($account, TRUE)` is typed `bool|AccessResultInterface`, so calling
+    `getCacheMaxAge()` on the result was "method on bool". Narrowed with an explicit
+    `assertInstanceOf(AccessResult::class, …)` — the concrete class, because
+    `AccessResultInterface` declares `isForbidden()` but *not* `getCacheMaxAge()`, so
+    asserting the interface alone trades one static error for another.
+  - Three `assertIsArray()` calls on `getContextValues()`, which already returns `array`.
+    Removed; they asserted what the signature guarantees.
+  - A `?? []` after the same non-nullable call. Removed as dead.
+
 ### Changed
 - **Rewrote `CONTRIBUTING.md` for a public project.** It previously contained
   only an internal Jira-key branch/commit policy and a pointer to a private

@@ -281,7 +281,7 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
       ->createInstance('mcp_sentinel_security_policy');
     $tool->execute();
 
-    $json = json_encode($tool->getResult()->getContextValues() ?? []);
+    $json = json_encode($tool->getResult()->getContextValues());
     $this->assertStringNotContainsString(
       \Drupal::VERSION,
       $json,
