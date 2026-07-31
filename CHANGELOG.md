@@ -6,36 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-- **PHPStan is green again on `1.x`.** The workflow installs `phpstan/phpstan:^2` and
-  `mglaman/phpstan-drupal:^2` unpinned, so a new release started reporting eight errors on
-  code nobody had touched — a green badge that decayed on its own rather than a regression
-  anyone introduced.
+## [2.1.0] - 2026-07-30
 
-  Three classes, all in tests, all real rather than noise:
-
-  - `$tool->access($account, TRUE)` is typed `bool|AccessResultInterface`, so calling
-    `getCacheMaxAge()` on the result was "method on bool". Narrowed with an explicit
-    `assertInstanceOf(AccessResult::class, …)` — the concrete class, because
-    `AccessResultInterface` declares `isForbidden()` but *not* `getCacheMaxAge()`, so
-    asserting the interface alone trades one static error for another.
-  - Three `assertIsArray()` calls on `getContextValues()`, which already returns `array`.
-    Removed; they asserted what the signature guarantees.
-  - A `?? []` after the same non-nullable call. Removed as dead.
-
-### Changed
-- **Rewrote `CONTRIBUTING.md` for a public project.** It previously contained
-  only an internal Jira-key branch/commit policy and a pointer to a private
-  repo. Contributors now get coding standards, tests, changelog, and security-
-  reporting guidance modeled on the other published modules. Internal tracker
-  keys stay out of public history.
-
-### Added
-- **`SECURITY.md`** with a private disclosure route. Notes that Drupal Security
-  Team advisory coverage is not yet in place, so reports go to the maintainers
-  for now.
-- **`/.github` is `export-ignore` in `.gitattributes`**, so Actions workflows no
-  longer ship inside the drupal.org release tarball.
 ### Added
 - **Environment-scoped role-permission acknowledgements.** A grant that is
   legitimate on one environment and a violation on another can now be recorded
@@ -48,21 +20,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   acknowledgement does not apply and the violation is reported (fail closed).
   `VIOLATION_IS_ADMIN` stays outside this: an is_admin role cannot be
   acknowledged into compliance.
+- **`SECURITY.md`** with a private disclosure route. Notes that Drupal Security
+  Team advisory coverage is not yet in place, so reports go to the maintainers
+  for now.
+- **`/.github` is `export-ignore` in `.gitattributes`**, so Actions workflows no
+  longer ship inside the drupal.org release tarball.
+
+### Changed
+- **Rewrote `CONTRIBUTING.md` for a public project.** It previously contained
+  only an internal Jira-key branch/commit policy and a pointer to a private
+  repo. Contributors now get coding standards, tests, changelog, and security-
+  reporting guidance modeled on the other published modules. Internal tracker
+  keys stay out of public history.
 
 ### Fixed
-- **Update 10016 no longer leaves the moved audit settings behind as silent
-  no-ops.** It copied `audit_hash_key`, `audit_encryption_profile` and
-  `siem_enabled` into `audit_chain.settings` but left the originals in
-  `mcp_sentinel.settings`. Nothing read them; the settings form already wrote
-  straight to `audit_chain.settings`. Editing the leftovers — or a config
-  export that still contained them — looked like a successful key rotation and
-  was not. 10016 now clears them after the copy; a new update 10018 clears
-  them for sites that already ran 10016; they are gone from the install YAML
-  and the config schema. The form still presents SIEM streaming (and the hash
-  key / encryption profile) under Audit Logging — that is the right place for
-  the operator — and records them only in `audit_chain.settings`.
-  `getEditableConfigNames()` now declares `audit_chain.settings` so the form
-  matches what `submitForm()` actually writes.
 - **The 2.0.0 upgrade no longer takes the site down when `audit_chain` is not already
   enabled.** `mcp_sentinel.audit_logger` held a required reference to
   `audit_chain.logger`, so the natural sequence —
@@ -102,6 +73,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   specifically. A new kernel test installs the module without `audit_chain` and asserts
   the container compiles and every path fails honestly — the state is reproduced rather
   than described.
+- **Update 10016 no longer leaves the moved audit settings behind as silent
+  no-ops.** It copied `audit_hash_key`, `audit_encryption_profile` and
+  `siem_enabled` into `audit_chain.settings` but left the originals in
+  `mcp_sentinel.settings`. Nothing read them; the settings form already wrote
+  straight to `audit_chain.settings`. Editing the leftovers — or a config
+  export that still contained them — looked like a successful key rotation and
+  was not. 10016 now clears them after the copy; a new update 10018 clears
+  them for sites that already ran 10016; they are gone from the install YAML
+  and the config schema. The form still presents SIEM streaming (and the hash
+  key / encryption profile) under Audit Logging — that is the right place for
+  the operator — and records them only in `audit_chain.settings`.
+  `getEditableConfigNames()` now declares `audit_chain.settings` so the form
+  matches what `submitForm()` actually writes.
+- **PHPStan is green again on `1.x`.** The workflow installs `phpstan/phpstan:^2` and
+  `mglaman/phpstan-drupal:^2` unpinned, so a new release started reporting eight errors on
+  code nobody had touched — a green badge that decayed on its own rather than a regression
+  anyone introduced. Narrowed access-result types in tests, removed always-true
+  `assertIsArray()` calls, and dropped a dead `?? []`.
 
 ## [2.0.1] - 2026-07-30
 
