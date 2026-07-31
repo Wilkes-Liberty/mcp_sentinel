@@ -23,6 +23,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Removed; they asserted what the signature guarantees.
   - A `?? []` after the same non-nullable call. Removed as dead.
 
+### Changed
+- **Rewrote `CONTRIBUTING.md` for a public project.** It previously contained
+  only an internal Jira-key branch/commit policy and a pointer to a private
+  repo. Contributors now get coding standards, tests, changelog, and security-
+  reporting guidance modeled on the other published modules. Internal tracker
+  keys stay out of public history.
+
+### Added
+- **`SECURITY.md`** with a private disclosure route. Notes that Drupal Security
+  Team advisory coverage is not yet in place, so reports go to the maintainers
+  for now.
+- **`/.github` is `export-ignore` in `.gitattributes`**, so Actions workflows no
+  longer ship inside the drupal.org release tarball.
 ### Added
 - **Environment-scoped role-permission acknowledgements.** A grant that is
   legitimate on one environment and a violation on another can now be recorded
