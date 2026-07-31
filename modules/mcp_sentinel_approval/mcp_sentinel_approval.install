@@ -8,6 +8,43 @@
 declare(strict_types=1);
 
 /**
+ * Implements hook_requirements().
+ *
+ * Break-glass is only safe as a least-privilege, time-boxed role. If the role
+ * is missing or is still is_admin, the site is not in the shipped posture —
+ * report ERROR rather than letting operators discover it when a grant silently
+ * means "everything".
+ */
+function mcp_sentinel_approval_requirements(string $phase): array {
+  $requirements = [];
+  if ($phase !== 'runtime') {
+    return $requirements;
+  }
+
+  $role = \Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_admin');
+  if ($role === NULL) {
+    $requirements['mcp_sentinel_approval_mcp_admin_missing'] = [
+      'title' => t('MCP Sentinel Approval: mcp_admin role missing'),
+      'value' => t('Not found'),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('The approval submodule expects a non-admin <code>mcp_admin</code> role for time-boxed break-glass grants. Import the optional config shipped with this module (or create an equivalent enumerated role). Break-glass grants are refused until the role exists.'),
+    ];
+    return $requirements;
+  }
+
+  if ($role->isAdmin()) {
+    $requirements['mcp_sentinel_approval_mcp_admin_is_admin'] = [
+      'title' => t('MCP Sentinel Approval: mcp_admin is is_admin'),
+      'value' => t('Unsafe'),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('The <code>mcp_admin</code> role is flagged <code>is_admin</code>, so it holds every permission implicitly. Break-glass grants are refused. Clear <code>is_admin</code> and limit the role to the shipped break-glass set: access administration pages, view the administration theme, access site reports, view mcp sentinel audit log, administer mcp sentinel. Do not put approve mcp sentinel operations on this role.'),
+    ];
+  }
+
+  return $requirements;
+}
+
+/**
  * Install the mcp_admin_grant entity type for the break-glass model.
  */
 function mcp_sentinel_approval_update_10001(): string {

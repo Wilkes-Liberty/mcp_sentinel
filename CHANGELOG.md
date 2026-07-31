@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Enumerated `mcp_admin` break-glass role (approval submodule).** The role is
+  no longer left to the site as an `is_admin` superuser. Optional config ships a
+  non-admin role with five permissions: access administration pages, view the
+  administration theme, access site reports, view mcp sentinel audit log, and
+  administer mcp sentinel. **Excluded by design:** approve mcp sentinel
+  operations (separation of duties — a standing second person holds approve),
+  and every escape-hatch permission the default policy forbids. Agent capability
+  changes stay on the policy profile, not this role.
+
+### Fixed
+- **Break-glass grants fail closed when `mcp_admin` is `is_admin` or missing.**
+  Grant refuses with an explicit message; the status report reports ERROR. A
+  time-boxed "emergency" role that silently means every permission is not a
+  control.
+
 ## [2.1.0] - 2026-07-30
 
 ### Added

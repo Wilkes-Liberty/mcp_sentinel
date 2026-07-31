@@ -17,6 +17,31 @@ See its help at `/admin/help/mcp_sentinel_approval` and the project
   on approval the user receives a **time-boxed** `mcp_admin` role that a cron
   reaper auto-revokes at the configured TTL.
 
+## Break-glass role (`mcp_admin`)
+
+Enterprise posture: least privilege and separation of duties.
+
+- **Who:** a human operator in an emergency — not an agent. An agent cannot
+  request break-glass over the MCP channel; widening an agent stays a **policy
+  profile** change (reviewable config), not this role.
+- **What it is:** a non-`is_admin` role with an explicit permission set. The
+  module ships it as optional config (`config/optional/user.role.mcp_admin.yml`)
+  when the role does not already exist.
+- **Shipped permissions:**
+  - `access administration pages`
+  - `view the administration theme`
+  - `access site reports`
+  - `view mcp sentinel audit log`
+  - `administer mcp sentinel`
+- **Not on this role:** `approve mcp sentinel operations` (a standing second
+  person holds approve — so break-glass cannot rubber-stamp the next elevation),
+  nor escape-hatch permissions (`bypass node access`, `administer users`, etc.),
+  nor `administer site configuration` / `administer modules` (shell or a
+  deliberate separate grant).
+- **Fail closed:** if `mcp_admin` is missing or flagged `is_admin`, grants are
+  refused and the status report reports ERROR. The module does not silently
+  escalate to superuser.
+
 Enforcement uses a veto seam in the base module: a gated operation dispatches a
 destructive-operation event that this submodule vetoes to hold the operation.
 If the submodule is not enabled, nothing vetoes and operations run subject only

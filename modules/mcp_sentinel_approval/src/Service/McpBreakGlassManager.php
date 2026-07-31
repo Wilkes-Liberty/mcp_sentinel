@@ -82,10 +82,24 @@ final class McpBreakGlassManager {
       return ['granted' => FALSE, 'message' => sprintf('User %d not found.', $uid), 'expires' => 0];
     }
     $roleStorage = $this->entityTypeManager->getStorage('user_role');
-    if ($roleStorage->load(self::ROLE_ID) === NULL) {
+    $role = $roleStorage->load(self::ROLE_ID);
+    if ($role === NULL) {
       return [
         'granted' => FALSE,
         'message' => sprintf('The %s role does not exist on this site.', self::ROLE_ID),
+        'expires' => 0,
+      ];
+    }
+    // Enterprise fail-closed: is_admin holds every permission implicitly, so a
+    // "break-glass" grant would be silent superuser elevation. The shipped role
+    // is enumerated and non-admin; refuse until the site fixes the role.
+    if ($role->isAdmin()) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf(
+          'Refusing to grant %s: the role is flagged is_admin, so it holds every permission on the site. Clear is_admin and use the enumerated break-glass permission set (see mcp_sentinel_approval config/optional).',
+          self::ROLE_ID,
+        ),
         'expires' => 0,
       ];
     }
