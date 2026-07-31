@@ -2,6 +2,11 @@
 #
 # Enterprise defaults:
 # - is_admin: false — never superuser; permissions are enumerated below.
+# - This permission list IS the grant-time allowlist
+#   (McpBreakGlassManager::ALLOWED_PERMISSIONS). Keep them identical.
+# - Grant refuses if the role is missing, is_admin, or holds any permission
+#   outside this list. Status report ERROR for extras; WARNING if this role
+#   is a proper subset (narrower shell).
 # - No "approve mcp sentinel operations" — separation of duties; a standing
 #   second person holds approve so break-glass cannot rubber-stamp elevation.
 # - No escape-hatch permissions (bypass node access, administer users, …).
@@ -10,7 +15,6 @@
 # - Agent capability changes stay on the policy profile, not this role.
 #
 # Installed only when the role does not already exist (config/optional).
-# Grant refuses if the role is missing or is_admin; see McpBreakGlassManager.
 langcode: en
 status: true
 dependencies:

@@ -27,7 +27,8 @@ Enterprise posture: least privilege and separation of duties.
 - **What it is:** a non-`is_admin` role with an explicit permission set. The
   module ships it as optional config (`config/optional/user.role.mcp_admin.yml`)
   when the role does not already exist.
-- **Shipped permissions:**
+- **Shipped permissions** (`McpBreakGlassManager::ALLOWED_PERMISSIONS` — keep
+  identical to `config/optional/user.role.mcp_admin.yml`):
   - `access administration pages`
   - `view the administration theme`
   - `access site reports`
@@ -38,9 +39,12 @@ Enterprise posture: least privilege and separation of duties.
   nor escape-hatch permissions (`bypass node access`, `administer users`, etc.),
   nor `administer site configuration` / `administer modules` (shell or a
   deliberate separate grant).
-- **Fail closed:** if `mcp_admin` is missing or flagged `is_admin`, grants are
-  refused and the status report reports ERROR. The module does not silently
-  escalate to superuser.
+- **Fail closed (grant-time allowlist):** grants refuse when the role is
+  missing, flagged `is_admin`, or holds **any** permission outside the
+  allowlist. A proper subset of the allowlist still grants (narrower is safer).
+- **Status report:** ERROR for missing role, `is_admin`, or allowlist extras;
+  WARNING when the role is missing one or more shipped permissions (incomplete
+  operator shell).
 
 Enforcement uses a veto seam in the base module: a gated operation dispatches a
 destructive-operation event that this submodule vetoes to hold the operation.

@@ -6,21 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Break-glass grant-time permission allowlist (#87).**
+  `McpBreakGlassManager::ALLOWED_PERMISSIONS` is the elevation ceiling. Grant
+  refuses when `mcp_admin` holds any permission outside that set (including
+  `approve mcp sentinel operations`). A proper subset still grants. The optional
+  role YAML must stay identical to the constant.
+- **Status report drift for `mcp_admin` (#88).** ERROR when the role holds
+  allowlist extras (same refuse as grant); WARNING when it is missing shipped
+  permissions (incomplete operator shell). Missing role and `is_admin` remain
+  ERROR.
+
 ### Added
-- **Enumerated `mcp_admin` break-glass role (approval submodule).** The role is
-  no longer left to the site as an `is_admin` superuser. Optional config ships a
-  non-admin role with five permissions: access administration pages, view the
-  administration theme, access site reports, view mcp sentinel audit log, and
-  administer mcp sentinel. **Excluded by design:** approve mcp sentinel
+- **Enumerated `mcp_admin` break-glass role (approval submodule) (#78).** The
+  role is no longer left to the site as an `is_admin` superuser. Optional config
+  ships a non-admin role with five permissions: access administration pages,
+  view the administration theme, access site reports, view mcp sentinel audit
+  log, and administer mcp sentinel. **Excluded by design:** approve mcp sentinel
   operations (separation of duties — a standing second person holds approve),
   and every escape-hatch permission the default policy forbids. Agent capability
   changes stay on the policy profile, not this role.
 
 ### Fixed
-- **Break-glass grants fail closed when `mcp_admin` is `is_admin` or missing.**
-  Grant refuses with an explicit message; the status report reports ERROR. A
-  time-boxed "emergency" role that silently means every permission is not a
-  control.
+- **Break-glass grants fail closed when `mcp_admin` is `is_admin` or missing
+  (#78).** Grant refuses with an explicit message; the status report reports
+  ERROR. A time-boxed "emergency" role that silently means every permission is
+  not a control.
 - **`McpAuditLogger::verifyChain()` PHPStan return shape.** The `@return` now
   matches `AuditChainLoggerInterface::verify()` (includes `reason` and the
   `unkeyed_*` keys). Callers already treat the shape as growing; the sealed

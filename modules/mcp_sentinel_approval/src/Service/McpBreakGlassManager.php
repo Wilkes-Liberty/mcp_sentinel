@@ -24,10 +24,14 @@ use Drupal\user\UserInterface;
  *
  * Enterprise posture (least privilege + separation of duties):
  * - The shipped role is non-is_admin with an enumerated permission set
- *   (config/optional/user.role.mcp_admin.yml). It is not superuser.
- * - Grant refuses when the role is missing or still flagged is_admin.
- * - "approve mcp sentinel operations" is deliberately not on this role so a
- *   break-glass session cannot rubber-stamp the next elevation.
+ *   (ALLOWED_PERMISSIONS; config/optional/user.role.mcp_admin.yml). Not
+ *   superuser.
+ * - Grant refuses when the role is missing, is_admin, or holds any permission
+ *   outside ALLOWED_PERMISSIONS (the allowlist is an elevation invariant).
+ * - A narrower subset of the allowlist still grants (safer); status report
+ *   WARNINGs incomplete operator shells.
+ * - "approve mcp sentinel operations" is outside the allowlist so break-glass
+ *   cannot rubber-stamp the next elevation.
  * - Agent capability changes stay on the policy profile, not this role.
  */
 final class McpBreakGlassManager {
@@ -36,6 +40,26 @@ final class McpBreakGlassManager {
    * The break-glass admin role id.
    */
   public const string ROLE_ID = 'mcp_admin';
+
+  /**
+   * Permissions the break-glass role may hold (least-privilege ceiling).
+   *
+   * Single source of truth for grant-time refuse, status-report drift, tests,
+   * and the optional config YAML. Keep this list identical to
+   * config/optional/user.role.mcp_admin.yml. Order is not significant; callers
+   * that compare sets should sort.
+   *
+   * Intentionally excluded (non-exhaustive): approve mcp sentinel operations
+   * (separation of duties); escape-hatch perms; administer site configuration;
+   * administer modules.
+   */
+  public const array ALLOWED_PERMISSIONS = [
+    'access administration pages',
+    'view the administration theme',
+    'access site reports',
+    'view mcp sentinel audit log',
+    'administer mcp sentinel',
+  ];
 
   /**
    * Default grant lifetime (seconds) when none is configured.
@@ -77,12 +101,47 @@ final class McpBreakGlassManager {
   ) {}
 
   /**
+   * Permissions on the role that sit outside ALLOWED_PERMISSIONS.
+   *
+   * @param \Drupal\user\RoleInterface $role
+   *   The mcp_admin role (or any role checked against the allowlist).
+   *
+   * @return list<string>
+   *   Sorted machine names of disallowed permissions held by the role.
+   */
+  public static function permissionExtras(RoleInterface $role): array {
+    $extras = array_values(array_diff($role->getPermissions(), self::ALLOWED_PERMISSIONS));
+    sort($extras);
+    return $extras;
+  }
+
+  /**
+   * Shipped allowlist permissions the role does not hold.
+   *
+   * A non-empty result is safer than extras (narrower elevation) but means the
+   * documented operator shell is incomplete — status report WARNING, not grant
+   * refuse.
+   *
+   * @param \Drupal\user\RoleInterface $role
+   *   The mcp_admin role.
+   *
+   * @return list<string>
+   *   Sorted machine names from ALLOWED_PERMISSIONS missing on the role.
+   */
+  public static function permissionMissing(RoleInterface $role): array {
+    $missing = array_values(array_diff(self::ALLOWED_PERMISSIONS, $role->getPermissions()));
+    sort($missing);
+    return $missing;
+  }
+
+  /**
    * Grants the break-glass role to a user for the configured TTL.
    *
-   * Fail-closed: refuses when the grantee is missing, when the mcp_admin role
-   * is missing, or when that role is still is_admin. Those are not soft
-   * warnings — a time-boxed grant that silently means every permission is not
-   * a control.
+   * Fail-closed: refuses when the grantee is missing; when the mcp_admin role
+   * is missing; when that role is still is_admin; or when the role holds any
+   * permission outside ALLOWED_PERMISSIONS. Those are not soft warnings — a
+   * time-boxed grant that silently means more than the allowlist is not a
+   * control.
    *
    * @param int $uid
    *   The grantee user id.
@@ -122,6 +181,22 @@ final class McpBreakGlassManager {
         'message' => sprintf(
           'Refusing to grant %s: the role is flagged is_admin, so it holds every permission on the site. Clear is_admin and use the enumerated break-glass permission set (see mcp_sentinel_approval config/optional).',
           self::ROLE_ID,
+        ),
+        'expires' => 0,
+      ];
+    }
+
+    // Allowlist is the elevation ceiling. Extras (including approve-ops) mean
+    // the role outgrew least privilege; refuse rather than attach a widened
+    // break-glass session. A proper subset still grants.
+    $extras = self::permissionExtras($role);
+    if ($extras !== []) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf(
+          'Refusing to grant %s: the role holds permissions outside the break-glass allowlist (%s). Remove them from the role (or put them on a standing role that is not time-boxed elevation).',
+          self::ROLE_ID,
+          implode(', ', $extras),
         ),
         'expires' => 0,
       ];
@@ -188,7 +263,8 @@ final class McpBreakGlassManager {
       $uid = $grant->getUserId();
       $user = $userStorage->load($uid);
       // Only remove the role if no other still-active grant covers this user.
-      if ($user !== NULL && $user->hasRole(self::ROLE_ID) && !$this->hasOtherActiveGrant($uid, (int) $grant->id())) {
+      // Narrow to UserInterface before role API (same posture as grant()).
+      if ($user instanceof UserInterface && $user->hasRole(self::ROLE_ID) && !$this->hasOtherActiveGrant($uid, (int) $grant->id())) {
         $user->removeRole(self::ROLE_ID);
         $user->save();
       }
