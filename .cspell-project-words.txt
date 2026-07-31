@@ -53,6 +53,7 @@ mcps
 memoise
 memoises
 memorise
+mglaman
 normalise
 normalised
 normalises
