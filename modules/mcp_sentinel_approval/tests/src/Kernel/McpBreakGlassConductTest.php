@@ -153,7 +153,7 @@ final class McpBreakGlassConductTest extends KernelTestBase {
   }
 
   /**
-   * A config save while elevated produces config_save_break_glass with keys only.
+   * Elevated config save produces config_save_break_glass with keys only.
    *
    * @covers ::onConfigSave
    */

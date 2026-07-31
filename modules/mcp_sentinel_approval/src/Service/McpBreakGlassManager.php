@@ -354,7 +354,7 @@ final class McpBreakGlassManager {
   }
 
   /**
-   * Marks a grant revoked, removes the role when no other grant covers the user.
+   * Marks a grant revoked; removes the role if no other grant covers the user.
    *
    * @param \Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface $grant
    *   The grant to revoke.
