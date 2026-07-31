@@ -29,20 +29,6 @@ final class McpBreakGlassTest extends KernelTestBase {
   use UserCreationTrait;
 
   /**
-   * The approved five-permission break-glass set (no approve-ops).
-   *
-   * Kept as a constant so role creation, in-memory assertions, and the on-disk
-   * optional YAML contract stay aligned.
-   */
-  private const BREAK_GLASS_PERMISSIONS = [
-    'access administration pages',
-    'view the administration theme',
-    'access site reports',
-    'view mcp sentinel audit log',
-    'administer mcp sentinel',
-  ];
-
-  /**
    * {@inheritdoc}
    */
   protected static $modules = [
@@ -94,7 +80,8 @@ final class McpBreakGlassTest extends KernelTestBase {
         'label' => 'MCP break-glass admin',
         // Explicit FALSE: never rely on Role defaults for is_admin.
         'is_admin' => FALSE,
-        'permissions' => self::BREAK_GLASS_PERMISSIONS,
+        // Must match ALLOWED_PERMISSIONS — grant refuse uses that constant.
+        'permissions' => McpBreakGlassManager::ALLOWED_PERMISSIONS,
       ])->save();
     }
 
@@ -222,7 +209,7 @@ final class McpBreakGlassTest extends KernelTestBase {
     $this->assertNotNull($role, 'mcp_admin role must exist for break-glass tests.');
     $this->assertFalse($role->isAdmin(), 'Break-glass must not be is_admin.');
     $this->assertSame(
-      $this->sortedPermissions(self::BREAK_GLASS_PERMISSIONS),
+      $this->sortedPermissions(McpBreakGlassManager::ALLOWED_PERMISSIONS),
       $this->sortedPermissions($role->getPermissions()),
       'Role is the approved five-permission set.',
     );
@@ -235,10 +222,9 @@ final class McpBreakGlassTest extends KernelTestBase {
   }
 
   /**
-   * The optional config file on disk matches the approved enterprise default.
+   * The optional config file on disk matches the grant-time allowlist constant.
    *
-   * Prevents drift between the runtime role used in tests and the YAML that
-   * new sites import from config/optional.
+   * Prevents drift between ALLOWED_PERMISSIONS and the YAML new sites import.
    */
   public function testOptionalConfigYamlShipsApprovedList(): void {
     $path = $this->container->get('extension.list.module')
@@ -248,9 +234,9 @@ final class McpBreakGlassTest extends KernelTestBase {
     $this->assertIsArray($data);
     $this->assertFalse($data['is_admin'], 'Shipped YAML must set is_admin: false.');
     $this->assertSame(
-      $this->sortedPermissions(self::BREAK_GLASS_PERMISSIONS),
+      $this->sortedPermissions(McpBreakGlassManager::ALLOWED_PERMISSIONS),
       $this->sortedPermissions($data['permissions']),
-      'Shipped YAML permissions must match the approved five-permission set.',
+      'Shipped YAML permissions must match ALLOWED_PERMISSIONS.',
     );
     $this->assertNotContains(
       'approve mcp sentinel operations',
@@ -331,6 +317,119 @@ final class McpBreakGlassTest extends KernelTestBase {
       $requirements['mcp_sentinel_approval_mcp_admin_missing']['severity'],
       'Status report must ERROR when mcp_admin is missing.',
     );
+  }
+
+  /**
+   * Grant refuses when the role holds a permission outside the allowlist.
+   *
+   * @covers ::grant
+   * @covers ::permissionExtras
+   */
+  public function testGrantRefusesExtraPermissions(): void {
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    // Site widened break-glass past least privilege (escape-hatch example).
+    $role->grantPermission('administer users')->save();
+
+    $user = User::create(['name' => 'widened_role', 'status' => 1]);
+    $user->save();
+
+    $result = $this->manager()->grant((int) $user->id());
+    $this->assertFalse($result['granted'], 'Grant must refuse allowlist extras.');
+    $this->assertStringContainsString('outside the break-glass allowlist', $result['message']);
+    $this->assertStringContainsString('administer users', $result['message']);
+
+    $user = User::load($user->id());
+    $this->assertNotNull($user);
+    $this->assertFalse(
+      $user->hasRole(McpBreakGlassManager::ROLE_ID),
+      'Widened break-glass must not be attached to the account.',
+    );
+  }
+
+  /**
+   * Grant refuses when approve-ops is on the role (separation of duties).
+   *
+   * @covers ::grant
+   */
+  public function testGrantRefusesApproveOpsOnBreakGlassRole(): void {
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    $role->grantPermission('approve mcp sentinel operations')->save();
+
+    $user = User::create(['name' => 'sod_break', 'status' => 1]);
+    $user->save();
+
+    $result = $this->manager()->grant((int) $user->id());
+    $this->assertFalse($result['granted']);
+    $this->assertStringContainsString('approve mcp sentinel operations', $result['message']);
+  }
+
+  /**
+   * A proper subset of the allowlist still grants (narrower is safer).
+   *
+   * @covers ::grant
+   */
+  public function testGrantAllowsSubsetOfAllowlist(): void {
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    // Drop one shipped shell permission; elevation remains within the ceiling.
+    $role->revokePermission('view the administration theme')->save();
+    $this->assertSame(
+      ['view the administration theme'],
+      McpBreakGlassManager::permissionMissing($role),
+    );
+    $this->assertSame([], McpBreakGlassManager::permissionExtras($role));
+
+    $user = User::create(['name' => 'narrow_shell', 'status' => 1]);
+    $user->save();
+
+    $result = $this->manager()->grant((int) $user->id());
+    $this->assertTrue($result['granted'], 'Subset of allowlist must still grant.');
+  }
+
+  /**
+   * Status report ERRORs when the role holds allowlist extras.
+   */
+  public function testRequirementsErrorWhenRoleHasExtraPermissions(): void {
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    $role->grantPermission('administer users')->save();
+
+    $this->container->get('module_handler')->loadInclude('mcp_sentinel_approval', 'install');
+    $requirements = mcp_sentinel_approval_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_approval_mcp_admin_extra_permissions', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['mcp_sentinel_approval_mcp_admin_extra_permissions']['severity'],
+    );
+    $this->assertStringContainsString(
+      'administer users',
+      (string) $requirements['mcp_sentinel_approval_mcp_admin_extra_permissions']['description'],
+    );
+  }
+
+  /**
+   * Status report WARNINGs when the role is missing shipped allowlist perms.
+   */
+  public function testRequirementsWarningWhenRoleMissingShippedPermissions(): void {
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    $role->revokePermission('access site reports')->save();
+
+    $this->container->get('module_handler')->loadInclude('mcp_sentinel_approval', 'install');
+    $requirements = mcp_sentinel_approval_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_approval_mcp_admin_missing_permissions', $requirements);
+    $this->assertSame(
+      REQUIREMENT_WARNING,
+      $requirements['mcp_sentinel_approval_mcp_admin_missing_permissions']['severity'],
+    );
+    $this->assertStringContainsString(
+      'access site reports',
+      (string) $requirements['mcp_sentinel_approval_mcp_admin_missing_permissions']['description'],
+    );
+    // Incomplete shell is not ERROR-level (grant still allowed).
+    $this->assertArrayNotHasKey('mcp_sentinel_approval_mcp_admin_extra_permissions', $requirements);
   }
 
 }

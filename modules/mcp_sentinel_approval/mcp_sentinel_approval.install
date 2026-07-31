@@ -7,18 +7,17 @@
 
 declare(strict_types=1);
 
+use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Drupal\user\RoleInterface;
 
 /**
  * Implements hook_requirements().
  *
- * Break-glass is only safe as a least-privilege, time-boxed role. If the role
- * is missing or is still is_admin, the site is not in the shipped posture —
- * report ERROR rather than letting operators discover it when a grant silently
- * means "everything".
- *
- * Mirrors McpBreakGlassManager::grant() fail-closed checks so the Status
- * report and the grant path agree.
+ * Break-glass is only safe as a least-privilege, time-boxed role. Report
+ * ERROR when the role is missing, is_admin, or holds permissions outside the
+ * allowlist (same refuse conditions as McpBreakGlassManager::grant()). Report
+ * WARNING when the role is a proper subset of the allowlist — safer elevation,
+ * but the documented operator shell is incomplete.
  */
 function mcp_sentinel_approval_requirements(string $phase): array {
   $requirements = [];
@@ -28,15 +27,15 @@ function mcp_sentinel_approval_requirements(string $phase): array {
     return $requirements;
   }
 
-  $role = \Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_admin');
+  $role = \Drupal::entityTypeManager()->getStorage('user_role')->load(McpBreakGlassManager::ROLE_ID);
   // Entity storage is EntityInterface|null; RoleInterface is required for
-  // isAdmin() and for treating a non-role entity as "missing".
+  // isAdmin() / getPermissions() and for treating a non-role as "missing".
   if (!$role instanceof RoleInterface) {
     $requirements['mcp_sentinel_approval_mcp_admin_missing'] = [
       'title' => t('MCP Sentinel Approval: mcp_admin role missing'),
       'value' => t('Not found'),
       'severity' => REQUIREMENT_ERROR,
-      'description' => t('The approval submodule expects a non-admin <code>mcp_admin</code> role for time-boxed break-glass grants. Import the optional config shipped with this module (or create an equivalent enumerated role). Break-glass grants are refused until the role exists.'),
+      'description' => t('The approval submodule expects a non-admin <code>mcp_admin</code> role for time-boxed break-glass grants. Import the optional config shipped with this module (or create an equivalent role limited to the break-glass allowlist). Break-glass grants are refused until the role exists.'),
     ];
     return $requirements;
   }
@@ -48,7 +47,37 @@ function mcp_sentinel_approval_requirements(string $phase): array {
       'title' => t('MCP Sentinel Approval: mcp_admin is is_admin'),
       'value' => t('Unsafe'),
       'severity' => REQUIREMENT_ERROR,
-      'description' => t('The <code>mcp_admin</code> role is flagged <code>is_admin</code>, so it holds every permission implicitly. Break-glass grants are refused. Clear <code>is_admin</code> and limit the role to the shipped break-glass set: access administration pages, view the administration theme, access site reports, view mcp sentinel audit log, administer mcp sentinel. Do not put approve mcp sentinel operations on this role.'),
+      'description' => t('The <code>mcp_admin</code> role is flagged <code>is_admin</code>, so it holds every permission implicitly. Break-glass grants are refused. Clear <code>is_admin</code> and limit the role to the shipped break-glass allowlist. Do not put approve mcp sentinel operations on this role.'),
+    ];
+    // is_admin already implies every permission; skip set drift checks.
+    return $requirements;
+  }
+
+  // Extras = role outgrew the elevation ceiling. Same severity as grant refuse.
+  $extras = McpBreakGlassManager::permissionExtras($role);
+  if ($extras !== []) {
+    $requirements['mcp_sentinel_approval_mcp_admin_extra_permissions'] = [
+      'title' => t('MCP Sentinel Approval: mcp_admin has extra permissions'),
+      'value' => t('Unsafe'),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('The <code>mcp_admin</code> role holds permissions outside the break-glass allowlist (@extras). Break-glass grants are refused until those are removed (or moved to a standing role). Allowlist: @allowlist.', [
+        '@extras' => implode(', ', $extras),
+        '@allowlist' => implode(', ', McpBreakGlassManager::ALLOWED_PERMISSIONS),
+      ]),
+    ];
+  }
+
+  // Missing shipped perms = incomplete operator shell. Narrower is safer, so
+  // WARNING only; grant still succeeds on a proper subset.
+  $missing = McpBreakGlassManager::permissionMissing($role);
+  if ($missing !== []) {
+    $requirements['mcp_sentinel_approval_mcp_admin_missing_permissions'] = [
+      'title' => t('MCP Sentinel Approval: mcp_admin missing shipped permissions'),
+      'value' => t('Incomplete'),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('The <code>mcp_admin</code> role is missing shipped break-glass permissions (@missing). Elevation is narrower than the documented operator shell. Restore them from the optional config if operators need that shell during an incident.', [
+        '@missing' => implode(', ', $missing),
+      ]),
     ];
   }
 
