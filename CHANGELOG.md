@@ -21,6 +21,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Grant refuses with an explicit message; the status report reports ERROR. A
   time-boxed "emergency" role that silently means every permission is not a
   control.
+- **`McpAuditLogger::verifyChain()` PHPStan return shape.** The `@return` now
+  matches `AuditChainLoggerInterface::verify()` (includes `reason` and the
+  `unkeyed_*` keys). Callers already treat the shape as growing; the sealed
+  old shape failed static analysis against current audit_chain.
 
 ## [2.1.0] - 2026-07-30
 

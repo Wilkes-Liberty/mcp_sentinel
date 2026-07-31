@@ -9,6 +9,8 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface;
+use Drupal\user\RoleInterface;
+use Drupal\user\UserInterface;
 
 /**
  * Grants and reaps the time-boxed mcp_admin break-glass role.
@@ -19,6 +21,14 @@ use Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface;
  * role and mark the grant revoked once the expiry passes. This mirrors the
  * content-lock reaper: cron-based revocation survives missed runs, where a
  * delayed queue item could be lost.
+ *
+ * Enterprise posture (least privilege + separation of duties):
+ * - The shipped role is non-is_admin with an enumerated permission set
+ *   (config/optional/user.role.mcp_admin.yml). It is not superuser.
+ * - Grant refuses when the role is missing or still flagged is_admin.
+ * - "approve mcp sentinel operations" is deliberately not on this role so a
+ *   break-glass session cannot rubber-stamp the next elevation.
+ * - Agent capability changes stay on the policy profile, not this role.
  */
 final class McpBreakGlassManager {
 
@@ -69,30 +79,43 @@ final class McpBreakGlassManager {
   /**
    * Grants the break-glass role to a user for the configured TTL.
    *
+   * Fail-closed: refuses when the grantee is missing, when the mcp_admin role
+   * is missing, or when that role is still is_admin. Those are not soft
+   * warnings — a time-boxed grant that silently means every permission is not
+   * a control.
+   *
    * @param int $uid
    *   The grantee user id.
    *
    * @return array{granted: bool, message: string, expires: int}
    *   'granted' is TRUE when the role was added and a grant recorded.
+   *   'expires' is a Unix timestamp when granted; 0 when refused.
    */
   public function grant(int $uid): array {
-    $userStorage = $this->entityTypeManager->getStorage('user');
-    $user = $userStorage->load($uid);
-    if ($user === NULL) {
-      return ['granted' => FALSE, 'message' => sprintf('User %d not found.', $uid), 'expires' => 0];
+    $user = $this->entityTypeManager->getStorage('user')->load($uid);
+    // Entity storage returns EntityInterface|null; narrow before User API use.
+    if (!$user instanceof UserInterface) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf('User %d not found.', $uid),
+        'expires' => 0,
+      ];
     }
-    $roleStorage = $this->entityTypeManager->getStorage('user_role');
-    $role = $roleStorage->load(self::ROLE_ID);
-    if ($role === NULL) {
+
+    $role = $this->entityTypeManager->getStorage('user_role')->load(self::ROLE_ID);
+    // Role must exist as config (optional install or site-created). We never
+    // invent a standing superuser role at grant time.
+    if (!$role instanceof RoleInterface) {
       return [
         'granted' => FALSE,
         'message' => sprintf('The %s role does not exist on this site.', self::ROLE_ID),
         'expires' => 0,
       ];
     }
-    // Enterprise fail-closed: is_admin holds every permission implicitly, so a
-    // "break-glass" grant would be silent superuser elevation. The shipped role
-    // is enumerated and non-admin; refuse until the site fixes the role.
+
+    // is_admin holds every permission implicitly. Granting that as "break-
+    // glass" would be silent superuser elevation. The shipped role is
+    // enumerated and non-admin; refuse until the site fixes the role.
     if ($role->isAdmin()) {
       return [
         'granted' => FALSE,
@@ -107,6 +130,8 @@ final class McpBreakGlassManager {
     $now = $this->time->getRequestTime();
     $expires = $now + $this->ttl();
 
+    // Overlapping grants (renew before first expiry) re-use the role on the
+    // account; each grant row still has its own expiry for the reaper.
     if (!$user->hasRole(self::ROLE_ID)) {
       $user->addRole(self::ROLE_ID);
       $user->save();
@@ -116,6 +141,7 @@ final class McpBreakGlassManager {
       'uid' => $uid,
       'granted' => $now,
       'expires' => $expires,
+      // FALSE here; entity queries bind NOT_REVOKED (0). See constant.
       'revoked' => FALSE,
     ]);
     $grant->save();

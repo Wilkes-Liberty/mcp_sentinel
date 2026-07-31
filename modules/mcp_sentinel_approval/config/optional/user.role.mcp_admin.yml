@@ -1,3 +1,16 @@
+# Time-boxed break-glass role for human operators (not agents).
+#
+# Enterprise defaults:
+# - is_admin: false — never superuser; permissions are enumerated below.
+# - No "approve mcp sentinel operations" — separation of duties; a standing
+#   second person holds approve so break-glass cannot rubber-stamp elevation.
+# - No escape-hatch permissions (bypass node access, administer users, …).
+# - No administer site configuration / administer modules — use shell or a
+#   deliberate separate grant for those.
+# - Agent capability changes stay on the policy profile, not this role.
+#
+# Installed only when the role does not already exist (config/optional).
+# Grant refuses if the role is missing or is_admin; see McpBreakGlassManager.
 langcode: en
 status: true
 dependencies:
@@ -9,8 +22,10 @@ label: 'MCP break-glass admin'
 weight: 5
 is_admin: false
 permissions:
+  # Operator shell: reach admin UI and reports while elevated.
   - 'access administration pages'
   - 'view the administration theme'
   - 'access site reports'
+  # Sentinel surfaces needed during an incident.
   - 'view mcp sentinel audit log'
   - 'administer mcp sentinel'

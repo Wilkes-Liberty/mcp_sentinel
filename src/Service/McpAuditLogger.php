@@ -190,14 +190,17 @@ class McpAuditLogger {
    * signing key, plus counts. Read the keys you need rather than comparing the
    * whole array, or a purely additive change upstream reads as a failure here.
    *
-   * @return array{ok: bool, broken_at: int|null}
-   *   'ok' TRUE if the chain is intact; FALSE if any row fails verification.
-   *   'broken_at' is the row id of the first broken link, or NULL if ok.
+   * @return array{ok: bool, broken_at: int|null, reason: string|null, unkeyed_rows: int, unkeyed_through: int|null}
+   *   Pass-through of audit_chain's verify() shape. 'ok' is TRUE when the chain
+   *   is intact; 'broken_at' is the first broken row id or NULL; 'reason' and
+   *   the unkeyed_* fields distinguish tampering from pre-key rows.
    */
   public function verifyChain(): array {
     // Verification walks the whole chain, not just this channel's rows: the
     // entries are interleaved with every other consumer's, so a per-channel
     // walk could not tell a deletion from a gap. A break anywhere is a break.
+    // Return type matches AuditChainLoggerInterface::verify() so PHPStan does
+    // not treat the additive keys as a sealed-shape violation.
     return $this->requireChain()->verify();
   }
 

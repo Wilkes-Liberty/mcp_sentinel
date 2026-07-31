@@ -7,6 +7,8 @@
 
 declare(strict_types=1);
 
+use Drupal\user\RoleInterface;
+
 /**
  * Implements hook_requirements().
  *
@@ -14,15 +16,22 @@ declare(strict_types=1);
  * is missing or is still is_admin, the site is not in the shipped posture —
  * report ERROR rather than letting operators discover it when a grant silently
  * means "everything".
+ *
+ * Mirrors McpBreakGlassManager::grant() fail-closed checks so the Status
+ * report and the grant path agree.
  */
 function mcp_sentinel_approval_requirements(string $phase): array {
   $requirements = [];
+  // Install/update phases run before config and entities are reliable; only
+  // assert the break-glass role posture at runtime.
   if ($phase !== 'runtime') {
     return $requirements;
   }
 
   $role = \Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_admin');
-  if ($role === NULL) {
+  // Entity storage is EntityInterface|null; RoleInterface is required for
+  // isAdmin() and for treating a non-role entity as "missing".
+  if (!$role instanceof RoleInterface) {
     $requirements['mcp_sentinel_approval_mcp_admin_missing'] = [
       'title' => t('MCP Sentinel Approval: mcp_admin role missing'),
       'value' => t('Not found'),
@@ -32,6 +41,8 @@ function mcp_sentinel_approval_requirements(string $phase): array {
     return $requirements;
   }
 
+  // is_admin is incompatible with an enumerated least-privilege break-glass
+  // set: Drupal grants every permission implicitly to is_admin roles.
   if ($role->isAdmin()) {
     $requirements['mcp_sentinel_approval_mcp_admin_is_admin'] = [
       'title' => t('MCP Sentinel Approval: mcp_admin is is_admin'),
