@@ -86,9 +86,17 @@ final class McpBreakGlassTest extends KernelTestBase {
     }
 
     // Freeze time so grant TTL / reaper expiry math is deterministic.
+    // Rebind the manager after the mock: installConfig may already have
+    // constructed services that captured the real clock.
     $time = $this->createMock(TimeInterface::class);
     $time->method('getRequestTime')->willReturnCallback(fn (): int => $this->now);
     $this->container->set('datetime.time', $time);
+    $this->container->set('mcp_sentinel_approval.break_glass', new McpBreakGlassManager(
+      $this->container->get('entity_type.manager'),
+      $time,
+      $this->container->get('config.factory'),
+      $this->container->get('mcp_sentinel.audit_logger'),
+    ));
   }
 
   /**
@@ -430,6 +438,69 @@ final class McpBreakGlassTest extends KernelTestBase {
     );
     // Incomplete shell is not ERROR-level (grant still allowed).
     $this->assertArrayNotHasKey('mcp_sentinel_approval_mcp_admin_extra_permissions', $requirements);
+  }
+
+  /**
+   * Active grants are force-revoked when the role gains allowlist extras.
+   *
+   * @covers ::reapUnsafePosture
+   * @covers ::findActiveGrantFor
+   */
+  public function testReapUnsafePostureRevokesActiveGrantsOnExtras(): void {
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 3600)->save();
+    $user = User::create(['name' => 'live_holder', 'status' => 1]);
+    $user->save();
+    $uid = (int) $user->id();
+
+    $this->assertTrue($this->manager()->grant($uid)['granted']);
+    $user = User::load($uid);
+    $this->assertNotNull($user);
+    $this->assertTrue($user->hasRole(McpBreakGlassManager::ROLE_ID));
+    $this->assertNotNull($this->manager()->findActiveGrantFor($uid));
+
+    // Widen the role under the live grant — grant-time seal no longer applies.
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    $role->grantPermission('administer users')->save();
+
+    $this->assertSame(1, $this->manager()->reapUnsafePosture(), 'Live grant must be force-revoked.');
+    $user = User::load($uid);
+    $this->assertNotNull($user);
+    $this->assertFalse(
+      $user->hasRole(McpBreakGlassManager::ROLE_ID),
+      'Role must be removed when posture is unsafe.',
+    );
+    $this->assertNull($this->manager()->findActiveGrantFor($uid));
+
+    $revokedRows = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'mcp_admin_revoked')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertGreaterThanOrEqual(1, $revokedRows, 'Force-revoke must leave an audit row.');
+  }
+
+  /**
+   * Narrower-than-allowlist alone does not force-revoke (WARNING only).
+   *
+   * @covers ::reapUnsafePosture
+   */
+  public function testReapUnsafePostureIgnoresNarrowRole(): void {
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 3600)->save();
+    $user = User::create(['name' => 'narrow_live', 'status' => 1]);
+    $user->save();
+    $uid = (int) $user->id();
+    $this->assertTrue($this->manager()->grant($uid)['granted']);
+
+    $role = Role::load(McpBreakGlassManager::ROLE_ID);
+    $this->assertNotNull($role);
+    $role->revokePermission('view the administration theme')->save();
+
+    $this->assertSame(0, $this->manager()->reapUnsafePosture(), 'Subset must not force-revoke.');
+    $user = User::load($uid);
+    $this->assertNotNull($user);
+    $this->assertTrue($user->hasRole(McpBreakGlassManager::ROLE_ID));
   }
 
 }

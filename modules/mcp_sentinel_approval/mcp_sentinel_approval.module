@@ -7,8 +7,11 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
+use Drupal\user\RoleInterface;
 
 /**
  * Implements hook_help().
@@ -47,13 +50,59 @@ function mcp_sentinel_approval_help(string $route_name, RouteMatchInterface $rou
 /**
  * Implements hook_cron().
  *
- * Reaps expired time-boxed mcp_admin break-glass grants: removes the role and
- * marks the grant revoked once its expiry passes. Cron-based revocation mirrors
- * the content-lock reaper and survives missed runs, where a delayed queue item
+ * Reaps expired time-boxed mcp_admin break-glass grants, then force-revokes
+ * any still-active grants when the role's posture has become unsafe (missing,
+ * is_admin, or allowlist extras). Cron-based revocation mirrors the
+ * content-lock reaper and survives missed runs, where a delayed queue item
  * could be lost.
  */
 function mcp_sentinel_approval_cron(): void {
   /** @var \Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager $breakGlass */
   $breakGlass = \Drupal::service('mcp_sentinel_approval.break_glass');
   $breakGlass->reapExpired();
+  $breakGlass->reapUnsafePosture();
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for user_role_form.
+ *
+ * Surfaces that mcp_admin is time-boxed break-glass with a fixed allowlist,
+ * before the operator widens it in People → Roles and only learns later via
+ * grant refuse or the Status report.
+ */
+function mcp_sentinel_approval_form_user_role_form_alter(array &$form, FormStateInterface $form_state, string $form_id): void {
+  $form_object = $form_state->getFormObject();
+  if (!is_object($form_object) || !method_exists($form_object, 'getEntity')) {
+    return;
+  }
+  $entity = $form_object->getEntity();
+  if (!$entity instanceof RoleInterface || $entity->id() !== McpBreakGlassManager::ROLE_ID) {
+    return;
+  }
+
+  $allowlist = McpBreakGlassManager::ALLOWED_PERMISSIONS;
+  $status_url = Url::fromRoute('system.status')->toString();
+  $items = array_map(static fn (string $p): string => '<code>' . htmlspecialchars($p, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code>', $allowlist);
+
+  $form['mcp_sentinel_break_glass_warning'] = [
+    '#type' => 'container',
+    '#attributes' => [
+      'class' => ['messages', 'messages--warning'],
+      'role' => 'status',
+    ],
+    '#weight' => -200,
+    'title' => [
+      '#markup' => '<p><strong>' . t('MCP Sentinel break-glass role') . '</strong></p>',
+    ],
+    'body' => [
+      '#markup' => '<p>' . t('This role is the time-boxed <code>mcp_admin</code> break-glass elevation, not a standing admin role. Grants refuse and the <a href=":status">Status report</a> reports ERROR if it is flagged is_admin or holds any permission outside the shipped allowlist. A narrower subset still grants (Status report WARNING).', [':status' => $status_url]) . '</p>',
+    ],
+    'list_intro' => [
+      '#markup' => '<p>' . t('Shipped allowlist (keep identical to <code>McpBreakGlassManager::ALLOWED_PERMISSIONS</code> and <code>config/optional/user.role.mcp_admin.yml</code>):') . '</p>',
+    ],
+    'list' => [
+      '#theme' => 'item_list',
+      '#items' => $items,
+    ],
+  ];
 }

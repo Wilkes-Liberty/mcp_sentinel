@@ -41,3 +41,15 @@ services:
       - '@logger.channel.mcp_sentinel'
     tags:
       - { name: event_subscriber }
+
+  mcp_sentinel_approval.break_glass_conduct_subscriber:
+    class: Drupal\mcp_sentinel_approval\EventSubscriber\McpBreakGlassConductSubscriber
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.audit_logger'
+      - '@current_user'
+      - '@config.factory'
+      - '@config.storage'
+      - '@service_container'
+    tags:
+      - { name: event_subscriber }

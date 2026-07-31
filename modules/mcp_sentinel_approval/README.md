@@ -42,9 +42,34 @@ Enterprise posture: least privilege and separation of duties.
 - **Fail closed (grant-time allowlist):** grants refuse when the role is
   missing, flagged `is_admin`, or holds **any** permission outside the
   allowlist. A proper subset of the allowlist still grants (narrower is safer).
+- **Empty / narrow role edge:** if every shipped permission is stripped, the
+  empty set is still a subset of the allowlist, so **grant succeeds** and the
+  Status report only WARNINGs the missing shell permissions. That is
+  intentional (narrower is safer) but the elevated user gets nothing useful —
+  not a grant failure. Restore the shipped set from the optional YAML (or the
+  constant) if break-glass should be an operator shell again.
 - **Status report:** ERROR for missing role, `is_admin`, or allowlist extras;
   WARNING when the role is missing one or more shipped permissions (incomplete
   operator shell).
+- **Live-grant revalidation:** on cron, if `mcp_admin` is missing, `is_admin`,
+  or holds allowlist extras while grants are still active, those grants are
+  force-revoked (role removed, audit `mcp_admin_revoked` with reason
+  `role_posture_unsafe`). Narrower-than-allowlist alone does not force-revoke.
+- **Conduct audit while elevated:** config saves made by a user with a live
+  grant are audited as `config_save_break_glass` (config name, changed **key
+  names** only — never values — grant id, acting uid), including when the
+  holder sets `audit_enabled: false`. Ordinary admins without a live grant are
+  unchanged. If the audit write fails, the config save is refused (fail closed).
+- **People → Roles warning:** editing `mcp_admin` shows a Sentinel warning with
+  the allowlist and points at the Status report.
+
+### Dual-edit rule (YAML ≡ constant)
+
+`McpBreakGlassManager::ALLOWED_PERMISSIONS` and
+`config/optional/user.role.mcp_admin.yml` **must stay identical**. Edit both in
+the same commit. The kernel test
+`McpBreakGlassTest::testOptionalConfigYamlShipsApprovedList` blocks drift in
+the normal Tests workflow — do not change only one side.
 
 Enforcement uses a veto seam in the base module: a gated operation dispatches a
 destructive-operation event that this submodule vetoes to hold the operation.
