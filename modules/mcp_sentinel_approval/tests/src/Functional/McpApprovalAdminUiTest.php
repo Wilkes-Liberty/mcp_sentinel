@@ -6,6 +6,8 @@ namespace Drupal\Tests\mcp_sentinel_approval\Functional;
 
 use Drupal\mcp_sentinel_approval\Entity\McpAdminGrant;
 use Drupal\Tests\BrowserTestBase;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Functional tests for the approval settings form and break-glass grants list.
@@ -15,7 +17,11 @@ use Drupal\Tests\BrowserTestBase;
  * read-only break-glass grants list.
  *
  * @group mcp_sentinel
+ *
+ * @runTestsInSeparateProcesses
  */
+#[Group('mcp_sentinel')]
+#[RunTestsInSeparateProcesses]
 final class McpApprovalAdminUiTest extends BrowserTestBase {
 
   /**
@@ -88,6 +94,29 @@ final class McpApprovalAdminUiTest extends BrowserTestBase {
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('breakglass-holder');
     $this->assertSession()->pageTextContains('Active');
+  }
+
+  /**
+   * Editing the mcp_admin role in People shows the break-glass warning.
+   */
+  public function testMcpAdminRoleFormShowsBreakGlassWarning(): void {
+    $this->drupalLogin($this->drupalCreateUser(['administer permissions']));
+    $this->drupalGet('/admin/people/roles/manage/mcp_admin');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('MCP Sentinel break-glass role');
+    $this->assertSession()->pageTextContains('time-boxed');
+    $this->assertSession()->pageTextContains('administer mcp sentinel');
+    $this->assertSession()->linkExists('Status report');
+  }
+
+  /**
+   * Editing a different role does not show the break-glass warning.
+   */
+  public function testOtherRoleFormHasNoBreakGlassWarning(): void {
+    $this->drupalLogin($this->drupalCreateUser(['administer permissions']));
+    $this->drupalGet('/admin/people/roles/manage/authenticated');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextNotContains('MCP Sentinel break-glass role');
   }
 
 }

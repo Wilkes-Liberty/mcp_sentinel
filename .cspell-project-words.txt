@@ -62,6 +62,7 @@ optimised
 packagist
 Pathauto
 pcre
+permissioned
 phpcs
 phpstan
 phpunit

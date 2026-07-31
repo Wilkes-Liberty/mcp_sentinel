@@ -254,30 +254,132 @@ final class McpBreakGlassManager {
       return 0;
     }
 
-    $userStorage = $this->entityTypeManager->getStorage('user');
     $revoked = 0;
     foreach ($storage->loadMultiple($ids) as $grant) {
       if (!$grant instanceof McpAdminGrantInterface) {
         continue;
       }
-      $uid = $grant->getUserId();
-      $user = $userStorage->load($uid);
-      // Only remove the role if no other still-active grant covers this user.
-      // Narrow to UserInterface before role API (same posture as grant()).
-      if ($user instanceof UserInterface && $user->hasRole(self::ROLE_ID) && !$this->hasOtherActiveGrant($uid, (int) $grant->id())) {
-        $user->removeRole(self::ROLE_ID);
-        $user->save();
-      }
-      $grant->setRevoked(TRUE)->save();
-      $this->auditLogger->log('mcp_admin_revoked', [
-        'entity_type' => 'user',
-        'id' => (string) $uid,
-        'grant_id' => (int) $grant->id(),
-      ]);
+      $this->revokeGrant($grant, 'expired');
       $revoked++;
     }
 
     return $revoked;
+  }
+
+  /**
+   * Force-revokes active grants when mcp_admin posture is unsafe.
+   *
+   * Grant-time allowlist and status-report drift close elevation at the next
+   * grant. They do not address a live grant: if an operator widens mcp_admin
+   * (or flips is_admin) while someone still holds the role until TTL, that
+   * session keeps the widened capability. Cron calls this alongside
+   * reapExpired().
+   *
+   * Unsafe = role missing, is_admin, or any permission outside
+   * ALLOWED_PERMISSIONS. Narrower-than-allowlist alone is NOT unsafe (status
+   * WARNING only) — do not force-revoke for that.
+   *
+   * @return int
+   *   The number of grants revoked for posture.
+   */
+  public function reapUnsafePosture(): int {
+    $role = $this->entityTypeManager->getStorage('user_role')->load(self::ROLE_ID);
+    $posture = 'ok';
+    if (!$role instanceof RoleInterface) {
+      $posture = 'missing';
+    }
+    elseif ($role->isAdmin()) {
+      $posture = 'is_admin';
+    }
+    elseif (self::permissionExtras($role) !== []) {
+      $posture = 'extras';
+    }
+    if ($posture === 'ok') {
+      return 0;
+    }
+
+    $storage = $this->entityTypeManager->getStorage('mcp_admin_grant');
+    $now = $this->time->getRequestTime();
+    $ids = $storage->getQuery()
+      ->accessCheck(FALSE)
+      ->condition('revoked', self::NOT_REVOKED)
+      ->condition('expires', $now, '>')
+      ->execute();
+    if (!$ids) {
+      return 0;
+    }
+
+    $revoked = 0;
+    foreach ($storage->loadMultiple($ids) as $grant) {
+      if (!$grant instanceof McpAdminGrantInterface) {
+        continue;
+      }
+      $this->revokeGrant($grant, 'role_posture_unsafe', ['posture' => $posture]);
+      $revoked++;
+    }
+    return $revoked;
+  }
+
+  /**
+   * Returns the user's active (non-expired, non-revoked) grant, if any.
+   *
+   * Used by the break-glass conduct auditor: a cookie-session holder of
+   * mcp_admin is only "elevated" when a live grant row exists.
+   *
+   * @param int $uid
+   *   The user id.
+   *
+   * @return \Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface|null
+   *   The first active grant, or NULL.
+   */
+  public function findActiveGrantFor(int $uid): ?McpAdminGrantInterface {
+    if ($uid <= 0) {
+      return NULL;
+    }
+    $storage = $this->entityTypeManager->getStorage('mcp_admin_grant');
+    $now = $this->time->getRequestTime();
+    $ids = $storage->getQuery()
+      ->accessCheck(FALSE)
+      ->condition('uid', $uid)
+      // 0, not FALSE: see self::NOT_REVOKED.
+      ->condition('revoked', self::NOT_REVOKED)
+      ->condition('expires', $now, '>')
+      ->range(0, 1)
+      ->execute();
+    if (!$ids) {
+      return NULL;
+    }
+    $grant = $storage->load(reset($ids));
+    return $grant instanceof McpAdminGrantInterface ? $grant : NULL;
+  }
+
+  /**
+   * Marks a grant revoked; removes the role if no other grant covers the user.
+   *
+   * @param \Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface $grant
+   *   The grant to revoke.
+   * @param string $reason
+   *   Audit reason: 'expired' or 'role_posture_unsafe'.
+   * @param array $extraMeta
+   *   Additional audit metadata (e.g. posture detail).
+   */
+  private function revokeGrant(McpAdminGrantInterface $grant, string $reason, array $extraMeta = []): void {
+    $uid = $grant->getUserId();
+    $userStorage = $this->entityTypeManager->getStorage('user');
+    $user = $userStorage->load($uid);
+    // Only remove the role if no other still-active grant covers this user.
+    // Narrow to UserInterface before role API (same posture as grant()).
+    if ($user instanceof UserInterface && $user->hasRole(self::ROLE_ID) && !$this->hasOtherActiveGrant($uid, (int) $grant->id())) {
+      $user->removeRole(self::ROLE_ID);
+      $user->save();
+    }
+    $grant->setRevoked(TRUE)->save();
+    $this->auditLogger->log('mcp_admin_revoked', array_merge([
+      'entity_type' => 'user',
+      'id' => (string) $uid,
+      'grant_id' => (int) $grant->id(),
+      'reason' => $reason,
+    ], $extraMeta));
   }
 
   /**

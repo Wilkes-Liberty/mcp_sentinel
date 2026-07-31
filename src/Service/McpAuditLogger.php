@@ -133,6 +133,35 @@ class McpAuditLogger {
       return;
     }
 
+    $this->writeToChain($operation, $metadata);
+  }
+
+  /**
+   * Logs an operation even when audit_enabled is off.
+   *
+   * Break-glass elevation is accountable by design. A holder can set
+   * audit_enabled to false — if the ordinary log() gate applied, that change
+   * (and anything after it while elevated) would leave no row. This path still
+   * goes through requireChain() and fails closed when the chain is missing.
+   *
+   * @param string $operation
+   *   A short operation identifier (e.g. 'config_save_break_glass').
+   * @param array $metadata
+   *   Optional metadata (same contract as log()).
+   */
+  public function logAlways(string $operation, array $metadata = []): void {
+    $this->writeToChain($operation, $metadata);
+  }
+
+  /**
+   * Appends one row to the audit chain (shared by log() and logAlways()).
+   *
+   * @param string $operation
+   *   Operation identifier.
+   * @param array $metadata
+   *   Metadata payload.
+   */
+  private function writeToChain(string $operation, array $metadata): void {
     // The connector's self-reported X-MCP-Client label (Integration Contract
     // v1.0). Recorded into the audit metadata for forensic identity only — it
     // is NEVER an enforcement signal. Governance keys on the authenticated role

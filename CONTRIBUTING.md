@@ -58,6 +58,19 @@ Security-relevant changes (policy resolution, role assertions, audit logging,
 break-glass, raw SQL, OAuth channel detection) should include a test that fails
 without the fix.
 
+### Break-glass allowlist dual-edit
+
+The break-glass permission ceiling lives in **two** places that must stay
+identical:
+
+1. `McpBreakGlassManager::ALLOWED_PERMISSIONS` (runtime refuse + status report)
+2. `modules/mcp_sentinel_approval/config/optional/user.role.mcp_admin.yml`
+   (what new sites import)
+
+Never edit one without the other in the same commit. CI’s PHPUnit suite includes
+`McpBreakGlassTest::testOptionalConfigYamlShipsApprovedList`, which fails if they
+drift.
+
 ## Documentation
 
 Update `README.md`, `CHANGELOG.md` (under `[Unreleased]`), and the docs in

@@ -6,6 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Break-glass conduct audit (#94 / d.o #3614177).** Config saves made while a
+  live `mcp_admin` grant is active are audited as `config_save_break_glass`
+  (object name, changed key names only, grant id, acting uid), including the
+  self-concealing case of setting `audit_enabled: false`. Ordinary admins
+  without a grant are unchanged. If the audit write fails, the save is refused.
+- **Live-grant posture revalidation (#89 / d.o #3614165).** On cron, if
+  `mcp_admin` is missing, `is_admin`, or holds allowlist extras, all active
+  grants are force-revoked with audit reason `role_posture_unsafe`. Narrower
+  shells alone do not force-revoke.
+
+### Added
+- **People → Roles warning for `mcp_admin` (#91 / d.o #3614166).** Editing the
+  break-glass role shows that it is time-boxed elevation, lists the allowlist,
+  and links to the Status report.
+
+### Changed
+- **Documented empty/narrow break-glass edge and dual-edit rule (#92, #93 /
+  d.o #3614167, #3614168).** Approval README and CONTRIBUTING state that a
+  subset (including empty) still grants with Status WARNING only, and that
+  `ALLOWED_PERMISSIONS` must stay identical to the optional role YAML (kernel
+  test remains the blocking check).
+
 ## [2.2.0] - 2026-07-31
 
 ### Upgrading
