@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-07-31
+
+### Upgrading
+
+**`drush mcp-sentinel:break-glass` will now refuse on sites whose `mcp_admin` role is
+`is_admin` or holds permissions outside the shipped allowlist.** Previously it granted
+regardless. Read this before you need it, because the moment you find out otherwise is an
+emergency.
+
+That refusal is the point — a time-boxed "emergency" role that silently means *every*
+permission was never a bounded control — but it does mean break-glass stops working until
+the role is corrected. Check the status report after upgrading: it now reports an ERROR for
+an `is_admin` or over-permissioned `mcp_admin`, and a WARNING when the role is missing
+shipped permissions.
+
+The module ships a correct role in the approval submodule's `config/optional`. Note that
+`config/optional` **will not overwrite an existing role**, so a site that already has
+`mcp_admin` must reconcile it by hand — the shipped YAML is the reference, and it must stay
+identical to `McpBreakGlassManager::ALLOWED_PERMISSIONS`.
+
 ### Security
 - **Break-glass grant-time permission allowlist (#87).**
   `McpBreakGlassManager::ALLOWED_PERMISSIONS` is the elevation ceiling. Grant
