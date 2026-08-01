@@ -55,11 +55,11 @@ STRIP_LINE_PATTERNS = [
     re.compile(rf"^(?:{CREDIT_TRAILER})\s*:\s*.*(?:{AI_AUTHOR})", re.I),
     re.compile(rf"^(?i:(?:{CREDIT_TRAILER})\s*:)\s*.*\bAI\b"),
     re.compile(
-        rf"^(?:Generated|Created|Written|Authored|Produced)\s+(?:with|by)\s+"
+        rf"^\s*(?:\U0001F916\s*)?(?:Generated|Created|Written|Authored|Produced)\s+(?:with|by)\s+"
         rf".*(?:{AI_AUTHOR})",
         re.I,
     ),
-    re.compile(r"\U0001F916"),  # robot emoji anywhere on the line
+    re.compile(r"^\s*\U0001F916\s*$"),  # a line that is ONLY the robot emoji
 ]
 
 # --- END SHARED PATTERNS ---
@@ -132,7 +132,7 @@ def commits_oldest_first(base: str, head: str) -> List[Tuple[str, str]]:
     """(sha, full message) for each non-merge commit in base..head, oldest first."""
     sep = "\x1e"
     out = git(
-        ["log", "--reverse", "--no-merges", f"--format=%H{sep}%B%x00", f"{base}..{head}"]
+        ["log", "--reverse", "--topo-order", "--no-merges", f"--format=%H{sep}%B%x00", f"{base}..{head}"]
     ).stdout
     commits: List[Tuple[str, str]] = []
     for record in out.split("\x00"):
@@ -304,6 +304,16 @@ def main() -> int:
         )
         print(exc.stderr or "", file=sys.stderr)
         return 2
+
+    merges = git(["rev-list", "--merges", f"{base_sha}..{head_sha}"]).stdout.strip()
+    if merges:
+        print(
+            f"::warning::strip-attribution: merge commits detected in {short(base_sha)}..{short(head_sha)}; "
+            "auto-rewrite only supports linear history. Please rebase to a linear branch and re-run."
+        )
+        set_output("stripped", "false")
+        set_output("count", "0")
+        return 0
 
     commits = commits_oldest_first(base_sha, head_sha)
     dirty = []
