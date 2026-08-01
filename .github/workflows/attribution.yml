@@ -1,45 +1,68 @@
 name: Attribution
 
-# Fails a pull request whose commits, title or body credit AI with authorship.
+# Strips AI-attribution trailers from PR commit messages, then fails the check
+# if any attribution credit remains (commits, title, or body).
 #
-# Local commit hooks cannot cover this. GitHub composes "Commit suggestion",
-# "Apply suggestion" and Copilot Autofix commits **server-side**, so no local
-# `git commit` runs and no local hook fires. A trailer added that way is
-# invisible until someone reads the commit list, and once it is merged and
-# tagged it cannot be removed -- a tag pins history permanently. Before merge is
-# the only window where the fix is cheap.
+# Why this exists
+# ---------------
+# Local commit hooks cannot cover server-side commits. GitHub composes
+# "Commit suggestion", "Apply suggestion" and Copilot Autofix commits on the
+# server, so no local `git commit` runs and no local hook fires. A trailer
+# added that way is invisible until someone reads the commit list, and once it
+# is merged and tagged it cannot be removed — a tag pins history permanently.
+# Before merge is the only window where the fix is cheap.
 #
-# pull_request ONLY, deliberately: on `push` to the default branch this would be
-# permanently red against pre-existing history, and a trailer cannot reach the
-# default branch except through a PR or an admin bypass.
+# Two controls, one workflow
+# --------------------------
+# 1. strip-attribution.py rewrites removable trailer / footer lines on the PR
+#    branch (same-repo PRs only) and force-with-lease pushes the cleaned tip.
+# 2. check-attribution.py fails the job if any attribution credit remains —
+#    including PR title/body and mid-subject prose the stripper will not touch.
+#
+# pull_request ONLY, deliberately: on `push` to the default branch this would
+# be permanently red against pre-existing history, and a trailer cannot reach
+# the default branch except through a PR or an admin bypass.
 
 on:
   pull_request:
     # `edited` is load-bearing and NOT in the default set (opened, synchronize,
     # reopened). This check scans the PR title and body, and both are editable
-    # after the check has gone green -- so without `edited` a PR could pass, have
+    # after the check has gone green — so without `edited` a PR could pass, have
     # an attribution typed into its title, and merge green. It also means a red
     # body check can be cleared by fixing the body, instead of needing a
     # no-op push.
     types: [opened, synchronize, reopened, edited]
 
 permissions:
-  contents: read
+  contents: write      # force-with-lease push of the cleaned PR branch
+  pull-requests: write # optional comment when trailers were stripped
+
+concurrency:
+  group: attribution-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   attribution:
     name: No AI attribution
     runs-on: ubuntu-latest
+    # NOTE: no job-level `if:`. A skipped required check blocks the PR with no
+    # admin bypass. Fork / no-push paths are handled inside steps.
     steps:
       # fetch-depth: 0 is required. The default shallow clone cannot walk
-      # base..head, and the script fails loudly rather than reporting green if
+      # base..head, and both scripts fail loudly rather than reporting green if
       # the range is unreadable.
-      - uses: actions/checkout@v7
+      #
+      # ref: github.head_ref checks out the PR branch tip so strip can rewrite
+      # and push. For fork PRs the push step is skipped; the check still runs.
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # The title and body reach the script through files, never through shell
-      # interpolation -- a PR title is attacker-controlled text, and ${{ }}
+      # interpolation — a PR title is attacker-controlled text, and ${{ }}
       # inside a run: block would let it execute.
       - name: Stage the PR title and body
         env:
@@ -49,13 +72,43 @@ jobs:
           printf '%s' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
           printf '%s' "$PR_BODY"  > "$RUNNER_TEMP/pr-body.txt"
 
-      # NOTE: gate STEPS, never the job. A job-level `if:` on a *required* check
-      # skips rather than reports, and a skipped required check blocks the PR
-      # with no admin bypass. This job carries no `if:` and always reports.
+      - name: Strip AI attribution trailers from commits
+        id: strip
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BRANCH: ${{ github.head_ref }}
+          ORIGINAL_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/strip-attribution.py \
+            --base "$BASE" \
+            --head HEAD \
+            --branch "$BRANCH" \
+            --push \
+            --force-with-lease-ref "${BRANCH}:${ORIGINAL_HEAD}"
+
+      - name: Comment when trailers were stripped
+        if: >-
+          github.event.pull_request.head.repo.full_name == github.repository
+          && steps.strip.outputs.stripped == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          COUNT: ${{ steps.strip.outputs.count }}
+        run: |
+          set -euo pipefail
+          body="Removed AI attribution trailer(s) from **${COUNT}** commit(s) on this branch (standing order §1). Trees and author identity are unchanged; only the forbidden credit lines were dropped. Re-run of this check will confirm the tip is clean."
+          gh pr comment "$PR" --body "$body"
+
+      # Always scan — including when strip was skipped (fork PR) or a no-op.
+      # Scan HEAD so a successful local rewrite is validated even before the
+      # follow-up workflow run from the force-push lands.
       - name: Scan commits, title and body
         run: |
+          set -euo pipefail
           python3 .github/scripts/check-attribution.py \
             --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
+            --head HEAD \
             --title-file "$RUNNER_TEMP/pr-title.txt" \
             --body-file "$RUNNER_TEMP/pr-body.txt"
