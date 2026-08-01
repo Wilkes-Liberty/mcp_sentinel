@@ -219,10 +219,21 @@ class McpAuditLogger {
    * signing key, plus counts. Read the keys you need rather than comparing the
    * whole array, or a purely additive change upstream reads as a failure here.
    *
-   * @return array{ok: bool, broken_at: int|null, reason: string|null, unkeyed_rows: int, unkeyed_through: int|null}
-   *   Pass-through of audit_chain's verify() shape. 'ok' is TRUE when the chain
-   *   is intact; 'broken_at' is the first broken row id or NULL; 'reason' and
-   *   the unkeyed_* fields distinguish tampering from pre-key rows.
+   * @return array{
+   *   ok: bool,
+   *   broken_at: int|null,
+   *   reason: string|null,
+   *   unkeyed_rows: int,
+   *   unkeyed_through: int|null,
+   *   verified_from: int|null,
+   *   sealed_through: int|null,
+   *   seal_intact: bool|null
+   *   }
+   *   Pass-through of audit_chain's verify() shape (must stay aligned with
+   *   AuditChainLoggerInterface::verify()). 'ok' is TRUE when the chain is
+   *   intact; 'broken_at' is the first broken row id or NULL; 'reason' and
+   *   the unkeyed_* fields distinguish tampering from pre-key rows; seal_* /
+   *   verified_from describe an operator seal over a historical prefix.
    */
   public function verifyChain(): array {
     // Verification walks the whole chain, not just this channel's rows: the
