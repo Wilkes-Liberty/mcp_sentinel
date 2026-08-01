@@ -113,7 +113,10 @@ attributed to the authenticated account.
 - **MCP Sentinel Approval** (`mcp_sentinel_approval`) — optional human-approval
   gate: queues governed destructive operations (bulk delete) as approval
   requests for an authorized human to approve or deny instead of executing
-  them immediately.
+  them immediately. Includes time-boxed break-glass elevation into a shipped
+  non-admin `mcp_admin` role (permission allowlist, grant-time seal, status
+  drift, live-grant posture revalidation, and audit of config saves while
+  elevated).
 
 ## Requirements
 

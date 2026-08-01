@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-31
+
 ### Security
 - **Break-glass conduct audit (#94 / d.o #3614177).** Config saves made while a
   live `mcp_admin` grant is active are audited as `config_save_break_glass`
