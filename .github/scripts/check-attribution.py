@@ -72,7 +72,18 @@ PATTERNS = [
         re.compile(r"\bAI[-\s]?(?:generated|authored|assisted|written)\b", re.I),
         'an "AI-generated" authorship marker',
     ),
-    (re.compile(r"\U0001F916"), "the robot emoji attribution marker"),
+    (
+        # A robot emoji is only an attribution when it stands as a marker line
+        # on its own. Matching it anywhere fails any text that DESCRIBES the
+        # control -- which blocked a release PR whose purpose was to warn about
+        # trailers, and every PR in this control's own rollout.
+        #
+        # Nothing is lost by narrowing it: the real trailer reads
+        # "<emoji> Generated with <tool>", and the Generated/Created rule above
+        # is unanchored, so it already matches with the emoji in front.
+        re.compile(r"^[ \t]*\U0001F916[ \t]*$", re.M),
+        "a robot emoji attribution marker line",
+    ),
 ]
 
 # --- END SHARED PATTERNS ---
