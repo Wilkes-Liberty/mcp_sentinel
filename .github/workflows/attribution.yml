@@ -38,6 +38,11 @@ permissions:
   pull-requests: write # optional comment when trailers were stripped
 
 concurrency:
+  # The head SHA is load-bearing. The strip step force-pushes the cleaned
+  # branch, which starts a second run; without the SHA that run shares this
+  # group and cancel-in-progress kills the run that just did the stripping,
+  # mid-verification. A cancelled run is neither pass nor fail, so as a
+  # required check it can leave a PR unmergeable. Do not simplify this key.
   group: attribution-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
   cancel-in-progress: true
 

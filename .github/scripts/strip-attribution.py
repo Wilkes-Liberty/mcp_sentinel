@@ -37,7 +37,7 @@ import os
 import re
 import subprocess
 import sys
-from typing import Iterable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 # --- BEGIN SHARED PATTERNS (keep identical to check-attribution.py) ---
 
