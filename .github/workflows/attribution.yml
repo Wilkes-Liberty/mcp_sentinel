@@ -1,0 +1,61 @@
+name: Attribution
+
+# Fails a pull request whose commits, title or body credit AI with authorship.
+#
+# Local commit hooks cannot cover this. GitHub composes "Commit suggestion",
+# "Apply suggestion" and Copilot Autofix commits **server-side**, so no local
+# `git commit` runs and no local hook fires. A trailer added that way is
+# invisible until someone reads the commit list, and once it is merged and
+# tagged it cannot be removed -- a tag pins history permanently. Before merge is
+# the only window where the fix is cheap.
+#
+# pull_request ONLY, deliberately: on `push` to the default branch this would be
+# permanently red against pre-existing history, and a trailer cannot reach the
+# default branch except through a PR or an admin bypass.
+
+on:
+  pull_request:
+    # `edited` is load-bearing and NOT in the default set (opened, synchronize,
+    # reopened). This check scans the PR title and body, and both are editable
+    # after the check has gone green -- so without `edited` a PR could pass, have
+    # an attribution typed into its title, and merge green. It also means a red
+    # body check can be cleared by fixing the body, instead of needing a
+    # no-op push.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  attribution:
+    name: No AI attribution
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 is required. The default shallow clone cannot walk
+      # base..head, and the script fails loudly rather than reporting green if
+      # the range is unreadable.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The title and body reach the script through files, never through shell
+      # interpolation -- a PR title is attacker-controlled text, and ${{ }}
+      # inside a run: block would let it execute.
+      - name: Stage the PR title and body
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
+          printf '%s' "$PR_BODY"  > "$RUNNER_TEMP/pr-body.txt"
+
+      # NOTE: gate STEPS, never the job. A job-level `if:` on a *required* check
+      # skips rather than reports, and a skipped required check blocks the PR
+      # with no admin bypass. This job carries no `if:` and always reports.
+      - name: Scan commits, title and body
+        run: |
+          python3 .github/scripts/check-attribution.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --title-file "$RUNNER_TEMP/pr-title.txt" \
+            --body-file "$RUNNER_TEMP/pr-body.txt"
