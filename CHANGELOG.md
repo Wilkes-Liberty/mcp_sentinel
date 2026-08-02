@@ -9,6 +9,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - **PHPStan: `McpAuditLogger::verifyChain()` return shape.** Document the full
   `audit_chain` `verify()` array (including seal/verified_from keys).
+- **CI: the attribution gate no longer fails on clean commits.** The stripper
+  compared each commit message against a copy that had gained a trailing newline,
+  so every commit looked modified and the run ended with `strip count > 0 but tip
+  unchanged`.
 
 
 ### Added
