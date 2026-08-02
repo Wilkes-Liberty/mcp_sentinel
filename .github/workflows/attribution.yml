@@ -76,7 +76,7 @@ jobs:
       # executed below comes from here. `repository:` is deliberately omitted so
       # this cannot be pointed at a fork.
       - name: Check out the base commit (trusted)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
@@ -99,12 +99,12 @@ jobs:
           # merge the scripts first, add the workflow second.
           missing=""
           for f in check-attribution.py strip-attribution.py; do
-            [ -f ".github/scripts/$f" ] || missing="$missing $f"
+            [ -f ".github/scripts/$f" ] || missing="${missing:+$missing }$f"
           done
           if [ -n "$missing" ]; then
-            echo "::error::the base commit has no attribution scripts ($missing). \
-          Merge .github/scripts/ on its own first, then add this workflow. The scripts \
-          are inert without it, so the first pull request is safe to merge unguarded."
+            # One line on purpose: a ::error:: annotation folded with backslash
+            # continuations bakes the YAML indentation into the message.
+            echo "::error::the base commit has no attribution scripts ($missing). Merge .github/scripts/ on its own first, then add this workflow; the scripts are inert without it, so that first pull request is safe to merge unguarded."
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/trusted"
@@ -128,7 +128,11 @@ jobs:
       - name: Check out the PR head locally
         env:
           BRANCH: ${{ github.head_ref }}
-        run: git checkout --quiet "$BRANCH"
+        # Fully qualified on purpose. A head_ref comes from the pull request and
+        # may legally begin with "-", which git would read as an option; the
+        # refs/heads/ prefix makes that impossible. Detaching is fine -- the
+        # strip step re-attaches the branch itself.
+        run: git checkout --quiet "refs/heads/${BRANCH}"
 
       # The title and body reach the script through files, never through shell
       # interpolation — a PR title is attacker-controlled text, and ${{ }}
@@ -138,6 +142,7 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          set -euo pipefail
           printf '%s' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
           printf '%s' "$PR_BODY"  > "$RUNNER_TEMP/pr-body.txt"
 
@@ -160,6 +165,10 @@ jobs:
             --force-with-lease-ref "${BRANCH}:${ORIGINAL_HEAD}"
 
       - name: Comment when trailers were stripped
+        # A courtesy notice must never decide a required check. Without this, a
+        # rate limit or a transient API error on `gh pr comment` fails the job
+        # after stripping and scanning both succeeded.
+        continue-on-error: true
         if: >-
           github.event.pull_request.head.repo.full_name == github.repository
           && steps.strip.outputs.stripped == 'true'
