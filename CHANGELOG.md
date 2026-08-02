@@ -9,6 +9,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - **PHPStan: `McpAuditLogger::verifyChain()` return shape.** Document the full
   `audit_chain` `verify()` array (including seal/verified_from keys).
+- **CI: the attribution gate no longer fails on clean commits.** The checker
+  compared each commit message against a copy that had gained a trailing newline,
+  so every commit looked modified and the run ended with `strip count > 0 but tip
+  unchanged`. Merge commits are now scanned, and the robot-emoji rule matches a
+  marker line rather than the character anywhere in the message.
 
 
 ### Added
