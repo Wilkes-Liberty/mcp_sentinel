@@ -92,8 +92,12 @@ def clean_message(message: str) -> Tuple[str, List[str]]:
     never produce a subject-less commit. Residual subject-level attribution is
     the check's job.
 
-    Returns the message unchanged when nothing matched, so a clean commit is
-    never rewritten.
+    Returns the message with its content unchanged when nothing matched, so a
+    clean commit is never rewritten. Not byte-for-byte identical: the result is
+    always newline-terminated, because `git log` supplies records with the
+    trailing newline stripped and `rewrite_range` compares against
+    `message + "\n"`. Callers should treat a missing final newline as
+    equivalent rather than relying on identity.
 
     Known limitation, stated because the patterns cannot express the
     difference: matching is on the author *name* as well as the address, so a
@@ -125,7 +129,12 @@ def clean_message(message: str) -> Tuple[str, List[str]]:
     # formatting -- which is outside this tool's stated scope, and would report
     # those commits as having carried attribution when they did not.
     if not removed:
-        return message, []
+        # Newline-terminated, but otherwise untouched. rewrite_range compares
+        # against `message + "\n"`, and git log records arrive stripped of their
+        # trailing newline -- so returning the message verbatim made every clean
+        # commit compare unequal and get rewritten. That is the exact opposite
+        # of what this early return is for.
+        return (message if message.endswith("\n") else message + "\n"), []
 
     # Drop trailing blank lines in the body (keep subject even if alone).
     while len(out) > 1 and out[-1].strip() == "":
