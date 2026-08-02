@@ -1,45 +1,137 @@
 name: Attribution
 
-# Fails a pull request whose commits, title or body credit AI with authorship.
+# Strips AI-attribution trailers from PR commit messages, then fails the check
+# if any attribution credit remains (commits, title, or body).
 #
-# Local commit hooks cannot cover this. GitHub composes "Commit suggestion",
-# "Apply suggestion" and Copilot Autofix commits **server-side**, so no local
-# `git commit` runs and no local hook fires. A trailer added that way is
-# invisible until someone reads the commit list, and once it is merged and
-# tagged it cannot be removed -- a tag pins history permanently. Before merge is
-# the only window where the fix is cheap.
+# Why this exists
+# ---------------
+# Local commit hooks cannot cover server-side commits. GitHub composes
+# "Commit suggestion", "Apply suggestion" and Copilot Autofix commits on the
+# server, so no local `git commit` runs and no local hook fires. A trailer
+# added that way is invisible until someone reads the commit list, and once it
+# is merged and tagged it cannot be removed — a tag pins history permanently.
+# Before merge is the only window where the fix is cheap.
 #
-# pull_request ONLY, deliberately: on `push` to the default branch this would be
-# permanently red against pre-existing history, and a trailer cannot reach the
-# default branch except through a PR or an admin bypass.
+# Two controls, one workflow
+# --------------------------
+# 1. strip-attribution.py rewrites removable trailer / footer lines on the PR
+#    branch (same-repo PRs only) and force-with-lease pushes the cleaned tip.
+# 2. check-attribution.py fails the job if any attribution credit remains —
+#    including PR title/body and mid-subject prose the stripper will not touch.
+#
+# pull_request ONLY, deliberately: on `push` to the default branch this would
+# be permanently red against pre-existing history, and a trailer cannot reach
+# the default branch except through a PR or an admin bypass.
+#
+# The trust model, which is the part that is easy to get wrong
+# -----------------------------------------------------------
+# A gate that runs code supplied by the thing it is gating is not a gate. An
+# earlier version checked out the PR head and executed `.github/scripts/*` from
+# that checkout, so a pull request could edit the checker to exit 0 and pass
+# itself. On a public repository that is open to anyone with a fork; on a
+# private one it is open to anyone who can push a branch.
+#
+# So the scripts always come from the BASE commit, are copied out of the work
+# tree before any PR content is checked out, and are executed from there. The
+# PR's own copy of them is never run.
+#
+# The PR head is fetched from `refs/pull/<n>/head` on the base repository
+# rather than cloned from the contributor's fork. That is also why fork PRs
+# work at all: the base commit and the head commit end up in one clone, so
+# `base..head` is readable. Cloning the fork instead leaves the base SHA
+# missing and the range unreadable, which fails the run rather than passing it,
+# but fails it for the wrong reason.
 
 on:
   pull_request:
     # `edited` is load-bearing and NOT in the default set (opened, synchronize,
     # reopened). This check scans the PR title and body, and both are editable
-    # after the check has gone green -- so without `edited` a PR could pass, have
+    # after the check has gone green — so without `edited` a PR could pass, have
     # an attribution typed into its title, and merge green. It also means a red
     # body check can be cleared by fixing the body, instead of needing a
     # no-op push.
     types: [opened, synchronize, reopened, edited]
 
 permissions:
-  contents: read
+  contents: write      # force-with-lease push of the cleaned PR branch
+  pull-requests: write # optional comment when trailers were stripped
+
+concurrency:
+  # The head SHA is load-bearing. The strip step force-pushes the cleaned
+  # branch, which starts a second run; without the SHA that run shares this
+  # group and cancel-in-progress kills the run that just did the stripping,
+  # mid-verification. A cancelled run is neither pass nor fail, so as a
+  # required check it can leave a PR unmergeable. Do not simplify this key.
+  group: attribution-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
 
 jobs:
   attribution:
     name: No AI attribution
     runs-on: ubuntu-latest
+    # NOTE: no job-level `if:`. A skipped required check blocks the PR with no
+    # admin bypass. Fork / no-push paths are handled inside steps.
     steps:
-      # fetch-depth: 0 is required. The default shallow clone cannot walk
-      # base..head, and the script fails loudly rather than reporting green if
-      # the range is unreadable.
-      - uses: actions/checkout@v7
+      # 1. TRUSTED checkout: the base repository at the base commit. Everything
+      # executed below comes from here. `repository:` is deliberately omitted so
+      # this cannot be pointed at a fork.
+      - name: Check out the base commit (trusted)
+        uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
 
+      # 2. Move the trusted scripts out of the work tree BEFORE any PR content
+      # is checked out. Step 4 replaces the work tree with the PR's files,
+      # including its own .github/scripts — which must never be the copy that
+      # runs.
+      - name: Copy the trusted scripts out of the work tree
+        run: |
+          set -euo pipefail
+          # Fail closed when the base commit has no scripts. This happens on
+          # first adoption, where the pull request adding the workflow is also
+          # the one adding the scripts, so there is nothing trusted to run yet.
+          #
+          # Falling back to the pull request's copy would defeat the whole
+          # design, and not only on first adoption: one merged pull request
+          # that deletes the scripts from the default branch would put every
+          # later pull request back on its own copy. Adopt in two steps --
+          # merge the scripts first, add the workflow second.
+          missing=""
+          for f in check-attribution.py strip-attribution.py; do
+            [ -f ".github/scripts/$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::the base commit has no attribution scripts ($missing). \
+          Merge .github/scripts/ on its own first, then add this workflow. The scripts \
+          are inert without it, so the first pull request is safe to merge unguarded."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/trusted"
+          cp .github/scripts/check-attribution.py "$RUNNER_TEMP/trusted/"
+          cp .github/scripts/strip-attribution.py "$RUNNER_TEMP/trusted/"
+
+      # 3. Bring the PR head into this clone. From the BASE repository's
+      # refs/pull namespace, so it works for forks and leaves base and head in
+      # one repository where base..head is readable.
+      - name: Fetch the PR head
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --force origin \
+            "+refs/pull/${PR}/head:refs/heads/${BRANCH}"
+
+      # 4. Work tree becomes the PR content. Safe now: nothing below runs a
+      # script from it.
+      - name: Check out the PR head locally
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: git checkout --quiet "$BRANCH"
+
       # The title and body reach the script through files, never through shell
-      # interpolation -- a PR title is attacker-controlled text, and ${{ }}
+      # interpolation — a PR title is attacker-controlled text, and ${{ }}
       # inside a run: block would let it execute.
       - name: Stage the PR title and body
         env:
@@ -49,13 +141,46 @@ jobs:
           printf '%s' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
           printf '%s' "$PR_BODY"  > "$RUNNER_TEMP/pr-body.txt"
 
-      # NOTE: gate STEPS, never the job. A job-level `if:` on a *required* check
-      # skips rather than reports, and a skipped required check blocks the PR
-      # with no admin bypass. This job carries no `if:` and always reports.
-      - name: Scan commits, title and body
+      # Same-repo only: a fork's branch is not ours to rewrite, and the token
+      # cannot push to it. Fork PRs still get scanned below.
+      - name: Strip AI attribution trailers from commits
+        id: strip
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BRANCH: ${{ github.head_ref }}
+          ORIGINAL_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          python3 .github/scripts/check-attribution.py \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.event.pull_request.head.sha }}" \
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/trusted/strip-attribution.py" \
+            --base "$BASE" \
+            --head HEAD \
+            --branch "$BRANCH" \
+            --push \
+            --force-with-lease-ref "${BRANCH}:${ORIGINAL_HEAD}"
+
+      - name: Comment when trailers were stripped
+        if: >-
+          github.event.pull_request.head.repo.full_name == github.repository
+          && steps.strip.outputs.stripped == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          COUNT: ${{ steps.strip.outputs.count }}
+        run: |
+          set -euo pipefail
+          body="Removed AI attribution trailer(s) from **${COUNT}** commit(s) on this branch (standing order §1). Trees and author identity are unchanged; only the forbidden credit lines were dropped. Re-run of this check will confirm the tip is clean."
+          gh pr comment "$PR" --body "$body"
+
+      # Always scan — including when strip was skipped (fork PR) or a no-op.
+      # HEAD is the PR tip, rewritten in place by strip when that ran.
+      - name: Scan commits, title and body
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          python3 "$RUNNER_TEMP/trusted/check-attribution.py" \
+            --base "$BASE" \
+            --head HEAD \
             --title-file "$RUNNER_TEMP/pr-title.txt" \
             --body-file "$RUNNER_TEMP/pr-body.txt"
