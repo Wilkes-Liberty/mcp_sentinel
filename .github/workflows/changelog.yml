@@ -1,9 +1,25 @@
 name: Changelog
+
+# Requires a CHANGELOG.md entry only on pull requests that opt in with the
+# `changelog` label; unlabeled PRs pass. Requiring an entry by default was
+# tried and reverted org-wide: routine CI, tooling and dependency PRs either
+# pad the release notes users read or get labelled around, and a check that
+# fires when nothing is wrong gets ignored.
+#
+# Self-contained on purpose: this public repository cannot call reusable
+# workflows that live in the org's private repositories — such calls fail at
+# workflow load ("workflow file issue", 0s) before any step runs.
+#
+# No base-branch filter: the gate fires on every pull request, whatever the
+# target branch.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
+
 permissions:
   contents: read
+
 jobs:
   changelog:
     name: CHANGELOG updated
@@ -12,8 +28,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Require a CHANGELOG.md entry
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+      - name: Require a CHANGELOG.md entry (only on `changelog`-labeled PRs)
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'changelog')
                 && github.event.pull_request.user.login != 'dependabot[bot]' }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -21,6 +37,6 @@ jobs:
           if git diff --name-only "$BASE_SHA"...HEAD | grep -qx 'CHANGELOG.md'; then
             echo "CHANGELOG.md updated."
           else
-            echo "::error::This PR does not update CHANGELOG.md. Add an entry under [Unreleased], or apply the 'no-changelog' label for trivial PRs."
+            echo "::error::This PR is labeled 'changelog' but does not update CHANGELOG.md. Add an entry under [Unreleased], or remove the label."
             exit 1
           fi
