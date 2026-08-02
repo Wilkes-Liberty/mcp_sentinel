@@ -91,6 +91,17 @@ def clean_message(message: str) -> Tuple[str, List[str]]:
     Preserves the subject line even if it would match a strip pattern, so we
     never produce a subject-less commit. Residual subject-level attribution is
     the check's job.
+
+    Returns the message unchanged when nothing matched, so a clean commit is
+    never rewritten.
+
+    Known limitation, stated because the patterns cannot express the
+    difference: matching is on the author *name* as well as the address, so a
+    human co-author who happens to be called Claude, Devin or Gemini is
+    stripped along with the machines. Erring that way is deliberate -- §1 is
+    absolute and a missed trailer is unrecoverable once tagged -- but it is a
+    real false positive. Every removed line is reported, so a wrongly dropped
+    human co-author is visible in the run and can be restored by hand.
     """
     # Normalize to lines without a guaranteed trailing newline for processing.
     raw = message.replace("\r\n", "\n").replace("\r", "\n")
@@ -107,6 +118,14 @@ def clean_message(message: str) -> Tuple[str, List[str]]:
             removed.append(line)
             continue
         out.append(line)
+
+    # Whitespace normalization is repair for the gap a removed trailer leaves,
+    # so it only runs when something was removed. Doing it unconditionally
+    # rewrites and force-pushes commits that were already clean, purely for
+    # formatting -- which is outside this tool's stated scope, and would report
+    # those commits as having carried attribution when they did not.
+    if not removed:
+        return message, []
 
     # Drop trailing blank lines in the body (keep subject even if alone).
     while len(out) > 1 and out[-1].strip() == "":
