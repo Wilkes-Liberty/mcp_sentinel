@@ -104,7 +104,18 @@ jobs:
         env:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
         run: |
-          composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
+          retry composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
             --no-interaction --no-install --no-progress
           cd drupal
           # Some deps are dev-stability (mcp_server is ^2.0@dev).
@@ -124,18 +135,29 @@ jobs:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
           PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
           # -W (--with-all-dependencies) on both: recommended-project ships a
           # composer.lock, so each require is a *partial* update and composer
           # refuses to move transitive packages the lock pins — core-dev wants
           # phpunit, phpunit wants sebastian/diff ^6, the lock says 7.0.0, and
           # resolution fails. -W lets it move them.
-          composer require -W --no-interaction --no-progress \
+          retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
           # core-dev brings PHPUnit; drush because the module ships Drush
           # commands whose tests instantiate them (they extend
           # Drush\Commands\DrushCommands); the rest are the contrib modules the
           # tests enable, mirroring the module's own require-dev.
-          composer require -W --dev --no-interaction --no-progress \
+          retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
             "phpunit/phpunit:${PHPUNIT_VERSION}" \
             "drush/drush:^13" \
@@ -287,7 +309,18 @@ jobs:
 
       - name: Scaffold a Drupal site
         run: |
-          composer create-project "drupal/recommended-project:^11" drupal \
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
+          retry composer create-project "drupal/recommended-project:^11" drupal \
             --no-interaction --no-install --no-progress
           cd drupal
           composer config minimum-stability dev
@@ -302,9 +335,20 @@ jobs:
       - name: Install dependencies
         working-directory: drupal
         run: |
-          composer require -W --no-interaction --no-progress \
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
+          retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
-          composer require -W --dev --no-interaction --no-progress \
+          retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^11" \
             "phpunit/phpunit:^11.5" \
             "drush/drush:^13" \
@@ -439,7 +483,18 @@ jobs:
       # nothing about the module.
       - name: Scaffold a Drupal site
         run: |
-          composer create-project "drupal/recommended-project:^11" drupal \
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
+          retry composer create-project "drupal/recommended-project:^11" drupal \
             --no-interaction --no-install --no-progress
           cd drupal
           composer config minimum-stability dev
@@ -454,12 +509,23 @@ jobs:
       - name: Install dependencies
         working-directory: drupal
         run: |
-          composer require -W --no-interaction --no-progress \
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
+          retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
           # The same contrib set the tests enable: phpstan resolves types
           # against these, and a missing one turns a real error into a
           # "class not found" that hides it.
-          composer require -W --dev --no-interaction --no-progress \
+          retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^11" \
             "phpstan/phpstan:^2" \
             "phpstan/extension-installer:^1.4" \
