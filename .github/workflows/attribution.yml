@@ -148,9 +148,19 @@ jobs:
 
       # Same-repo only: a fork's branch is not ours to rewrite, and the token
       # cannot push to it. Fork PRs still get scanned below.
+      # Never rewrite the default branch. A pull request may legitimately be
+      # opened FROM the default branch -- master into a release branch, or
+      # simply aimed the wrong way -- and the strip step force-pushes whatever
+      # the head branch is. If Actions is permitted to bypass branch
+      # protection, that rewrites the default branch's history. The blast
+      # radius is the whole repository, and the control does not need it: the
+      # scan below still runs and still fails the check, a human just clears it
+      # by hand.
       - name: Strip AI attribution trailers from commits
         id: strip
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        if: >-
+          github.event.pull_request.head.repo.full_name == github.repository
+          && github.head_ref != github.event.repository.default_branch
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           BRANCH: ${{ github.head_ref }}
@@ -171,6 +181,7 @@ jobs:
         continue-on-error: true
         if: >-
           github.event.pull_request.head.repo.full_name == github.repository
+          && github.head_ref != github.event.repository.default_branch
           && steps.strip.outputs.stripped == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
