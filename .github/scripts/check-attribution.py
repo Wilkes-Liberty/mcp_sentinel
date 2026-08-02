@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Fail a pull request whose commits or prose carry AI-attribution credit.
+"""Fail a pull request whose commits, identities, or prose carry AI-attribution credit.
 
 Wilkes & Liberty work reads as authored by the human operator. This is not about
 hiding that AI tooling is used -- naming a tool, or shipping a CLAUDE.md, is
 fine. The rule is about authorship and contribution CREDIT.
+
+Three surfaces are scanned, because credit lands on all three: commit MESSAGES,
+the commit AUTHOR and COMMITTER identities, and the PR title and body. The
+identity scan was added after a pull request merged with `copilot-swe-agent[bot]`
+in its author field and passed this check cleanly -- the trailers had been
+stripped, and nothing looked at who the commit said wrote it.
 
 A local commit hook cannot cover this on its own. GitHub composes "Commit
 suggestion", "Apply suggestion" and Copilot Autofix commits **server-side**, so
@@ -105,6 +111,32 @@ If the trailer came from GitHub's "Commit suggestion" or Copilot Autofix, do not
 use that button. Read the suggestion, apply the edit yourself, and commit it
 under your own name.
 
+To fix an AI AUTHOR or COMMITTER IDENTITY, rewording is not enough -- the claim
+is in the commit's identity fields, not its message. WHICH field is wrong
+decides the fix, and the wrong one destroys credit that was correct:
+
+  * AUTHOR is the AI (the usual case -- an agent wrote the commit):
+
+        git rebase -i <base>          # mark the commit `edit`
+        git commit --amend --reset-author --no-edit
+        git rebase --continue
+
+  * COMMITTER only, author is a human who should keep the credit (a
+    server-side "Commit suggestion" applied to someone else's work).
+    Do NOT use --reset-author here; it would overwrite that human with you:
+
+        git rebase -i <base>          # mark the commit `edit`
+        git commit --amend --no-edit  # re-stamps committer, author untouched
+        git rebase --continue
+
+Then `git push --force-with-lease`. The commit's content is untouched either
+way. `git log --format='%an <%ae> / %cn <%ce>'` shows which field is which.
+
+The same button is usually the cause. An agent that opens or updates a pull
+request commits under its own identity, so accepting its commits wholesale
+credits it in `git log` -- which is more visible than a trailer, not less.
+Take the change, not the commit.
+
 To fix a PR TITLE or BODY, just edit it here -- no history rewrite needed.
 """
 
@@ -115,6 +147,110 @@ def find_attribution(text: str):
         if pattern.search(text):
             return description
     return None
+
+
+# An AI name standing in the author or committer slot of a commit.
+#
+# The PATTERNS above only ever match an attribution *construct* -- a trailer, a
+# "Generated with" footer -- because in prose a vendor name is just a word. In
+# an identity field there is no construct to look for: the field IS the claim.
+# `Author: copilot-swe-agent[bot]` credits an AI with authorship as plainly as
+# any trailer, and more visibly, since git log and the GitHub commit list show
+# the author and not the trailers.
+#
+# Identity matching is split in two, because the vendor list contains two very
+# different kinds of word and treating them alike is wrong in both directions.
+#
+# UNAMBIGUOUS -- a company or product, not something a person is called. Seeing
+# one in an author field is the claim by itself.
+IDENTITY_UNAMBIGUOUS = (
+    r"anthropic|openai|copilot|chatgpt|windsurf|aider|"
+    r"github\s*copilot|swe-?agent"
+)
+
+# AMBIGUOUS -- also ordinary human given names or common words. `claude` and
+# `devin` are names people have; `gemini`, `cursor`, `codex` and `llama` are
+# words. Flagging these on sight would block a contributor called Claude Dupont,
+# which on the published projects is an outside contribution refused for being
+# named wrong. They only count alongside a marker below.
+IDENTITY_AMBIGUOUS = r"claude|devin|gemini|cursor|codex|llama"
+
+# What turns an ambiguous token into a claim: a bot/agent marker, or a noreply
+# address of the kind automation commits under. `Claude <noreply@anthropic.com>`
+# is caught by the unambiguous list anyway; `claude-code[bot]` is caught here.
+# `bot` and `agent` are bounded the same way the tokens above are, and for the
+# same reason: unbounded, `agent` matches inside ordinary words that turn up in
+# real addresses -- `agentur` is German for agency, and `Reagent` is a surname.
+# Either would have combined with an ambiguous given name to flag a human.
+# `noreply` needs no boundary; it is not a fragment of anything.
+IDENTITY_BOT_MARKER = (
+    r"\[bot\]|(?<![a-z0-9])(?:bot|agent)(?![a-z0-9])|noreply|no-reply"
+)
+
+# Boundaries are explicitly alphanumeric rather than `\b`, because Python's `\b`
+# is built on `\w`, which counts `_` as a word character. `\bcopilot\b` does NOT
+# match `copilot_swe_agent` -- the underscore is the commonest separator in bot
+# handles, so the boundary intended to prevent surname false positives was also
+# skipping the exact identities this check exists for.
+def _bounded(alternation: str) -> re.Pattern:
+    return re.compile(rf"(?<![a-z0-9])(?:{alternation})(?![a-z0-9])", re.I)
+
+
+AI_IDENTITY_UNAMBIGUOUS = _bounded(IDENTITY_UNAMBIGUOUS)
+AI_IDENTITY_AMBIGUOUS = _bounded(IDENTITY_AMBIGUOUS)
+AI_IDENTITY_MARKER = re.compile(IDENTITY_BOT_MARKER, re.I)
+
+# Roles are checked separately so the message can say which one is wrong.
+# Both matter: an agent that authors a commit lands in the author slot, while a
+# server-side "Commit suggestion" can put one in the committer slot instead.
+IDENTITY_ROLES = ("author", "committer")
+
+
+def find_identity_attribution(identities):
+    """Return a description of the first AI identity found, or None.
+
+    `identities` is ((author_name, author_email), (committer_name, committer_email)).
+
+    An identity counts as an attribution when it contains an unambiguous vendor
+    or product name, OR an ambiguous token together with a bot/agent marker.
+    Name and email are considered as one string per role, so a marker in the
+    address qualifies a token in the name -- `Claude <claude-code[bot]@...>` is
+    one identity, not two unrelated fields.
+
+    Deliberately NOT a check that the address is an @wilkesliberty.com one.
+    Standing order §2 does require that of the operator, but this control also
+    runs on the published projects, where an external contributor's commit is
+    the point rather than a defect. A rule that fails every outside pull request
+    would be removed within a week, and taking the whole control with it.
+    """
+    for role, (name, email) in zip(IDENTITY_ROLES, identities):
+        identity = " ".join(v for v in (name, email) if v)
+        if not identity:
+            continue
+
+        hit = AI_IDENTITY_UNAMBIGUOUS.search(identity)
+        if hit:
+            return f"an AI {role} identity ({hit.group(0)} in: {identity})"
+
+        hit = AI_IDENTITY_AMBIGUOUS.search(identity)
+        if hit and AI_IDENTITY_MARKER.search(identity):
+            return (f"an AI {role} identity ({hit.group(0)} with a bot/agent "
+                    f"marker, in: {identity})")
+    return None
+
+
+def escape_workflow_command(text: str) -> str:
+    """Neutralise a value before it goes into a `::error::` annotation.
+
+    Findings quote commit subjects and identity fields, all of which are written
+    by whoever made the commit -- attacker-controlled on a fork pull request. A
+    raw newline there ends the annotation and starts a new line of workflow
+    output, so a crafted name could emit its own workflow commands or simply
+    forge a reassuring log. GitHub's documented encoding for these three bytes.
+    """
+    return (text.replace("%", "%25")
+                .replace("\r", "%0D")
+                .replace("\n", "%0A"))
 
 
 # ``` fenced block ``` or `inline span`
@@ -142,31 +278,73 @@ def strip_code(markdown: str) -> str:
 
 
 def commits_in_range(base: str, head: str):
-    """(sha, subject, full message) for each commit in base..head, merges included.
+    """Yield (sha, subject, author_name, author_email, committer_name,
+    committer_email, full message) for each commit in base..head.
 
-    Merges are excluded: a merge commit's message is generated by GitHub and
-    carries no authorship claim of its own, and including them would re-report
-    a trailer already flagged on the commit it merges.
+    **Merges are included**, deliberately, and there is no `--no-merges` here.
+
+    This docstring used to say the opposite while the code comment below said
+    "included on purpose" and the implementation included them -- a three-way
+    contradiction in eight lines, left behind when the behaviour changed and
+    only the comment was updated.
+
+    This is a VENDORED file: the tests that pin this behaviour live in the
+    repository it is copied from, not here. Do not read the note above as
+    local coverage -- if you change this function in place, nothing in this
+    repository will tell you. Change it upstream and re-vendor.
+
+    Two reasons merges belong in the scan, and the second is why the stale
+    "generated by GitHub, carries no claim of its own" reasoning was wrong:
+
+    * a merge commit message is written by whoever merged and can carry a
+      trailer like any other, and the stripper cannot cover that hole because
+      it refuses to rewrite non-linear history;
+    * a merge is *authored by whoever performed it*. An agent that merges a
+      pull request puts its own identity on that commit, and skipping merges
+      would skip exactly that case.
     """
-    sep = "\x1e"
+    # NUL-delimited, not \x1e. An author name and email are supplied by whoever
+    # made the commit, so they are attacker-controlled on a fork pull request:
+    # a name containing the old \x1e separator split its own record into the
+    # wrong number of fields, and the parser below then dropped the commit
+    # silently. Two ordinary-looking choices combining into "craft a name, skip
+    # the scan". NUL is the one byte git guarantees cannot appear in any of
+    # these fields, so the delimiter cannot be forged.
+    fields = ("%H", "%s", "%an", "%ae", "%cn", "%ce", "%B")
     out = subprocess.run(
-        # Merges included on purpose. A merge commit message is written by
-        # whoever merged and can carry a trailer like any other; excluding
-        # them left a hole the stripper could not cover either, since it
-        # refuses to rewrite non-linear history. The check detects, a human
-        # fixes -- which is the standing division between these two scripts.
-        ["git", "log", f"--format=%H{sep}%s{sep}%B%x00", f"{base}..{head}"],
+        # -z terminates each RECORD with a single NUL, and %x00 between fields
+        # makes the field separator NUL too. Because the format does not end in
+        # %x00, there is no doubled NUL: the stream is one flat run of
+        # NUL-separated fields with a single trailing terminator. Verified
+        # against git rather than assumed -- two commits of seven fields yields
+        # 14 fields plus one empty tail, not 15 plus a tail.
+        ["git", "log", "-z", "--format=" + "%x00".join(fields), f"{base}..{head}"],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    for record in out.split("\x00"):
-        record = record.strip("\n")
-        if not record:
-            continue
-        parts = record.split(sep, 2)
-        if len(parts) == 3:
-            yield parts[0], parts[1], parts[2]
+
+    # -z ends each record with its own NUL, so the stream is one flat run of
+    # NUL-separated fields: len(fields) per commit, exactly.
+    chunks = out.split("\x00")
+    if chunks and chunks[-1] == "":
+        chunks.pop()
+
+    if len(chunks) % len(fields) != 0:
+        # Fail closed. The previous version skipped any record it could not
+        # split and reported on whatever was left -- a gate that quietly scans
+        # fewer commits than it was asked to, which is indistinguishable from a
+        # clean run. If this output cannot be parsed, nothing about it is known.
+        raise ValueError(
+            f"unparseable git log output: {len(chunks)} field(s) is not a "
+            f"multiple of {len(fields)}"
+        )
+
+    for i in range(0, len(chunks), len(fields)):
+        record = chunks[i:i + len(fields)]
+        # %B is trailed by git's own newline; the rest are exact.
+        record[-1] = record[-1].rstrip("\n")
+        yield tuple(record)
 
 
 def short(rev: str) -> str:
@@ -220,11 +398,32 @@ def main() -> int:
               "fetch-depth: 0?")
         print(exc.stderr or "", file=sys.stderr)
         return 1
+    except (ValueError, UnicodeDecodeError) as exc:
+        # ValueError: the NUL stream did not divide into whole records.
+        # UnicodeDecodeError: a commit was authored in a non-UTF-8 encoding, so
+        # `text=True` cannot decode it.
+        #
+        # Both already failed closed by crashing -- an uncaught traceback exits
+        # non-zero, which is the safe direction. But a traceback is not a
+        # finding: nothing in the workflow log says what to do about it, and the
+        # exit code is the same one a genuine attribution produces, so the two
+        # are indistinguishable to anyone reading the check. Fail closed AND
+        # legibly.
+        print(f"::error::could not parse the commit range: "
+              f"{escape_workflow_command(str(exc))}")
+        print("This is a harness failure, not an attribution finding. The gate "
+              "refuses to report clean on commits it could not read.",
+              file=sys.stderr)
+        return 1
 
-    for sha, subject, message in commits:
+    for sha, subject, an, ae, cn, ce, message in commits:
         description = find_attribution(message)
         if description:
             findings.append(f"commit {short(sha)} ({subject}) carries {description}")
+
+        identity = find_identity_attribution(((an, ae), (cn, ce)))
+        if identity:
+            findings.append(f"commit {short(sha)} ({subject}) carries {identity}")
 
     for label, path in (("PR title", args.title_file), ("PR body", args.body_file)):
         text, error = read_optional(path)
@@ -246,7 +445,7 @@ def main() -> int:
         return 0
 
     for finding in findings:
-        print(f"::error::{finding}")
+        print(f"::error::{escape_workflow_command(finding)}")
     print(REMEDY)
     return 1
 
