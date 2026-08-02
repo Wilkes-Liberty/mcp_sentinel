@@ -178,7 +178,14 @@ IDENTITY_AMBIGUOUS = r"claude|devin|gemini|cursor|codex|llama"
 # What turns an ambiguous token into a claim: a bot/agent marker, or a noreply
 # address of the kind automation commits under. `Claude <noreply@anthropic.com>`
 # is caught by the unambiguous list anyway; `claude-code[bot]` is caught here.
-IDENTITY_BOT_MARKER = r"\[bot\]|(?<![a-z0-9])bot(?![a-z0-9])|agent|noreply|no-reply"
+# `bot` and `agent` are bounded the same way the tokens above are, and for the
+# same reason: unbounded, `agent` matches inside ordinary words that turn up in
+# real addresses -- `agentur` is German for agency, and `Reagent` is a surname.
+# Either would have combined with an ambiguous given name to flag a human.
+# `noreply` needs no boundary; it is not a fragment of anything.
+IDENTITY_BOT_MARKER = (
+    r"\[bot\]|(?<![a-z0-9])(?:bot|agent)(?![a-z0-9])|noreply|no-reply"
+)
 
 # Boundaries are explicitly alphanumeric rather than `\b`, because Python's `\b`
 # is built on `\w`, which counts `_` as a word character. `\bcopilot\b` does NOT
@@ -305,8 +312,12 @@ def commits_in_range(base: str, head: str):
     # these fields, so the delimiter cannot be forged.
     fields = ("%H", "%s", "%an", "%ae", "%cn", "%ce", "%B")
     out = subprocess.run(
-        # -z terminates each RECORD with NUL; %x00 between fields makes the
-        # field separator NUL too. Records therefore end in a doubled NUL.
+        # -z terminates each RECORD with a single NUL, and %x00 between fields
+        # makes the field separator NUL too. Because the format does not end in
+        # %x00, there is no doubled NUL: the stream is one flat run of
+        # NUL-separated fields with a single trailing terminator. Verified
+        # against git rather than assumed -- two commits of seven fields yields
+        # 14 fields plus one empty tail, not 15 plus a tail.
         ["git", "log", "-z", "--format=" + "%x00".join(fields), f"{base}..{head}"],
         capture_output=True,
         text=True,
@@ -386,6 +397,23 @@ def main() -> int:
         print("::error::could not read the commit range. Does the checkout use "
               "fetch-depth: 0?")
         print(exc.stderr or "", file=sys.stderr)
+        return 1
+    except (ValueError, UnicodeDecodeError) as exc:
+        # ValueError: the NUL stream did not divide into whole records.
+        # UnicodeDecodeError: a commit was authored in a non-UTF-8 encoding, so
+        # `text=True` cannot decode it.
+        #
+        # Both already failed closed by crashing -- an uncaught traceback exits
+        # non-zero, which is the safe direction. But a traceback is not a
+        # finding: nothing in the workflow log says what to do about it, and the
+        # exit code is the same one a genuine attribution produces, so the two
+        # are indistinguishable to anyone reading the check. Fail closed AND
+        # legibly.
+        print(f"::error::could not parse the commit range: "
+              f"{escape_workflow_command(str(exc))}")
+        print("This is a harness failure, not an attribution finding. The gate "
+              "refuses to report clean on commits it could not read.",
+              file=sys.stderr)
         return 1
 
     for sha, subject, an, ae, cn, ce, message in commits:
