@@ -34,8 +34,10 @@ Composer package; you do not need to interact with it to contribute.
 1. Fork and branch off `1.x`.
 2. Make your change, following Drupal coding standards (see below).
 3. Add or update tests for any behavior change.
-4. Add an entry under `## [Unreleased]` in `CHANGELOG.md` (a CI check enforces
-   this; trivial PRs may use the `no-changelog` label).
+4. Add an entry under `## [Unreleased]` in `CHANGELOG.md` for anything users
+   would notice. The `CHANGELOG updated` CI check is opt-in: apply the
+   `changelog` label to PRs whose changes belong in the release notes and it
+   enforces the entry (Dependabot PRs are exempt).
 5. Open a pull request with a clear description of the problem and the fix.
 
 ## Coding standards & checks
