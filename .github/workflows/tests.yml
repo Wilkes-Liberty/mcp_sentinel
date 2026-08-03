@@ -105,18 +105,23 @@ jobs:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
-          retry composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
-            --no-interaction --no-install --no-progress
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
           cd drupal
           # Some deps are dev-stability (mcp_server is ^2.0@dev).
           composer config minimum-stability dev
@@ -136,15 +141,16 @@ jobs:
           PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
           # -W (--with-all-dependencies) on both: recommended-project ships a
           # composer.lock, so each require is a *partial* update and composer
@@ -310,18 +316,23 @@ jobs:
       - name: Scaffold a Drupal site
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
-          retry composer create-project "drupal/recommended-project:^11" drupal \
-            --no-interaction --no-install --no-progress
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:^11" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
           cd drupal
           composer config minimum-stability dev
           composer config prefer-stable true
@@ -336,15 +347,16 @@ jobs:
         working-directory: drupal
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
           retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
@@ -484,18 +496,23 @@ jobs:
       - name: Scaffold a Drupal site
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
-          retry composer create-project "drupal/recommended-project:^11" drupal \
-            --no-interaction --no-install --no-progress
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:^11" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
           cd drupal
           composer config minimum-stability dev
           composer config prefer-stable true
@@ -510,15 +527,16 @@ jobs:
         working-directory: drupal
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
           retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
