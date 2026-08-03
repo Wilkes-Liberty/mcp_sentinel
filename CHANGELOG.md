@@ -25,9 +25,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.github/workflows/attribution.yml` becomes a thin caller pinned to
   `Wilkes-Liberty/shared-ci@v1`, and the vendored `.github/scripts/` copies are
   removed. One implementation for every repository makes copy drift structurally
-  impossible instead of merely detectable.
-- **CI: the attribution gate reads its scripts from the base commit.** A
-  pull request can no longer supply the code that decides whether it passes.
+  impossible instead of merely detectable. The trust property is unchanged:
+  the scripts that judge a pull request are fetched from the shared repository
+  at the exact commit the pin resolved to, so a pull request still cannot
+  supply the code that decides whether it passes.
 
 
 ## [2.3.0] - 2026-07-31
