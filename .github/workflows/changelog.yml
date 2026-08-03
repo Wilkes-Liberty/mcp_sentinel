@@ -6,12 +6,16 @@ name: Changelog
 # pad the release notes users read or get labelled around, and a check that
 # fires when nothing is wrong gets ignored.
 #
+# Dependabot PRs are exempt even when labelled — their changelog treatment is
+# decided at release time, not per version bump.
+#
 # Self-contained on purpose: this public repository cannot call reusable
 # workflows that live in the org's private repositories — such calls fail at
 # workflow load ("workflow file issue", 0s) before any step runs.
 #
 # No base-branch filter: the gate fires on every pull request, whatever the
-# target branch.
+# target branch. Both steps share the opt-in guard, so unlabelled PRs skip
+# the checkout entirely and the check reports success immediately.
 
 on:
   pull_request:
@@ -26,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'changelog')
+                && github.event.pull_request.user.login != 'dependabot[bot]' }}
         with:
           fetch-depth: 0
       - name: Require a CHANGELOG.md entry (only on `changelog`-labeled PRs)
@@ -34,7 +40,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if git diff --name-only "$BASE_SHA"...HEAD | grep -qx 'CHANGELOG.md'; then
+          if git diff --name-only "$BASE_SHA"...HEAD | grep -qxF 'CHANGELOG.md'; then
             echo "CHANGELOG.md updated."
           else
             echo "::error::This PR is labeled 'changelog' but does not update CHANGELOG.md. Add an entry under [Unreleased], or remove the label."
