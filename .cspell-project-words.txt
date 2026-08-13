@@ -8,6 +8,7 @@ behavioural
 bodyless
 bookmarkable
 breakglass
+bypassable
 Cerda
 chartjs
 ciphertext
@@ -67,6 +68,8 @@ phpcs
 phpstan
 phpunit
 PKCE
+preflighted
+preflights
 preg
 Recognised
 redactions
@@ -94,6 +97,7 @@ unanalysable
 uncacheable
 uncaches
 unconfigured
+undesignated
 undismissed
 unexecutable
 ungated
