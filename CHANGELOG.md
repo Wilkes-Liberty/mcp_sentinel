@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-08-13
+
 ### Security
 - **Fail-closed governed source contract (#106 / d.o. #3616543).** Governed
   Tool, context, JSON:API, and GraphQL product paths now share one typed
