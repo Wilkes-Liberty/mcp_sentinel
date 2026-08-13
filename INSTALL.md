@@ -72,8 +72,9 @@ submodule.
 # Base module.
 drush en mcp_sentinel -y
 
-# Optional: expose Tool plugins to MCP clients.
-drush en mcp_sentinel_server mcp_server_tool_bridge -y
+# Optional base feature, required for a production MCP Tool path. The OAuth
+# submodule is mandatory for connector-facing production readiness.
+drush en mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y
 
 # Optional: govern the GraphQL Compose endpoint.
 drush en mcp_sentinel_graphql -y
@@ -87,11 +88,13 @@ drush cr
 ## 3. Register the Tool plugins with mcp_server (if using mcp_sentinel_server)
 
 ```bash
-# Register tools (OAuth scopes left disabled):
+# Production is fail closed by default: preflight every Tool, then register all
+# of them with authentication_mode=required and the exact derived scope.
 drush mcp-sentinel:setup
 
-# Or register tools AND require OAuth scopes on each:
-drush mcp-sentinel:setup --require-oauth
+# Deliberate local-only escape. This always exits non-zero and never reports
+# contract_ready; do not use it on staging or production.
+drush mcp-sentinel:setup --allow-unauthenticated-development
 ```
 
 `drush mcp-sentinel:teardown` reverses this (unregisters all Sentinel tools).
@@ -101,9 +104,13 @@ drush mcp-sentinel:setup --require-oauth
 Governance is decided server-side from the OAuth agent channel, never from a
 client-supplied header. Configure `simple_oauth`:
 
-1. Create a `consumers` consumer for the agent client.
-2. Mint a `simple_oauth` bearer token carrying the agent scope.
-3. The agent sends `Authorization: Bearer …` on every request; Sentinel resolves
+1. Create the required OAuth scope entities and an enabled role-bound policy
+   profile.
+2. Run `drush mcp-sentinel:agent-provision <tier> --env=<env>` to create or bind
+   the role, service account, and exact designated Consumer. The command never
+   creates or rotates a secret; set that out of band.
+3. Mint a `simple_oauth` bearer token carrying the exact required scope.
+4. The agent sends `Authorization: Bearer …` on every request; Sentinel resolves
    the governed policy profile from that token.
 
 An optional **authenticated-role fallback** can govern requests by role when no
@@ -123,21 +130,25 @@ companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
 > before this convention was standardized — must you either set `agent_scopes` to
 > match those ids, or (recommended) migrate the scopes to the underscore form per
 > [§ "Upgrade note: OAuth scope machine ids are now underscores"](#upgrade-note-oauth-scope-machine-ids-are-now-underscores).
-> If nothing
-> matches, no token is ever recognised as the agent channel and the module fails
-> open — see the fail-loud note below.
+> If nothing matches, the source contract is not ready and governed product
+> paths are refused — see the fail-closed note below.
 
-> **Fail-loud safety net.** If the module is **enabled but cannot govern any
-> request** — both `agent_scopes` and `agent_oauth_clients` empty (with the role
-> fallback unusable), or no policy profile configured — the status report at
-> **Reports → Status report** (`/admin/reports/status`) raises a WARNING
-> ("MCP Sentinel: not governing any request"). Treat that warning as a
-> misconfiguration: the module is failing open until it is wired correctly.
+> **Fail-closed safety net.** The settings page, Status report, authenticated
+> `GET /drupal-mcp/readiness`, Tool base, context endpoint, and governed
+> JSON:API/GraphQL subscribers all use one typed source-contract evaluator.
+> Missing server/bridge/OAuth/audit wiring, empty scopes, absent or disabled
+> Tool registrations, an undesignated/disabled Consumer, blocked owner, or no
+> applicable active role-bound profile produces a stable not-ready reason and
+> refuses the governed path. `contract_ready` means only that this local
+> configuration and availability contract is complete; it does not claim
+> policy effectiveness, verified evidence, or overall security posture.
 
 > **Agent discovery.** Once the agent channel is wired, agents can introspect
 > your content model before acting via the governed context endpoint
 > `/drupal-mcp/context` (content types, fields, vocabularies, media types);
-> `/drupal-mcp/health` is a status probe. Both are described in `docs/CONNECTOR.md`.
+> `/drupal-mcp/health` is a liveness probe, while authenticated
+> `/drupal-mcp/readiness` reports the bounded source contract. These are
+> described in `docs/CONNECTOR.md`.
 
 ## 5. Set up audit-metadata encryption (optional but recommended)
 
@@ -214,9 +225,9 @@ token against `mcp_sentinel.settings:agent_scopes`, so the token, the
 
 Fresh installs need no action — the install default and `mcp-sentinel:setup`
 already use the underscore form. **If you previously created colon-form
-(`mcp:read` / `mcp:write`) scopes you must migrate**, otherwise tokens will no
-longer be recognised as the agent channel and write tools will fail open as
-ungoverned:
+(`mcp:read` / `mcp:write`) scopes you must migrate**. Legacy releases could
+treat the mismatch as ungoverned; the current source contract refuses the
+governed product path as not ready:
 
 1. Update the governance allowlist to the underscore form (UI: **Configuration →
    Web services → MCP Sentinel → OAuth agent channel → Agent scopes**, one per
@@ -237,7 +248,7 @@ ungoverned:
 4. Re-tag the registered tools and rebuild caches:
 
    ```bash
-   drush mcp-sentinel:setup --require-oauth
+   drush mcp-sentinel:setup
    drush cr
    ```
 

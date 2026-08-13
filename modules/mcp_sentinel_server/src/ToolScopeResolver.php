@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel_server;
 
+use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\tool\Tool\ToolOperation;
 
 /**
@@ -40,11 +41,7 @@ final class ToolScopeResolver {
    *   The OAuth scope machine id the tool must require.
    */
   public static function resolve(ToolOperation $operation, bool $isConfigDomain): string {
-    $modifying = $operation->isModifying();
-    if ($isConfigDomain) {
-      return $modifying ? 'mcp_config' : 'mcp_config_read';
-    }
-    return $modifying ? 'mcp_write' : 'mcp_read';
+    return McpToolScopeResolver::resolve($operation, $isConfigDomain);
   }
 
 }

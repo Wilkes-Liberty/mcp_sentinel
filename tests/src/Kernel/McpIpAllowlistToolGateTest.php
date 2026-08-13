@@ -295,12 +295,13 @@ final class McpIpAllowlistToolGateTest extends KernelTestBase {
   }
 
   /**
-   * Ungoverned accounts are never blocked by the IP allowlist gate.
+   * A dedicated Tool refuses an undesignated account before the IP gate.
    *
-   * When no policy profile resolves for an account, isClientIpAllowed()
-   * is never consulted — the tool's standard permission check applies only.
+   * Tool permission alone is not a production governance channel. The final
+   * shared gate requires the designated OAuth identity and applicable policy
+   * binding before IP policy can even be evaluated.
    */
-  public function testUngovernedAccountNotAffectedByIpGate(): void {
+  public function testUndesignatedAccountFailsClosedBeforeIpGate(): void {
     $this->setProfileIps(['203.0.113.0/24']);
 
     // An account without the mcp_api role is ungoverned.
@@ -314,10 +315,8 @@ final class McpIpAllowlistToolGateTest extends KernelTestBase {
       ->createInstance('mcp_sentinel_site_context');
     $result = $tool->access($ungoverned, TRUE);
 
-    // Ungoverned accounts are allowed by the permission check and never hit
-    // the IP gate (isGoverned() returns FALSE → no profile resolves).
-    $this->assertFalse($result->isForbidden(),
-      'Ungoverned accounts must not be blocked by the IP allowlist gate.');
+    $this->assertTrue($result->isForbidden(),
+      'A Tool request without the designated governed identity must fail closed.');
 
     $this->popRequest();
   }

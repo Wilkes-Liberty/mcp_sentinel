@@ -107,13 +107,23 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 ```bash
 composer require drupal/mcp_sentinel drupal/mcp_server drupal/simple_oauth
 
-# Enable the base module plus the mcp_server integration submodule.
-drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge -y
+# Enable the base module plus the production MCP integration and OAuth gate.
+drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y
 drush cr
 
-# Register the MCP Sentinel Tool plugins with mcp_server.
+# Register every Tool with required OAuth and its exact derived scope.
 drush mcp-sentinel:setup
+
+# Bind one environment-specific Consumer to an active role/profile.
+drush mcp-sentinel:agent-provision content --env=prod
 ```
+
+`mcp-sentinel:setup` is fail closed: production OAuth is required by default,
+all registrations are preflighted before the first save, and partial writes are
+rolled back. It returns non-zero until an applicable designated Consumer has
+been provisioned. The only unauthenticated escape is the explicit
+`--allow-unauthenticated-development` option; it always returns non-zero and can
+never make `/drupal-mcp/readiness` report `contract_ready`.
 
 > **mcp_server 2.x requires a patch to `mcp/sdk`.** It adds the runtime element
 > handler interfaces (`RuntimeToolHandlerInterface` et al.) that the Tool bridge
@@ -128,7 +138,7 @@ drush mcp-sentinel:setup
 
 | Submodule | Purpose |
 |-----------|---------|
-| `mcp_sentinel_server` | Registers the Tool plugins with mcp_server (`mcp_tool_config` entities) and wires OAuth scopes. Provides `drush mcp-sentinel:setup` / `:teardown`. Depends on `mcp_server_tool_bridge`. |
+| `mcp_sentinel_server` | Registers the Tool plugins with mcp_server (`mcp_tool_config` entities), requires per-Tool OAuth on production paths, and provisions designated Consumers. Provides `drush mcp-sentinel:setup` / `:teardown` / `:agent-provision`. Depends on `mcp_server_tool_bridge`; production readiness also requires `mcp_server_oauth`. |
 | `mcp_sentinel_graphql` | Extends governance to the GraphQL endpoint: gates mutations/reads, redacts fields, and audits operations for governed agents. Depends on `graphql_compose`. |
 | `mcp_sentinel_approval` | Optional human-approval gate: queues governed destructive operations (bulk delete) as approval requests instead of executing them, for an authorized human to approve or deny. Depends only on `mcp_sentinel`. |
 
@@ -931,7 +941,7 @@ default rather than merely guarded.
 
 | Command | Purpose |
 |---------|---------|
-| `drush mcp-sentinel:status` | Print the active policy plus audit and lock counts. |
+| `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
 | `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. Refused unless the profile sets `allow_raw_sql`; every attempt is audited. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
@@ -939,7 +949,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |
 | `drush mcp-sentinel:webhook-prune` | Delete webhook delivery rows past retention (also runs on cron). |
 | `drush mcp-sentinel:webhook-replay <id>` | Reset a delivery row to pending and re-queue it. |
-| `drush mcp-sentinel:setup [--require-oauth]` | (submodule) Register Sentinel Tool plugins with mcp_server. |
+| `drush mcp-sentinel:setup [--allow-unauthenticated-development]` | (submodule) Preflight and register Sentinel Tool plugins with required OAuth by default. The development escape is explicitly not ready and exits non-zero. |
 | `drush mcp-sentinel:teardown` | (submodule) Unregister all Sentinel tools from mcp_server. |
 | `drush mcp-sentinel:agent-provision <tier> --env=<env>` | (submodule) Provision an agent tier — `content`, `content-auditor`, `auditor`, `developer`, or `admin` — as a role + service account + OAuth consumer (`<tier>-<env>`). Never creates or rotates secrets. |
 | `drush mcp-sentinel:break-glass <uid>` | (approval submodule) Request the time-boxed `mcp_admin` break-glass role for a user; always approval-gated, auto-revoked at the configured TTL. |
@@ -951,8 +961,8 @@ separate, optional Node.js MCP connector — not part of this module and not a
 count of Sentinel's own plugins. It exposes **66 connector tools across 9
 modules** (multi-site, GraphQL, and a Drush bridge) that an MCP client can call
 against a Drupal site. MCP Sentinel governs those calls when they reach Drupal;
-it does not provide them. For reference, this module itself ships 7 base Tool
-plugins plus 1 GraphQL schema tool (via `mcp_sentinel_graphql`).
+it does not provide them. For reference, this module itself ships 10 base Tool
+plugins plus 1 conditional GraphQL schema tool (via `mcp_sentinel_graphql`).
 
 MCP Sentinel implements **Integration Contract v1.0** (published by the connector
 at `docs/integration-contract.md` in

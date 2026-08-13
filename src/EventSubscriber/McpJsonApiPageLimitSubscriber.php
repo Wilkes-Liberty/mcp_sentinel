@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
+use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
 
 /**
@@ -45,14 +48,17 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   /**
    * Constructs an McpJsonApiPageLimitSubscriber.
    *
-   * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
-   *   The MCP Sentinel policy resolver.
    * @param \Drupal\mcp_sentinel\Service\McpAccessChecker $accessChecker
    *   The MCP Sentinel access checker, used for the IP-allowlist gate.
+   * @param \Drupal\mcp_sentinel\Service\McpGovernanceReadiness $readiness
+   *   Source-governance readiness evaluator.
+   * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
+   *   Current authenticated account.
    */
   public function __construct(
-    private readonly McpPolicyResolver $policyResolver,
     private readonly McpAccessChecker $accessChecker,
+    private readonly McpGovernanceReadiness $readiness,
+    private readonly AccountProxyInterface $currentUser,
   ) {}
 
   /**
@@ -82,9 +88,35 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       return;
     }
 
-    $profile = $this->policyResolver->resolve();
-    if ($profile === NULL) {
+    $requiredScope = in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
+      ? 'mcp_read'
+      : 'mcp_write';
+    $readiness = $this->readiness->evaluate(
+      McpGovernedSurface::JsonApi,
+      $this->currentUser,
+      $requiredScope,
+    );
+    if (!$readiness->isApplicable()) {
       return;
+    }
+    if (!$readiness->isReady()) {
+      $reason = $readiness->reason();
+      if ($reason?->isAuthorizationFailure()) {
+        throw new AccessDeniedHttpException('MCP access is denied.');
+      }
+      throw new ServiceUnavailableHttpException(
+        NULL,
+        'MCP source governance is not ready: '
+        . $reason->value . '.',
+      );
+    }
+
+    $profile = $readiness->profile();
+    if ($profile === NULL) {
+      throw new ServiceUnavailableHttpException(
+        NULL,
+        'MCP source governance is not ready: active_profile_missing.',
+      );
     }
 
     // IP allowlist: deny the whole JSON:API request (collection, individual or

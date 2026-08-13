@@ -9,5 +9,7 @@ dependencies:
   - mcp_sentinel:mcp_sentinel
   - mcp_server:mcp_server_tool_bridge
 
-# mcp_server:mcp_server_oauth is optional — when enabled, `drush mcp-sentinel:setup`
-# also tags each registered tool with an OAuth scope and authentication mode.
+# mcp_server:mcp_server_oauth is installed independently, but production
+# readiness and the default `drush mcp-sentinel:setup` path require it. The
+# only exception is the explicit development-only command option, which can
+# never report the connector-facing contract as ready.

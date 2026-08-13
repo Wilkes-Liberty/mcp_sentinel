@@ -20,12 +20,12 @@ function mcp_sentinel_server_help(string $route_name, RouteMatchInterface $route
 
   $output = '';
   $output .= '<h2>' . t('About') . '</h2>';
-  $output .= '<p>' . t('MCP Sentinel Server bridges the Sentinel Tool plugins to the <a href=":mcp">MCP Server</a> module. It registers each Sentinel tool as an <code>mcp_tool_config</code> entity and, when <code>mcp_server_oauth</code> is enabled, tags each tool with the OAuth scope derived from the tool plugin itself (content read/write vs config read/write). It also provisions the per-environment agent tiers (role, service account, and OAuth consumer).', [':mcp' => 'https://www.drupal.org/project/mcp']) . '</p>';
+  $output .= '<p>' . t('MCP Sentinel Server bridges the Sentinel Tool plugins to the <a href=":mcp">MCP Server</a> module. It registers each Sentinel tool as an <code>mcp_tool_config</code> entity, requires <code>mcp_server_oauth</code> for production setup, and tags every tool with the exact OAuth scope derived from the plugin itself (content read/write vs config read/write). It also provisions the per-environment agent tiers (role, service account, and designated OAuth Consumer) without creating secrets.', [':mcp' => 'https://www.drupal.org/project/mcp']) . '</p>';
 
   $output .= '<h2>' . t('This submodule has no settings page') . '</h2>';
   $output .= '<p>' . t('It is operated entirely through Drush:') . '</p>';
   $output .= '<ul>';
-  $output .= '<li>' . t('<code>drush mcp-sentinel:setup [--require-oauth]</code> — register the Sentinel tools with MCP Server (and require OAuth scopes).') . '</li>';
+  $output .= '<li>' . t('<code>drush mcp-sentinel:setup [--allow-unauthenticated-development]</code> — preflight and register the Sentinel tools with required OAuth by default. The explicit development escape remains not ready and exits non-zero.') . '</li>';
   $output .= '<li>' . t('<code>drush mcp-sentinel:teardown</code> — unregister them.') . '</li>';
   $output .= '<li>' . t('<code>drush mcp-sentinel:agent-provision &lt;tier&gt; --env=&lt;env&gt;</code> — provision an agent tier (content, content-auditor, auditor, developer, or admin) as a role + service account + OAuth consumer. Consumer secrets are never created or rotated by this command; set them out of band.') . '</li>';
   $output .= '</ul>';

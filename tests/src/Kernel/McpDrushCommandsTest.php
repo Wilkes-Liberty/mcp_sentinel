@@ -97,6 +97,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
       $this->container->get('datetime.time'),
       $this->container->get('mcp_sentinel.urgent_conditions'),
       $this->container->get('mcp_sentinel.role_assertions'),
+      $this->container->get('mcp_sentinel.governance_readiness'),
     );
 
     // Wire a no-op DrushLoggerManager so commands can call $this->logger()->
@@ -454,7 +455,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
   }
 
   /**
-   * Status returns EXIT_SUCCESS with no fatal errors.
+   * Status data paths, including shared readiness, work without fatal errors.
    *
    * Because DrushCommands::io() (SymfonyStyle) is only available inside a
    * real Drush session, we cannot call status() directly in a kernel test
@@ -500,6 +501,15 @@ final class McpDrushCommandsTest extends KernelTestBase {
       'status data: mcp_sentinel.settings:enabled must be readable.');
     $this->assertNotNull($config->get('audit_enabled'),
       'status data: mcp_sentinel.settings:audit_enabled must be readable.');
+
+    // The base-only kernel fixture is intentionally not production-ready:
+    // status must consume this same typed result rather than inventing a
+    // separate or more permissive health claim.
+    $contract = $this->container
+      ->get('mcp_sentinel.governance_readiness')
+      ->contractStatus();
+    $this->assertFalse($contract->isReady());
+    $this->assertNotNull($contract->reason());
   }
 
 }

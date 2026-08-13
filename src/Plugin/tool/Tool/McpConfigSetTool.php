@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
-use Drupal\Core\Access\AccessResult;
-use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
@@ -15,7 +12,6 @@ use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
-use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolOperation;
 use Drupal\tool\TypedData\InputDefinition;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -53,7 +49,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
     ),
   ],
 )]
-final class McpConfigSetTool extends ToolBase implements ConfigScopeToolInterface {
+final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeToolInterface {
 
   use McpEntityToolTrait;
 
@@ -148,22 +144,6 @@ final class McpConfigSetTool extends ToolBase implements ConfigScopeToolInterfac
       $this->t('Configuration @name updated.', ['@name' => $name]),
       ['name' => $name, 'keys' => array_keys($data)],
     );
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  protected function checkAccess(array $values, AccountInterface $account, bool $return_as_object = FALSE): bool|AccessResultInterface {
-    $access = AccessResult::allowedIfHasPermission($account, 'access mcp sentinel context');
-    if (!$access->isAllowed()) {
-      return $return_as_object ? $access : FALSE;
-    }
-    $profile = $this->policyResolver->resolve($account);
-    if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
-      $denied = AccessResult::forbidden('Source IP not permitted by MCP Sentinel policy.')->setCacheMaxAge(0);
-      return $return_as_object ? $denied : FALSE;
-    }
-    return $return_as_object ? $access : $access->isAllowed();
   }
 
 }

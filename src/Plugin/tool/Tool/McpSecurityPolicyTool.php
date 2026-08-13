@@ -4,16 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
-use Drupal\Core\Access\AccessResult;
-use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
-use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolOperation;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -30,7 +25,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
   description: new TranslatableMarkup('Returns the active MCP Sentinel security configuration: allowed/denied entity types, permitted operations, and redacted fields. Check this before attempting write operations.'),
   operation: ToolOperation::Explain,
 )]
-final class McpSecurityPolicyTool extends ToolBase {
+final class McpSecurityPolicyTool extends McpGovernedToolBase {
 
   /**
    * The policy resolver service.
@@ -43,18 +38,12 @@ final class McpSecurityPolicyTool extends ToolBase {
   protected ConfigFactoryInterface $configFactory;
 
   /**
-   * The MCP Sentinel access checker service.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->resolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->configFactory = $container->get('config.factory');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     return $instance;
   }
 
@@ -87,27 +76,6 @@ final class McpSecurityPolicyTool extends ToolBase {
       'entity_rules' => $profile->getEntityRules(),
     ];
     return ExecutableResult::success($this->t('Security policy retrieved.'), $data);
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  protected function checkAccess(array $values, AccountInterface $account, bool $return_as_object = FALSE): bool|AccessResultInterface {
-    $access = AccessResult::allowedIfHasPermission($account, 'access mcp sentinel context');
-    if (!$access->isAllowed()) {
-      return $return_as_object ? $access : FALSE;
-    }
-
-    // IP allowlist gate — governed requests only. When a policy profile applies
-    // and the client IP is not in the profile's allowlist, deny access.
-    // The result is explicitly uncacheable: client IP is not a cache context.
-    $profile = $this->resolver->resolve($account);
-    if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
-      $denied = AccessResult::forbidden('Source IP not permitted by MCP Sentinel policy.')->setCacheMaxAge(0);
-      return $return_as_object ? $denied : FALSE;
-    }
-
-    return $return_as_object ? $access : $access->isAllowed();
   }
 
 }

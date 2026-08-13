@@ -273,6 +273,7 @@ final class McpServerRegistrationTest extends KernelTestBase {
       $this->container->get('module_handler'),
       $this->container->get('plugin.manager.tool'),
       $this->container->get('cache_tags.invalidator'),
+      $this->container->get('config.factory'),
     );
   }
 

@@ -223,11 +223,11 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 469 collect today: 62 Unit + 368 Kernel in the top-level module,
-          # plus 10 (approval) + 14 (graphql) + 8 + 7 (server) in the
+          # 538 collect today: 91 Unit + 386 Kernel in the top-level module,
+          # plus 26 (approval) + 14 (graphql) + 7 + 14 (server) in the
           # submodules. The floor sits just under that, so losing any one
           # submodule suite — the smallest is 7 tests — trips it.
-          MIN_TESTS: '460'
+          MIN_TESTS: '530'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
@@ -406,7 +406,7 @@ jobs:
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
           # Same doctrine as the matrix job: assert the count, not the exit
-          # status. 22 files / 103 test methods today; the floor catches a
+          # status. 22 files / 104 test methods today; the floor catches a
           # dropped directory, not normal drift.
           MIN_TESTS: '60'
         run: |

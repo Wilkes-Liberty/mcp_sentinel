@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_graphql\EventSubscriber;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\graphql\Event\OperationEvent;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use GraphQL\Error\Error;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -30,17 +32,20 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
   /**
    * Constructs a GraphqlGovernanceSubscriber.
    *
-   * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $resolver
-   *   The policy resolver service.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   The audit logger service.
    * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
    *   The config factory service.
+   * @param \Drupal\mcp_sentinel\Service\McpGovernanceReadiness $readiness
+   *   Source-governance readiness evaluator.
+   * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
+   *   Current authenticated account.
    */
   public function __construct(
-    private readonly McpPolicyResolver $resolver,
     private readonly McpAuditLogger $auditLogger,
     private readonly ConfigFactoryInterface $configFactory,
+    private readonly McpGovernanceReadiness $readiness,
+    private readonly AccountProxyInterface $currentUser,
   ) {}
 
   /**
@@ -63,15 +68,31 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    *   When the active MCP Sentinel policy forbids the operation.
    */
   public function onOperation(OperationEvent $event): void {
-    $profile = $this->resolver->resolve();
-    if ($profile === NULL) {
-      return;
-    }
-
     $context = $event->getContext();
     $type = $context->getType();
     $operation_name = $context->getOperation()->operationName ?? NULL;
     $is_mutation = $type === 'mutation';
+    $readiness = $this->readiness->evaluate(
+      McpGovernedSurface::Graphql,
+      $this->currentUser,
+      $is_mutation ? 'mcp_write' : 'mcp_read',
+    );
+    if (!$readiness->isApplicable()) {
+      return;
+    }
+    if (!$readiness->isReady()) {
+      $reason = $readiness->reason();
+      throw new Error(
+        $reason?->isAuthorizationFailure()
+          ? 'MCP access is denied.'
+          : 'MCP source governance is not ready: '
+            . $reason->value . '.',
+      );
+    }
+    $profile = $readiness->profile();
+    if ($profile === NULL) {
+      throw new Error('MCP source governance is not ready: active_profile_missing.');
+    }
 
     $config = $this->configFactory->get('mcp_sentinel.settings');
 
@@ -81,11 +102,6 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
         'operation_type' => $type,
         'operation_name' => $operation_name,
       ]);
-    }
-
-    // Master switch.
-    if (!$config->get('enabled')) {
-      throw new Error('MCP access is disabled by MCP Sentinel.');
     }
 
     // Mutation gate.

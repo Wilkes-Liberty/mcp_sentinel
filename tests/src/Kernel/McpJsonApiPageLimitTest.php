@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
@@ -79,12 +80,18 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
    *   The request path.
    * @param array $pageParams
    *   The page[] query parameter values.
+   * @param string $method
+   *   The HTTP request method.
    *
    * @return \Symfony\Component\HttpKernel\Event\RequestEvent
    *   The event.
    */
-  private function makeRequestEvent(string $path, array $pageParams = []): RequestEvent {
-    $request = Request::create($path);
+  private function makeRequestEvent(
+    string $path,
+    array $pageParams = [],
+    string $method = 'GET',
+  ): RequestEvent {
+    $request = Request::create($path, $method);
     if ($pageParams) {
       $request->query->set('page', $pageParams);
     }
@@ -198,6 +205,36 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber->onRequest($event);
     $this->assertSame(50000, (int) $event->getRequest()->query->all('page')['limit'],
       'Ungoverned requests must not be capped.');
+  }
+
+  /**
+   * A governed JSON:API read fails closed before policy/page processing.
+   */
+  public function testGovernedReadFailsClosedWhenGovernanceDisabled(): void {
+    $this->switchToGovernedUser();
+    $this->config('mcp_sentinel.settings')->set('enabled', FALSE)->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/jsonapi/node/article');
+
+    $this->expectException(ServiceUnavailableHttpException::class);
+    $this->expectExceptionMessage('module_disabled');
+    $subscriber->onRequest($event);
+  }
+
+  /**
+   * A governed JSON:API write uses the same readiness veto.
+   */
+  public function testGovernedWriteFailsClosedWhenGovernanceDisabled(): void {
+    $this->switchToGovernedUser();
+    $this->config('mcp_sentinel.settings')->set('enabled', FALSE)->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/jsonapi/node/article/example', [], 'PATCH');
+
+    $this->expectException(ServiceUnavailableHttpException::class);
+    $this->expectExceptionMessage('module_disabled');
+    $subscriber->onRequest($event);
   }
 
   /**

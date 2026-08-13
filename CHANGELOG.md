@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Fail-closed governed source contract (#106 / d.o. #3616543).** Governed
+  Tool, context, JSON:API, and GraphQL product paths now share one typed
+  readiness decision and deny when required server/bridge/OAuth/audit/Tool
+  registration or designated Consumer→active owner→role-bound policy wiring is
+  missing. Ordinary human Drupal traffic remains outside this boundary.
+
+### Added
+- **Bounded authenticated readiness endpoint.** `GET /drupal-mcp/readiness`
+  reports `contract_ready` plus a stable non-secret reason. The response
+  explicitly does not claim policy effectiveness, verified evidence, or
+  overall posture.
+- **Rollback-safe Tool and agent provisioning.** Production setup requires
+  OAuth by default and preflights every Tool; agent provisioning owns the
+  Consumer/account/profile designation but never creates or rotates secrets.
+- **CI: No AI attribution gate.** Pull requests fail when commits, the
+  PR title, or the PR body credit AI with authorship (shared Wilkes & Liberty
+  drop-in). Covers server-side paths that local hooks cannot see.
+
 ### Fixed
 - **PHPStan: `McpAuditLogger::verifyChain()` return shape.** Document the full
   `audit_chain` `verify()` array (including seal/verified_from keys).
@@ -14,11 +33,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   so every commit looked modified and the run ended with `strip count > 0 but tip
   unchanged`.
 
-
-### Added
-- **CI: No AI attribution gate.** Pull requests fail when commits, the
-  PR title, or the PR body credit AI with authorship (shared Wilkes & Liberty
-  drop-in). Covers server-side paths that local hooks cannot see.
 
 ### Changed
 - **CI: the attribution check is now the shared workflow.**
@@ -889,7 +903,7 @@ working range is now `^10.6 || ^11.3`, and every floor in it is exercised by CI.
 - `mcp_config` is now part of the default `agent_scopes` so a token carrying only that
   scope is still recognized on the governed agent channel.
 
-> **Upgrade action.** After updating, re-run `drush mcp-sentinel:setup --require-oauth`
+> **Upgrade action.** After updating, re-run `drush mcp-sentinel:setup`
 > to re-tag the config tools with `mcp_config`. Ensure your config/dev consumer holds the
 > `mcp_config` scope (the `oauth2_scope` entity must exist) and that content-tier consumers
 > do **not**. Any consumer that previously called the config tools with only `mcp_write`
@@ -1594,7 +1608,7 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   traffic is governed and audited.
 - Per-tool `mcp:read`/`mcp:write` scope enforcement via `mcp_server_oauth`
   third-party settings on each `mcp_tool_config`. Run
-  `drush mcp-sentinel:setup --require-oauth` to apply.
+  `drush mcp-sentinel:setup` to apply.
 - Governed redaction and entity-access decisions vary by both `user.roles` and
   `oauth2_scopes` cache contexts, preventing agent-channel responses from being
   served to cookie-session requests for the same user.

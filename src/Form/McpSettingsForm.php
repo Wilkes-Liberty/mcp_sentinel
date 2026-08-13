@@ -10,6 +10,7 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\mcp_sentinel\Service\McpDlp;
+use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -40,6 +41,11 @@ class McpSettingsForm extends ConfigFormBase {
   protected McpRoleAssertions $roleAssertions;
 
   /**
+   * Connector-facing source-governance readiness evaluator.
+   */
+  protected McpGovernanceReadiness $governanceReadiness;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
@@ -47,6 +53,7 @@ class McpSettingsForm extends ConfigFormBase {
     $instance->entityTypeManager = $container->get('entity_type.manager');
     $instance->encryptionProfileManager = $container->get('encrypt.encryption_profile.manager');
     $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
+    $instance->governanceReadiness = $container->get('mcp_sentinel.governance_readiness');
     return $instance;
   }
 
@@ -143,6 +150,17 @@ class McpSettingsForm extends ConfigFormBase {
       '#title' => $this->t('MCP Access'),
       '#group' => 'tabs',
       '#open' => TRUE,
+    ];
+    $contract = $this->governanceReadiness->contractStatus();
+    $form['status']['contract_status'] = [
+      '#type' => 'item',
+      '#title' => $this->t('Source-governance contract'),
+      '#markup' => $contract->isReady()
+        ? $this->t('Ready')
+        : $this->t('Not ready: <code>@reason</code>', [
+          '@reason' => $contract->reason()->value,
+        ]),
+      '#description' => $this->t('This is the same fail-closed source-contract check used by governed Tool, context, JSON:API, and GraphQL paths. Ready means required local configuration and services are available; it does not claim policy effectiveness, verified evidence, or overall security posture.'),
     ];
     $form['status']['enabled'] = [
       '#type' => 'checkbox',

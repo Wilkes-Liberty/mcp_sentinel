@@ -86,6 +86,20 @@ services:
       - '@current_user'
       - '@config.factory'
 
+  mcp_sentinel.governance_readiness:
+    class: Drupal\mcp_sentinel\Service\McpGovernanceReadiness
+    arguments:
+      - '@config.factory'
+      - '@entity_type.manager'
+      - '@module_handler'
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.oauth_context'
+      - '@?audit_chain.logger'
+      # Optional at container-build time so an incomplete upgrade can still
+      # run requirements/update tooling. Readiness returns
+      # tool_registration_missing rather than letting the container fail.
+      - '@?plugin.manager.tool'
+
   mcp_sentinel.dlp:
     class: Drupal\mcp_sentinel\Service\McpDlp
     factory: 'Drupal\mcp_sentinel\Service\McpDlp::createFromConfig'
@@ -109,8 +123,9 @@ services:
   mcp_sentinel.jsonapi_page_limit_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber
     arguments:
-      - '@mcp_sentinel.policy_resolver'
       - '@mcp_sentinel.access_checker'
+      - '@mcp_sentinel.governance_readiness'
+      - '@current_user'
     tags:
       - { name: event_subscriber }
 

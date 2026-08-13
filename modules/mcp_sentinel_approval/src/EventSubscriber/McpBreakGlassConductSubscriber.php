@@ -97,7 +97,7 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
     }
 
     $uid = (int) $this->currentUser->id();
-    if ($uid <= 0 || !$this->currentUser->hasRole(McpBreakGlassManager::ROLE_ID)) {
+    if ($uid <= 0 || !in_array(McpBreakGlassManager::ROLE_ID, $this->currentUser->getRoles(), TRUE)) {
       return;
     }
 
