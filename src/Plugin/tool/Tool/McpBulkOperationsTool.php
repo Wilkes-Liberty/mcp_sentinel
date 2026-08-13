@@ -4,11 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
-use Drupal\Core\Access\AccessResult;
-use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveOpEvent;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
@@ -16,7 +13,6 @@ use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
-use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolOperation;
 use Drupal\tool\TypedData\InputDefinition;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -64,7 +60,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
     ),
   ],
 )]
-final class McpBulkOperationsTool extends ToolBase {
+final class McpBulkOperationsTool extends McpGovernedToolBase {
 
   use McpEntityToolTrait;
 
@@ -255,28 +251,6 @@ final class McpBulkOperationsTool extends ToolBase {
     }
     $operation === 'publish' ? $entity->setPublished() : $entity->setUnpublished();
     $entity->save();
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  protected function checkAccess(array $values, AccountInterface $account, bool $return_as_object = FALSE): bool|AccessResultInterface {
-    $access = AccessResult::allowedIfHasPermission($account, 'access mcp sentinel context');
-    if (!$access->isAllowed()) {
-      return $return_as_object ? $access : FALSE;
-    }
-
-    // IP allowlist gate — governed requests only. The early-return error paths
-    // (confirm=false, empty ids) skip the per-entity IP gate, so an IP-blocked
-    // agent could otherwise probe tool availability. Gate here at the entry.
-    // The result is explicitly uncacheable: client IP is not a cache context.
-    $profile = $this->policyResolver->resolve($account);
-    if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
-      $denied = AccessResult::forbidden('Source IP not permitted by MCP Sentinel policy.')->setCacheMaxAge(0);
-      return $return_as_object ? $denied : FALSE;
-    }
-
-    return $return_as_object ? $access : $access->isAllowed();
   }
 
 }

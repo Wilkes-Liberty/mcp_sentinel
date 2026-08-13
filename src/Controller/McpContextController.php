@@ -6,8 +6,10 @@ namespace Drupal\mcp_sentinel\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -25,15 +27,15 @@ class McpContextController extends ControllerBase {
    *
    * @param \Drupal\Core\Entity\EntityFieldManagerInterface $entityFieldManager
    *   The entity field manager (reads content-type field definitions).
-   * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
-   *   The policy resolver (resolves the governing profile for the request).
    * @param \Drupal\mcp_sentinel\Service\McpAccessChecker $accessChecker
    *   The access checker (evaluates the profile's IP allowlist).
+   * @param \Drupal\mcp_sentinel\Service\McpGovernanceReadiness $readiness
+   *   Source-governance readiness evaluator.
    */
   public function __construct(
     private readonly EntityFieldManagerInterface $entityFieldManager,
-    private readonly McpPolicyResolver $policyResolver,
     private readonly McpAccessChecker $accessChecker,
+    private readonly McpGovernanceReadiness $readiness,
   ) {}
 
   /**
@@ -42,8 +44,8 @@ class McpContextController extends ControllerBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get('entity_field.manager'),
-      $container->get('mcp_sentinel.policy_resolver'),
       $container->get('mcp_sentinel.access_checker'),
+      $container->get('mcp_sentinel.governance_readiness'),
     );
   }
 
@@ -61,13 +63,17 @@ class McpContextController extends ControllerBase {
    *   client IP is not permitted by policy.
    */
   public function context(): JsonResponse {
-    $config = $this->config('mcp_sentinel.settings');
-    if (!$config->get('enabled')) {
-      return new JsonResponse(['error' => 'MCP access is disabled.'], 403);
+    $readiness = $this->readiness->evaluate(
+      McpGovernedSurface::Context,
+      $this->currentUser(),
+      'mcp_read',
+    );
+    if (!$readiness->isReady()) {
+      return $this->notReadyResponse($readiness->reason());
     }
 
     // IP allowlist gate — governed requests only.
-    $profile = $this->policyResolver->resolve();
+    $profile = $readiness->profile();
     if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
       return new JsonResponse(
         ['error' => 'Source IP not permitted by MCP Sentinel policy.'],
@@ -102,6 +108,43 @@ class McpContextController extends ControllerBase {
       $enabled ? 200 : 503,
       ['Cache-Control' => 'no-store']
     );
+  }
+
+  /**
+   * Reports source-governance contract availability to authenticated callers.
+   *
+   * This endpoint deliberately does not claim effective policy enforcement,
+   * verified audit evidence, or an overall-green security posture.
+   */
+  public function readiness(): JsonResponse {
+    $result = $this->readiness->contractStatus();
+    return new JsonResponse([
+      'contract_ready' => $result->isReady(),
+      'reason' => $result->reason()?->value,
+      'scope' => 'source_governance_contract',
+      'claims' => [
+        'policy_effectiveness' => FALSE,
+        'evidence_chain_verified' => FALSE,
+        'overall_posture' => FALSE,
+      ],
+    ], $result->isReady() ? 200 : 503, [
+      'Cache-Control' => 'private, no-store',
+      'X-Content-Type-Options' => 'nosniff',
+    ]);
+  }
+
+  /**
+   * Builds a stable, non-secret readiness denial response.
+   */
+  private function notReadyResponse(McpGovernanceReadinessReason $reason): JsonResponse {
+    $status = $reason->isAuthorizationFailure() ? 403 : 503;
+    return new JsonResponse([
+      'error' => $status === 403 ? 'MCP access is denied.' : 'MCP source governance is not ready.',
+      'reason' => $reason->value,
+    ], $status, [
+      'Cache-Control' => 'private, no-store',
+      'X-Content-Type-Options' => 'nosniff',
+    ]);
   }
 
   /**

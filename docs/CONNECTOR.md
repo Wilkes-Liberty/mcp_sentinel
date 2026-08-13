@@ -94,7 +94,7 @@ re-issuing.
 
 Each `mcp_tool_config` entity carries third-party settings under the
 `mcp_server_oauth` namespace (written by
-`drush mcp-sentinel:setup --require-oauth`):
+`drush mcp-sentinel:setup`):
 
 | Setting | Value |
 |---------|-------|
@@ -104,14 +104,11 @@ Each `mcp_tool_config` entity carries third-party settings under the
 The `mcp_server_oauth` subscriber enforces these per tool call — a token that
 lacks the required scope is rejected before governance even fires.
 
-> **When is `mcp_server_oauth` needed?** It is an optional submodule that adds
-> *per-tool* scope enforcement on the `mcp_server` transport. It is not required
-> for governance itself — entity-access gating, redaction, auditing, rate limits,
-> and content locks all work without it. Enable it (and re-run
-> `drush mcp-sentinel:setup --require-oauth`) only when you want each individual
-> Tool call gated on `mcp_read` / `mcp_write` at the transport layer in addition
-> to the role-based policy profile. If you see a 401 on every tool call, this
-> submodule (or an `authentication_mode` mismatch) is the usual cause.
+> **Production requires `mcp_server_oauth`.** The base module's non-Tool Drupal
+> controls can exist without MCP Server, but the connector-facing product
+> contract cannot be ready without per-Tool OAuth enforcement. The default
+> setup path refuses to run when the OAuth submodule is absent; the explicit
+> unauthenticated development escape remains not ready and exits non-zero.
 
 ### Tool → scope mapping
 
@@ -125,12 +122,13 @@ lacks the required scope is rejected before governance even fires.
 | `mcp_sentinel_media_create` | `mcp_write` |
 | `mcp_sentinel_workflow_transition` | `mcp_write` |
 | `mcp_sentinel_bulk_operations` | `mcp_write` |
-| `mcp_sentinel_config_get` | `mcp_config` |
-| `mcp_sentinel_config_list` | `mcp_config` |
+| `mcp_sentinel_config_get` | `mcp_config_read` |
+| `mcp_sentinel_config_list` | `mcp_config_read` |
 | `mcp_sentinel_config_set` | `mcp_config` |
 
-> **Config tools are config-tier only.** The three `config_*` tools require
-> `mcp_config`, **not** `mcp_write`. A content-tier token (`mcp_read` +
+> **Config tools are config-tier only.** The read tools require
+> `mcp_config_read`; the write tool requires `mcp_config`, never `mcp_write`.
+> A content-tier token (`mcp_read` +
 > `mcp_write`) is therefore denied on every config tool at the transport layer,
 > before governance fires. Grant `mcp_config` only to the dev/config consumer
 > (the `developer` / `admin` tiers in `mcp-sentinel:agent-provision`).
@@ -162,9 +160,10 @@ Repeat the steps in this section for **each** environment
 
 ### 3.1 Scope entities
 
-Create three simple_oauth scope entities (or use `simple_oauth_static_scope` for
-static scope definitions). `mcp_config` is the config-tier scope — ship it only
-where a config/dev consumer needs it:
+Create four simple_oauth scope entities (or use `simple_oauth_static_scope` for
+static scope definitions). `mcp_config_read` is read-only config access;
+`mcp_config` is config write. Ship them only where an auditor/dev consumer
+needs them:
 
 ```bash
 # mcp_read
@@ -197,7 +196,22 @@ ddev drush php:eval "
   \$scope->save();
 "
 
-# mcp_config (config-tier only — config_get / config_list / config_set)
+# mcp_config_read (config_get / config_list)
+ddev drush php:eval "
+  \$scope = \Drupal\simple_oauth\Entity\Oauth2Scope::create([
+    'id' => 'mcp_config_read',
+    'name' => 'mcp_config_read',
+    'description' => 'MCP config read tools — auditor/dev tier only',
+    'grant_types' => [
+      'authorization_code' => ['status' => TRUE],
+      'client_credentials' => ['status' => TRUE],
+    ],
+    'umbrella' => FALSE,
+  ]);
+  \$scope->save();
+"
+
+# mcp_config (config_set only)
 ddev drush php:eval "
   \$scope = \Drupal\simple_oauth\Entity\Oauth2Scope::create([
     'id' => 'mcp_config',
@@ -216,53 +230,45 @@ ddev drush php:eval "
 > **Scope `name` must equal the machine `id`.** MCP Sentinel governance matches
 > the scope *name* carried on the validated token against
 > `mcp_sentinel.settings:agent_scopes`. These ship as `mcp_read` / `mcp_write` /
-> `mcp_config` (underscore). If you set a scope `name` that differs from the configured
+> `mcp_config_read` / `mcp_config` (underscore). If a scope `name` differs from the configured
 > `agent_scopes`, governance will never recognise the token as the agent channel
-> and write tools will fail open as ungoverned. See UPGRADE.md if you previously
+> and the governed product path is refused. See UPGRADE.md if you previously
 > created colon-form (`mcp:read` / `mcp:write`) scopes.
 
-### 3.2 Consumer (one per environment)
+### 3.2 Designated Consumer and bound account (one per environment)
 
-Create a Consumer entity named `mcp-agent-<env>` via the Drupal UI at
-`/admin/config/services/consumer/add`, or via `drush php:eval`:
+First create an enabled policy profile whose `roles` include the selected
+tier's role (see §3.5; the `content` tier uses `mcp_content_editor`). Then use
+the provisioning command so Consumer, active owner account, role, scopes, and
+designation are written as one rollback-safe batch:
 
 ```bash
-ddev drush php:eval "
-  \$c = \Drupal\consumers\Entity\Consumer::create([
-    'label' => 'MCP Agent (staging)',
-    'client_id' => 'mcp-agent-staging',
-    'is_default' => FALSE,
-    'redirect' => ['https://PLACEHOLDER-staging.internal/oauth/callback'],
-    'scopes' => ['mcp_read', 'mcp_write'],
-    'access_token_expiration' => 3600,
-    'confidential' => TRUE,
-  ]);
-  \$c->save();
-  echo 'Consumer UUID: ' . \$c->uuid() . PHP_EOL;
-"
+ddev drush mcp-sentinel:agent-provision content --env=staging
 ```
 
-Note the generated `client_id` and set the client secret via the consumer edit
-form (stored in a Key entity, never in config YAML).
+The deterministic `client_id` is `content-staging`. The command never creates,
+prints, changes, or rotates a secret; set it out of band through the Consumer
+UI/Key provider after provisioning. A missing scope, blocked owner, or absent
+applicable profile fails before designation; a later write failure rolls the
+entire identity batch back.
 
 ### 3.3 MCP Sentinel agent-channel settings
 
-Register the consumer with MCP Sentinel (optional but recommended — restricts
-governance to exactly this consumer rather than any token bearing `mcp:*`):
+`agent-provision` writes the exact Consumer client ID into Sentinel settings as
+its final step. Verify that designation rather than maintaining it separately:
 
 ```bash
 ddev drush php:eval "
   \Drupal::configFactory()
     ->getEditable('mcp_sentinel.settings')
-    ->set('agent_oauth_clients', ['mcp-agent-staging'])
-    ->save();
+    ->get('agent_oauth_clients');
 "
 ```
 
-> **Important:** with the default config `agent_oauth_clients: {}` (empty),
-> ANY OAuth token bearing `mcp_read` or `mcp_write` from ANY consumer is
-> treated as on the governed agent channel. To restrict governance to a
-> specific consumer, populate `agent_oauth_clients` with its `client_id`.
+> **Important:** an empty `agent_oauth_clients` value is not production-ready.
+> Scope-only recognition remains useful for legacy/non-product integrations,
+> but every governed Tool/context/connector path requires an exact designated,
+> enabled Consumer bound to an active account and applicable role-bound profile.
 
 ### 3.4 simple_oauth token TTL
 
@@ -289,7 +295,7 @@ ddev drush php:eval "
     \$p = \Drupal\mcp_sentinel\Entity\McpPolicyProfile::create(['id' => 'agent_prod']);
   }
   \$p->set('label', 'Agent (production)')
-    ->set('roles', ['mcp_api'])           // bound to the admin's governed role
+    ->set('roles', ['mcp_content_editor']) // content tier role
     ->set('weight', 10)
     ->set('allow_read', TRUE)
     ->set('allow_write', TRUE)
@@ -391,7 +397,7 @@ from the public hostname. Only the internal VPN hostname should accept writes.
 ### 3.7 Register tools with OAuth scope enforcement
 
 ```bash
-ddev drush mcp-sentinel:setup --require-oauth
+ddev drush mcp-sentinel:setup
 ddev drush cr
 ```
 
@@ -403,7 +409,22 @@ ddev drush config:get mcp_server.mcp_tool_config.mcp_sentinel_node_operations
 #           third_party_settings.mcp_server_oauth.scopes[0] = mcp_write
 ```
 
-### 3.8 Export configuration
+### 3.8 Verify the bounded source contract
+
+With a bearer token for the designated Consumer whose subject has `access mcp
+sentinel context`, call:
+
+```bash
+curl -sS '<INTERNAL_BASE_URL>/drupal-mcp/readiness' \
+  -H 'Authorization: Bearer <ACCESS_TOKEN>' | jq
+```
+
+Ready returns HTTP 200 and `contract_ready: true`. A stable HTTP 503 reason
+identifies missing local wiring. This response is deliberately bounded: its
+`claims` object keeps policy effectiveness, evidence-chain verification, and
+overall posture false. A green readiness response is not an assurance report.
+
+### 3.9 Export configuration
 
 ```bash
 ddev drush cex
@@ -464,7 +485,8 @@ manual runbook — record the results in an ops ticket or this section.
 - Consumer `mcp-agent-<env>` created with `mcp_read` + `mcp_write` scopes.
 - Agent policy profile with `allow_write: true`, `allow_delete: false`.
 - JSON:API `read_only: false` on the internal host.
-- `drush mcp-sentinel:setup --require-oauth` run; `drush cr` done.
+- `drush mcp-sentinel:setup` run; `drush cr` done; authenticated
+  `/drupal-mcp/readiness` returns `contract_ready: true`.
 
 ### Step 1 — Obtain a token
 
@@ -547,7 +569,8 @@ session. Create or edit a node via `/node/add/article` in the Drupal admin UI.
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | All requests ungoverned | `agent_oauth_clients` + `agent_scopes` mismatch | Check token scopes: `jq -R 'split(".") \| .[1] \| @base64d \| fromjson' <<< "$TOKEN"` |
-| 401 on every tool call | `mcp_server_oauth` not enabled or `authentication_mode` mismatch | `ddev drush en mcp_server_oauth -y && ddev drush mcp-sentinel:setup --require-oauth` |
+| 401 on every tool call | token lacks the exact scope or Consumer binding | Verify the token/Consumer/account/profile join and run `ddev drush mcp-sentinel:setup`; do not disable OAuth. |
+| 503 from `/drupal-mcp/readiness` | source contract incomplete | Use the stable `reason` value and Status report; fix the named server/bridge/OAuth/audit/Tool/Consumer/account/profile prerequisite. |
 | Audit row shows `uid: 0` | Consumer has no subject user (client_credentials) | Create a dedicated machine-account user and link it to the Consumer entity |
 | APCu stale after config change | php-fpm has its own APCu pool | `ddev restart` to flush |
 | Container still uses old service signature | Drupal container cache | `ddev drush cr` |

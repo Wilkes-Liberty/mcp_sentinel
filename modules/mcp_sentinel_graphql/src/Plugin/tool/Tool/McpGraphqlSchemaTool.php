@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel_graphql\Plugin\tool\Tool;
 
-use Drupal\Core\Access\AccessResult;
-use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\graphql\Entity\ServerInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
-use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolOperation;
 use Drupal\tool\TypedData\InputDefinition;
 use GraphQL\Utils\SchemaPrinter;
@@ -38,7 +35,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
     ),
   ],
 )]
-final class McpGraphqlSchemaTool extends ToolBase {
+final class McpGraphqlSchemaTool extends McpGovernedToolBase {
 
   /**
    * The entity type manager.
@@ -90,14 +87,6 @@ final class McpGraphqlSchemaTool extends ToolBase {
         'sdl' => $sdl,
       ],
     );
-  }
-
-  /**
-   * {@inheritdoc}
-   */
-  protected function checkAccess(array $values, AccountInterface $account, bool $return_as_object = FALSE): bool|AccessResultInterface {
-    $access = AccessResult::allowedIfHasPermission($account, 'access mcp sentinel context');
-    return $return_as_object ? $access : $access->isAllowed();
   }
 
 }

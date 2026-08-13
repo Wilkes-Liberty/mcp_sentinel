@@ -75,6 +75,34 @@ class McpOauthContext {
   }
 
   /**
+   * Whether the current account came from a validated OAuth access token.
+   */
+  public function isOauthRequest(): bool {
+    return $this->tokenAuthUser() !== NULL;
+  }
+
+  /**
+   * Whether the current OAuth consumer is explicitly designated as an agent.
+   */
+  public function isDesignatedAgentClient(): bool {
+    $clientId = $this->clientId();
+    if ($clientId === NULL) {
+      return FALSE;
+    }
+    $configured = (array) ($this->configFactory
+      ->get('mcp_sentinel.settings')
+      ->get('agent_oauth_clients') ?? []);
+    return in_array($clientId, $configured, TRUE);
+  }
+
+  /**
+   * Whether the validated token carries an exact required scope.
+   */
+  public function hasScope(string $scope): bool {
+    return in_array($scope, $this->scopes(), TRUE);
+  }
+
+  /**
    * Determines whether the current request is on the governed agent channel.
    *
    * A request is on the agent channel when:
@@ -95,10 +123,9 @@ class McpOauthContext {
     }
 
     $config = $this->configFactory->get('mcp_sentinel.settings');
-    $allowedClients = $config->get('agent_oauth_clients') ?? [];
     $agentScopes = $config->get('agent_scopes') ?? [];
 
-    if (!empty($allowedClients) && in_array($clientId, $allowedClients, TRUE)) {
+    if ($this->isDesignatedAgentClient()) {
       return TRUE;
     }
 

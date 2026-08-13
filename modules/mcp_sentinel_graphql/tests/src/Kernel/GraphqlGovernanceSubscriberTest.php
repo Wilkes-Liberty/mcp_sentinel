@@ -144,7 +144,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $this->container->get('current_user')->setAccount($agent);
 
     $this->expectException(Error::class);
-    $this->expectExceptionMessage('MCP access is disabled by MCP Sentinel.');
+    $this->expectExceptionMessage('module_disabled');
 
     $this->subscriber()->onOperation($this->makeEvent('query'));
   }
@@ -256,9 +256,10 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
    */
   private function subscriber(): GraphqlGovernanceSubscriber {
     return new GraphqlGovernanceSubscriber(
-      $this->container->get('mcp_sentinel.policy_resolver'),
       $this->container->get('mcp_sentinel.audit_logger'),
       $this->container->get('config.factory'),
+      $this->container->get('mcp_sentinel.governance_readiness'),
+      $this->container->get('current_user'),
     );
   }
 

@@ -4,6 +4,45 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Governed MCP paths now refuse incomplete 2.3.0 wiring
+
+**Affects:** every site upgrading from 2.3.0, especially installs that left
+`agent_oauth_clients` empty or registered Tools with OAuth disabled/optional.
+
+The upgrade does **not** silently designate a Consumer, enable an account,
+select a policy profile, create/rotate a secret, or rewrite existing Tool auth
+settings. Those are security decisions and hidden repair would make an
+incomplete site appear safe. Instead one typed evaluator returns a stable
+not-ready reason, and governed Tool/context/JSON:API/GraphQL product paths deny
+until all prerequisites are true.
+
+After deploying the code and running database updates:
+
+1. Enable `mcp_sentinel_server`, `mcp_server_tool_bridge`, and
+   `mcp_server_oauth`, then rebuild the container.
+2. Ensure the four scope entities exist: `mcp_read`, `mcp_write`,
+   `mcp_config_read`, and `mcp_config`.
+3. Ensure an enabled policy profile applies to the selected tier role.
+4. Run `drush mcp-sentinel:setup`. OAuth is required by default; the command
+   preflights every Tool and rolls back a partial registration batch.
+5. Run `drush mcp-sentinel:agent-provision <tier> --env=<env>`. It binds an
+   enabled Consumer to an active owner account and designates the exact client
+   ID as its final write. It never creates or rotates a secret.
+6. Set the Consumer secret out of band, mint a fresh token, run `drush cr`, and
+   call authenticated `GET /drupal-mcp/readiness`.
+
+HTTP 200 with `contract_ready: true` proves only the local source-contract
+configuration and availability checks. It does not claim policy effectiveness,
+audit-chain verification, independent evidence, or an overall-green posture.
+HTTP 503 carries a stable non-secret reason for the next missing prerequisite.
+
+The only unauthenticated setup path is
+`--allow-unauthenticated-development`. It is visibly development-only, exits
+non-zero, and can never satisfy production readiness. Rolling code back does
+not restore governed availability automatically; preserve the exported
+configuration and complete or deliberately revert the identity/Tool changes as
+an operator-controlled action.
+
 ## 2.0.0 requires the `audit_chain` module
 
 **Affects:** any install upgrading from 1.x to 2.0.x.
@@ -68,9 +107,9 @@ server-validated access token and intersects them with the
 `mcp_sentinel.settings:agent_scopes` allowlist (see
 `src/Service/McpOauthContext.php`). For a token to be recognised as the agent
 channel, the scope **name** on the token must exactly match an entry in
-`agent_scopes`. If the names disagree, the request is treated as *not* on the
-agent channel — governance never engages and write tools effectively fail open
-as ungoverned.
+`agent_scopes`. On legacy releases a mismatch could be treated as an ungoverned
+request. The current source contract instead refuses the governed product path
+with a stable not-ready/scope reason.
 
 Because the scope name flows end-to-end (scope entity → token → governance
 allowlist), the scope entity's `name` must equal its underscore machine `id`,
@@ -133,7 +172,7 @@ emit the underscore form.
 4. **Re-tag the registered tools and rebuild caches:**
 
    ```bash
-   drush mcp-sentinel:setup --require-oauth
+   drush mcp-sentinel:setup
    drush cr
    ```
 

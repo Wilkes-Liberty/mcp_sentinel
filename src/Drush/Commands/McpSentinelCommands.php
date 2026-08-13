@@ -11,6 +11,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
@@ -56,6 +57,8 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly McpUrgentConditions $urgentConditions,
     #[Autowire(service: 'mcp_sentinel.role_assertions')]
     private readonly McpRoleAssertions $roleAssertions,
+    #[Autowire(service: 'mcp_sentinel.governance_readiness')]
+    private readonly McpGovernanceReadiness $governanceReadiness,
   ) {
     parent::__construct();
   }
@@ -64,7 +67,7 @@ final class McpSentinelCommands extends DrushCommands {
    * Show a summary of the current MCP Sentinel configuration and state.
    */
   #[CLI\Command(name: 'mcp-sentinel:status', aliases: ['mcps:status'])]
-  #[CLI\Usage(name: 'drush mcp-sentinel:status', description: 'Print the active policy plus audit and lock counts.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:status', description: 'Print the source-contract readiness, active policy, audit, and lock state.')]
   public function status(): int {
     $config = $this->configFactory->get('mcp_sentinel.settings');
     $bool = static fn(?bool $v): string => $v ? 'yes' : 'no';
@@ -92,7 +95,7 @@ final class McpSentinelCommands extends DrushCommands {
       'OAuth agent channel',
       sprintf(
         'clients=%s | scopes=%s | role_fallback=%s',
-        $oauthClients ? implode(',', $oauthClients) : '(any — scope-only mode)',
+        $oauthClients ? implode(',', $oauthClients) : '(none — not production ready)',
         $oauthScopes ? implode(',', $oauthScopes) : '(none)',
         $bool($config->get('governed_role_fallback')),
       ),
@@ -114,6 +117,18 @@ final class McpSentinelCommands extends DrushCommands {
       $configCondition === NULL
         ? 'live'
         : strtoupper((string) $configCondition['severity']) . ': ' . $configCondition['message'],
+    ];
+
+    // Reuse the same typed contract evaluated by the runtime readiness route,
+    // governed Tools, settings page, and install requirements. This is only a
+    // source wiring/availability claim; it does not claim policy
+    // effectiveness, audit-chain verification, or hosted readiness.
+    $contract = $this->governanceReadiness->contractStatus();
+    $rows[] = [
+      'Source governance contract',
+      $contract->isReady()
+        ? 'ready (source wiring and availability only)'
+        : 'NOT READY: ' . $contract->reason()->value,
     ];
 
     $output = $this->output();
@@ -141,9 +156,11 @@ final class McpSentinelCommands extends DrushCommands {
       }
     }
 
-    // Non-zero exit when config governance is in a critical fail-open state so
-    // monitoring catches it, mirroring audit-verify's exit-code contract.
-    if ($configCondition !== NULL && $configCondition['severity'] === 'critical') {
+    // Non-zero exit whenever the source contract or config-governance floor is
+    // not ready so deployment and monitoring cannot mistake partial wiring for
+    // governed service availability.
+    if (!$contract->isReady()
+      || ($configCondition !== NULL && $configCondition['severity'] === 'critical')) {
       return self::EXIT_FAILURE;
     }
 

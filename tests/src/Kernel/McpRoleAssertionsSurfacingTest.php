@@ -57,6 +57,9 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
+    // The runtime requirements hook renders a settings route; route URL
+    // generation consults the alias repository in this isolated kernel.
+    $this->installEntitySchema('path_alias');
     $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installConfig(['audit_chain', 'mcp_sentinel', 'user']);
   }

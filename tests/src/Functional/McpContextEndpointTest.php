@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\Tests\BrowserTestBase;
+use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Tests the MCP Sentinel health and context endpoints.
  *
  * @group mcp_sentinel
  */
+#[RunTestsInSeparateProcesses]
 final class McpContextEndpointTest extends BrowserTestBase {
 
   /**
@@ -44,6 +46,22 @@ final class McpContextEndpointTest extends BrowserTestBase {
     // Anonymous users lack 'access mcp sentinel context'.
     $this->drupalGet('/drupal-mcp/context');
     $this->assertSession()->statusCodeEquals(403);
+  }
+
+  /**
+   * The readiness contract is authenticated and GET-only at the live router.
+   */
+  public function testReadinessEndpointBoundary(): void {
+    $this->drupalGet('/drupal-mcp/readiness');
+    $this->assertSession()->statusCodeEquals(403);
+
+    $response = $this->getHttpClient()->request(
+      'POST',
+      $this->buildUrl('/drupal-mcp/readiness'),
+      ['http_errors' => FALSE],
+    );
+    $this->assertSame(405, $response->getStatusCode());
+    $this->assertSame('GET, HEAD', $response->getHeaderLine('Allow'));
   }
 
 }

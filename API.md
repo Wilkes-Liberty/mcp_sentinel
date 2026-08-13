@@ -89,9 +89,9 @@ SIEM, queue, or notification system without touching the audit log.
 
 MCP Sentinel ships its governed tools as `tool` plugins
 (`Drupal\tool\Attribute\Tool` on a class extending
-`Drupal\tool\Tool\ToolBase`). They live in `src/Plugin/tool/Tool/` and are
-discovered by core's Tool API; the `mcp_sentinel_server` submodule registers
-them with `mcp_server`.
+`Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase`). They live in
+`src/Plugin/tool/Tool/` and are discovered by core's Tool API; the
+`mcp_sentinel_server` submodule registers them with `mcp_server`.
 
 To build a tool that participates in Sentinel governance, use
 `Drupal\mcp_sentinel\Plugin\tool\Tool\McpEntityToolTrait`. It provides the
@@ -107,13 +107,14 @@ protected helpers the shipped tools share:
 | `checkResponseSizeCap(...)` | enforce the profile's response-size cap |
 | `truncateBulkResultsToSizeCap(...)` | trim a bulk result set to the size cap |
 
-A governed tool's `checkAccess()` should resolve the account's profile via
-`mcp_sentinel.policy_resolver`, and when governed, enforce the IP allowlist
-(`McpAccessChecker::isClientIpAllowed()`) returning
-`AccessResult::forbidden()->setCacheMaxAge(0)` on failure — the canonical
-pattern used by every shipped write tool. Ungoverned accounts must be left
-unaffected (return neutral). The shipped `McpContentLockTool` is the reference
-implementation.
+`McpGovernedToolBase::checkAccess()` is final. It enforces the Drupal
+permission, the shared connector-facing readiness contract, the exact OAuth
+scope derived from the plugin definition, and the profile IP allowlist before
+a subclass can run. A Tool that needs an additional restriction overrides
+`checkGovernedAccess()` and may only narrow the common decision. Do not extend
+`ToolBase` directly and do not reimplement this gate: doing so creates a path
+that can operate when server/OAuth/audit/registration/identity/policy wiring is
+absent.
 
 ## Policy-profile config entity
 
@@ -159,9 +160,10 @@ content **publishing**. Both layers are additive and default to the safe value
   the `allow_config_read` / `allow_config_write` gates. Reads/lists honor
   `audit_log_reads`; denied config names are never even enumerated by the list
   tool. When `mcp_server_oauth` is enabled, all three are additionally gated at
-  the transport layer on the dedicated **`mcp_config`** scope (not `mcp_write`),
-  so a content-tier token (`mcp_read` / `mcp_write`) is rejected before
-  governance fires — config management is isolated to the dev/config tier.
+  the transport layer: config reads require **`mcp_config_read`**, config writes
+  require **`mcp_config`** (never `mcp_write`). A content-tier token
+  (`mcp_read` / `mcp_write`) is rejected before governance fires — config
+  management is isolated to the auditor/dev/config tiers.
 - **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on
   `ConfigEvents::SAVE`) audits every governed config save as `config_save` (diff
   via `McpAuditLogger::computeConfigDiff()`) and, for a governed write to a
@@ -183,7 +185,7 @@ content **publishing**. Both layers are additive and default to the safe value
 
 | Command | Purpose |
 |---------|---------|
-| `mcp-sentinel:status` | Posture summary; non-zero exit when the `config_governance` guard is critical (never fail open). |
+| `mcp-sentinel:status` | Source-contract readiness plus policy, audit, lock, and config-guard state. Exits non-zero whenever the connector-facing source contract is not ready; a ready contract does not claim healthy posture, effective policy, or durable evidence. |
 | `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
 | `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only governed raw-SQL path. Refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement; every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
 | `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. |
@@ -203,6 +205,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |
 | `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) |
+| `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom) |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |

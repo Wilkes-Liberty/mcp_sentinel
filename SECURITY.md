@@ -35,6 +35,16 @@ MCP Sentinel is only as strong as its deployment. Operators must:
 - **Keep the agent channel distinct from human admin sessions.** An admin's
   cookie-session UI is not governed; that is intentional. Do not put agent
   credentials on accounts that also operate the site as humans.
+- **Treat `/drupal-mcp/health` as liveness only.** Governed connectors must use
+  the authenticated `/drupal-mcp/readiness` contract and refuse service unless
+  it reports `contract_ready`. A ready contract confirms source-side wiring and
+  availability; it does not prove policy effectiveness, verified evidence, or
+  an overall-green security posture.
+- **Complete the designated Consumer binding before exposing governed MCP.**
+  Production readiness requires required-OAuth Tool registration, exact
+  non-empty scopes, an enabled designated Consumer, its active owner account,
+  and an applicable enabled policy profile. The explicit unauthenticated
+  development escape is never production-ready.
 - **Understand that audit integrity depends on the signing key and on
   `audit_chain` remaining enabled.** A missing or unresolvable key is reported
   loudly; do not silence that path.
@@ -43,6 +53,9 @@ MCP Sentinel is only as strong as its deployment. Operators must:
 
 - Policy profiles constrain governed operations through MCP, JSON:API, and
   GraphQL when the request is on the agent channel.
+- Governed Tool, context, JSON:API, and GraphQL paths refuse service when the
+  required source-governance contract is absent or invalid; they do not fall
+  back to plain Drupal execution.
 - Fail-closed behaviour when the audit chain is unavailable for a governed
   write (the write is refused rather than performed unaudited).
 - Role assertions that report escape-hatch permissions held outside the channel.

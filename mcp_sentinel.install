@@ -156,6 +156,29 @@ function mcp_sentinel_requirements(string $phase): array {
     return $requirements;
   }
 
+  // Report the same connector-facing source contract enforced at runtime.
+  // This is intentionally stricter than the legacy "a channel could fire"
+  // warning below: a non-empty scope string is not production readiness when
+  // server/OAuth/audit/tool registration or designated identity wiring is
+  // absent. Reuse the typed evaluator so the status report, readiness endpoint,
+  // Tool base, and API subscribers cannot drift into conflicting answers.
+  if (\Drupal::hasService('mcp_sentinel.governance_readiness')) {
+    /** @var \Drupal\mcp_sentinel\Service\McpGovernanceReadiness $readiness */
+    $readiness = \Drupal::service('mcp_sentinel.governance_readiness');
+    $contract = $readiness->contractStatus();
+    if (!$contract->isReady()) {
+      $reason = $contract->reason()->value;
+      $requirements['mcp_sentinel_contract_not_ready'] = [
+        'title' => t('MCP Sentinel: source-governance contract not ready'),
+        'value' => t('Not ready (@reason)', ['@reason' => $reason]),
+        'severity' => REQUIREMENT_ERROR,
+        'description' => t('Governed MCP product paths are refused until the source contract is complete. Review the <a href=":url">MCP Sentinel settings</a>, enable the required server/bridge/OAuth/audit modules, provision a designated active Consumer whose owner resolves to an applicable role-bound profile, and register every Tool with required authentication and its exact derived scope. The readiness signal does not claim policy effectiveness, verified evidence, or overall security posture.', [
+          ':url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
+        ]),
+      ];
+    }
+  }
+
   // Permanently failed webhook deliveries are otherwise invisible
   // (#3613242): rows land in failed / failed_ssrf / failed_redirect and sit
   // silently until retention prunes them — a month of 100% delivery failure
