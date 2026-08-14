@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Human publication authority preserved for already-published unmoderated
+  content (#107 / d.o. #3616542).** A governed agent edit of an
+  already-published entity with no moderation workflow no longer mutates the
+  live revision (previously the edit landed in the live default revision and
+  the presave backstop then forced the entity unpublished — content changed
+  and taken down in one save). Revisionable types store the edit as an
+  unpublished forward (non-default) revision: the live revision is unchanged
+  and stays published, and an `unmoderated_forward_revision` evidence row
+  names both revisions. Types that cannot carry a forward revision are
+  refused with a stable message — a 422 on validated seams (JSON:API, REST,
+  forms), an aborted save plus an `unmoderated_in_place_denied` evidence row
+  on the unvalidated seam. Pure takedown (unpublish) and ungoverned traffic
+  are unchanged.
+
 ## [2.4.0] - 2026-08-13
 
 ### Security

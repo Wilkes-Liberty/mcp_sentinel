@@ -12,6 +12,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Service\McpCompositeRedirect;
 use Drupal\mcp_sentinel\Service\McpModerationGate;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\Validator\Constraint;
 use Symfony\Component\Validator\ConstraintValidator;
@@ -29,10 +30,11 @@ use Symfony\Component\Validator\ConstraintValidator;
  *   violation message: submit the edit with a non-published moderation_state
  *   (e.g. draft) to create a forward revision for human review.
  * - **Unmoderated**: the incoming status is published, and the entity is
- *   either new or its stored status was not already published. In-place edits
- *   remain allowed here — an unmoderated type has no forward-revision
- *   workflow to redirect the edit into, so gating it would leave agents no
- *   path at all; sites wanting that strictness deny writes for the type.
+ *   either new or its stored status was not already published. An in-place
+ *   edit of already-published content (d.o #3616542) passes validation only
+ *   when it is redirectable: the presave redirect stores it as an unpublished
+ *   forward revision and the live default revision is untouched. A type that
+ *   cannot carry a forward revision is denied here with a stable message.
  *
  * Published → draft, draft → draft, and published → archived always pass.
  *
@@ -60,6 +62,9 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
    * @param \Drupal\mcp_sentinel\Service\McpCompositeRedirect $compositeRedirect
    *   Decides whether a composite-child write must be denied (pinned by
    *   published content and not safely draftable) — see GitHub #46.
+   * @param \Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision $unmoderatedRedirect
+   *   Decides whether an in-place edit of published unmoderated content is
+   *   redirectable to a forward revision or must be denied (d.o #3616542).
    * @param \Drupal\content_moderation\ModerationInformationInterface|null $moderationInformation
    *   The moderation information service, or NULL when Content Moderation is
    *   not installed.
@@ -69,6 +74,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     private readonly McpModerationGate $moderationGate,
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly McpCompositeRedirect $compositeRedirect,
+    private readonly McpUnmoderatedForwardRevision $unmoderatedRedirect,
     private readonly ?ModerationInformationInterface $moderationInformation = NULL,
   ) {}
 
@@ -81,6 +87,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       $container->get('mcp_sentinel.moderation_gate'),
       $container->get('entity_type.manager'),
       $container->get('mcp_sentinel.composite_redirect'),
+      $container->get('mcp_sentinel.unmoderated_redirect'),
       $container->has('content_moderation.moderation_information')
         ? $container->get('content_moderation.moderation_information')
         : NULL,
@@ -190,6 +197,18 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       return;
     }
     if (!$entity->isNew() && $this->originalIsPublished($entity)) {
+      // An in-place edit of live content (d.o #3616542). A revisionable type
+      // passes: the presave redirect stores the edit as an unpublished forward
+      // revision and the live default revision is untouched. A type that
+      // cannot carry a forward revision has nowhere safe to put the edit, so
+      // it is refused here. Entity-level on purpose: the bypass payload need
+      // not contain the status field, and JSON:API's filterByFields() drops
+      // field-level violations for absent fields (see the moderated case
+      // above).
+      if ($this->unmoderatedRedirect->classify($entity) === McpUnmoderatedForwardRevision::DECISION_DENY) {
+        $this->context->buildViolation(McpUnmoderatedForwardRevision::IN_PLACE_DENY_MESSAGE)
+          ->addViolation();
+      }
       return;
     }
 

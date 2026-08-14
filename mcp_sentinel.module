@@ -207,6 +207,15 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
   // refused with a 422 by the McpDenyPublish constraint before this runs.
   \Drupal::service('mcp_sentinel.composite_redirect')->onPresave($entity);
 
+  // Unmoderated in-place gate (d.o #3616542): a governed edit of an
+  // already-published entity with no moderation workflow must never mutate the
+  // live default revision. Redirectable (revisionable) saves become an
+  // unpublished forward revision here; non-revisionable saves on the
+  // unvalidated seam are aborted. Runs before the publish-gate backstop below
+  // on purpose: the redirect unpublishes the forward revision, which also
+  // keeps the backstop away from it.
+  \Drupal::service('mcp_sentinel.unmoderated_redirect')->onPresave($entity);
+
   // Publish-gate backstop (status=0) for unmoderated publishable entities.
   //
   // The McpDenyPublish constraint reports a denied go-live wherever the entity
@@ -308,6 +317,7 @@ function mcp_sentinel_entity_insert(EntityInterface $entity): void {
  */
 function mcp_sentinel_entity_update(EntityInterface $entity): void {
   \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
+  \Drupal::service('mcp_sentinel.unmoderated_redirect')->onPostSave($entity);
 }
 
 /**

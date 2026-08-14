@@ -63,6 +63,18 @@ services:
       # Optional: NULL when the Content Moderation module is not installed.
       - '@?content_moderation.moderation_information'
 
+  mcp_sentinel.unmoderated_redirect:
+    class: Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.moderation_gate'
+      - '@entity_type.manager'
+      - '@mcp_sentinel.audit_logger'
+      - '@current_user'
+      - '@datetime.time'
+      # Optional: NULL when the Content Moderation module is not installed.
+      - '@?content_moderation.moderation_information'
+
   mcp_sentinel.webhook_queue_manager:
     class: Drupal\mcp_sentinel\Service\McpWebhookQueueManager
     arguments:
