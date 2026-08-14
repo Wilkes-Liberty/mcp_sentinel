@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-14
+
 ### Added
 - **Governed composite-child creation (#122 / d.o. #3616669).** Paragraphs
   cannot be created over JSON:API at all upstream — their access handler
@@ -1689,7 +1691,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta4...1.0.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.5.0...1.x
+[2.5.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.4.0...2.5.0
 [1.0.0-beta4]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta3...1.0.0-beta4
 [1.0.0-beta3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta2...1.0.0-beta3
 [1.0.0-beta2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta1...1.0.0-beta2
