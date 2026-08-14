@@ -157,8 +157,13 @@ final class McpUnmoderatedForwardRevision {
       throw new \RuntimeException(self::IN_PLACE_DENY_MESSAGE);
     }
 
+    // Stash the STORED DEFAULT revision id, not getLoadedRevisionId(): a
+    // caller may have loaded a non-default revision, and the evidence row
+    // must name the live revision that was actually protected.
+    $storedDefault = $this->storedDefault($entity);
+    $this->stash[$entity->uuid()] = $storedDefault?->getRevisionId() ?? $entity->getLoadedRevisionId();
+
     /** @var \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface $entity */
-    $this->stash[$entity->uuid()] = $entity->getLoadedRevisionId();
     $entity->setNewRevision(TRUE);
     $entity->isDefaultRevision(FALSE);
     $entity->setUnpublished();
@@ -214,15 +219,29 @@ final class McpUnmoderatedForwardRevision {
    *   TRUE only when the stored default revision is confirmed published.
    */
   private function storedIsPublished(ContentEntityInterface $entity): bool {
+    $stored = $this->storedDefault($entity);
+    return $stored instanceof EntityPublishedInterface && $stored->isPublished();
+  }
+
+  /**
+   * Loads the entity's stored default (live) revision, uncached.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The entity being classified or saved.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface|null
+   *   The stored default revision, or NULL when it cannot be loaded.
+   */
+  private function storedDefault(ContentEntityInterface $entity): ?ContentEntityInterface {
     $id = $entity->id();
     if ($id === NULL) {
-      return FALSE;
+      return NULL;
     }
     $stored = $this->entityTypeManager
       ->getStorage($entity->getEntityTypeId())
       ->loadUnchanged($id);
 
-    return $stored instanceof EntityPublishedInterface && $stored->isPublished();
+    return $stored instanceof ContentEntityInterface ? $stored : NULL;
   }
 
 }

@@ -219,6 +219,7 @@ final class McpUnmoderatedForwardRevisionTest extends KernelTestBase {
    */
   public function testForwardRevisionAuditEvidence(): void {
     $node = $this->createLivePage();
+    $liveRevisionId = (int) $node->getRevisionId();
 
     $this->setGovernedAccount();
     $node->setTitle('Audited edit');
@@ -226,6 +227,21 @@ final class McpUnmoderatedForwardRevisionTest extends KernelTestBase {
 
     $this->assertSame(1, $this->countAuditRows('unmoderated_forward_revision'),
       'A redirected in-place edit must write exactly one evidence row.');
+
+    $row = \Drupal::database()
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'unmoderated_forward_revision')
+      ->execute()
+      ->fetchAssoc();
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame($liveRevisionId, (int) ($metadata['live_revision_id'] ?? 0),
+      'The evidence row must name the stored default (live) revision.');
+    $this->assertSame((int) $node->getRevisionId(), (int) ($metadata['forward_revision_id'] ?? 0),
+      'The evidence row must name the forward revision that carries the edit.');
+    $this->assertGreaterThan($liveRevisionId, (int) $metadata['forward_revision_id'],
+      'The forward revision must be newer than the live revision it protects.');
   }
 
   /**
