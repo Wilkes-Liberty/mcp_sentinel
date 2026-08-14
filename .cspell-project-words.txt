@@ -55,6 +55,7 @@ memoise
 memoises
 memorise
 mglaman
+msar
 normalise
 normalised
 normalises
