@@ -37,6 +37,13 @@ drush mcp-sentinel:setup
 # Tiers: content, content-auditor, auditor, developer, admin.
 drush mcp-sentinel:agent-provision content --env=prod
 
+# Re-provision every declared principal. Consumers are content entities, so
+# database refreshes and copies destroy them; declare each environment's
+# tiers in mcp_sentinel.settings:agent_provision_tiers ("<tier>:<env>",
+# typically via a settings.php override) and run this from deploy/refresh
+# tooling so a wiped principal heals on the next run. Idempotent.
+drush mcp-sentinel:agent-reconcile
+
 # Remove the tool registrations.
 drush mcp-sentinel:teardown
 ```

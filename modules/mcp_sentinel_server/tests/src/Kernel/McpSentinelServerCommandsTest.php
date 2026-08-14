@@ -216,6 +216,12 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
       ['scope_id' => 'mcp_write'],
     ], $consumerFields['scopes']);
     $this->assertArrayNotHasKey('secret', $consumerFields);
+    // d.o #3616862: a provisioned consumer must be able to actually mint
+    // tokens — the client_credentials grant enabled and simple_oauth's
+    // default user bound to the tier account. Without these the principal
+    // satisfies the readiness contract yet fails every token request.
+    $this->assertSame([['value' => 'client_credentials']], $consumerFields['grant_types']);
+    $this->assertSame(42, $consumerFields['user_id']);
     $this->assertSame(0, $deleted);
   }
 
@@ -393,6 +399,66 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
       static fn (string $type): EntityStorageInterface => $storages[$type],
     );
     return $manager;
+  }
+
+  /**
+   * Reconcile provisions every declared tier.
+   */
+  public function testAgentReconcileProvisionsDeclaredTiers(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('agent_provision_tiers', ['content:prod'])
+      ->save();
+    $deleted = 0;
+    $consumerFields = [];
+    $command = $this->command(
+      $this->agentEntityTypeManager(FALSE, $deleted, $consumerFields),
+      $this->moduleHandler(['consumers' => TRUE, 'simple_oauth' => TRUE]),
+    );
+
+    $result = $command->agentReconcile();
+
+    $this->assertSame(0, $result);
+    $this->assertSame(['content-prod'], $this->config('mcp_sentinel.settings')->get('agent_oauth_clients'));
+    $this->assertSame([['value' => 'client_credentials']], $consumerFields['grant_types']);
+  }
+
+  /**
+   * An invalid declared entry fails the run but valid entries still provision.
+   */
+  public function testAgentReconcileSkipsInvalidEntriesAndFails(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('agent_provision_tiers', ['bogus:prod', 'content:prod'])
+      ->save();
+    $deleted = 0;
+    $consumerFields = [];
+    $command = $this->command(
+      $this->agentEntityTypeManager(FALSE, $deleted, $consumerFields),
+      $this->moduleHandler(['consumers' => TRUE, 'simple_oauth' => TRUE]),
+    );
+
+    $result = $command->agentReconcile();
+
+    $this->assertNotSame(0, $result,
+      'A declared principal that cannot be reconciled must fail the run, not vanish silently.');
+    $this->assertSame(['content-prod'], $this->config('mcp_sentinel.settings')->get('agent_oauth_clients'),
+      'Valid declarations still provision.');
+  }
+
+  /**
+   * No declaration means an honest no-op.
+   */
+  public function testAgentReconcileNoDeclarationIsNoop(): void {
+    $deleted = 0;
+    $consumerFields = [];
+    $command = $this->command(
+      $this->agentEntityTypeManager(FALSE, $deleted, $consumerFields),
+      $this->moduleHandler(['consumers' => TRUE, 'simple_oauth' => TRUE]),
+    );
+
+    $result = $command->agentReconcile();
+
+    $this->assertSame(0, $result);
+    $this->assertSame([], $consumerFields, 'No writes when nothing is declared.');
   }
 
 }
