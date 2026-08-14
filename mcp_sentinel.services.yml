@@ -39,6 +39,7 @@ services:
     arguments:
       - '@config.factory'
       - '@request_stack'
+      - '@entity_type.manager'
 
   mcp_sentinel.moderation_gate:
     class: Drupal\mcp_sentinel\Service\McpModerationGate

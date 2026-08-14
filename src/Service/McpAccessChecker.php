@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\IpUtils;
@@ -31,10 +32,16 @@ final class McpAccessChecker {
    *   The config factory service.
    * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
    *   The request stack, used to read the trusted client IP.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface|null $entityTypeManager
+   *   The entity type manager, used to recognise composite-child entity types
+   *   for the governed creation grant (d.o #3616669). NULL is accepted so
+   *   existing kernel tests that construct the checker directly keep working;
+   *   without it the grant simply never applies.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
+    private readonly ?EntityTypeManagerInterface $entityTypeManager = NULL,
   ) {}
 
   /**
@@ -195,6 +202,23 @@ final class McpAccessChecker {
       $result = AccessResult::forbidden(
         'Write operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+
+    // Composite-child grant (d.o #3616669). A composite child (a paragraph)
+    // cannot be created over an API at all upstream: its access handler allows
+    // creation only in HTML form context and stays neutral for API formats,
+    // which collapses to 403 — so the connector's create-then-reference flow
+    // is impossible even under a write-allowed profile. The governed channel
+    // supplies the policy context standalone creation lacks, so once every
+    // gate above has passed, Sentinel grants creation for entity types that
+    // declare a revision parent (composites only — non-composite types keep
+    // their neutral fall-through so core role permissions still decide them).
+    // A standalone composite is inert until a host references it, and that
+    // host save runs the full governance stack.
+    $definition = $this->entityTypeManager?->getDefinition($entityTypeId, FALSE);
+    if ($definition !== NULL && $definition->get('entity_revision_parent_type_field') !== NULL) {
+      $result = AccessResult::allowed()->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
