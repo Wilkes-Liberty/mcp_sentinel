@@ -34,9 +34,11 @@ final class McpAccessChecker {
    *   The request stack, used to read the trusted client IP.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface|null $entityTypeManager
    *   The entity type manager, used to recognize composite-child entity types
-   *   for the governed creation grant (d.o #3616669). NULL is accepted so
-   *   existing kernel tests that construct the checker directly keep working;
-   *   without it the grant simply never applies.
+   *   for the governed creation grant (d.o #3616669). Nullable with a NULL
+   *   default for the deploy window only: until the container rebuilds, the
+   *   cached service definition still passes two arguments, and a required
+   *   third would fatal every request in that window. Degradation is
+   *   fail-closed — without the service the grant simply never applies.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -164,7 +166,9 @@ final class McpAccessChecker {
    *   The resolved policy profile for the requesting account.
    *
    * @return \Drupal\Core\Access\AccessResult
-   *   Forbidden if the create is disallowed; neutral otherwise.
+   *   Forbidden if the create is disallowed; allowed when every gate passes
+   *   and the entity type is a composite child (d.o #3616669); neutral
+   *   otherwise.
    */
   public function checkCreateAccess(
     string $entityTypeId,
