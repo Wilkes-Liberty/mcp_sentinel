@@ -204,8 +204,8 @@ final class McpUnmoderatedForwardRevision {
    *
    * Reads from storage rather than $entity->original so classify() answers the
    * same way at validation time (original not yet populated) and at presave.
-   * Fails closed by treating an unloadable stored entity as unpublished — the
-   * go-live gates own that case.
+   * Fails closed by treating a stored entity that cannot be loaded as
+   * unpublished — the go-live gates own that case.
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $entity
    *   The entity being classified.
