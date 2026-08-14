@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-08-14
+
 ### Fixed
 - **Provisioned consumers can actually mint tokens (#126 / d.o. #3616862).**
   `mcp-sentinel:agent-provision` never set `grant_types` or simple_oauth's
@@ -1710,7 +1712,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.5.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.6.0...1.x
+[2.6.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.5.0...2.6.0
 [2.5.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.4.0...2.5.0
 [1.0.0-beta4]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta3...1.0.0-beta4
 [1.0.0-beta3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/1.0.0-beta2...1.0.0-beta3
