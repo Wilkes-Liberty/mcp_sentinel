@@ -159,7 +159,6 @@ services:
       - '@current_user'
       - '@mcp_sentinel.rate_limiter'
       - '@mcp_sentinel.read_budgets'
-      - '@flood'
       - '@mcp_sentinel.audit_logger'
     tags:
       - { name: event_subscriber }

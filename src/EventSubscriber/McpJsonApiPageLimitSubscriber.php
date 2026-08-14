@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
-use Drupal\Core\Flood\FloodInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
@@ -22,7 +21,7 @@ use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
 
 /**
- * Governs JSON:API requests: IP allowlist + the profile result_count_cap.
+ * Governs JSON:API and GraphQL requests: IP allowlist, budgets, result caps.
  *
  * Drupal 11.3 core does not expose a hook_jsonapi_resource_params_alter hook.
  * This subscriber runs at KernelEvents::REQUEST priority -20 (after routing and
@@ -66,8 +65,6 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *   Per-principal request-budget enforcement (finite by default).
    * @param \Drupal\mcp_sentinel\Service\McpReadBudgetResolver $budgets
    *   Effective read-budget resolution.
-   * @param \Drupal\Core\Flood\FloodInterface $flood
-   *   The core flood service, backing the collection page budget.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Audit logger for bounded budget-denial evidence rows.
    */
@@ -77,7 +74,6 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     private readonly AccountProxyInterface $currentUser,
     private readonly McpRateLimiter $rateLimiter,
     private readonly McpReadBudgetResolver $budgets,
-    private readonly FloodInterface $flood,
     private readonly McpAuditLogger $auditLogger,
   ) {}
 
@@ -104,15 +100,19 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       return;
     }
     $request = $event->getRequest();
-    if (!$this->isJsonApiRequest($request)) {
+    $surface = McpGovernedSurface::fromPath($request->getPathInfo());
+    if ($surface === NULL) {
       return;
     }
 
-    $requiredScope = in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
+    // GraphQL reads travel over POST; the verb cannot select the scope there
+    // (#3616540). The JSON:API surface keeps the verb-derived scope.
+    $requiredScope = $surface === McpGovernedSurface::Graphql
+      || in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
       ? 'mcp_read'
       : 'mcp_write';
     $readiness = $this->readiness->evaluate(
-      McpGovernedSurface::JsonApi,
+      $surface,
       $this->currentUser,
       $requiredScope,
     );
@@ -158,7 +158,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     $uid = (int) $this->currentUser->id();
     if (!$this->rateLimiter->check($profile, $uid, NULL)) {
       $this->auditLogger->log('read_budget_denied', [
-        'surface' => 'jsonapi',
+        'surface' => $surface->value,
         'budget' => 'requests',
         'profile' => $profile->id(),
         'path' => $request->getPathInfo(),
@@ -169,27 +169,30 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     }
     $this->rateLimiter->register($profile, $uid, NULL);
 
+    if ($surface !== McpGovernedSurface::JsonApi) {
+      // The GraphQL surface shares only the request budget at this seam; row
+      // bounding happens in the graphql submodule's result pass and byte
+      // bounding in the response subscriber.
+      return;
+    }
+
     // Page budget (#3616540): collection reads count against a windowed
     // per-principal page budget so pagination cannot amplify a bounded
     // per-request cap into an unbounded export.
     if (in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
       && $this->isCollectionRequest($request)) {
-      [$pages, $pageWindow] = $this->budgets->pageBudget();
-      if ($pages > 0 && $pageWindow > 0) {
-        $pageKey = 'mcp_sentinel.pages.' . $profile->id() . '.' . $uid;
-        if (!$this->flood->isAllowed($pageKey, $pages, $pageWindow)) {
-          $this->auditLogger->log('read_budget_denied', [
-            'surface' => 'jsonapi',
-            'budget' => 'pages',
-            'profile' => $profile->id(),
-            'path' => $request->getPathInfo(),
-          ]);
-          throw new TooManyRequestsHttpException(NULL,
-            'MCP Sentinel collection page budget exceeded for the active profile (page_budget_exceeded). Retry after the current window.'
-          );
-        }
-        $this->flood->register($pageKey, $pageWindow);
+      if (!$this->rateLimiter->checkPageBudget($profile, $uid)) {
+        $this->auditLogger->log('read_budget_denied', [
+          'surface' => 'jsonapi',
+          'budget' => 'pages',
+          'profile' => $profile->id(),
+          'path' => $request->getPathInfo(),
+        ]);
+        throw new TooManyRequestsHttpException(NULL,
+          'MCP Sentinel collection page budget exceeded for the active profile (page_budget_exceeded). Retry after the current window.'
+        );
       }
+      $this->rateLimiter->registerPageBudget($profile, $uid);
     }
 
     $cap = $this->budgets->effectiveResultCap($profile);
@@ -228,22 +231,6 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         ),
       );
     }
-  }
-
-  /**
-   * Returns TRUE when the request targets a JSON:API endpoint.
-   *
-   * Detects by the presence of the '/jsonapi/' segment anywhere in the path,
-   * rather than as a strict prefix, so that language-prefixed URLs such as
-   * '/en/jsonapi/node/article' (URL language negotiation) are also matched.
-   * Routing attributes may not be populated at KernelEvents::REQUEST
-   * priority -20, so path matching is the reliable detection strategy here.
-   *
-   * @param \Symfony\Component\HttpFoundation\Request $request
-   *   The incoming request.
-   */
-  private function isJsonApiRequest(Request $request): bool {
-    return str_contains($request->getPathInfo(), '/jsonapi/');
   }
 
   /**

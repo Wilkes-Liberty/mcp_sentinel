@@ -87,8 +87,8 @@ final class McpGovernedResponseSubscriberTest extends KernelTestBase {
   /**
    * Builds a main-request ResponseEvent for a path and response body.
    */
-  private function makeResponseEvent(string $path, string $body): ResponseEvent {
-    $request = Request::create($path, 'GET');
+  private function makeResponseEvent(string $path, string $body, string $method = 'GET'): ResponseEvent {
+    $request = Request::create($path, $method);
     $response = new Response($body, 200, ['Content-Type' => 'application/vnd.api+json']);
     /** @var \Symfony\Component\HttpKernel\HttpKernelInterface $kernel */
     $kernel = $this->container->get('http_kernel');
@@ -136,13 +136,17 @@ final class McpGovernedResponseSubscriberTest extends KernelTestBase {
   }
 
   /**
-   * A governed GraphQL response is measured by the same budget.
+   * A governed GraphQL POST response is measured by the same budget.
+   *
+   * GraphQL reads travel over POST, so the subscriber must evaluate the
+   * read scope there — deriving scope from the verb would classify every
+   * query as a write and skip measurement for read-only principals.
    */
   public function testOverBudgetGraphqlResponseIsRefused(): void {
     $this->switchToGovernedUser();
     $this->setByteBudget(10);
     $subscriber = $this->container->get('mcp_sentinel.governed_response_subscriber');
-    $event = $this->makeResponseEvent('/graphql', str_repeat('y', 11));
+    $event = $this->makeResponseEvent('/graphql', str_repeat('y', 11), 'POST');
     $subscriber->onResponse($event);
     $this->assertSame(413, $event->getResponse()->getStatusCode());
   }

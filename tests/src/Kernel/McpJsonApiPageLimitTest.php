@@ -411,6 +411,24 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
   }
 
   /**
+   * Governed GraphQL POSTs consume the same request budget (#3616540).
+   */
+  public function testGraphqlRequestBudgetThrottles(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', ['requests' => 2, 'request_window' => 60])
+      ->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $subscriber->onRequest($this->makeRequestEvent('/graphql', [], 'POST'));
+    $subscriber->onRequest($this->makeRequestEvent('/graphql', [], 'POST'));
+    $this->expectException(TooManyRequestsHttpException::class);
+    $this->expectExceptionMessageMatches('/read_budget_exceeded/');
+    $subscriber->onRequest($this->makeRequestEvent('/graphql', [], 'POST'));
+  }
+
+  /**
    * Individual-resource GETs do not consume the collection page budget.
    */
   public function testIndividualResourceGetDoesNotConsumePageBudget(): void {

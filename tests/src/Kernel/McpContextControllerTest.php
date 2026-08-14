@@ -109,6 +109,25 @@ final class McpContextControllerTest extends KernelTestBase {
   }
 
   /**
+   * The schema document consumes the per-principal request budget (#3616540).
+   */
+  public function testContextConsumesRequestBudget(): void {
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->switchToDevelopmentGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', ['requests' => 1, 'request_window' => 60])
+      ->save();
+
+    $controller = McpContextController::create($this->container);
+    $this->assertSame(200, $controller->context()->getStatusCode());
+
+    $second = $controller->context();
+    $this->assertSame(429, $second->getStatusCode());
+    $this->assertStringContainsString('read_budget_exceeded', (string) $second->getContent());
+  }
+
+  /**
    * Switches the request account onto the explicit development-only seam.
    */
   private function switchToDevelopmentGovernedUser(): void {

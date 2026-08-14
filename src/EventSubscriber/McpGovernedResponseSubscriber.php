@@ -11,7 +11,6 @@ use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -65,12 +64,17 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
       return;
     }
     $request = $event->getRequest();
-    $surface = $this->surfaceForPath($request);
+    $surface = McpGovernedSurface::fromPath($request->getPathInfo());
     if ($surface === NULL) {
       return;
     }
 
-    $requiredScope = in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
+    // GraphQL reads travel over POST, so scope cannot be derived from the
+    // HTTP verb there — a read-only principal's query would evaluate as a
+    // write, fail readiness, and skip measurement entirely. Egress
+    // measurement is a read-class control on every surface it covers.
+    $requiredScope = $surface === McpGovernedSurface::Graphql
+      || in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
       ? 'mcp_read'
       : 'mcp_write';
     $readiness = $this->readiness->evaluate($surface, $this->currentUser, $requiredScope);
@@ -123,23 +127,6 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
     $refusal->setPrivate();
     $refusal->headers->set('Cache-Control', 'private, no-store');
     $event->setResponse($refusal);
-  }
-
-  /**
-   * Maps a request path to its governed surface, or NULL when out of scope.
-   *
-   * @param \Symfony\Component\HttpFoundation\Request $request
-   *   The incoming request.
-   */
-  private function surfaceForPath(Request $request): ?McpGovernedSurface {
-    $path = $request->getPathInfo();
-    if (str_contains($path, '/jsonapi/')) {
-      return McpGovernedSurface::JsonApi;
-    }
-    if (str_contains($path, '/graphql')) {
-      return McpGovernedSurface::Graphql;
-    }
-    return NULL;
   }
 
 }

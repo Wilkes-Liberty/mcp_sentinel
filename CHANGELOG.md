@@ -25,8 +25,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `require_finite_read_budgets: false` is the explicit non-production
   override: it restores `0 = unlimited` and raises a permanent status-report
   warning, so a secure-install verification cannot pass with the override
-  active. Part 2 of d.o. #3616540 (classification-aware egress destinations)
-  is tracked on the same issue.
+  active. Governed GraphQL requests consume the same per-principal request
+  budget, and the response measurement evaluates the read scope on POST —
+  GraphQL reads travel over POST, so verb-derived scope would have skipped
+  them. The `/drupal-mcp/context` schema document consumes the request
+  budget too. Flood accounting pins the uid as the flood identifier: the
+  default identifier is the client IP, which would have let IP rotation
+  multiply a principal's quota. Part 2 of d.o. #3616540 (classification-aware
+  egress destinations) is tracked on the same issue.
 
 ### Changed
 - `McpRateLimiter` and `McpExfiltrationGuard` now take the new

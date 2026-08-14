@@ -117,8 +117,13 @@ final class McpReadBudgetResolver {
   public function effectiveRateLimit(McpPolicyProfileInterface $profile): array {
     $requests = $profile->getRateLimitRequests();
     $window = $profile->getRateLimitWindow();
-    if ($requests > 0 && $window > 0) {
-      return [$requests, $window];
+    if ($requests > 0) {
+      // A finite operator value is never widened: a missing/zero window gets
+      // the default window rather than discarding the request count.
+      return [
+        $requests,
+        $window > 0 ? $window : $this->defaultValue('request_window', self::DEFAULT_REQUEST_WINDOW),
+      ];
     }
     if (!$this->finiteBudgetsRequired()) {
       return [0, 0];

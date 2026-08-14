@@ -147,6 +147,22 @@ final class McpReadBudgetResolverTest extends KernelTestBase {
   }
 
   /**
+   * A finite operator request count is never widened by a zero window.
+   */
+  public function testFiniteRequestsWithZeroWindowKeepsRequests(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', ['request_window' => 45])
+      ->save();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('rate_limit_requests', 300)
+      ->set('rate_limit_window', 0)
+      ->save();
+    $this->assertSame([300, 45], $this->resolver()->effectiveRateLimit($this->defaultProfile()));
+  }
+
+  /**
    * Missing defaults fall back to the built-in constants, never to unlimited.
    */
   public function testMissingDefaultsFallBackToConstants(): void {
