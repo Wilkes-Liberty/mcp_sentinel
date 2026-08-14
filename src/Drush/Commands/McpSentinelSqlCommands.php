@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpRawSqlGuard;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
@@ -65,6 +66,8 @@ final class McpSentinelSqlCommands extends DrushCommands {
     private readonly McpPolicyResolver $policyResolver,
     #[Autowire(service: 'mcp_sentinel.raw_sql_guard')]
     private readonly McpRawSqlGuard $rawSqlGuard,
+    #[Autowire(service: 'mcp_sentinel.exfiltration_guard')]
+    private readonly McpExfiltrationGuard $exfiltrationGuard,
     #[Autowire(service: 'mcp_sentinel.audit_logger')]
     private readonly McpAuditLogger $auditLogger,
     #[Autowire(service: 'database')]
@@ -131,7 +134,7 @@ final class McpSentinelSqlCommands extends DrushCommands {
       ]);
     }
 
-    $cap = $profile->getResultCountCap();
+    $cap = $this->exfiltrationGuard->effectiveResultCap($profile);
     $limit = ($cap > 0) ? $cap + 1 : 0;
 
     try {
@@ -154,8 +157,8 @@ final class McpSentinelSqlCommands extends DrushCommands {
 
     // The exfiltration guard's result cap applies here exactly as it does to a
     // governed tool response — a policy that caps result size should not be
-    // silently wider on this path.
-    $cap = $profile->getResultCountCap();
+    // silently wider on this path. Effective (finite-by-default) caps apply.
+    $cap = $this->exfiltrationGuard->effectiveResultCap($profile);
     $total = count($rows);
     $truncated = $cap > 0 && $total > $cap;
     if ($truncated) {

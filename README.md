@@ -461,7 +461,8 @@ server.
    and edit the target profile.
 2. In the *Rate limits & quotas* tab:
    - **Max requests per window** — maximum governed tool calls allowed in the
-     window. `0` means unlimited (the default on all shipped profiles).
+     window. `0` no longer means unlimited: it resolves to the finite default
+     budget (see *Finite-by-default read budgets* below).
    - **Window (seconds)** — the rolling window duration. Default is `60`.
 3. Save. The limit takes effect immediately for new requests.
 
@@ -475,8 +476,9 @@ Adjust based on observed agent traffic patterns.
 - The flood key is `mcp_sentinel.profile.{profile_id}.{uid}` where `{uid}` is
   the server-resolved authenticated user ID — never an agent-supplied value.
   This prevents key-cycling bypass attacks.
-- A limit of `0` short-circuits before touching the flood service, so an
-  unconfigured profile never incurs unnecessary flood writes.
+- A limit of `0` resolves to the finite default request budget unless the
+  explicit non-production override is active, in which case it short-circuits
+  before touching the flood service (#3616540).
 - When the limit is exceeded, governed tool calls return a "rate limit exceeded"
   failure and an audit row is written with operation `rate_limit_exceeded`.
   Enforcement is applied at the top of each governed tool's execution, before
@@ -493,13 +495,14 @@ call, preventing mass-read attacks and accidental data exfiltration.
    and edit the target profile.
 2. In the *Rate limits & quotas* tab:
    - **Max result items** — maximum items returned per Tool call, JSON:API page
-     request, or GraphQL multi-value field result list. `0` means unlimited (the
-     default on all shipped profiles). Recommended: `500`.
+     request, or GraphQL multi-value field result list. `0` resolves to the
+     finite default (500) rather than unlimited. Recommended: `500`.
    - **Max response size in bytes** — maximum serialized response size for
-     governed Tool calls. Bulk-write output exceeding this limit is truncated
-     after the writes complete (with `_size_truncated: true` flagged); pure-read
-     tools fail before materializing data. `0` means unlimited. Recommended:
-     `2097152` (2 MB).
+     governed responses. Bulk-write Tool output exceeding this limit is
+     truncated after the writes complete (with `_size_truncated: true`
+     flagged); pure-read tools fail before materializing data; over-budget
+     JSON:API/GraphQL responses are refused with a 413. `0` resolves to the
+     finite default (8 MiB). Recommended: `2097152` (2 MB).
 3. Save. Limits take effect immediately.
 
 ### Enforcement seams
@@ -510,9 +513,48 @@ call, preventing mass-read attacks and accidental data exfiltration.
 | **JSON:API** | A `KernelEvents::REQUEST` subscriber blocks `page[limit]` values above `result_count_cap` for governed requests with HTTP 400 before the DB query runs. (`hook_jsonapi_resource_params_alter` does not exist in Drupal 11.3; the subscriber is the correct implementation.) |
 | **GraphQL** | `hook_graphql_compose_field_results_alter` in `mcp_sentinel_graphql` truncates multi-value field result lists to `result_count_cap` as a third pass after redaction and DLP masking. |
 
-Ungoverned requests and profiles with `result_count_cap = 0` are never capped.
-The response-size cap applies to Tool output only (JSON:API and GraphQL
-response-size enforcement is deferred to a future pass).
+| **Response bytes** | `McpGovernedResponseSubscriber` measures every governed JSON:API/GraphQL response and replaces an over-budget body with a bounded 413 refusal (`response_size_cap_exceeded`) plus a non-sensitive audit row. |
+
+Ungoverned requests are never capped. A profile cap of `0` is clamped to the
+finite defaults unless the explicit override is active (next section).
+
+## Finite-by-default read budgets (#3616540)
+
+Unlimited is not an exfiltration floor. Since this feature, every governed
+read budget is finite by default: a profile value of `0` resolves to the
+defaults in `mcp_sentinel.settings`:
+
+```yaml
+require_finite_read_budgets: true
+read_budget_defaults:
+  results: 500        # max items per request
+  bytes: 8388608      # max response bytes (8 MiB)
+  requests: 600       # max governed requests per window
+  request_window: 60
+  pages: 120          # max collection pages per window
+  page_window: 60
+```
+
+An explicit finite profile value always wins — the requirement is that every
+budget is *finite*, not small. On the governed JSON:API seam this also means:
+
+- every governed request consumes the per-principal request budget (429
+  `read_budget_exceeded` when exhausted) — the source-side chained-action
+  floor;
+- collection reads consume a windowed per-principal page budget (429
+  `page_budget_exceeded`), so pagination cannot amplify a bounded per-request
+  cap into an unbounded export;
+- an absent `page[limit]` is pinned to a finite cap smaller than JSON:API's
+  default page size of 50, so omitting the parameter never reads more rows
+  than requesting the maximum.
+
+Budget denials write bounded, non-sensitive `read_budget_denied` audit rows
+(budget class, profile, path, sizes — never payloads).
+
+Setting `require_finite_read_budgets: false` is the **explicit non-production
+override**: it restores the historical `0 = unlimited` behavior and raises a
+permanent warning on the status report, so a secure-install verification can
+never report clean while the override is active.
 
 ## IP allowlisting per profile
 

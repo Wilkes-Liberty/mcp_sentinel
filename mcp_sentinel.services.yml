@@ -130,13 +130,21 @@ services:
       - '@config.factory'
       - '@logger.channel.mcp_sentinel'
 
+  mcp_sentinel.read_budgets:
+    class: Drupal\mcp_sentinel\Service\McpReadBudgetResolver
+    arguments:
+      - '@config.factory'
+
   mcp_sentinel.rate_limiter:
     class: Drupal\mcp_sentinel\Service\McpRateLimiter
     arguments:
       - '@flood'
+      - '@mcp_sentinel.read_budgets'
 
   mcp_sentinel.exfiltration_guard:
     class: Drupal\mcp_sentinel\Service\McpExfiltrationGuard
+    arguments:
+      - '@mcp_sentinel.read_budgets'
 
   mcp_sentinel.raw_sql_guard:
     class: Drupal\mcp_sentinel\Service\McpRawSqlGuard
@@ -149,6 +157,20 @@ services:
       - '@mcp_sentinel.access_checker'
       - '@mcp_sentinel.governance_readiness'
       - '@current_user'
+      - '@mcp_sentinel.rate_limiter'
+      - '@mcp_sentinel.read_budgets'
+      - '@flood'
+      - '@mcp_sentinel.audit_logger'
+    tags:
+      - { name: event_subscriber }
+
+  mcp_sentinel.governed_response_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpGovernedResponseSubscriber
+    arguments:
+      - '@mcp_sentinel.governance_readiness'
+      - '@current_user'
+      - '@mcp_sentinel.exfiltration_guard'
+      - '@mcp_sentinel.audit_logger'
     tags:
       - { name: event_subscriber }
 

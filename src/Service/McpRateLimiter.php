@@ -13,6 +13,10 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  * Flood keys anchor on the server-resolved uid + profile id only. Agent-
  * supplied headers are never used as flood identifiers to prevent key-cycling
  * bypass attacks.
+ *
+ * Budgets are finite by default (#3616540): an unlimited (0) profile value is
+ * clamped to the configured default request budget by McpReadBudgetResolver
+ * unless the explicit non-production override is active.
  */
 final class McpRateLimiter {
 
@@ -21,9 +25,12 @@ final class McpRateLimiter {
    *
    * @param \Drupal\Core\Flood\FloodInterface $flood
    *   The core flood service.
+   * @param \Drupal\mcp_sentinel\Service\McpReadBudgetResolver $budgets
+   *   The finite-by-default budget resolver.
    */
   public function __construct(
     private readonly FloodInterface $flood,
+    private readonly McpReadBudgetResolver $budgets,
   ) {}
 
   /**
@@ -45,8 +52,7 @@ final class McpRateLimiter {
     int $uid,
     ?string $toolId,
   ): bool {
-    $req = $profile->getRateLimitRequests();
-    $win = $profile->getRateLimitWindow();
+    [$req, $win] = $this->budgets->effectiveRateLimit($profile);
     if ($req <= 0 || $win <= 0) {
       return TRUE;
     }
@@ -72,8 +78,7 @@ final class McpRateLimiter {
     int $uid,
     ?string $toolId,
   ): void {
-    $req = $profile->getRateLimitRequests();
-    $win = $profile->getRateLimitWindow();
+    [$req, $win] = $this->budgets->effectiveRateLimit($profile);
     if ($req <= 0 || $win <= 0) {
       return;
     }

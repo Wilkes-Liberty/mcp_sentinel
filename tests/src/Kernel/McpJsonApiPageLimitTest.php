@@ -13,6 +13,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
+use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
@@ -169,10 +170,12 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
   }
 
   /**
-   * When cap is 0 (unlimited), any limit passes through.
+   * Cap 0 passes any limit only under the explicit unlimited override.
    */
   public function testUnlimitedCapPassesAnyLimit(): void {
     $this->switchToGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', FALSE)->save();
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('result_count_cap', 0)->save();
@@ -344,6 +347,93 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber->onRequest($event);
     $this->assertSame(-5, (int) $event->getRequest()->query->all('page')['limit'],
       'Negative page[limit] must be passed through without a cap exception.');
+  }
+
+  /**
+   * An absent page[limit] is pinned to a small finite cap.
+   *
+   * A cap below JSON:API's default page size of 50 must bind the default
+   * page too, or omitting the parameter would out-read the allowed maximum.
+   */
+  public function testAbsentPageLimitIsPinnedToSmallCap(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('result_count_cap', 10)->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $event = $this->makeRequestEvent('/jsonapi/node/article');
+    $subscriber->onRequest($event);
+    $this->assertSame(10, (int) $event->getRequest()->query->all('page')['limit'],
+      'An absent page[limit] must be pinned to a finite cap below the JSON:API default of 50.');
+  }
+
+  /**
+   * The request budget throttles governed JSON:API traffic (#3616540).
+   */
+  public function testRequestBudgetThrottlesGovernedRequests(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', ['requests' => 2, 'request_window' => 60])
+      ->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
+    $this->expectException(TooManyRequestsHttpException::class);
+    $this->expectExceptionMessageMatches('/read_budget_exceeded/');
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
+  }
+
+  /**
+   * Pagination amplification is bounded by the page budget (#3616540).
+   */
+  public function testPageBudgetBoundsCollectionPagination(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', [
+        'requests' => 100,
+        'request_window' => 60,
+        'pages' => 2,
+        'page_window' => 60,
+      ])
+      ->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article', ['offset' => 0]));
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article', ['offset' => 50]));
+    $this->expectException(TooManyRequestsHttpException::class);
+    $this->expectExceptionMessageMatches('/page_budget_exceeded/');
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article', ['offset' => 100]));
+  }
+
+  /**
+   * Individual-resource GETs do not consume the collection page budget.
+   */
+  public function testIndividualResourceGetDoesNotConsumePageBudget(): void {
+    $this->switchToGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', [
+        'requests' => 100,
+        'request_window' => 60,
+        'pages' => 1,
+        'page_window' => 60,
+      ])
+      ->save();
+
+    $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
+    // Consume the single page.
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
+    // Individual resources (UUID paths) are not collection pages.
+    $uuid = '11111111-1111-4111-8111-111111111111';
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article/' . $uuid));
+    // A second collection page is over budget.
+    $this->expectException(TooManyRequestsHttpException::class);
+    $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
   }
 
 }

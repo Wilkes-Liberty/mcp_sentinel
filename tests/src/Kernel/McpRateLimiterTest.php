@@ -94,9 +94,11 @@ final class McpRateLimiterTest extends KernelTestBase {
   }
 
   /**
-   * When rate_limit_requests is 0 (unlimited), flood is never called.
+   * Zero requests stays unlimited only under the explicit override (#3616540).
    */
   public function testUnlimitedWhenZero(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', FALSE)->save();
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('rate_limit_requests', 0)->save();

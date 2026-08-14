@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
+use Drupal\Core\Flood\FloodInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpRateLimiter;
+use Drupal\mcp_sentinel\Service\McpReadBudgetResolver;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\ServiceUnavailableHttpException;
+use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
 
 /**
@@ -36,7 +41,10 @@ use Symfony\Component\HttpKernel\KernelEvents;
  *    not in the profile's non-empty allowed_ips list. An empty allowed_ips list
  *    imposes no restriction.
  * 2. result_count_cap on page[limit] — a 400 Bad Request is returned when the
- *    requested page[limit] exceeds the profile cap.
+ *    requested page[limit] exceeds the effective (finite-by-default) cap, an
+ *    absent page[limit] is pinned to a cap smaller than JSON:API's default
+ *    page size, and per-principal request and collection-page budgets bound
+ *    chained calls and pagination amplification (#3616540).
  *
  * Both gates only apply to requests that:
  * 1. Have a path containing '/jsonapi/' (covers both '/jsonapi/...' and
@@ -54,11 +62,23 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *   Source-governance readiness evaluator.
    * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
    *   Current authenticated account.
+   * @param \Drupal\mcp_sentinel\Service\McpRateLimiter $rateLimiter
+   *   Per-principal request-budget enforcement (finite by default).
+   * @param \Drupal\mcp_sentinel\Service\McpReadBudgetResolver $budgets
+   *   Effective read-budget resolution.
+   * @param \Drupal\Core\Flood\FloodInterface $flood
+   *   The core flood service, backing the collection page budget.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   Audit logger for bounded budget-denial evidence rows.
    */
   public function __construct(
     private readonly McpAccessChecker $accessChecker,
     private readonly McpGovernanceReadiness $readiness,
     private readonly AccountProxyInterface $currentUser,
+    private readonly McpRateLimiter $rateLimiter,
+    private readonly McpReadBudgetResolver $budgets,
+    private readonly FloodInterface $flood,
+    private readonly McpAuditLogger $auditLogger,
   ) {}
 
   /**
@@ -131,7 +151,48 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       );
     }
 
-    $cap = $profile->getResultCountCap();
+    // Request budget (#3616540): every governed JSON:API request counts
+    // against the finite-by-default per-principal request budget. This is the
+    // source-side chained-action floor — pagination loops, retries, and
+    // follow-on calls all consume it.
+    $uid = (int) $this->currentUser->id();
+    if (!$this->rateLimiter->check($profile, $uid, NULL)) {
+      $this->auditLogger->log('read_budget_denied', [
+        'surface' => 'jsonapi',
+        'budget' => 'requests',
+        'profile' => $profile->id(),
+        'path' => $request->getPathInfo(),
+      ]);
+      throw new TooManyRequestsHttpException(NULL,
+        'MCP Sentinel request budget exceeded for the active profile (read_budget_exceeded). Retry after the current window.'
+      );
+    }
+    $this->rateLimiter->register($profile, $uid, NULL);
+
+    // Page budget (#3616540): collection reads count against a windowed
+    // per-principal page budget so pagination cannot amplify a bounded
+    // per-request cap into an unbounded export.
+    if (in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
+      && $this->isCollectionRequest($request)) {
+      [$pages, $pageWindow] = $this->budgets->pageBudget();
+      if ($pages > 0 && $pageWindow > 0) {
+        $pageKey = 'mcp_sentinel.pages.' . $profile->id() . '.' . $uid;
+        if (!$this->flood->isAllowed($pageKey, $pages, $pageWindow)) {
+          $this->auditLogger->log('read_budget_denied', [
+            'surface' => 'jsonapi',
+            'budget' => 'pages',
+            'profile' => $profile->id(),
+            'path' => $request->getPathInfo(),
+          ]);
+          throw new TooManyRequestsHttpException(NULL,
+            'MCP Sentinel collection page budget exceeded for the active profile (page_budget_exceeded). Retry after the current window.'
+          );
+        }
+        $this->flood->register($pageKey, $pageWindow);
+      }
+    }
+
+    $cap = $this->budgets->effectiveResultCap($profile);
     if ($cap <= 0) {
       return;
     }
@@ -139,6 +200,14 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     // JSON:API uses page[limit] (nested in the 'page' query param array).
     $page = $request->query->all('page');
     if (!isset($page['limit'])) {
+      // JSON:API's own default page size is 50. A finite cap below that must
+      // bind the default page too, so the absent limit is pinned to the cap —
+      // otherwise omitting page[limit] would read more rows than requesting
+      // the maximum the policy allows.
+      if ($cap < 50) {
+        $page['limit'] = $cap;
+        $request->query->set('page', $page);
+      }
       return;
     }
 
@@ -175,6 +244,24 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    */
   private function isJsonApiRequest(Request $request): bool {
     return str_contains($request->getPathInfo(), '/jsonapi/');
+  }
+
+  /**
+   * Returns TRUE when the request reads a JSON:API collection (a list page).
+   *
+   * Individual resources and their sub-paths end in (or contain) a UUID;
+   * collection URLs end at the resource-type segment. Related/relationship
+   * reads of a single resource are deliberately not counted as pages.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The incoming request.
+   */
+  private function isCollectionRequest(Request $request): bool {
+    $path = rtrim($request->getPathInfo(), '/');
+    return preg_match(
+      '@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@i',
+      $path,
+    ) !== 1;
   }
 
 }

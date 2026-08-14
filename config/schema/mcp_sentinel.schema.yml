@@ -85,6 +85,31 @@ mcp_sentinel.settings:
     governed_role_fallback:
       type: boolean
       label: 'Treat governed roles as governed even without an OAuth agent token (local dev)'
+    require_finite_read_budgets:
+      type: boolean
+      label: 'Clamp unlimited (0) read-budget values to the finite defaults (disable = explicit non-production override)'
+    read_budget_defaults:
+      type: mapping
+      label: 'Finite defaults applied when a profile budget is unlimited (0)'
+      mapping:
+        results:
+          type: integer
+          label: 'Default max result items per request'
+        bytes:
+          type: integer
+          label: 'Default max response bytes'
+        requests:
+          type: integer
+          label: 'Default max governed requests per window'
+        request_window:
+          type: integer
+          label: 'Request budget window in seconds'
+        pages:
+          type: integer
+          label: 'Default max collection pages per window'
+        page_window:
+          type: integer
+          label: 'Page budget window in seconds'
     # audit_hash_key, siem_enabled and audit_encryption_profile lived here
     # until 2.0.0, then moved to audit_chain.settings. They are intentionally
     # absent from this schema so a leftover copy cannot pass config validation

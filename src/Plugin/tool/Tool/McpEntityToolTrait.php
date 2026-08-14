@@ -138,7 +138,7 @@ trait McpEntityToolTrait {
     $results['succeeded'] = $capped;
     if ($truncated) {
       $results['_result_truncated'] = TRUE;
-      $results['_result_cap'] = $profile->getResultCountCap();
+      $results['_result_cap'] = $guard->effectiveResultCap($profile);
     }
     return $results;
   }
@@ -174,7 +174,7 @@ trait McpEntityToolTrait {
           'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
           [
             '@bytes' => $bytes,
-            '@cap'   => $profile->getResponseSizeCap(),
+            '@cap'   => $guard->effectiveResponseSizeCap($profile),
           ]
         )
       );
@@ -209,7 +209,9 @@ trait McpEntityToolTrait {
     array $results,
     McpPolicyProfileInterface $profile,
   ): array {
-    $cap = $profile->getResponseSizeCap();
+    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
+    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    $cap = $guard->effectiveResponseSizeCap($profile);
     if ($cap <= 0) {
       return $results;
     }
