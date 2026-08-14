@@ -33,7 +33,7 @@ final class McpAccessChecker {
    * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
    *   The request stack, used to read the trusted client IP.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface|null $entityTypeManager
-   *   The entity type manager, used to recognise composite-child entity types
+   *   The entity type manager, used to recognize composite-child entity types
    *   for the governed creation grant (d.o #3616669). NULL is accepted so
    *   existing kernel tests that construct the checker directly keep working;
    *   without it the grant simply never applies.
