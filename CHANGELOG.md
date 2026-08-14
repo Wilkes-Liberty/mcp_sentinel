@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-08-14
+
 ### Added
 - **Governed composite-child creation (#122 / d.o. #3616669).** Paragraphs
   cannot be created over JSON:API at all upstream — their access handler
