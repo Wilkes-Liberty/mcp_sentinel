@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Governed composite-child creation (#122 / d.o. #3616669).** Paragraphs
+  cannot be created over JSON:API at all upstream — their access handler
+  allows creation only in HTML form context and stays neutral for API
+  formats, collapsing to 403, so the connector's create-then-reference flow
+  could never build paragraph pages. When a request is governed and its
+  policy profile permits writes for the type, the create-access hook now
+  grants creation of composite-child entity types (those declaring a
+  revision parent). Denied types and the write gate still forbid first;
+  ungoverned traffic and non-composite entity types are unchanged, and the
+  referencing host save runs the full governance stack.
+
 ### Security
 - **One write-precondition boundary for every governed write channel
   (#108 / d.o. #3616541).** Content locks and version preconditions were

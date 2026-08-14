@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\IpUtils;
@@ -31,10 +32,18 @@ final class McpAccessChecker {
    *   The config factory service.
    * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
    *   The request stack, used to read the trusted client IP.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface|null $entityTypeManager
+   *   The entity type manager, used to recognize composite-child entity types
+   *   for the governed creation grant (d.o #3616669). Nullable with a NULL
+   *   default for the deploy window only: until the container rebuilds, the
+   *   cached service definition still passes two arguments, and a required
+   *   third would fatal every request in that window. Degradation is
+   *   fail-closed — without the service the grant simply never applies.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
+    private readonly ?EntityTypeManagerInterface $entityTypeManager = NULL,
   ) {}
 
   /**
@@ -157,7 +166,9 @@ final class McpAccessChecker {
    *   The resolved policy profile for the requesting account.
    *
    * @return \Drupal\Core\Access\AccessResult
-   *   Forbidden if the create is disallowed; neutral otherwise.
+   *   Forbidden if the create is disallowed; allowed when every gate passes
+   *   and the entity type is a composite child (d.o #3616669); neutral
+   *   otherwise.
    */
   public function checkCreateAccess(
     string $entityTypeId,
@@ -195,6 +206,23 @@ final class McpAccessChecker {
       $result = AccessResult::forbidden(
         'Write operations are disabled in MCP Sentinel.'
       )->addCacheTags($tags);
+      return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+    }
+
+    // Composite-child grant (d.o #3616669). A composite child (a paragraph)
+    // cannot be created over an API at all upstream: its access handler allows
+    // creation only in HTML form context and stays neutral for API formats,
+    // which collapses to 403 — so the connector's create-then-reference flow
+    // is impossible even under a write-allowed profile. The governed channel
+    // supplies the policy context standalone creation lacks, so once every
+    // gate above has passed, Sentinel grants creation for entity types that
+    // declare a revision parent (composites only — non-composite types keep
+    // their neutral fall-through so core role permissions still decide them).
+    // A standalone composite is inert until a host references it, and that
+    // host save runs the full governance stack.
+    $definition = $this->entityTypeManager?->getDefinition($entityTypeId, FALSE);
+    if ($definition !== NULL && $definition->get('entity_revision_parent_type_field') !== NULL) {
+      $result = AccessResult::allowed()->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
