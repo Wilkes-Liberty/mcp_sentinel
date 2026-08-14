@@ -485,9 +485,14 @@ final class McpSentinelServerCommands extends DrushCommands {
   #[CLI\Command(name: 'mcp-sentinel:agent-reconcile', aliases: ['msar'])]
   #[CLI\Usage(name: 'drush mcp-sentinel:agent-reconcile', description: 'Provision every tier declared in agent_provision_tiers.')]
   public function agentReconcile(): int {
-    $declared = (array) ($this->configFactory
-      ->get('mcp_sentinel.settings')
-      ->get('agent_provision_tiers') ?? []);
+    // Deduplicated so repeats in the declaration cannot inflate the summary
+    // counts or run provisioning twice for one principal.
+    $declared = array_values(array_unique(array_filter(array_map(
+      static fn ($entry): string => trim((string) $entry),
+      (array) ($this->configFactory
+        ->get('mcp_sentinel.settings')
+        ->get('agent_provision_tiers') ?? []),
+    ))));
     if ($declared === []) {
       $this->logger()?->notice('No agent tiers declared (agent_provision_tiers is empty) — nothing to reconcile.');
       return self::EXIT_SUCCESS;
