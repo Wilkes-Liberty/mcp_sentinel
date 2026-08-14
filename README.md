@@ -232,9 +232,25 @@ MCP policy profiles → Configuration governance**.
   workflow-transition tool and the JSON:API/REST write path (the
   `moderation_state` / `status` field-access gate), which share one
   published-state check (`mcp_sentinel.moderation_gate`). An optional maximum
-  moderation state still applies, and on unmoderated publishable entities the
-  `status` flag is blocked only in the publish direction (unpublishing is allowed).
-  A human `publisher` publishes.
+  moderation state still applies. On unmoderated publishable entities the
+  `status` flag is blocked in the publish direction, and an in-place edit of
+  **already-published** unmoderated content never mutates the live revision:
+  revisionable types store the edit as an unpublished forward revision for a
+  human to review, and types that cannot carry a forward revision are refused
+  (unpublishing — takedown — remains allowed in place). A human `publisher`
+  publishes.
+- **Write preconditions.** Every governed mutation of an existing entity —
+  including relationship-only writes, translations, and deletes — runs one
+  shared precondition contract before anything changes: an active content lock
+  held by a *different* server-resolved principal denies the write and the
+  delete (the acting principal's own lock never blocks it), and a save that
+  would replace the stored default revision from a copy of it that is no
+  longer current is refused instead of overwriting the concurrent change
+  (continuing a forward — non-default — draft is not affected). Validated
+  seams (JSON:API, REST, forms)
+  report a 422; unvalidated saves abort with a rollback-surviving evidence
+  row, and passing updates record the checked precondition and final target
+  revision on their audit row. Ungoverned human traffic is never gated.
 - **Per-entity-type destructive overrides.** A profile's global `allow_delete`
   (and `allow_write`) flag is the default for every entity type, but an
   `entity_rules` map can override it for one type at a time. Setting
