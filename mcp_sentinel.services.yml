@@ -22,6 +22,9 @@ services:
       # closed at runtime instead — it never records nothing quietly.
       - '@?audit_chain.logger'
       - '@mcp_sentinel.dlp'
+      # Transaction awareness: refusal evidence written inside an aborting
+      # entity-save transaction must survive its rollback.
+      - '@database'
 
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver
@@ -62,6 +65,13 @@ services:
       - '@logger.channel.mcp_sentinel'
       # Optional: NULL when the Content Moderation module is not installed.
       - '@?content_moderation.moderation_information'
+
+  mcp_sentinel.write_preconditions:
+    class: Drupal\mcp_sentinel\Service\McpWritePreconditions
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.content_lock'
+      - '@entity_type.manager'
 
   mcp_sentinel.unmoderated_redirect:
     class: Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision

@@ -144,8 +144,8 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
     if (!$this->moderationInformation->isModeratedEntity($entity)) {
       return ExecutableResult::failure($this->t('This entity is not under Content Moderation.'));
     }
-    if ($this->contentLock->isLocked($entity_type, $id)) {
-      return ExecutableResult::failure($this->t('Entity @id is locked against MCP writes.', ['@id' => $id]));
+    if ($this->contentLock->conflictsForActor($entity_type, $id)) {
+      return ExecutableResult::failure($this->t('Entity @id is locked against MCP writes by another actor.', ['@id' => $id]));
     }
     $policyResult = $this->accessChecker->checkEntityAccess($entity, 'update', $profile);
     if ($reason = $this->denyReason($policyResult)) {

@@ -145,9 +145,10 @@ final class McpUnmoderatedForwardRevision {
 
     if ($decision === self::DECISION_DENY) {
       // Validated seams were already refused with a 422 by the constraint; an
-      // unvalidated seam reaching here must abort. Evidence first: the refusal
-      // has to be observable even though the save never happens.
-      $this->auditLogger->log('unmoderated_in_place_denied', [
+      // unvalidated seam reaching here must abort. Evidence first — via the
+      // rollback-surviving path, because the abort makes the storage layer
+      // roll back the transaction this hook runs inside (d.o #3616541).
+      $this->auditLogger->logSurvivingRollback('unmoderated_in_place_denied', [
         'entity_type' => $entity->getEntityTypeId(),
         'bundle' => $entity->bundle(),
         'id' => $entity->id(),

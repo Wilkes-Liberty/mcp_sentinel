@@ -222,7 +222,11 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
   }
 
   /**
-   * Update on a content-locked node is blocked with a clear message.
+   * Update on a node locked by ANOTHER principal is blocked with a message.
+   *
+   * The lock check is owner-aware (d.o #3616541): what blocks the agent is a
+   * lock held by a different server-resolved principal — the human editor the
+   * lock exists to protect.
    */
   public function testUpdateOnLockedNodeBlocked(): void {
     $this->createGovernedAccount();
@@ -235,9 +239,16 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
     $node->save();
     $nid = (string) $node->id();
 
-    // Lock the node.
-    \Drupal::service('mcp_sentinel.content_lock')
-      ->lock('node', $nid, 'Being edited by a human');
+    // Lock the node as a DIFFERENT principal (the human editing it).
+    \Drupal::database()->merge('mcp_sentinel_content_locks')
+      ->keys(['entity_type' => 'node', 'entity_id' => $nid])
+      ->fields([
+        'locked_by' => 999,
+        'locked_at' => \Drupal::time()->getRequestTime(),
+        'expires_at' => \Drupal::time()->getRequestTime() + 600,
+        'reason' => 'Being edited by a human',
+      ])
+      ->execute();
 
     $tool = \Drupal::service('plugin.manager.tool')
       ->createInstance('mcp_sentinel_node_operations');
@@ -247,12 +258,44 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
     $tool->execute();
 
     $this->assertFalse($tool->getResultStatus(),
-      'Update on a content-locked node must be denied.');
+      'Update on a node locked by another principal must be denied.');
     $this->assertStringContainsStringIgnoringCase(
       'locked',
       (string) $tool->getResultMessage(),
       'Failure message must indicate that the node is locked.'
     );
+  }
+
+  /**
+   * The acting agent's own lock does not block its tool update.
+   *
+   * The tool channel runs the same owner-aware contract as every other write
+   * channel: an agent that reserved content with a lock can still edit it.
+   */
+  public function testUpdateUnderOwnLockPasses(): void {
+    $this->createGovernedAccount();
+
+    $node = Node::create([
+      'type' => 'page',
+      'title' => 'Reserved Node',
+      'uid' => 1,
+    ]);
+    $node->save();
+    $nid = (string) $node->id();
+
+    // The lock service records the CURRENT user as the owner.
+    \Drupal::service('mcp_sentinel.content_lock')
+      ->lock('node', $nid, 'Reserved by this agent');
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_node_operations');
+    $tool->setInputValue('action', 'update');
+    $tool->setInputValue('id', $nid);
+    $tool->setInputValue('title', 'Edit under my own lock');
+    $tool->execute();
+
+    $this->assertTrue($tool->getResultStatus(),
+      'An update under the acting principal\'s own lock must pass.');
   }
 
   /**

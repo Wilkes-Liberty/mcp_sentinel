@@ -143,6 +143,65 @@ class McpContentLock {
   }
 
   /**
+   * Whether an active lock held by a DIFFERENT principal blocks the actor.
+   *
+   * The owner-aware conflict check every governed write channel shares
+   * (d.o #3616541): the acting principal's own lock never blocks its write,
+   * and ownership is resolved from the server-side current user — never from
+   * anything a caller sends.
+   *
+   * @param string $entityType
+   *   The entity type ID to check.
+   * @param string $entityId
+   *   The entity ID to check.
+   *
+   * @return bool
+   *   TRUE when an active lock exists and is held by another principal.
+   */
+  public function conflictsForActor(string $entityType, string $entityId): bool {
+    $row = $this->activeLockRow($entityType, $entityId);
+    return $row !== NULL && (int) $row['locked_by'] !== (int) $this->currentUser->id();
+  }
+
+  /**
+   * Whether the acting principal itself holds the active lock.
+   *
+   * @param string $entityType
+   *   The entity type ID to check.
+   * @param string $entityId
+   *   The entity ID to check.
+   *
+   * @return bool
+   *   TRUE when an active lock exists and the current user holds it.
+   */
+  public function heldByActor(string $entityType, string $entityId): bool {
+    $row = $this->activeLockRow($entityType, $entityId);
+    return $row !== NULL && (int) $row['locked_by'] === (int) $this->currentUser->id();
+  }
+
+  /**
+   * Returns the active (non-expired) lock row, or NULL.
+   *
+   * @param string $entityType
+   *   The entity type ID to look up.
+   * @param string $entityId
+   *   The entity ID to look up.
+   *
+   * @return array|null
+   *   The active lock row, or NULL when none is active.
+   */
+  private function activeLockRow(string $entityType, string $entityId): ?array {
+    $now = $this->time->getRequestTime();
+    $row = $this->database->select('mcp_sentinel_content_locks', 'l')
+      ->fields('l')
+      ->condition('l.entity_type', $entityType)
+      ->condition('l.entity_id', $entityId)
+      ->where('l.expires_at = 0 OR l.expires_at > :now', [':now' => $now])
+      ->execute()->fetchAssoc();
+    return $row ?: NULL;
+  }
+
+  /**
    * Reaps all expired (time-bounded) locks. Called by hook_cron.
    *
    * Only rows with a positive expires_at that lies in the past are deleted.

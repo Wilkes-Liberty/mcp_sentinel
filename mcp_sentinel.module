@@ -200,6 +200,32 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     return;
   }
 
+  // Shared write-precondition boundary (d.o #3616541): every governed
+  // mutation runs the same owner-aware lock check and stale-default-version
+  // check before anything else touches the entity. Validated seams were
+  // already refused with a 422 by the McpWriteConflict constraint; this is
+  // the unvalidated seam (custom code, Drush), which aborts after writing an
+  // evidence row. Runs FIRST on purpose: a locked or stale save must not be
+  // redirected, backstopped, or diffed — it must not happen.
+  if ($entity instanceof ContentEntityInterface) {
+    /** @var \Drupal\mcp_sentinel\Service\McpWritePreconditions $preconditions */
+    $preconditions = \Drupal::service('mcp_sentinel.write_preconditions');
+    $conflict = $preconditions->evaluateWrite($entity);
+    if ($conflict !== NULL) {
+      \Drupal::service('mcp_sentinel.audit_logger')->logSurvivingRollback($conflict, [
+        'entity_type' => $entity->getEntityTypeId(),
+        'bundle'      => $entity->bundle(),
+        'id'          => $entity->id(),
+        'label'       => $entity->label(),
+        'note'        => 'Governed write refused by the write-precondition boundary (unvalidated seam); the save was aborted.',
+      ]);
+      throw new \RuntimeException($preconditions->messageFor($conflict));
+    }
+    // The write may proceed: stash the checked precondition so the post-save
+    // audit row can record it together with the final target revision.
+    $preconditions->stashReceipt($entity);
+  }
+
   // Composite-child publish gate (GitHub #46): a direct write to a paragraph
   // pinned by a published host is publish-class. When redirectable, force a new
   // paragraph revision here so the pinned (live) revision is never mutated; the
@@ -266,21 +292,45 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     }
   }
 
+  \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
+}
+
+/**
+ * Writes the entity_save audit row for a completed governed save.
+ *
+ * Runs from hook_entity_insert()/hook_entity_update() rather than presave
+ * (where it lived until d.o #3616541) for two reasons: a row must never be
+ * written for a save that subsequently aborts — an audit row for a write that
+ * did not happen is evidence of nothing — and the final target revision id
+ * only exists after the save, so the write-precondition receipt can only be
+ * completed here.
+ *
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ *   The just-saved entity.
+ * @param string $operation
+ *   Either 'create' or 'update', from the calling hook.
+ */
+function _mcp_sentinel_log_entity_save(EntityInterface $entity, string $operation): void {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  if (!$resolver->isGoverned()) {
+    return;
+  }
+
   /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
   $logger = \Drupal::service('mcp_sentinel.audit_logger');
 
   $metadata = [
     'entity_type' => $entity->getEntityTypeId(),
     'bundle'      => $entity->bundle(),
-    'id'          => $entity->id() ?: '(new)',
+    'id'          => $entity->id(),
     'label'       => $entity->label(),
-    'operation'   => $entity->isNew() ? 'create' : 'update',
+    'operation'   => $operation,
   ];
 
   // For updates on fieldable entities, compute a redaction-aware change diff
   // and attach it to the metadata under a 'changes' key so the audit row
   // captures exactly what was modified.
-  if (!$entity->isNew()
+  if ($operation === 'update'
     && $entity instanceof FieldableEntityInterface
     && $logger->originalOf($entity) !== NULL
   ) {
@@ -292,8 +342,44 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     }
   }
 
+  // The execution receipt: the precondition checked at presave, completed
+  // with the final target revision (d.o #3616541).
+  if ($entity instanceof ContentEntityInterface) {
+    $receipt = \Drupal::service('mcp_sentinel.write_preconditions')->takeReceipt($entity);
+    if ($receipt !== NULL) {
+      $metadata['precondition'] = $receipt;
+    }
+  }
+
   $logger->log('entity_save', $metadata);
-  \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
+}
+
+/**
+ * Implements hook_entity_predelete().
+ *
+ * The delete leg of the shared write-precondition boundary (d.o #3616541): a
+ * governed delete of content locked by another principal is refused before
+ * anything is removed. Deletes have no validation seam, so the abort here is
+ * the only surface; the Tool plugins run the same owner-aware check first and
+ * fail gracefully.
+ */
+function mcp_sentinel_entity_predelete(EntityInterface $entity): void {
+  if (!$entity instanceof ContentEntityInterface) {
+    return;
+  }
+  /** @var \Drupal\mcp_sentinel\Service\McpWritePreconditions $preconditions */
+  $preconditions = \Drupal::service('mcp_sentinel.write_preconditions');
+  $conflict = $preconditions->evaluateDelete($entity);
+  if ($conflict !== NULL) {
+    \Drupal::service('mcp_sentinel.audit_logger')->logSurvivingRollback($conflict, [
+      'entity_type' => $entity->getEntityTypeId(),
+      'bundle'      => $entity->bundle(),
+      'id'          => $entity->id(),
+      'label'       => $entity->label(),
+      'note'        => 'Governed delete refused by the write-precondition boundary; nothing was removed.',
+    ]);
+    throw new \RuntimeException($preconditions->messageFor($conflict));
+  }
 }
 
 /**
@@ -305,6 +391,7 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
  */
 function mcp_sentinel_entity_insert(EntityInterface $entity): void {
   \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
+  _mcp_sentinel_log_entity_save($entity, 'create');
 }
 
 /**
@@ -318,6 +405,7 @@ function mcp_sentinel_entity_insert(EntityInterface $entity): void {
 function mcp_sentinel_entity_update(EntityInterface $entity): void {
   \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
   \Drupal::service('mcp_sentinel.unmoderated_redirect')->onPostSave($entity);
+  _mcp_sentinel_log_entity_save($entity, 'update');
 }
 
 /**
@@ -481,6 +569,10 @@ function mcp_sentinel_entity_type_alter(array &$entity_types): void {
     if ($entity_type instanceof EntityTypeInterface
       && $entity_type->entityClassImplements(ContentEntityInterface::class)) {
       $entity_type->addConstraint('McpDenyPublish');
+      // The shared write-precondition boundary (d.o #3616541): owner-aware
+      // content locks and stale-default-version refusal on the validated
+      // seams, for every content entity type and every write channel.
+      $entity_type->addConstraint('McpWriteConflict');
     }
   }
 
