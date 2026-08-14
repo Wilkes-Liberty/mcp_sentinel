@@ -243,9 +243,11 @@ MCP policy profiles → Configuration governance**.
   including relationship-only writes, translations, and deletes — runs one
   shared precondition contract before anything changes: an active content lock
   held by a *different* server-resolved principal denies the write and the
-  delete (the acting principal's own lock never blocks it), and a save whose
-  loaded copy is no longer the stored default revision is refused instead of
-  overwriting the concurrent change. Validated seams (JSON:API, REST, forms)
+  delete (the acting principal's own lock never blocks it), and a save that
+  would replace the stored default revision from a copy of it that is no
+  longer current is refused instead of overwriting the concurrent change
+  (continuing a forward — non-default — draft is not affected). Validated
+  seams (JSON:API, REST, forms)
   report a 422; unvalidated saves abort with a rollback-surviving evidence
   row, and passing updates record the checked precondition and final target
   revision on their audit row. Ungoverned human traffic is never gated.
