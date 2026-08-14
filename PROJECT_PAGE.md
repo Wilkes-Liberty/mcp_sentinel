@@ -96,7 +96,10 @@ attributed to the authenticated account.
   a two-layer SSRF guard, and a delivery log with one-click replay.
 - **Rich context endpoint** — `/drupal-mcp/context` exposes a full site schema
   (content types with fields, vocabularies, media types) so agents can discover
-  your model before acting; `/drupal-mcp/health` provides a status probe.
+  your model before acting; `/drupal-mcp/health` provides a status probe;
+  authenticated `GET /drupal-mcp/readiness` reports whether the fail-closed
+  governed source contract is ready (`contract_ready` plus a stable non-secret
+  reason) without claiming policy effectiveness or overall posture.
 - **Governed Tool plugins** — ready-to-use Tool API tools (site context,
   security policy, content locks, node create/update, media creation, workflow
   transitions, bulk publish/unpublish/delete, GraphQL schema discovery), each
