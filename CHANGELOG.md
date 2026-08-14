@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Provisioned consumers can actually mint tokens (#126 / d.o. #3616862).**
+  `mcp-sentinel:agent-provision` never set `grant_types` or simple_oauth's
+  default user, so its consumers satisfied the readiness contract yet failed
+  every token request (`unsupported_grant_type`, then an "invalid default
+  user" 500). The provisioner now enables the client_credentials grant and
+  binds the tier account as the consumer's default user.
+
+### Added
+- **Declared agent principals with `mcp-sentinel:agent-reconcile`.**
+  Consumers are content entities: database refreshes and copies silently
+  destroy per-environment principals. Environments now declare their tiers in
+  `mcp_sentinel.settings:agent_provision_tiers` ("<tier>:<env>" entries,
+  typically injected per environment via a settings.php override), and the
+  new command re-provisions every declared principal idempotently — wired
+  into deploy and refresh tooling, a wiped principal heals on the next run.
+  A declared entry that cannot be reconciled fails the run loudly; secrets
+  remain outside (deploy tooling reconciles those separately).
+
 ## [2.5.0] - 2026-08-14
 
 ### Added

@@ -12,6 +12,7 @@ webhook_endpoints: {  }
 webhook_delivery_retention_days: 30
 allow_internal_webhook_urls: false
 agent_oauth_clients: {  }
+agent_provision_tiers: {  }
 agent_scopes:
   - 'mcp_read'
   - 'mcp_write'

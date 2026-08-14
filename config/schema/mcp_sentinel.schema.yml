@@ -72,6 +72,11 @@ mcp_sentinel.settings:
       label: 'Agent OAuth client IDs (consumer client_id values)'
       sequence:
         type: string
+    agent_provision_tiers:
+      type: sequence
+      label: 'Declared agent principals ("<tier>:<env>") reconciled by mcp-sentinel:agent-reconcile'
+      sequence:
+        type: string
     agent_scopes:
       type: sequence
       label: 'Scopes that mark the agent channel'

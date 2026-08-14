@@ -384,6 +384,12 @@ final class McpSentinelServerCommands extends DrushCommands {
       ];
       $consumer->set('owner_id', $account->id());
       $consumer->set('status', 1);
+      // d.o #3616862: without the grant the league server refuses every token
+      // request (unsupported_grant_type), and without a default user the
+      // token endpoint 500s (invalid default user) — a principal that passes
+      // the readiness contract but cannot authenticate at all.
+      $consumer->set('grant_types', [['value' => 'client_credentials']]);
+      $consumer->set('user_id', $account->id());
       if ($consumer->hasField('scopes')) {
         $consumer->set('scopes', array_map(
           static fn (string $id): array => ['scope_id' => $id],
@@ -463,6 +469,56 @@ final class McpSentinelServerCommands extends DrushCommands {
         $this->logger()?->critical('An entity rollback step failed; inspect the Sentinel provisioning state immediately.');
       }
     }
+  }
+
+  /**
+   * Reconcile every declared agent principal.
+   *
+   * The self-healing counterpart to agent-provision: consumers are content
+   * entities, so DB refreshes and copies silently destroy per-environment
+   * principals. Environments declare their tiers in
+   * mcp_sentinel.settings:agent_provision_tiers ("<tier>:<env>" entries,
+   * typically injected per environment via a settings.php override), and
+   * deploy/refresh tooling runs this command to restore them. Idempotent;
+   * never touches secrets (deploy tooling reconciles those separately).
+   */
+  #[CLI\Command(name: 'mcp-sentinel:agent-reconcile', aliases: ['msar'])]
+  #[CLI\Usage(name: 'drush mcp-sentinel:agent-reconcile', description: 'Provision every tier declared in agent_provision_tiers.')]
+  public function agentReconcile(): int {
+    $declared = (array) ($this->configFactory
+      ->get('mcp_sentinel.settings')
+      ->get('agent_provision_tiers') ?? []);
+    if ($declared === []) {
+      $this->logger()?->notice('No agent tiers declared (agent_provision_tiers is empty) — nothing to reconcile.');
+      return self::EXIT_SUCCESS;
+    }
+
+    $failures = 0;
+    foreach ($declared as $entry) {
+      $parts = explode(':', (string) $entry, 2);
+      // A declared principal that cannot be reconciled is a loud failure —
+      // silently skipping it would recreate the exact wipe-and-vanish class
+      // this command exists to close.
+      if (count($parts) !== 2 || $parts[0] === '' || $parts[1] === '' || !isset(self::TIERS[$parts[0]])) {
+        $this->logger()?->error(sprintf(
+          'Invalid agent_provision_tiers entry "%s" — expected "<tier>:<env>" with a known tier (%s).',
+          (string) $entry,
+          implode(', ', array_keys(self::TIERS)),
+        ));
+        $failures++;
+        continue;
+      }
+      if ($this->agentProvision($parts[0], ['env' => $parts[1]]) !== self::EXIT_SUCCESS) {
+        $failures++;
+      }
+    }
+
+    if ($failures > 0) {
+      $this->logger()?->error(sprintf('%d of %d declared agent principal(s) failed to reconcile.', $failures, count($declared)));
+      return self::EXIT_FAILURE;
+    }
+    $this->logger()?->success(sprintf('Reconciled %d declared agent principal(s).', count($declared)));
+    return self::EXIT_SUCCESS;
   }
 
 }
