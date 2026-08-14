@@ -7,6 +7,37 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- **One write-precondition boundary for every governed write channel
+  (#108 / d.o. #3616541).** Content locks and version preconditions were
+  checked only inside the governed Tool plugins; JSON:API, GraphQL, and
+  direct governed saves could bypass an active lock or silently overwrite a
+  concurrent change. Every governed mutation of an existing entity —
+  relationship-only writes, translations, and deletes included — now runs
+  one shared contract: an active lock held by a **different** server-resolved
+  principal denies the write and the delete (`content_lock_conflict`), and a
+  save whose loaded copy is no longer the stored default revision is refused
+  instead of overwriting the concurrent change (`stale_version_conflict`).
+  Validated seams get a 422 via the new `McpWriteConflict` constraint; the
+  unvalidated seam aborts with a rollback-surviving evidence row. Lock
+  ownership is bound to the authenticated actor — the acting principal's own
+  lock never blocks it, and the Tool plugins now use the same owner-aware
+  check (bulk delete included, which previously skipped locks entirely).
+  Ungoverned human traffic is never gated.
+
+### Changed
+- **The `entity_save` audit row is written after the save commits, not at
+  presave.** A row is no longer recorded for a save that aborts (evidence of
+  writes that never happened), the row's id is the real entity id for
+  creates, and governed updates carry an execution receipt: the checked lock
+  state, the loaded revision the precondition was verified against, and the
+  final target revision.
+
+### Fixed
+- **Refusal evidence now survives the storage rollback.** The in-place-denial
+  row from the unmoderated forward-revision gate (and every new
+  write-precondition refusal) is written via a post-transaction callback:
+  the abort rolls back the enclosing entity transaction, which previously
+  discarded the evidence row along with the save.
 - **Human publication authority preserved for already-published unmoderated
   content (#107 / d.o. #3616542).** A governed agent edit of an
   already-published entity with no moderation workflow no longer mutates the

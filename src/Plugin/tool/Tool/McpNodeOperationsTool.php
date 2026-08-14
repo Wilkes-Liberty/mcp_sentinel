@@ -177,8 +177,8 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
     if (!$node instanceof NodeInterface) {
       return ExecutableResult::failure($this->t('Node "@id" not found.', ['@id' => $values['id'] ?? '']));
     }
-    if ($this->contentLock->isLocked('node', (string) $node->id())) {
-      return ExecutableResult::failure($this->t('Node @id is locked against MCP writes (a human may be editing it).', ['@id' => $node->id()]));
+    if ($this->contentLock->conflictsForActor('node', (string) $node->id())) {
+      return ExecutableResult::failure($this->t('Node @id is locked against MCP writes by another actor (a human may be editing it).', ['@id' => $node->id()]));
     }
     $policyResult = $this->accessChecker->checkEntityAccess($node, 'update', $profile);
     if ($policy = $this->denyReason($policyResult)) {

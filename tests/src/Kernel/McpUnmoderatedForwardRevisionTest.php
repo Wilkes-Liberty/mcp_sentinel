@@ -412,10 +412,19 @@ final class McpUnmoderatedForwardRevisionTest extends KernelTestBase {
     $this->setGovernedAccount();
     $comment->setSubject('Sneaky comment edit');
 
-    // Core's storage layer wraps the presave refusal, keeping its message.
-    $this->expectException(EntityStorageException::class);
-    $this->expectExceptionMessageMatches('/cannot be changed in place/');
-    $comment->save();
+    try {
+      $comment->save();
+      $this->fail('The non-revisionable in-place edit must abort on the unvalidated seam.');
+    }
+    catch (EntityStorageException $e) {
+      // Core's storage layer wraps the presave refusal, keeping its message.
+      $this->assertStringContainsString('cannot be changed in place', $e->getMessage());
+    }
+
+    // The refusal aborts the save, which rolls back the enclosing storage
+    // transaction — the evidence row must survive that rollback.
+    $this->assertSame(1, $this->countAuditRows('unmoderated_in_place_denied'),
+      'The refused in-place edit must leave an evidence row despite the rollback.');
   }
 
   /**

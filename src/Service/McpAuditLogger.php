@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -102,13 +103,47 @@ class McpAuditLogger {
    *   diff are passed through DLP scanning before storage in the audit log.
    *   NULL is accepted so existing kernel tests that construct the logger
    *   without this argument continue to work.
+   * @param \Drupal\Core\Database\Connection|null $database
+   *   The database connection, used only to detect an active transaction so
+   *   refusal evidence can survive its rollback (logSurvivingRollback()).
+   *   NULL is accepted for the same test-construction reason as $dlp; without
+   *   it, logSurvivingRollback() degrades to an immediate log().
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
     private readonly ?AuditChainLoggerInterface $auditChain,
     private readonly ?McpDlp $dlp = NULL,
+    private readonly ?Connection $database = NULL,
   ) {}
+
+  /**
+   * Logs an operation so the row survives a rolled-back entity transaction.
+   *
+   * A refusal raised inside hook_entity_presave()/hook_entity_predelete()
+   * aborts the save — and the storage layer rolls the whole transaction back,
+   * taking an ordinarily-written audit row with it. Evidence of a refusal
+   * that silently vanishes is worse than none: it reads as "nothing
+   * happened". When a transaction is active, this defers the write to a
+   * post-transaction callback (which runs after the rollback completes);
+   * otherwise it logs immediately.
+   *
+   * @param string $operation
+   *   A short operation identifier (e.g. 'content_lock_conflict').
+   * @param array $metadata
+   *   Optional metadata (same contract as log()).
+   */
+  public function logSurvivingRollback(string $operation, array $metadata = []): void {
+    if ($this->database !== NULL && $this->database->inTransaction()) {
+      $this->database->transactionManager()->addPostTransactionCallback(
+        function () use ($operation, $metadata): void {
+          $this->log($operation, $metadata);
+        }
+      );
+      return;
+    }
+    $this->log($operation, $metadata);
+  }
 
   /**
    * Logs an MCP operation.
