@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
+use Drupal\node\Entity\NodeType;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
@@ -153,6 +154,67 @@ final class McpContextControllerTest extends KernelTestBase {
       ->save();
     $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
     $this->container->get('current_user')->setAccount($account);
+  }
+
+  /**
+   * The schema document is refused below its classification label.
+   *
+   * The context document is metadata classified `internal` by default: a
+   * profile whose context ceiling is lower may not receive it, one at or
+   * above the label receives it unchanged.
+   */
+  public function testContextRefusedWhenSchemaLabelExceedsCeiling(): void {
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->switchToDevelopmentGovernedUser();
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['context' => 'public'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $response = McpContextController::create($this->container)->context();
+    $this->assertSame(403, $response->getStatusCode());
+    $payload = json_decode((string) $response->getContent(), TRUE);
+    $this->assertSame('classification_egress_denied', $payload['errors'][0]['code'] ?? NULL);
+    $this->assertArrayNotHasKey('site', $payload);
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['context' => 'internal'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $response = McpContextController::create($this->container)->context();
+    $this->assertSame(200, $response->getStatusCode());
+    $this->assertArrayHasKey('site', json_decode((string) $response->getContent(), TRUE));
+  }
+
+  /**
+   * Bundles classified above the ceiling are omitted from the schema document.
+   */
+  public function testContextOmitsOverCeilingBundles(): void {
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installConfig(['filter', 'node']);
+    NodeType::create(['type' => 'memo', 'name' => 'Memo'])->save();
+    NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
+    $this->switchToDevelopmentGovernedUser();
+    $this->config('mcp_sentinel.settings')
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted'],
+      ])
+      ->save();
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['context' => 'internal'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $payload = json_decode((string) McpContextController::create($this->container)->context()->getContent(), TRUE);
+    $this->assertArrayHasKey('article', $payload['content_types']);
+    $this->assertArrayNotHasKey('memo', $payload['content_types'], 'A restricted bundle is not described to an internal-ceiling principal.');
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['context' => 'restricted'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $payload = json_decode((string) McpContextController::create($this->container)->context()->getContent(), TRUE);
+    $this->assertArrayHasKey('memo', $payload['content_types']);
   }
 
 }

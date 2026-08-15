@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\jsonapi\ResourceType\ResourceTypeRepositoryInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -40,6 +44,8 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
     private readonly AccountProxyInterface $currentUser,
     private readonly McpExfiltrationGuard $guard,
     private readonly McpAuditLogger $auditLogger,
+    private readonly ?McpClassificationResolver $classification = NULL,
+    private readonly ?ResourceTypeRepositoryInterface $resourceTypes = NULL,
   ) {}
 
   /**
@@ -97,6 +103,14 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
     }
     $bytes = strlen($content);
     if (!$this->guard->exceedsResponseSizeCap($bytes, $profile)) {
+      // Within the byte budget: the classification seam (d.o #3616540 part
+      // 2) is defense in depth behind entity and field access — an
+      // over-ceiling resource type that survived to serialization is
+      // refused with the same structured code the request seam uses.
+      if ($surface === McpGovernedSurface::JsonApi
+        && $this->classificationRefuses($event->getResponse(), $content, $profile)) {
+        $event->setResponse($this->classification->refusalResponse());
+      }
       return;
     }
 
@@ -129,6 +143,95 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
     $refusal->setPrivate();
     $refusal->headers->set('Cache-Control', 'private, no-store');
     $event->setResponse($refusal);
+  }
+
+  /**
+   * Whether a rendered JSON:API body carries an over-ceiling resource type.
+   *
+   * Applies to successful JSON:API documents only: errors carry no resources
+   * and other content types are not this seam's business. Every `type` in
+   * `data` and `included` is resolved to its entity type and bundle through
+   * the resource type repository (alias-aware) and judged against the
+   * profile's JSON:API ceiling. Deny more: a body that cannot be decoded, or
+   * a type name the repository does not know, is refused while a ceiling is
+   * in force — this seam guarantees no unmeasured payload leaves.
+   *
+   * @param \Symfony\Component\HttpFoundation\Response $response
+   *   The rendered response.
+   * @param string $content
+   *   Its body.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved profile.
+   *
+   * @return bool
+   *   TRUE when the body must be replaced with the classification refusal.
+   */
+  private function classificationRefuses(Response $response, string $content, McpPolicyProfileInterface $profile): bool {
+    if ($this->classification === NULL || $this->resourceTypes === NULL) {
+      return FALSE;
+    }
+    if (!$response->isSuccessful()
+      || !str_contains((string) $response->headers->get('Content-Type', ''), 'application/vnd.api+json')
+      || !$this->classification->assignsAboveLowest()) {
+      return FALSE;
+    }
+    $surface = McpGovernedSurface::JsonApi;
+    $ceiling = $this->classification->effectiveCeiling($profile, $surface);
+    if ($ceiling === NULL) {
+      return FALSE;
+    }
+    try {
+      $document = json_decode($content, TRUE, 64, JSON_THROW_ON_ERROR);
+    }
+    catch (\JsonException) {
+      $document = NULL;
+    }
+    if (!is_array($document)) {
+      $this->classification->evidence($profile, $surface, '(undecodable)', '', '', $this->classification->highestLabel(), $ceiling);
+      return TRUE;
+    }
+    foreach ($this->resourceTypeNames($document) as $typeName) {
+      $resourceType = $this->resourceTypes->getByTypeName($typeName);
+      if ($resourceType === NULL) {
+        // Not a resource type this site serves; nothing here can vouch for
+        // it, so it is judged as the highest label.
+        $this->classification->evidence($profile, $surface, substr($typeName, 0, 64), '', '', $this->classification->highestLabel(), $ceiling);
+        return TRUE;
+      }
+      $label = $this->classification->labelForEntityType($resourceType->getEntityTypeId(), $resourceType->getBundle());
+      if ($this->classification->exceeds($label, $ceiling)) {
+        $this->classification->evidence($profile, $surface, $resourceType->getEntityTypeId(), $resourceType->getBundle(), '', $label, $ceiling);
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * The distinct resource type names in a JSON:API document's data + included.
+   *
+   * @param array $document
+   *   The decoded document.
+   *
+   * @return string[]
+   *   Type names, in first-seen order.
+   */
+  private function resourceTypeNames(array $document): array {
+    $names = [];
+    foreach (['data', 'included'] as $member) {
+      $value = $document[$member] ?? NULL;
+      if (!is_array($value)) {
+        continue;
+      }
+      // A single resource object has a string 'type'; a list has objects.
+      $objects = isset($value['type']) ? [$value] : $value;
+      foreach ($objects as $object) {
+        if (is_array($object) && is_string($object['type'] ?? NULL) && $object['type'] !== '') {
+          $names[$object['type']] = TRUE;
+        }
+      }
+    }
+    return array_keys($names);
   }
 
 }

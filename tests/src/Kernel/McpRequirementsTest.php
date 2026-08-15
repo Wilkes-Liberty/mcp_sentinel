@@ -236,4 +236,53 @@ final class McpRequirementsTest extends KernelTestBase {
     }
   }
 
+  /**
+   * Labels above the floor with a role-bound profile lacking ceilings warn.
+   *
+   * The shipped role-less default profile never trips this: binding a profile
+   * to agent roles is what makes it production-oriented. Setting ceilings on
+   * that profile clears the warning; an empty map never warns.
+   */
+  public function testClassificationWithoutCeilingsWarns(): void {
+    // Shipped state: the map labels identity types restricted, but the only
+    // profile is the role-less default -> no warning.
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayNotHasKey('mcp_sentinel_classification_ceilings', $requirements);
+
+    // A role-bound profile without ceilings -> warning.
+    McpPolicyProfile::create([
+      'id' => 'agents',
+      'label' => 'Agents',
+      'roles' => ['mcp_api'],
+    ])->save();
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_classification_ceilings', $requirements);
+    $this->assertSame(REQUIREMENT_WARNING, $requirements['mcp_sentinel_classification_ceilings']['severity']);
+    $this->assertStringContainsString('agents', (string) $requirements['mcp_sentinel_classification_ceilings']['value']);
+
+    // Ceilings on that profile clear it.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.agents')
+      ->set('egress_ceilings', ['jsonapi' => 'internal'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $this->assertArrayNotHasKey('mcp_sentinel_classification_ceilings', mcp_sentinel_requirements('runtime'));
+
+    // A disabled role-bound profile without ceilings does not count.
+    McpPolicyProfile::create([
+      'id' => 'retired',
+      'label' => 'Retired',
+      'roles' => ['mcp_api'],
+      'status' => FALSE,
+    ])->save();
+    $this->assertArrayNotHasKey('mcp_sentinel_classification_ceilings', mcp_sentinel_requirements('runtime'));
+
+    // With nothing labelled above the floor there is nothing to warn about.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.agents')
+      ->set('egress_ceilings', [])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $this->config('mcp_sentinel.settings')->set('classification_map', [])->save();
+    $this->assertArrayNotHasKey('mcp_sentinel_classification_ceilings', mcp_sentinel_requirements('runtime'));
+  }
+
 }

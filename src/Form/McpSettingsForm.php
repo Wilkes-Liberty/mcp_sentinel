@@ -9,6 +9,7 @@ use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
@@ -377,6 +378,110 @@ class McpSettingsForm extends ConfigFormBase {
     ];
 
     // -----------------------------------------------------------------------
+    // Classification tab (d.o #3616540 part 2).
+    // -----------------------------------------------------------------------
+    $form['classification'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Classification'),
+      '#description' => $this->t('Label data by configuration, not content inspection: an ordered vocabulary of classification labels and a map assigning labels to entity types, bundles or fields. Unlabelled data carries the lowest label. Nothing is enforced until a policy profile sets per-surface egress ceilings; profiles that govern agent roles without ceilings are flagged on the status report.'),
+      '#group' => 'tabs',
+    ];
+    $stored_labels = array_values(array_filter(
+      array_map('strval', (array) ($config->get('classification_labels') ?? [])),
+      static fn (string $label): bool => $label !== '',
+    ));
+    $form['classification']['classification_labels'] = [
+      '#type' => 'textarea',
+      '#title' => $this->t('Classification labels (lowest first)'),
+      '#description' => $this->t('One label per line, ordered from least to most sensitive. Leave empty to use the built-in <code>public</code>, <code>internal</code>, <code>restricted</code>. Labels used in the map or on profile ceilings must appear here.'),
+      '#default_value' => implode("\n", $stored_labels),
+      '#rows' => 3,
+    ];
+    $form['classification']['context_schema_label'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Schema document label'),
+      '#description' => $this->t('The label of the site schema served by <code>/drupal-mcp/context</code> and the site-context tool. Schema is metadata, classified <code>internal</code> by default; a profile whose context or tool ceiling is lower does not receive it.'),
+      '#default_value' => (string) ($config->get('context_schema_label') ?? 'internal'),
+      '#size' => 24,
+      '#maxlength' => 64,
+    ];
+    $stored_map = array_values(array_filter((array) ($config->get('classification_map') ?? []), 'is_array'));
+    $map_count = $this->rowCount($form_state, 'classification_map_rows', count($stored_map));
+    $form['classification']['classification_map_help'] = [
+      '#type' => 'item',
+      '#title' => $this->t('Classification map'),
+      '#description' => $this->t('Each row labels an entity type; leave <em>bundle</em> empty for every bundle and <em>field</em> empty for the entity itself. A bundle row beats a type row; a field row beats the entity label. Rows without an entity type or label are dropped.'),
+    ];
+    $form['classification']['classification_map_rows'] = [
+      '#type' => 'container',
+      '#tree' => TRUE,
+      '#prefix' => '<div id="mcp-classification-rows-wrapper">',
+      '#suffix' => '</div>',
+    ];
+    for ($i = 0; $i < $map_count; $i++) {
+      $row = $stored_map[$i] ?? [];
+      $form['classification']['classification_map_rows'][$i] = [
+        '#type' => 'fieldset',
+        '#title' => $this->t('Assignment @n', ['@n' => $i + 1]),
+        '#attributes' => ['class' => ['mcp-sentinel-row']],
+      ];
+      $form['classification']['classification_map_rows'][$i]['entity_type'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Entity type'),
+        '#default_value' => (string) ($row['entity_type'] ?? ''),
+        '#size' => 20,
+        '#maxlength' => 64,
+      ];
+      $form['classification']['classification_map_rows'][$i]['bundle'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Bundle'),
+        '#default_value' => (string) ($row['bundle'] ?? ''),
+        '#size' => 20,
+        '#maxlength' => 64,
+      ];
+      $form['classification']['classification_map_rows'][$i]['field'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Field'),
+        '#default_value' => (string) ($row['field'] ?? ''),
+        '#size' => 20,
+        '#maxlength' => 64,
+      ];
+      $form['classification']['classification_map_rows'][$i]['label'] = [
+        '#type' => 'textfield',
+        '#title' => $this->t('Label'),
+        '#default_value' => (string) ($row['label'] ?? ''),
+        '#size' => 16,
+        '#maxlength' => 64,
+      ];
+      $form['classification']['classification_map_rows'][$i]['remove'] = [
+        '#type' => 'submit',
+        '#name' => 'classification_remove_' . $i,
+        '#value' => $this->t('Remove assignment @n', ['@n' => $i + 1]),
+        '#submit' => ['::classificationRemoveRow'],
+        '#limit_validation_errors' => [],
+        '#mcp_editor_parents' => ['classification', 'classification_map_rows'],
+        '#mcp_editor_input' => ['classification_map_rows'],
+        '#mcp_editor_row' => $i,
+        '#ajax' => [
+          'callback' => '::listEditorAjax',
+          'wrapper' => 'mcp-classification-rows-wrapper',
+        ],
+      ];
+    }
+    $form['classification']['classification_map_rows']['add'] = [
+      '#type' => 'submit',
+      '#name' => 'classification_add',
+      '#value' => $this->t('Add assignment'),
+      '#submit' => ['::classificationAddRow'],
+      '#limit_validation_errors' => [],
+      '#mcp_editor_parents' => ['classification', 'classification_map_rows'],
+      '#ajax' => [
+        'callback' => '::listEditorAjax',
+        'wrapper' => 'mcp-classification-rows-wrapper',
+      ],
+    ];
+
+    // -----------------------------------------------------------------------
     // Anomaly detection tab.
     // -----------------------------------------------------------------------
     $form['anomaly'] = [
@@ -717,6 +822,61 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
+    // Validate the classification vocabulary, map and schema label together:
+    // every label named must exist in the vocabulary being submitted (not the
+    // stored one), so a vocabulary change and its dependents land in one save.
+    $labels = $this->submittedClassificationLabels($form_state);
+    $schema_label = trim((string) ($form_state->getValue('context_schema_label') ?? ''));
+    if ($schema_label !== '' && !in_array($schema_label, $labels, TRUE)) {
+      $form_state->setErrorByName(
+        'classification][context_schema_label',
+        $this->t('The schema document label "@label" is not in the classification vocabulary.', ['@label' => $schema_label]),
+      );
+    }
+    foreach ((array) ($form_state->getValue('classification_map_rows') ?? []) as $i => $row) {
+      if (!is_array($row)) {
+        continue;
+      }
+      $type = trim((string) ($row['entity_type'] ?? ''));
+      $label = trim((string) ($row['label'] ?? ''));
+      $bundle = trim((string) ($row['bundle'] ?? ''));
+      $field = trim((string) ($row['field'] ?? ''));
+      // A fully blank row is skipped.
+      if ($type === '' && $label === '' && $bundle === '' && $field === '') {
+        continue;
+      }
+      if ($type === '') {
+        $form_state->setErrorByName(
+          "classification][classification_map_rows][$i][entity_type",
+          $this->t('Classification assignment @n needs an entity type.', ['@n' => (int) $i + 1]),
+        );
+      }
+      elseif (!$this->entityTypeManager->hasDefinition($type)) {
+        $form_state->setErrorByName(
+          "classification][classification_map_rows][$i][entity_type",
+          $this->t('Classification assignment @n names "@type", which is not an entity type on this site.', [
+            '@n' => (int) $i + 1,
+            '@type' => $type,
+          ]),
+        );
+      }
+      if ($label === '') {
+        $form_state->setErrorByName(
+          "classification][classification_map_rows][$i][label",
+          $this->t('Classification assignment @n needs a label.', ['@n' => (int) $i + 1]),
+        );
+      }
+      elseif (!in_array($label, $labels, TRUE)) {
+        $form_state->setErrorByName(
+          "classification][classification_map_rows][$i][label",
+          $this->t('Classification assignment @n uses "@label", which is not in the classification vocabulary.', [
+            '@n' => (int) $i + 1,
+            '@label' => $label,
+          ]),
+        );
+      }
+    }
+
     // Validate the DLP patterns multi-row editor.
     $dlp_rows = (array) ($form_state->getValue('dlp_patterns_rows') ?? []);
     foreach ($dlp_rows as $i => $row) {
@@ -876,6 +1036,40 @@ class McpSettingsForm extends ConfigFormBase {
   }
 
   /**
+   * Submit handler: adds a classification assignment row.
+   */
+  public function classificationAddRow(array &$form, FormStateInterface $form_state): void {
+    $this->addRow($form, $form_state, 'classification_map_rows');
+  }
+
+  /**
+   * Submit handler: removes a classification assignment row.
+   */
+  public function classificationRemoveRow(array &$form, FormStateInterface $form_state): void {
+    $this->removeRow($form, $form_state, 'classification_map_rows');
+  }
+
+  /**
+   * The vocabulary as submitted: trimmed, non-empty, de-duplicated, in order.
+   *
+   * Empty falls back to the built-in default so the map and the schema label
+   * validate against what will actually be in force.
+   *
+   * @return string[]
+   *   The ordered labels.
+   */
+  private function submittedClassificationLabels(FormStateInterface $form_state): array {
+    $labels = [];
+    foreach (explode("\n", (string) ($form_state->getValue('classification_labels') ?? '')) as $label) {
+      $label = trim($label);
+      if ($label !== '' && !in_array($label, $labels, TRUE)) {
+        $labels[] = $label;
+      }
+    }
+    return $labels === [] ? McpClassificationResolver::DEFAULT_LABELS : $labels;
+  }
+
+  /**
    * Submit handler: adds an anomaly rule row.
    */
   public function anomalyAddRow(array &$form, FormStateInterface $form_state): void {
@@ -935,6 +1129,27 @@ class McpSettingsForm extends ConfigFormBase {
         ];
       }
     }
+    // Assemble the classification map from the row editor, dropping rows that
+    // lack an entity type or label (validation has already refused partial
+    // rows and unknown labels).
+    $classification_map = [];
+    foreach ((array) ($form_state->getValue('classification_map_rows') ?? []) as $row) {
+      if (!is_array($row)) {
+        continue;
+      }
+      $type = trim((string) ($row['entity_type'] ?? ''));
+      $label = trim((string) ($row['label'] ?? ''));
+      if ($type === '' || $label === '') {
+        continue;
+      }
+      $classification_map[] = [
+        'entity_type' => $type,
+        'bundle' => trim((string) ($row['bundle'] ?? '')),
+        'field' => trim((string) ($row['field'] ?? '')),
+        'label' => $label,
+      ];
+    }
+
     // Assemble the anomaly rules sequence-of-maps from the row editor, dropping
     // rows that lack an id or operation pattern.
     $anomaly_rules = [];
@@ -996,6 +1211,9 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
       ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
       ->set('dlp_patterns', $dlp_patterns)
+      ->set('classification_labels', $this->submittedClassificationLabels($form_state))
+      ->set('classification_map', $classification_map)
+      ->set('context_schema_label', trim((string) ($form_state->getValue('context_schema_label') ?? '')) ?: 'internal')
       ->set('anomaly_enabled', (bool) $form_state->getValue('anomaly_enabled'))
       ->set('anomaly_alert_log', (bool) $form_state->getValue('anomaly_alert_log'))
       ->set('anomaly_alert_email', trim((string) ($form_state->getValue('anomaly_alert_email') ?? '')))

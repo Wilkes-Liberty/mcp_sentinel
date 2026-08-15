@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_graphql\Kernel;
 
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\graphql\GraphQL\Execution\FieldContext;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
 use Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use GraphQL\Type\Definition\ResolveInfo;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests mcp_sentinel_graphql_graphql_compose_field_results_alter().
@@ -337,6 +340,75 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
   ): void {
     // The entity argument is not used by the hook; pass NULL.
     mcp_sentinel_graphql_graphql_compose_field_results_alter($results, NULL, $plugin, $context);
+  }
+
+  /**
+   * Labels node/page field_secret restricted and ceilings the graphql surface.
+   */
+  private function classifySecret(string $ceiling): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'page', 'field' => 'field_secret', 'label' => 'restricted'],
+      ])
+      ->save();
+    $this->config('mcp_sentinel.mcp_policy_profile.test_agent')
+      ->set('egress_ceilings', ['graphql' => $ceiling])
+      ->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+    $stack = $this->container->get('request_stack');
+    $request = Request::create('/graphql', 'POST');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+  }
+
+  /**
+   * A mock entity of the given type and bundle for the alter hook.
+   */
+  private function makeEntity(string $type, string $bundle): EntityInterface {
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('getEntityTypeId')->willReturn($type);
+    $entity->method('bundle')->willReturn($bundle);
+    return $entity;
+  }
+
+  /**
+   * An over-ceiling field returns the redaction placeholder (§5.3).
+   */
+  public function testOverCeilingFieldGetsPlaceholder(): void {
+    $this->makeGoverned([], 0);
+    $this->classifySecret('internal');
+
+    $results = ['top secret'];
+    $context = $this->makeFieldContext();
+    mcp_sentinel_graphql_graphql_compose_field_results_alter($results, $this->makeEntity('node', 'page'), $this->makePlugin('field_secret'), $context);
+    $this->assertSame(['[REDACTED]'], $results);
+    $this->assertContains('route', $context->getCacheContexts());
+    $this->assertContains('headers:' . McpClassificationResolver::HEADER_DECLARED_CEILING, $context->getCacheContexts());
+
+    // A sibling field of the same entity serializes.
+    $other = ['hello'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter($other, $this->makeEntity('node', 'page'), $this->makePlugin('body'), $this->makeFieldContext());
+    $this->assertSame(['hello'], $other);
+
+    // The same field on another bundle is unlabelled.
+    $article = ['fine'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter($article, $this->makeEntity('node', 'article'), $this->makePlugin('field_secret'), $this->makeFieldContext());
+    $this->assertSame(['fine'], $article);
+  }
+
+  /**
+   * At ceiling the same field returns its data unchanged.
+   */
+  public function testAtCeilingFieldReturnsData(): void {
+    $this->makeGoverned([], 0);
+    $this->classifySecret('restricted');
+
+    $results = ['top secret'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter($results, $this->makeEntity('node', 'page'), $this->makePlugin('field_secret'), $this->makeFieldContext());
+    $this->assertSame(['top secret'], $results);
   }
 
 }

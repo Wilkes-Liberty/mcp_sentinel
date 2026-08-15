@@ -6,6 +6,8 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\NodeType;
 use Drupal\taxonomy\Entity\Vocabulary;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -378,6 +380,67 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
     $data = $tool->getResult()->getContextValues();
     $this->assertArrayHasKey('content_types', $data,
       'Ungoverned account must receive the full schema response.');
+  }
+
+  /**
+   * The site-context tool honours the Tool ceiling like the context endpoint.
+   */
+  public function testSiteContextToolHonoursCeiling(): void {
+    $this->createGovernedAccount();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'page', 'field' => '', 'label' => 'restricted'],
+      ])
+      ->save();
+
+    // Below the schema label the whole document is refused.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['tool' => 'public'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertFalse($tool->getResultStatus());
+    $this->assertStringContainsString('classification_egress_denied', (string) $tool->getResultMessage());
+
+    // At the schema label the document is served, minus over-ceiling bundles.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['tool' => 'internal'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertTrue($tool->getResultStatus());
+    $this->assertArrayNotHasKey('page', $tool->getResult()->getContextValues()['content_types']);
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['tool' => 'restricted'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertArrayHasKey('page', $tool->getResult()->getContextValues()['content_types']);
+  }
+
+  /**
+   * The governed Tool base names the Tool surface on the current request.
+   *
+   * Tool execution has no path of its own, so the access gate stamps the
+   * request; entity reads during the later execute() then resolve the Tool
+   * ceiling instead of the strictest configured one.
+   */
+  public function testToolAccessStampsTheToolSurface(): void {
+    $account = $this->createGovernedAccount();
+    $request = Request::create('/_mcp', 'POST');
+    $this->container->get('request_stack')->push($request);
+
+    $this->assertNull($request->attributes->get(McpClassificationResolver::REQUEST_ATTRIBUTE_SURFACE));
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->access($account, TRUE);
+    $this->assertSame('tool', $request->attributes->get(McpClassificationResolver::REQUEST_ATTRIBUTE_SURFACE));
+    $this->assertSame(McpGovernedSurface::Tool, $this->container->get('mcp_sentinel.classification')->currentSurface());
+
+    $this->container->get('request_stack')->pop();
   }
 
 }

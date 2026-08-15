@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\Sql\SqlEntityStorageInterface;
 use Drupal\Core\Entity\Sql\TableMappingInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 
 /**
@@ -86,9 +87,14 @@ final class McpRawSqlGuard {
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   The entity type manager, used to resolve every SQL-backed entity type's
    *   physical tables and the columns backing each field.
+   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver|null $classification
+   *   Classification egress ceilings (d.o #3616540 part 2). Nullable for the
+   *   deploy window in which the cached container still passes one argument;
+   *   without it no ceiling is evaluated, exactly the previous behavior.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    private readonly ?McpClassificationResolver $classification = NULL,
   ) {}
 
   /**
@@ -98,12 +104,15 @@ final class McpRawSqlGuard {
    *   The raw statement as submitted.
    * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
    *   The resolved policy profile.
+   * @param \Drupal\mcp_sentinel\Enum\McpGovernedSurface $surface
+   *   The surface the statement leaves through — the governed drush command
+   *   unless a caller says otherwise. Selects the profile's egress ceiling.
    *
    * @return string[]
    *   Refusal reasons. An empty array means the statement is permitted; the
    *   caller must treat a non-empty array as a hard refusal, never a warning.
    */
-  public function check(string $sql, McpPolicyProfileInterface $profile): array {
+  public function check(string $sql, McpPolicyProfileInterface $profile, McpGovernedSurface $surface = McpGovernedSurface::Drush): array {
     $trimmed = trim($sql);
     if ($trimmed === '') {
       return ['The statement is empty.'];
@@ -182,11 +191,67 @@ final class McpRawSqlGuard {
 
     $errors = array_merge(
       $errors,
-      $this->checkRedaction($normalised, $resolved, $profile->getRedactedFields()),
+      $this->checkRedaction($normalised, $resolved, $profile->getRedactedFields(), 'is redacted by the policy profile'),
+      $this->checkClassification($normalised, $resolved, $profile, $surface),
       $this->checkSelectLists($normalised),
     );
 
     return array_values(array_unique($errors));
+  }
+
+  /**
+   * Refuses statements over data classified above the profile's ceiling.
+   *
+   * Entity-level rows judge the table: SQL cannot see bundles, so a type
+   * whose highest type/bundle label exceeds the ceiling is refused outright.
+   * Field-level rows judge column references through the same machinery as
+   * redacted columns (deny more, never less; d.o #3616540 part 2).
+   *
+   * @param string $normalised
+   *   The normalised statement.
+   * @param array<string, string> $resolved
+   *   Table name => entity type ID.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile.
+   * @param \Drupal\mcp_sentinel\Enum\McpGovernedSurface $surface
+   *   The egress surface.
+   *
+   * @return string[]
+   *   Refusal reasons; each carries the stable code
+   *   classification_egress_denied.
+   */
+  private function checkClassification(string $normalised, array $resolved, McpPolicyProfileInterface $profile, McpGovernedSurface $surface): array {
+    if ($this->classification === NULL || $resolved === [] || !$this->classification->assignsAboveLowest()) {
+      return [];
+    }
+    $ceiling = $this->classification->effectiveCeiling($profile, $surface);
+    if ($ceiling === NULL) {
+      return [];
+    }
+    $errors = [];
+    $fields = [];
+    foreach (array_unique($resolved) as $entityTypeId) {
+      $highest = $this->classification->highestEntityLabelForEntityType($entityTypeId);
+      if ($this->classification->exceeds($highest, $ceiling)) {
+        $errors[] = sprintf(
+          "Entity type '%s' is classified '%s', above the '%s' egress ceiling for this surface (%s).",
+          $entityTypeId,
+          $highest,
+          $ceiling,
+          McpClassificationResolver::DENIAL_CODE,
+        );
+      }
+      $fields = array_merge($fields, array_keys($this->classification->fieldsAboveCeiling($entityTypeId, $ceiling)));
+    }
+    if ($fields !== []) {
+      $errors = array_merge($errors, $this->checkRedaction(
+        $normalised,
+        $resolved,
+        array_values(array_unique($fields)),
+        sprintf("is classified above the '%s' egress ceiling (%s)", $ceiling, McpClassificationResolver::DENIAL_CODE),
+      ));
+    }
+    return $errors;
   }
 
   /**
@@ -358,12 +423,14 @@ final class McpRawSqlGuard {
    * @param array<string, string> $resolved
    *   Referenced table => entity type ID.
    * @param string[] $redactedFields
-   *   Field names the profile redacts.
+   *   Field names that may not be referenced.
+   * @param string $reasonPredicate
+   *   Why, phrased as a predicate ("is redacted by the policy profile").
    *
    * @return string[]
    *   Refusal reasons.
    */
-  private function checkRedaction(string $normalised, array $resolved, array $redactedFields): array {
+  private function checkRedaction(string $normalised, array $resolved, array $redactedFields, string $reasonPredicate): array {
     if ($redactedFields === [] || $resolved === []) {
       return [];
     }
@@ -378,17 +445,19 @@ final class McpRawSqlGuard {
       }
       if ($starSelected) {
         $errors[] = sprintf(
-          "SELECT * is not permitted on '%s': it carries the redacted field(s) %s.",
+          "SELECT * is not permitted on '%s': it carries the field(s) %s, each of which %s.",
           $table,
           implode(', ', array_keys($columns)),
+          $reasonPredicate,
         );
       }
       foreach ($columns as $fieldName => $columnNames) {
         foreach ($columnNames as $column) {
           if (preg_match('/\b' . preg_quote($column, '/') . '\b/i', $normalised)) {
             $errors[] = sprintf(
-              "Field '%s' is redacted by the policy profile and cannot be referenced (column '%s').",
+              "Field '%s' %s and cannot be referenced (column '%s').",
               $fieldName,
+              $reasonPredicate,
               $column,
             );
           }

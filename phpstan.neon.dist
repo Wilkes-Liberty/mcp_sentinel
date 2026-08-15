@@ -51,6 +51,13 @@ parameters:
     -
       identifier: method.internal
       path: modules/mcp_sentinel_graphql/tests/src/Kernel/GraphqlGovernanceSubscriberTest.php
+    # McpGovernedSurfaceTest asserts the enum's literal case values on purpose
+    # (the audit metadata and profile ceilings key on those strings); PHPStan
+    # sees constants compared to themselves. Reassess if the vocabulary stops
+    # being a backed enum.
+    -
+      identifier: method.alreadyNarrowedType
+      path: tests/src/Unit/McpGovernedSurfaceTest.php
     # Update-hook tests call assertIsString() on hook return values that
     # phpstan narrows to string from the function signature; the assertion
     # is intentional (it documents the contract) and harmless.

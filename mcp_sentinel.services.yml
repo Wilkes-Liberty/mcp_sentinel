@@ -40,6 +40,7 @@ services:
       - '@config.factory'
       - '@request_stack'
       - '@entity_type.manager'
+      - '@mcp_sentinel.classification'
 
   mcp_sentinel.moderation_gate:
     class: Drupal\mcp_sentinel\Service\McpModerationGate
@@ -149,6 +150,16 @@ services:
       - '@config.factory'
       - '@logger.channel.mcp_sentinel'
 
+  mcp_sentinel.classification:
+    class: Drupal\mcp_sentinel\Service\McpClassificationResolver
+    arguments:
+      - '@config.factory'
+      - '@request_stack'
+      # Origin evidence reads the environment name from settings.php
+      # ($settings['mcp_sentinel.environment']), never from config.
+      - '@settings'
+      - '@mcp_sentinel.audit_logger'
+
   mcp_sentinel.read_budgets:
     class: Drupal\mcp_sentinel\Service\McpReadBudgetResolver
     arguments:
@@ -169,6 +180,7 @@ services:
     class: Drupal\mcp_sentinel\Service\McpRawSqlGuard
     arguments:
       - '@entity_type.manager'
+      - '@mcp_sentinel.classification'
 
   mcp_sentinel.jsonapi_page_limit_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber
@@ -179,6 +191,7 @@ services:
       - '@mcp_sentinel.rate_limiter'
       - '@mcp_sentinel.read_budgets'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.classification'
     tags:
       - { name: event_subscriber }
 
@@ -189,6 +202,10 @@ services:
       - '@current_user'
       - '@mcp_sentinel.exfiltration_guard'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.classification'
+      # Optional: kernel tests boot the module without jsonapi; the seam then
+      # never re-types a body (there is no JSON:API to serve one).
+      - '@?jsonapi.resource_type.repository'
     tags:
       - { name: event_subscriber }
 

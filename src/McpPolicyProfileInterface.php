@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel;
 
 use Drupal\Core\Config\Entity\ConfigEntityInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 
 /**
  * Defines an MCP Sentinel policy profile.
@@ -291,5 +292,23 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    *   An action class identifier, e.g. 'entity_write'.
    */
   public function requiresEvidenceFor(string $actionClass): bool;
+
+  /**
+   * Highest classification label this profile may receive, per surface.
+   *
+   * Part of the source-side "destination" model (d.o #3616540 part 2): a
+   * destination is the pair (this profile, a governed surface), and the
+   * ceiling is the highest label from the site's ordered vocabulary that may
+   * leave through that surface. A surface without a key has no ceiling.
+   *
+   * @return array<string, string>
+   *   Surface value (McpGovernedSurface) => label.
+   */
+  public function getEgressCeilings(): array;
+
+  /**
+   * The ceiling for one surface, or NULL when the profile sets none.
+   */
+  public function getEgressCeiling(McpGovernedSurface $surface): ?string;
 
 }

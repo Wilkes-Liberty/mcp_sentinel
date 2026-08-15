@@ -44,3 +44,4 @@ forbidden_role_permissions:
 acknowledged_role_permissions: {  }
 allow_raw_sql: false
 evidence_required_actions: {  }
+egress_ceilings: {  }

@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\IpUtils;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 
 /**
@@ -39,11 +40,16 @@ final class McpAccessChecker {
    *   cached service definition still passes two arguments, and a required
    *   third would fatal every request in that window. Degradation is
    *   fail-closed — without the service the grant simply never applies.
+   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver|null $classification
+   *   The classification resolver enforcing per-surface egress ceilings
+   *   (d.o #3616540 part 2). Nullable for the same deploy window; without it
+   *   no ceiling is evaluated, which is exactly the pre-upgrade behavior.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
     private readonly ?EntityTypeManagerInterface $entityTypeManager = NULL,
+    private readonly ?McpClassificationResolver $classification = NULL,
   ) {}
 
   /**
@@ -132,8 +138,62 @@ final class McpAccessChecker {
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
+    // Classification egress ceiling (d.o #3616540 part 2), evaluated LAST:
+    // every hard deny above wins first, so labels only ever deny more. Reads
+    // include 'view label' — a label-only representation is still egress.
     $result = AccessResult::neutral()->addCacheTags($tags);
+    if (in_array($operation, ['view', 'view label'], TRUE) && $this->classification !== NULL) {
+      $result = $this->checkClassification($entity, $profile, $result);
+    }
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
+  }
+
+  /**
+   * Applies the profile's egress ceiling for the current surface to a read.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity being read.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved policy profile.
+   * @param \Drupal\Core\Access\AccessResult $neutral
+   *   The neutral result to return (with cacheability) when nothing exceeds.
+   *
+   * @return \Drupal\Core\Access\AccessResult
+   *   The neutral result, or a forbidden result carrying the stable code
+   *   classification_egress_denied. Either way, when the site labels anything
+   *   above the floor the result varies by route and by the declared ceiling.
+   */
+  private function checkClassification(
+    EntityInterface $entity,
+    McpPolicyProfileInterface $profile,
+    AccessResult $neutral,
+  ): AccessResult {
+    assert($this->classification !== NULL);
+    if (!$this->classification->assignsAboveLowest()) {
+      // Nothing is labelled above the floor: no ceiling can refuse anything,
+      // and the decision does not depend on surface or declaration.
+      return $neutral;
+    }
+    $surface = $this->classification->currentSurface();
+    $ceiling = $this->classification->effectiveCeiling($profile, $surface);
+    $label = $this->classification->labelForEntity($entity);
+    if ($ceiling === NULL || !$this->classification->exceeds($label, $ceiling)) {
+      return $neutral->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
+    }
+    $this->classification->evidence(
+      $profile,
+      $surface,
+      $entity->getEntityTypeId(),
+      $entity->bundle(),
+      '',
+      $label,
+      $ceiling,
+    );
+    // The bare code is the reason on purpose: JSON:API repeats access reasons
+    // to the client in meta.omitted, so label prose must not travel there.
+    return AccessResult::forbidden(McpClassificationResolver::DENIAL_CODE)
+      ->addCacheTags($neutral->getCacheTags())
+      ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
   }
 
   /**
@@ -438,6 +498,30 @@ final class McpAccessChecker {
     $allowed = $profile->getAllowedEntityTypes();
     if ($allowed && !in_array($entityTypeId, $allowed, TRUE)) {
       return [JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::forbidden('Not in MCP Sentinel allowlist.'))];
+    }
+
+    // Classification (d.o #3616540 part 2): filter access is entity-type
+    // granular, and a relationship-path filter is a value oracle on any
+    // bundle or field of the type. So the whole type is judged by its most
+    // sensitive row — deny more, never less — and filtering is refused
+    // type-wide when that row exceeds the JSON:API ceiling.
+    if ($this->classification !== NULL && $this->classification->assignsAboveLowest()) {
+      $ceiling = $this->classification->effectiveCeiling($profile, McpGovernedSurface::JsonApi);
+      $highest = $this->classification->highestLabelForEntityType($entityTypeId);
+      if ($ceiling !== NULL && $this->classification->exceeds($highest, $ceiling)) {
+        $this->classification->evidence($profile, McpGovernedSurface::JsonApi, $entityTypeId, '', '', $highest, $ceiling);
+        return [
+          JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::forbidden(McpClassificationResolver::DENIAL_CODE))
+            ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS),
+        ];
+      }
+      // Under the ceiling the decision still DEPENDS on the surface and the
+      // declared ceiling; a neutral result carrying those contexts keeps a
+      // permitted collection from being re-served to a narrowed caller.
+      return [
+        JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::neutral())
+          ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS),
+      ];
     }
     return [];
   }

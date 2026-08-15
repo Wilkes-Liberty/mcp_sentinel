@@ -27,6 +27,37 @@ read_budget_defaults:
   request_window: 60
   pages: 120
   page_window: 60
+classification_labels:
+  - public
+  - internal
+  - restricted
+classification_map:
+  -
+    entity_type: user
+    bundle: ''
+    field: ''
+    label: restricted
+  -
+    entity_type: oauth2_token
+    bundle: ''
+    field: ''
+    label: restricted
+  -
+    entity_type: key
+    bundle: ''
+    field: ''
+    label: restricted
+  -
+    entity_type: consumer
+    bundle: ''
+    field: ''
+    label: restricted
+  -
+    entity_type: encryption_profile
+    bundle: ''
+    field: ''
+    label: restricted
+context_schema_label: internal
 dlp_enabled: false
 dlp_mask_mode: redact
 dlp_patterns:

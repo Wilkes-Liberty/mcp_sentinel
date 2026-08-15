@@ -8,6 +8,8 @@ use Drupal\Core\Config\Entity\ConfigEntityBase;
 use Drupal\Core\Entity\EntityForm;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -22,11 +24,20 @@ final class McpPolicyProfileForm extends EntityForm {
   protected McpRoleAssertions $roleAssertions;
 
   /**
+   * The classification resolver (vocabulary for the ceiling selects).
+   */
+  protected ?McpClassificationResolver $classification = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
     $instance = parent::create($container);
     $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
+    // NULL only in the deploy window before the container rebuilds.
+    $instance->classification = $container->has('mcp_sentinel.classification')
+      ? $container->get('mcp_sentinel.classification')
+      : NULL;
     return $instance;
   }
 
@@ -348,6 +359,46 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 5,
     ];
 
+    // --- Egress ceilings tab (d.o #3616540 part 2) ---------------------------
+    // The one #tree group on this form: the values must land as one map keyed
+    // by surface, and save() writes it explicitly.
+    $form['egress'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Egress ceilings'),
+      '#description' => $this->t('The highest classification label this profile may receive on each governed surface. Data labelled above a ceiling is refused (or redacted, per field) on that surface with the code <code>classification_egress_denied</code>. A surface without a ceiling receives everything its other gates allow; hard entity-type denies and redacted fields always win. Labels come from the classification vocabulary in the module settings.'),
+      '#group' => 'tabs',
+    ];
+    $form['egress']['egress_ceilings'] = [
+      '#type' => 'container',
+      '#tree' => TRUE,
+    ];
+    $options = ['' => $this->t('- No ceiling -')];
+    foreach ($this->classification?->labels() ?? McpClassificationResolver::DEFAULT_LABELS as $label) {
+      $options[$label] = $label;
+    }
+    $ceilings = $profile->getEgressCeilings();
+    $surfaces = [
+      McpGovernedSurface::Tool->value => $this->t('Tool (governed MCP tools)'),
+      McpGovernedSurface::Context->value => $this->t('Context endpoint (site schema)'),
+      McpGovernedSurface::JsonApi->value => $this->t('JSON:API'),
+      McpGovernedSurface::Graphql->value => $this->t('GraphQL'),
+      McpGovernedSurface::Drush->value => $this->t('Governed drush SQL'),
+    ];
+    foreach ($surfaces as $surface => $title) {
+      $current = $ceilings[$surface] ?? '';
+      if ($current !== '' && !isset($options[$current])) {
+        // A ceiling naming a label outside the vocabulary is enforced as the
+        // lowest label; keep it visible so the operator can see and fix it.
+        $options[$current] = $this->t('@label (not in vocabulary)', ['@label' => $current]);
+      }
+      $form['egress']['egress_ceilings'][$surface] = [
+        '#type' => 'select',
+        '#title' => $title,
+        '#options' => $options,
+        '#default_value' => $current,
+      ];
+    }
+
     return $form;
   }
 
@@ -585,6 +636,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'acknowledged_role_permissions',
       'allow_raw_sql',
       'entity_rules_delete',
+      'egress_ceilings',
     ];
     assert($entity instanceof ConfigEntityBase);
     foreach ($form_state->getValues() as $key => $value) {
@@ -658,6 +710,16 @@ final class McpPolicyProfileForm extends EntityForm {
       'allowed_redirect_hosts',
       $split($form_state->getValue('allowed_redirect_hosts'))
     );
+    // Egress ceilings: an empty select is an absent key (no ceiling), never
+    // an empty-string ceiling.
+    $ceilings = [];
+    foreach ((array) ($form_state->getValue('egress_ceilings') ?? []) as $surface => $label) {
+      $label = trim((string) $label);
+      if ($label !== '' && McpGovernedSurface::tryFrom((string) $surface) !== NULL) {
+        $ceilings[(string) $surface] = $label;
+      }
+    }
+    $profile->set('egress_ceilings', $ceilings);
     $profile->set(
       'forbidden_role_permissions',
       $split($form_state->getValue('forbidden_role_permissions'))

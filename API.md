@@ -140,6 +140,8 @@ governance the resolver selects per request. Read its gates and limits via:
 | `getForbiddenRolePermissions()` | permissions a governed role must not hold (escape hatches; ships populated) |
 | `getAcknowledgedRolePermissions()` | `role_id:permission` grants deliberately accepted, recorded in config |
 | `allowsRawSql()` | raw-SQL gate for `mcp-sentinel:sql-query` (default off; see README → Raw SQL) |
+| `getEvidenceRequiredActions()` / `requiresEvidenceFor()` | action classes that execute only when their evidence can commit to the keyed chain (#3616539) |
+| `getEgressCeilings()` / `getEgressCeiling(McpGovernedSurface)` | highest classification label the profile may receive per surface; absent = no ceiling (#3616540 part 2) |
 
 Profiles are configuration entities, so they are exportable, deployable, and
 overridable per environment. Do not store secrets in a profile — use Key
@@ -209,7 +211,8 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom) |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |
-| `mcp_sentinel.raw_sql_guard` | `McpRawSqlGuard` | `check($sql, $profile)` → refusal reasons (`[]` = permitted). Resolves `denied_entity_types` and `redacted_fields` down to physical tables and columns via the entity table mapping; fail-closed on anything it cannot resolve |
+| `mcp_sentinel.raw_sql_guard` | `McpRawSqlGuard` | `check($sql, $profile, $surface = Drush)` → refusal reasons (`[]` = permitted). Resolves `denied_entity_types`, `redacted_fields` and classification ceilings down to physical tables and columns via the entity table mapping; fail-closed on anything it cannot resolve |
+| `mcp_sentinel.classification` | `McpClassificationResolver` | classification labels and egress ceilings (#3616540 part 2): `labels()`, `labelForEntity()` / `labelForField()`, `currentSurface()`, `effectiveCeiling($profile, $surface)` (min of profile and declared), `exceeds($label, $ceiling)`, `denies()`, bounded `evidence()`, `refusalResponse()` |
 | `mcp_sentinel.anomaly_detector` | `McpAnomalyDetector` | evaluate anomaly rules over the audit stream |
 | `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks |
@@ -237,6 +240,34 @@ $bytes = $budgets->effectiveResponseSizeCap($profile); // int
 `McpExfiltrationGuard` and `McpRateLimiter` consume the resolver internally,
 so Tool, JSON:API, GraphQL, and governed drush SQL channels share one budget
 resolution.
+
+### `McpClassificationResolver` — classification labels & egress ceilings
+
+`mcp_sentinel.classification` answers "may data labelled X leave through
+(profile, surface)?" (#3616540 part 2). Labels come from
+`mcp_sentinel.settings:classification_labels` (ordered) and
+`classification_map` (entity type / bundle / field rows); ceilings from the
+profile's `egress_ceilings`. The current surface is the request's: Tool call
+sites stamp `McpClassificationResolver::REQUEST_ATTRIBUTE_SURFACE`, the
+context route and the JSON:API/GraphQL paths are recognized, and the governed
+drush command calls `setSurface(McpGovernedSurface::Drush)`.
+
+```php
+$classification = \Drupal::service('mcp_sentinel.classification');
+$surface = $classification->currentSurface();                    // ?McpGovernedSurface
+$ceiling = $classification->effectiveCeiling($profile, $surface); // ?string, NULL = none
+if ($classification->exceeds($classification->labelForEntity($entity), $ceiling)) {
+  $classification->evidence($profile, $surface, $entity->getEntityTypeId(), $entity->bundle(), '', $label, $ceiling);
+  return $classification->refusalResponse();                     // 403, code classification_egress_denied
+}
+```
+
+Deny-more rules: no ceiling → nothing exceeds; a label outside the vocabulary
+is the highest label as data and the lowest as a ceiling; an unknown surface
+takes the profile's strictest ceiling; a northbound `X-MCP-Declared-Ceiling`
+can only lower the effective ceiling. Ceiling-dependent access results must
+carry `McpClassificationResolver::CACHE_CONTEXTS` (`route` and the
+declared-ceiling header).
 
 ### `McpMetrics` — governance-dashboard data
 

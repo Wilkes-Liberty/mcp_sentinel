@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Entity;
 
 use Drupal\Core\Config\Entity\ConfigEntityBase;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 
 /**
@@ -82,6 +83,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "acknowledged_role_permissions",
  *     "allow_raw_sql",
  *     "evidence_required_actions",
+ *     "egress_ceilings",
  *   },
  * )
  */
@@ -317,6 +319,18 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   protected array $evidence_required_actions = [];
 
   /**
+   * Highest classification label this profile may receive, per surface.
+   *
+   * Keyed by McpGovernedSurface value. Empty by default and on every profile
+   * that predates the knob: an absent surface key is no ceiling, so an
+   * upgrade changes no read decision until an operator sets one
+   * (d.o #3616540 part 2).
+   *
+   * @var array<string, mixed>
+   */
+  protected array $egress_ceilings = [];
+
+  /**
    * {@inheritdoc}
    */
   public function getRoles(): array {
@@ -527,6 +541,28 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function requiresEvidenceFor(string $actionClass): bool {
     return in_array($actionClass, $this->getEvidenceRequiredActions(), TRUE);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getEgressCeilings(): array {
+    $ceilings = [];
+    foreach ($this->egress_ceilings as $surface => $label) {
+      // Hand-edited YAML can carry anything; only non-empty strings count.
+      $label = is_scalar($label) ? trim((string) $label) : '';
+      if ($label !== '') {
+        $ceilings[(string) $surface] = $label;
+      }
+    }
+    return $ceilings;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getEgressCeiling(McpGovernedSurface $surface): ?string {
+    return $this->getEgressCeilings()[$surface->value] ?? NULL;
   }
 
 }
