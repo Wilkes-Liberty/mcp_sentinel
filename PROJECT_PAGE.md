@@ -85,6 +85,13 @@ attributed to the authenticated account.
   unbounded export. Denials use stable reason codes and leave bounded,
   non-sensitive audit evidence. Blocks mass-read and accidental data
   exfiltration.
+- **Evidence-required actions** — mark action classes on a profile whose
+  governed mutations execute only when their evidence can commit to the keyed
+  audit chain: the precommit is appended in the same transaction as the
+  mutation (both durable together or neither), execution receipts complete the
+  correlation, an uncertain receipt is refused to the caller and reconciled on
+  cron instead of being reported as an unproven success, and no fallback to
+  unkeyed integrity or best-effort logging satisfies the class.
 - **Per-profile IP allowlisting** — restrict governed connections to specific
   IPv4/IPv6 addresses and CIDR blocks. Trusted-proxy-aware (reads the real client
   IP via Symfony, never a spoofable header) and enforced across entity access,

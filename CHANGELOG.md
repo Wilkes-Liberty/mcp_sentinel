@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-08-15
+
 ### Added
 - **Evidence-required action veto (#110 / d.o. #3616539).** Policy profiles
   gain `evidence_required_actions` (empty by default — opt-in per profile):
