@@ -110,6 +110,34 @@ mcp_sentinel.settings:
         page_window:
           type: integer
           label: 'Page budget window in seconds'
+    classification_labels:
+      type: sequence
+      label: 'Ordered classification vocabulary, lowest label first'
+      sequence:
+        type: string
+        label: 'Classification label'
+    classification_map:
+      type: sequence
+      label: 'Classification assignments (entity type, optional bundle, optional field)'
+      sequence:
+        type: mapping
+        label: 'Classification assignment'
+        mapping:
+          entity_type:
+            type: string
+            label: 'Entity type ID'
+          bundle:
+            type: string
+            label: 'Bundle (empty = every bundle)'
+          field:
+            type: string
+            label: 'Field name (empty = the entity itself)'
+          label:
+            type: string
+            label: 'Classification label'
+    context_schema_label:
+      type: string
+      label: 'Classification label of the schema documents served by the context endpoint and site-context tool'
     # audit_hash_key, siem_enabled and audit_encryption_profile lived here
     # until 2.0.0, then moved to audit_chain.settings. They are intentionally
     # absent from this schema so a leftover copy cannot pass config validation
@@ -315,3 +343,22 @@ mcp_sentinel.mcp_policy_profile.*:
       sequence:
         type: string
         label: 'Action class (entity_write, entity_delete)'
+    egress_ceilings:
+      type: mapping
+      label: 'Highest classification label this profile may receive, per governed surface (absent = no ceiling)'
+      mapping:
+        tool:
+          type: string
+          label: 'Tool surface ceiling'
+        context:
+          type: string
+          label: 'Context endpoint ceiling'
+        jsonapi:
+          type: string
+          label: 'JSON:API ceiling'
+        graphql:
+          type: string
+          label: 'GraphQL ceiling'
+        drush:
+          type: string
+          label: 'Governed drush SQL ceiling'
