@@ -82,9 +82,38 @@ final class McpClassificationResolver {
   private const DECLARATION_PATTERN = '/^[A-Za-z0-9._:-]+$/';
 
   /**
+   * Cache contexts every ceiling-dependent access result must carry.
+   *
+   * The decision varies by surface (route) and by the caller's declared
+   * ceiling; without these a body computed for one surface or one
+   * declaration could be re-served for another.
+   */
+  public const CACHE_CONTEXTS = ['route', 'headers:' . self::HEADER_DECLARED_CEILING];
+
+  /**
+   * Bound on the per-request evidence de-duplication set.
+   *
+   * A long-lived STDIO transport is one request for many calls; the set must
+   * not grow without limit there.
+   */
+  private const EVIDENCE_DEDUPE_CAP = 256;
+
+  /**
    * An explicit surface set by a call site without a request (drush).
    */
   private ?McpGovernedSurface $explicitSurface = NULL;
+
+  /**
+   * Evidence subjects already recorded for the current request.
+   *
+   * @var array<string, true>
+   */
+  private array $recorded = [];
+
+  /**
+   * The request the de-duplication set belongs to (spl_object_id), or 0.
+   */
+  private int $recordedFor = 0;
 
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -332,6 +361,85 @@ final class McpClassificationResolver {
    */
   public function denies(McpPolicyProfileInterface $profile, ?McpGovernedSurface $surface, string $label): bool {
     return $this->exceeds($label, $this->effectiveCeiling($profile, $surface));
+  }
+
+  /**
+   * Records one bounded classification_egress_denied evidence row.
+   *
+   * Names only labels, surface, profile, entity type/bundle/field and the
+   * caller's declarations — never a value. One row per distinct subject per
+   * request: a collection that omits fifty entities of one bundle is one
+   * decision, not fifty rows.
+   *
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The profile whose ceiling refused the read.
+   * @param \Drupal\mcp_sentinel\Enum\McpGovernedSurface|null $surface
+   *   The surface, or NULL when the read happened outside every surface.
+   * @param string $entityTypeId
+   *   The entity type of the refused subject.
+   * @param string $bundle
+   *   Its bundle, or '' when the subject is a whole type.
+   * @param string $field
+   *   The field name when a field was refused, or '' for the entity.
+   * @param string $label
+   *   The subject's classification label.
+   * @param string $ceiling
+   *   The effective ceiling that refused it.
+   */
+  public function evidence(
+    McpPolicyProfileInterface $profile,
+    ?McpGovernedSurface $surface,
+    string $entityTypeId,
+    string $bundle,
+    string $field,
+    string $label,
+    string $ceiling,
+  ): void {
+    $request = $this->requestStack->getCurrentRequest();
+    $requestId = $request === NULL ? 0 : spl_object_id($request);
+    if ($requestId !== $this->recordedFor) {
+      $this->recorded = [];
+      $this->recordedFor = $requestId;
+    }
+    $surfaceValue = $surface?->value ?? 'unknown';
+    $key = implode("\0", [$surfaceValue, $profile->id(), $entityTypeId, $bundle, $field, $label, $ceiling]);
+    if (isset($this->recorded[$key])) {
+      return;
+    }
+    if (count($this->recorded) >= self::EVIDENCE_DEDUPE_CAP) {
+      $this->recorded = [];
+    }
+    $this->recorded[$key] = TRUE;
+
+    // entity_type and bundle are lifted into audit_chain's own columns; the
+    // classification label is deliberately NOT keyed 'label', which the chain
+    // would treat as an entity label.
+    $this->auditLogger->log(self::DENIAL_CODE, [
+      'reason' => self::DENIAL_CODE,
+      'surface' => $surfaceValue,
+      'profile' => $profile->id(),
+      'entity_type' => $entityTypeId,
+      'bundle' => $bundle,
+      'field' => $field,
+      'classification' => $label,
+      'ceiling' => $ceiling,
+      'declared_ceiling' => $this->declaredCeiling(),
+      'declared_destination' => $this->declaredDestination(),
+      'origin' => $this->origin(),
+    ]);
+  }
+
+  /**
+   * The origin label: site and environment identity, recorded not enforced.
+   *
+   * @return array{site: string, environment: string}
+   *   The site name and the environment declared in settings.php.
+   */
+  private function origin(): array {
+    return [
+      'site' => (string) ($this->configFactory->get('system.site')->get('name') ?? ''),
+      'environment' => (string) ($this->settings->get('mcp_sentinel.environment') ?? ''),
+    ];
   }
 
   /**
