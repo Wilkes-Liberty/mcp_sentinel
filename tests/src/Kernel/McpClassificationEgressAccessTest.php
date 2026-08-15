@@ -10,12 +10,12 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\Tests\mcp_sentinel\Traits\McpClassificationTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Entity-level classification egress enforcement (d.o #3616540 part 2).
@@ -35,6 +35,7 @@ use Symfony\Component\HttpFoundation\Request;
 final class McpClassificationEgressAccessTest extends KernelTestBase {
 
   use UserCreationTrait;
+  use McpClassificationTestTrait;
 
   /**
    * A value that must never appear in evidence.
@@ -65,11 +66,6 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
    * A node in an unlabelled bundle.
    */
   private Node $article;
-
-  /**
-   * Whether onRequest() has pushed a request of its own onto the stack.
-   */
-  private bool $pushedRequest = FALSE;
 
   /**
    * {@inheritdoc}
@@ -113,46 +109,6 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
   }
 
   /**
-   * Sets the default profile's ceilings and clears every access cache.
-   *
-   * @param array<string, string> $ceilings
-   *   Surface value => label.
-   */
-  private function setCeilings(array $ceilings): void {
-    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
-      ->set('egress_ceilings', $ceilings)
-      ->save();
-    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
-    \Drupal::entityTypeManager()->getAccessControlHandler('node')->resetCache();
-  }
-
-  /**
-   * Makes a request the current one so the surface resolves from it.
-   */
-  private function onRequest(string $path, array $headers = [], array $attributes = []): void {
-    $stack = $this->container->get('request_stack');
-    // Keep the kernel's master request (and its session) at the bottom of
-    // the stack; only replace the request this helper pushed last time.
-    if ($this->pushedRequest) {
-      $stack->pop();
-    }
-    $request = Request::create($path);
-    $master = $stack->getCurrentRequest();
-    if ($master !== NULL && $master->hasSession()) {
-      $request->setSession($master->getSession());
-    }
-    foreach ($headers as $name => $value) {
-      $request->headers->set($name, $value);
-    }
-    foreach ($attributes as $name => $value) {
-      $request->attributes->set($name, $value);
-    }
-    $stack->push($request);
-    $this->pushedRequest = TRUE;
-    \Drupal::entityTypeManager()->getAccessControlHandler('node')->resetCache();
-  }
-
-  /**
    * The reason string of a forbidden result, or NULL.
    */
   private function reason(Node $node, string $operation = 'view'): ?string {
@@ -161,30 +117,6 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
       return NULL;
     }
     return $result instanceof AccessResultReasonInterface ? (string) $result->getReason() : '(no reason)';
-  }
-
-  /**
-   * Decoded classification evidence rows.
-   */
-  private function evidenceRows(): array {
-    $logger = $this->container->get('mcp_sentinel.audit_logger');
-    $rows = [];
-    $result = $this->container->get('database')->select('audit_chain_log', 'a')
-      ->fields('a', ['operation', 'entity_type', 'bundle', 'entity_id', 'entity_label', 'metadata'])
-      ->condition('operation', McpClassificationResolver::DENIAL_CODE)
-      ->orderBy('id')
-      ->execute();
-    foreach ($result as $record) {
-      // audit_chain lifts entity_type/bundle/id/label into columns; fold the
-      // columns back so a row reads as one map.
-      $rows[] = $logger->decodeMetadata((string) $record->metadata) + [
-        'entity_type' => $record->entity_type,
-        'bundle' => $record->bundle,
-        'entity_id' => (string) $record->entity_id,
-        'entity_label' => $record->entity_label,
-      ];
-    }
-    return $rows;
   }
 
   /**
@@ -293,6 +225,10 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
 
     $rows = $this->evidenceRows();
     $this->assertCount(1, $rows, 'One bounded row per subject per request.');
+    // A new request starts a new de-duplication set.
+    $this->onRequest('/jsonapi/node/memo');
+    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertCount(2, $this->evidenceRows(), 'The next request records its own row.');
     $row = $rows[0];
     $this->assertSame('jsonapi', $row['surface']);
     $this->assertSame('default', $row['profile']);
@@ -335,11 +271,12 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $access = $checker->getJsonApiFilterAccess('node', $profile);
     $this->assertArrayHasKey(JSONAPI_FILTER_AMONG_ALL, $access, 'The memo bundle is over ceiling, so node filtering is refused even on the article route.');
     $this->assertTrue($access[JSONAPI_FILTER_AMONG_ALL]->isForbidden());
-    $this->assertSame([], $checker->getJsonApiFilterAccess('taxonomy_term', $profile), 'Types without over-ceiling rows filter as before.');
+    $term = $checker->getJsonApiFilterAccess('taxonomy_term', $profile);
+    $this->assertFalse($term[JSONAPI_FILTER_AMONG_ALL]->isForbidden(), 'Types without over-ceiling rows filter as before.');
 
     $this->setCeilings(['jsonapi' => 'restricted']);
     $profile = $this->container->get('mcp_sentinel.policy_resolver')->resolve($this->agent);
-    $this->assertSame([], $checker->getJsonApiFilterAccess('node', $profile));
+    $this->assertFalse($checker->getJsonApiFilterAccess('node', $profile)[JSONAPI_FILTER_AMONG_ALL]->isForbidden());
   }
 
   /**
@@ -353,6 +290,21 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $contexts = $result->getCacheContexts();
     $this->assertContains('route', $contexts);
     $this->assertContains('headers:' . McpClassificationResolver::HEADER_DECLARED_CEILING, $contexts);
+
+    // The permitted (neutral) decision depends on the same two dimensions.
+    $this->setCeilings(['jsonapi' => 'restricted']);
+    $neutral = $this->memo->access('view', $this->agent, TRUE);
+    $this->assertInstanceOf(AccessResult::class, $neutral);
+    $this->assertFalse($neutral->isForbidden());
+    $this->assertContains('route', $neutral->getCacheContexts());
+    $this->assertContains('headers:' . McpClassificationResolver::HEADER_DECLARED_CEILING, $neutral->getCacheContexts());
+
+    // So does an under-ceiling filter-access decision.
+    $profile = $this->container->get('mcp_sentinel.policy_resolver')->resolve($this->agent);
+    $filter = $this->container->get('mcp_sentinel.access_checker')->getJsonApiFilterAccess('node', $profile);
+    $this->assertArrayHasKey(JSONAPI_FILTER_AMONG_ALL, $filter);
+    $this->assertFalse($filter[JSONAPI_FILTER_AMONG_ALL]->isForbidden());
+    $this->assertContains('headers:' . McpClassificationResolver::HEADER_DECLARED_CEILING, $filter[JSONAPI_FILTER_AMONG_ALL]->getCacheContexts());
   }
 
 }

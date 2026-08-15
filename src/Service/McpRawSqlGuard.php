@@ -424,13 +424,13 @@ final class McpRawSqlGuard {
    *   Referenced table => entity type ID.
    * @param string[] $redactedFields
    *   Field names that may not be referenced.
-   * @param string $because
+   * @param string $reasonPredicate
    *   Why, phrased as a predicate ("is redacted by the policy profile").
    *
    * @return string[]
    *   Refusal reasons.
    */
-  private function checkRedaction(string $normalised, array $resolved, array $redactedFields, string $because): array {
+  private function checkRedaction(string $normalised, array $resolved, array $redactedFields, string $reasonPredicate): array {
     if ($redactedFields === [] || $resolved === []) {
       return [];
     }
@@ -448,7 +448,7 @@ final class McpRawSqlGuard {
           "SELECT * is not permitted on '%s': it carries the field(s) %s, each of which %s.",
           $table,
           implode(', ', array_keys($columns)),
-          $because,
+          $reasonPredicate,
         );
       }
       foreach ($columns as $fieldName => $columnNames) {
@@ -457,7 +457,7 @@ final class McpRawSqlGuard {
             $errors[] = sprintf(
               "Field '%s' %s and cannot be referenced (column '%s').",
               $fieldName,
-              $because,
+              $reasonPredicate,
               $column,
             );
           }

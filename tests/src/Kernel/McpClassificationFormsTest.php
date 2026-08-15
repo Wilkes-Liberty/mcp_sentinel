@@ -110,7 +110,7 @@ final class McpClassificationFormsTest extends KernelTestBase {
       0 => ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'secret'],
       1 => ['entity_type' => ' node ', 'bundle' => '', 'field' => 'field_ssn', 'label' => 'secret'],
       2 => $blank,
-      3 => ['entity_type' => 'media', 'bundle' => '', 'field' => '', 'label' => 'open'],
+      3 => ['entity_type' => 'user', 'bundle' => '', 'field' => '', 'label' => 'open'],
       4 => $blank,
       5 => $blank,
     ];
@@ -125,7 +125,7 @@ final class McpClassificationFormsTest extends KernelTestBase {
     $this->assertSame([
       ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'secret'],
       ['entity_type' => 'node', 'bundle' => '', 'field' => 'field_ssn', 'label' => 'secret'],
-      ['entity_type' => 'media', 'bundle' => '', 'field' => '', 'label' => 'open'],
+      ['entity_type' => 'user', 'bundle' => '', 'field' => '', 'label' => 'open'],
     ], $settings->get('classification_map'));
   }
 
@@ -141,7 +141,7 @@ final class McpClassificationFormsTest extends KernelTestBase {
     $values['classification_map_rows'] = [
       0 => ['entity_type' => 'node', 'bundle' => '', 'field' => '', 'label' => 'bogus'],
       1 => ['entity_type' => '', 'bundle' => 'memo', 'field' => '', 'label' => 'internal'],
-      2 => $blank,
+      2 => ['entity_type' => 'no_such_type', 'bundle' => '', 'field' => '', 'label' => 'internal'],
       3 => $blank,
       4 => $blank,
       5 => $blank,
@@ -151,6 +151,7 @@ final class McpClassificationFormsTest extends KernelTestBase {
     $errors = $form_state->getErrors();
     $this->assertArrayHasKey('classification][classification_map_rows][0][label', $errors);
     $this->assertArrayHasKey('classification][classification_map_rows][1][entity_type', $errors, 'A row without an entity type is incomplete.');
+    $this->assertArrayHasKey('classification][classification_map_rows][2][entity_type', $errors, 'An unknown entity type is refused.');
     $this->assertArrayHasKey('classification][context_schema_label', $errors);
     // Nothing was written.
     $this->container->get('config.factory')->reset('mcp_sentinel.settings');

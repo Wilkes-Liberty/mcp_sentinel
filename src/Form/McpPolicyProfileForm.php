@@ -26,7 +26,7 @@ final class McpPolicyProfileForm extends EntityForm {
   /**
    * The classification resolver (vocabulary for the ceiling selects).
    */
-  protected McpClassificationResolver $classification;
+  protected ?McpClassificationResolver $classification = NULL;
 
   /**
    * {@inheritdoc}
@@ -34,7 +34,10 @@ final class McpPolicyProfileForm extends EntityForm {
   public static function create(ContainerInterface $container): static {
     $instance = parent::create($container);
     $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
-    $instance->classification = $container->get('mcp_sentinel.classification');
+    // NULL only in the deploy window before the container rebuilds.
+    $instance->classification = $container->has('mcp_sentinel.classification')
+      ? $container->get('mcp_sentinel.classification')
+      : NULL;
     return $instance;
   }
 
@@ -370,7 +373,7 @@ final class McpPolicyProfileForm extends EntityForm {
       '#tree' => TRUE,
     ];
     $options = ['' => $this->t('- No ceiling -')];
-    foreach ($this->classification->labels() as $label) {
+    foreach ($this->classification?->labels() ?? McpClassificationResolver::DEFAULT_LABELS as $label) {
       $options[$label] = $label;
     }
     $ceilings = $profile->getEgressCeilings();

@@ -851,6 +851,15 @@ class McpSettingsForm extends ConfigFormBase {
           $this->t('Classification assignment @n needs an entity type.', ['@n' => (int) $i + 1]),
         );
       }
+      elseif (!$this->entityTypeManager->hasDefinition($type)) {
+        $form_state->setErrorByName(
+          "classification][classification_map_rows][$i][entity_type",
+          $this->t('Classification assignment @n names "@type", which is not an entity type on this site.', [
+            '@n' => (int) $i + 1,
+            '@type' => $type,
+          ]),
+        );
+      }
       if ($label === '') {
         $form_state->setErrorByName(
           "classification][classification_map_rows][$i][label",

@@ -134,10 +134,10 @@ final class McpClassificationResolver {
     $configured = $this->configFactory->get('mcp_sentinel.settings')->get('classification_labels');
     $labels = [];
     foreach (is_array($configured) ? $configured : [] as $label) {
-      if (!is_string($label)) {
+      if (!is_scalar($label)) {
         continue;
       }
-      $label = trim($label);
+      $label = trim((string) $label);
       if ($label !== '' && !in_array($label, $labels, TRUE)) {
         $labels[] = $label;
       }
@@ -378,7 +378,7 @@ final class McpClassificationResolver {
   }
 
   /**
-   * The northbound declared ceiling, normalized, or NULL when none was sent.
+   * The northbound declared ceiling, normalised, or NULL when none was sent.
    *
    * A declaration outside the vocabulary — or malformed — is the lowest label:
    * the caller asked to narrow and cannot be granted more than the floor.
@@ -527,21 +527,64 @@ final class McpClassificationResolver {
   }
 
   /**
+   * Whether a bundle may be described to a principal on a surface.
+   *
+   * Shared by the context endpoint and the site-context tool: an over-ceiling
+   * bundle is omitted from the schema document, with one evidence row per
+   * bundle per request. No profile or no ceiling describes everything.
+   */
+  public function describesBundle(?McpPolicyProfileInterface $profile, McpGovernedSurface $surface, ?string $ceiling, string $entityTypeId, string $bundle): bool {
+    if ($profile === NULL || $ceiling === NULL) {
+      return TRUE;
+    }
+    $label = $this->labelForEntityType($entityTypeId, $bundle);
+    if (!$this->exceeds($label, $ceiling)) {
+      return TRUE;
+    }
+    $this->evidence($profile, $surface, $entityTypeId, $bundle, '', $label, $ceiling);
+    return FALSE;
+  }
+
+  /**
+   * Whether the schema document may leave through (profile, surface).
+   *
+   * Refuses (with evidence) when the schema label exceeds the ceiling.
+   */
+  public function schemaDenied(McpPolicyProfileInterface $profile, McpGovernedSurface $surface, ?string $ceiling): bool {
+    if ($ceiling === NULL) {
+      return FALSE;
+    }
+    $label = $this->schemaLabel();
+    if (!$this->exceeds($label, $ceiling)) {
+      return FALSE;
+    }
+    $this->evidence($profile, $surface, 'schema', '', '', $label, $ceiling);
+    return TRUE;
+  }
+
+  /**
+   * A trimmed string from a hand-editable config value; '' for non-scalars.
+   */
+  private static function scalar(mixed $value): string {
+    return is_scalar($value) ? trim((string) $value) : '';
+  }
+
+  /**
    * The profile's own ceiling for a surface (strictest when surface unknown).
    */
   private function profileCeiling(McpPolicyProfileInterface $profile, ?McpGovernedSurface $surface): ?string {
     if ($surface !== NULL) {
       $ceiling = $profile->getEgressCeiling($surface);
-      return $ceiling === NULL ? NULL : $this->normalizeCeiling($ceiling);
+      return $ceiling === NULL ? NULL : $this->normaliseCeiling($ceiling);
     }
     $strictest = NULL;
     $strictestRank = PHP_INT_MAX;
     foreach ($profile->getEgressCeilings() as $ceiling) {
-      $normalized = $this->normalizeCeiling($ceiling);
-      $rank = $this->rank($normalized) ?? 0;
+      $normalised = $this->normaliseCeiling($ceiling);
+      $rank = $this->rank($normalised) ?? 0;
       if ($rank < $strictestRank) {
         $strictestRank = $rank;
-        $strictest = $normalized;
+        $strictest = $normalised;
       }
     }
     return $strictest;
@@ -550,7 +593,7 @@ final class McpClassificationResolver {
   /**
    * A configured ceiling outside the vocabulary is the lowest label.
    */
-  private function normalizeCeiling(string $ceiling): string {
+  private function normaliseCeiling(string $ceiling): string {
     return $this->rank($ceiling) === NULL ? $this->lowestLabel() : $ceiling;
   }
 
@@ -591,14 +634,12 @@ final class McpClassificationResolver {
       if (!is_array($row)) {
         continue;
       }
-      $type = trim((string) ($row['entity_type'] ?? ''));
-      $label = trim((string) ($row['label'] ?? ''));
+      $type = self::scalar($row['entity_type'] ?? '');
+      $label = self::scalar($row['label'] ?? '');
       if ($type === '' || $label === '') {
         continue;
       }
-      $bundle = trim((string) ($row['bundle'] ?? ''));
-      $field = trim((string) ($row['field'] ?? ''));
-      $index[$type][$bundle][$field] = $label;
+      $index[$type][self::scalar($row['bundle'] ?? '')][self::scalar($row['field'] ?? '')] = $label;
     }
     return $index;
   }

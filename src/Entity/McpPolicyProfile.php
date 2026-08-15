@@ -326,7 +326,7 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * upgrade changes no read decision until an operator sets one
    * (d.o #3616540 part 2).
    *
-   * @var array<string, string>
+   * @var array<string, mixed>
    */
   protected array $egress_ceilings = [];
 
@@ -550,7 +550,7 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
     $ceilings = [];
     foreach ($this->egress_ceilings as $surface => $label) {
       // Hand-edited YAML can carry anything; only non-empty strings count.
-      $label = trim((string) $label);
+      $label = is_scalar($label) ? trim((string) $label) : '';
       if ($label !== '') {
         $ceilings[(string) $surface] = $label;
       }

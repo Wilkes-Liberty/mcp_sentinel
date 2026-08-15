@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Service\McpRawSqlGuard;
@@ -73,6 +74,8 @@ final class McpSentinelSqlCommands extends DrushCommands {
     private readonly McpAuditLogger $auditLogger,
     #[Autowire(service: 'database')]
     private readonly Connection $database,
+    #[Autowire(service: 'mcp_sentinel.classification')]
+    private readonly ?McpClassificationResolver $classification = NULL,
   ) {
     parent::__construct();
   }
@@ -86,6 +89,9 @@ final class McpSentinelSqlCommands extends DrushCommands {
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'", description: 'Run a governed query under the default profile.')]
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query --profile=readonly 'SELECT COUNT(*) FROM node_field_data'", description: 'Run a governed query under a named profile.')]
   public function sqlQuery(string $query = '', array $options = ['profile' => NULL]): int {
+    // Name the surface for anything downstream that resolves it from context
+    // (d.o #3616540 part 2): the CLI has no request to read it from.
+    $this->classification?->setSurface(McpGovernedSurface::Drush);
     $config = $this->configFactory->get('mcp_sentinel.settings');
 
     if (!$config->get('enabled')) {

@@ -515,6 +515,13 @@ final class McpAccessChecker {
             ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS),
         ];
       }
+      // Under the ceiling the decision still DEPENDS on the surface and the
+      // declared ceiling; a neutral result carrying those contexts keeps a
+      // permitted collection from being re-served to a narrowed caller.
+      return [
+        JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::neutral())
+          ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS),
+      ];
     }
     return [];
   }

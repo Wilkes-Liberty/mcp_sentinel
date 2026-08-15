@@ -11,6 +11,7 @@ use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\Tests\mcp_sentinel\Traits\McpClassificationTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
@@ -41,6 +42,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 final class McpClassificationEmptyMapRegressionTest extends KernelTestBase {
 
   use UserCreationTrait;
+  use McpClassificationTestTrait;
 
   /**
    * {@inheritdoc}
@@ -61,11 +63,6 @@ final class McpClassificationEmptyMapRegressionTest extends KernelTestBase {
    * A node in the bundle the control case labels.
    */
   private Node $memo;
-
-  /**
-   * Whether a request of this test's own is on top of the stack.
-   */
-  private bool $pushedRequest = FALSE;
 
   /**
    * {@inheritdoc}
@@ -109,23 +106,6 @@ final class McpClassificationEmptyMapRegressionTest extends KernelTestBase {
   }
 
   /**
-   * Makes a request current, keeping the kernel's master request underneath.
-   */
-  private function pushRequest(Request $request): void {
-    $stack = $this->container->get('request_stack');
-    if ($this->pushedRequest) {
-      $stack->pop();
-    }
-    $master = $stack->getCurrentRequest();
-    if ($master !== NULL && $master->hasSession()) {
-      $request->setSession($master->getSession());
-    }
-    $stack->push($request);
-    $this->pushedRequest = TRUE;
-    \Drupal::entityTypeManager()->getAccessControlHandler('node')->resetCache();
-  }
-
-  /**
    * Number of classification denial rows written so far.
    */
   private function denialCount(): int {
@@ -156,7 +136,8 @@ final class McpClassificationEmptyMapRegressionTest extends KernelTestBase {
       $refused[] = 'field_access';
     }
     // JSON:API filter access.
-    if ($this->container->get('mcp_sentinel.access_checker')->getJsonApiFilterAccess('node', $profile) !== []) {
+    $filter = $this->container->get('mcp_sentinel.access_checker')->getJsonApiFilterAccess('node', $profile);
+    if (isset($filter[JSONAPI_FILTER_AMONG_ALL]) && $filter[JSONAPI_FILTER_AMONG_ALL]->isForbidden()) {
       $refused[] = 'filter_access';
     }
     // Request seam.

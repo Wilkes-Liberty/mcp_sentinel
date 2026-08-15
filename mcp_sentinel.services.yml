@@ -203,7 +203,9 @@ services:
       - '@mcp_sentinel.exfiltration_guard'
       - '@mcp_sentinel.audit_logger'
       - '@mcp_sentinel.classification'
-      - '@jsonapi.resource_type.repository'
+      # Optional: kernel tests boot the module without jsonapi; the seam then
+      # never re-types a body (there is no JSON:API to serve one).
+      - '@?jsonapi.resource_type.repository'
     tags:
       - { name: event_subscriber }
 

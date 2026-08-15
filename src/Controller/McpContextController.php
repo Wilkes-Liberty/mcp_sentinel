@@ -9,7 +9,6 @@ use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
-use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
@@ -39,9 +38,10 @@ class McpContextController extends ControllerBase {
    *   Per-principal request-budget enforcement (finite by default).
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Audit logger for bounded budget-denial evidence rows.
-   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver $classification
+   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver|null $classification
    *   Classification egress ceilings (d.o #3616540 part 2): the schema
    *   document has a label, and over-ceiling bundles are not described.
+   *   NULL only in the deploy window before the container rebuilds.
    */
   public function __construct(
     private readonly EntityFieldManagerInterface $entityFieldManager,
@@ -49,7 +49,7 @@ class McpContextController extends ControllerBase {
     private readonly McpGovernanceReadiness $readiness,
     private readonly McpRateLimiter $rateLimiter,
     private readonly McpAuditLogger $auditLogger,
-    private readonly McpClassificationResolver $classification,
+    private readonly ?McpClassificationResolver $classification = NULL,
   ) {}
 
   /**
@@ -62,7 +62,7 @@ class McpContextController extends ControllerBase {
       $container->get('mcp_sentinel.governance_readiness'),
       $container->get('mcp_sentinel.rate_limiter'),
       $container->get('mcp_sentinel.audit_logger'),
-      $container->get('mcp_sentinel.classification'),
+      $container->has('mcp_sentinel.classification') ? $container->get('mcp_sentinel.classification') : NULL,
     );
   }
 
@@ -124,15 +124,16 @@ class McpContextController extends ControllerBase {
     // document is metadata with a label of its own; a profile whose context
     // ceiling sits below it may not receive it at all, and one at or above
     // it is not told about bundles classified higher than its ceiling.
-    $ceiling = $profile === NULL ? NULL : $this->classification->effectiveCeiling($profile, McpGovernedSurface::Context);
-    if ($profile !== NULL && $ceiling !== NULL) {
-      $schemaLabel = $this->classification->schemaLabel();
-      if ($this->classification->exceeds($schemaLabel, $ceiling)) {
-        $this->classification->evidence($profile, McpGovernedSurface::Context, 'schema', '', '', $schemaLabel, $ceiling);
-        return $this->classification->refusalResponse();
-      }
+    // The resolver is NULL only in the deploy window before the container
+    // rebuilds; no ceiling is evaluated then, exactly the previous behaviour.
+    $ceiling = ($profile === NULL || $this->classification === NULL)
+      ? NULL
+      : $this->classification->effectiveCeiling($profile, McpGovernedSurface::Context);
+    if ($profile !== NULL && $this->classification?->schemaDenied($profile, McpGovernedSurface::Context, $ceiling)) {
+      return $this->classification->refusalResponse();
     }
-    $describes = fn (string $entityTypeId, string $bundle): bool => $this->describes($profile, $ceiling, $entityTypeId, $bundle);
+    $describes = fn (string $entityTypeId, string $bundle): bool => $this->classification === NULL
+      || $this->classification->describesBundle($profile, McpGovernedSurface::Context, $ceiling, $entityTypeId, $bundle);
 
     return new JsonResponse([
       'site'          => $this->buildSiteInfo(),
@@ -197,25 +198,6 @@ class McpContextController extends ControllerBase {
       'Cache-Control' => 'private, no-store',
       'X-Content-Type-Options' => 'nosniff',
     ]);
-  }
-
-  /**
-   * Whether a bundle may be described to the requesting principal.
-   *
-   * Over-ceiling bundles are omitted from the schema document (evidence is
-   * written once per bundle per request); with no profile or no ceiling
-   * everything is described, exactly as before.
-   */
-  private function describes(?McpPolicyProfileInterface $profile, ?string $ceiling, string $entityTypeId, string $bundle): bool {
-    if ($profile === NULL || $ceiling === NULL) {
-      return TRUE;
-    }
-    $label = $this->classification->labelForEntityType($entityTypeId, $bundle);
-    if (!$this->classification->exceeds($label, $ceiling)) {
-      return TRUE;
-    }
-    $this->classification->evidence($profile, McpGovernedSurface::Context, $entityTypeId, $bundle, '', $label, $ceiling);
-    return FALSE;
   }
 
   /**

@@ -46,9 +46,9 @@ final class McpSiteContextTool extends McpGovernedToolBase {
   protected McpPolicyResolver $policyResolver;
 
   /**
-   * Classification egress ceilings.
+   * Classification egress ceilings (NULL only in the deploy window).
    */
-  protected McpClassificationResolver $classification;
+  protected ?McpClassificationResolver $classification = NULL;
 
   /**
    * {@inheritdoc}
@@ -58,7 +58,9 @@ final class McpSiteContextTool extends McpGovernedToolBase {
     $instance->entityTypeManager = $container->get('entity_type.manager');
     $instance->entityFieldManager = $container->get('entity_field.manager');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
-    $instance->classification = $container->get('mcp_sentinel.classification');
+    $instance->classification = $container->has('mcp_sentinel.classification')
+      ? $container->get('mcp_sentinel.classification')
+      : NULL;
     return $instance;
   }
 
@@ -70,16 +72,16 @@ final class McpSiteContextTool extends McpGovernedToolBase {
     // the same schema the context endpoint serves, judged against the Tool
     // ceiling — refused below the schema label, and over-ceiling bundles are
     // not described.
+    // The resolver is NULL only in the deploy window before the container
+    // rebuilds; no ceiling is evaluated then, exactly the previous behaviour.
     $profile = $this->policyResolver->resolve();
-    $ceiling = $profile === NULL ? NULL : $this->classification->effectiveCeiling($profile, McpGovernedSurface::Tool);
-    if ($profile !== NULL && $ceiling !== NULL) {
-      $schema_label = $this->classification->schemaLabel();
-      if ($this->classification->exceeds($schema_label, $ceiling)) {
-        $this->classification->evidence($profile, McpGovernedSurface::Tool, 'schema', '', '', $schema_label, $ceiling);
-        return ExecutableResult::failure($this->t("The site schema is classified above this principal's egress ceiling (@code).", [
-          '@code' => McpClassificationResolver::DENIAL_CODE,
-        ]));
-      }
+    $ceiling = ($profile === NULL || $this->classification === NULL)
+      ? NULL
+      : $this->classification->effectiveCeiling($profile, McpGovernedSurface::Tool);
+    if ($profile !== NULL && $this->classification?->schemaDenied($profile, McpGovernedSurface::Tool, $ceiling)) {
+      return ExecutableResult::failure($this->t("The site schema is classified above this principal's egress ceiling (@code).", [
+        '@code' => McpClassificationResolver::DENIAL_CODE,
+      ]));
     }
 
     $skip = ['vid', 'langcode', 'default_langcode', 'revision_translation_affected'];
@@ -137,20 +139,11 @@ final class McpSiteContextTool extends McpGovernedToolBase {
   /**
    * Whether a bundle may be described to the requesting principal.
    *
-   * Mirrors the context endpoint: over-ceiling bundles are omitted (with one
-   * evidence row per bundle per request); no profile or no ceiling describes
-   * everything, exactly as before.
+   * Mirrors the context endpoint through the resolver's shared rule.
    */
   private function describes(?McpPolicyProfileInterface $profile, ?string $ceiling, string $entity_type_id, string $bundle): bool {
-    if ($profile === NULL || $ceiling === NULL) {
-      return TRUE;
-    }
-    $label = $this->classification->labelForEntityType($entity_type_id, $bundle);
-    if (!$this->classification->exceeds($label, $ceiling)) {
-      return TRUE;
-    }
-    $this->classification->evidence($profile, McpGovernedSurface::Tool, $entity_type_id, $bundle, '', $label, $ceiling);
-    return FALSE;
+    return $this->classification === NULL
+      || $this->classification->describesBundle($profile, McpGovernedSurface::Tool, $ceiling, $entity_type_id, $bundle);
   }
 
 }

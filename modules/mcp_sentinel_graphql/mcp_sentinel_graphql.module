@@ -169,7 +169,9 @@ function _mcp_sentinel_graphql_field_over_ceiling(mixed $entity, GraphQLComposeF
     $bundle = $definition->getTargetBundle();
   }
   $context->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
-  $surface = $classification->currentSurface() ?? McpGovernedSurface::Graphql;
+  // This alter only ever runs inside GraphQL execution, so the surface is
+  // known here without consulting the request.
+  $surface = McpGovernedSurface::Graphql;
   $ceiling = $classification->effectiveCeiling($profile, $surface);
   $label = $classification->labelForField($entity_type_id, $bundle, $plugin->getFieldName());
   if ($ceiling === NULL || !$classification->exceeds($label, $ceiling)) {

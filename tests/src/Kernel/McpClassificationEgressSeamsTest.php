@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\NodeType;
+use Drupal\Tests\mcp_sentinel\Traits\McpClassificationTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\Group;
@@ -35,6 +36,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 final class McpClassificationEgressSeamsTest extends KernelTestBase {
 
   use UserCreationTrait;
+  use McpClassificationTestTrait;
 
   /**
    * A value that must never appear in evidence.
@@ -80,40 +82,6 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
   }
 
   /**
-   * Sets the default profile's ceilings.
-   *
-   * @param array<string, string> $ceilings
-   *   Surface value => label.
-   */
-  private function setCeilings(array $ceilings): void {
-    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
-      ->set('egress_ceilings', $ceilings)
-      ->save();
-    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
-  }
-
-  /**
-   * Whether a request of this test's own is on top of the stack.
-   */
-  private bool $pushedRequest = FALSE;
-
-  /**
-   * Makes a request current, keeping the kernel's master request underneath.
-   */
-  private function pushRequest(Request $request): void {
-    $stack = $this->container->get('request_stack');
-    if ($this->pushedRequest) {
-      $stack->pop();
-    }
-    $master = $stack->getCurrentRequest();
-    if ($master !== NULL && $master->hasSession()) {
-      $request->setSession($master->getSession());
-    }
-    $stack->push($request);
-    $this->pushedRequest = TRUE;
-  }
-
-  /**
    * Builds a routed JSON:API request event for a bundle route.
    */
   private function requestEvent(string $bundle, string $method = 'GET', array $headers = [], string $suffix = ''): RequestEvent {
@@ -138,26 +106,6 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
     $content = is_array($body) ? (string) json_encode($body) : $body;
     $response = new Response($content, $status, ['Content-Type' => $type]);
     return new ResponseEvent($this->container->get('http_kernel'), $request, HttpKernelInterface::MAIN_REQUEST, $response);
-  }
-
-  /**
-   * Decoded classification evidence rows.
-   */
-  private function evidenceRows(): array {
-    $logger = $this->container->get('mcp_sentinel.audit_logger');
-    $rows = [];
-    $result = $this->container->get('database')->select('audit_chain_log', 'a')
-      ->fields('a', ['entity_type', 'bundle', 'metadata'])
-      ->condition('operation', McpClassificationResolver::DENIAL_CODE)
-      ->orderBy('id')
-      ->execute();
-    foreach ($result as $record) {
-      $rows[] = $logger->decodeMetadata((string) $record->metadata) + [
-        'entity_type' => $record->entity_type,
-        'bundle' => $record->bundle,
-      ];
-    }
-    return $rows;
   }
 
   /**
