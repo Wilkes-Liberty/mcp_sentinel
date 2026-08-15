@@ -180,6 +180,7 @@ services:
     class: Drupal\mcp_sentinel\Service\McpRawSqlGuard
     arguments:
       - '@entity_type.manager'
+      - '@mcp_sentinel.classification'
 
   mcp_sentinel.jsonapi_page_limit_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber

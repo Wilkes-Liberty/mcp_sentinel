@@ -381,4 +381,63 @@ final class McpRawSqlGuardTest extends KernelTestBase {
     );
   }
 
+  /**
+   * Labels node data and puts the test profile under a drush ceiling.
+   *
+   * @param array $rows
+   *   classification_map rows.
+   * @param string|null $ceiling
+   *   The drush ceiling, or NULL for none.
+   *
+   * @return \Drupal\mcp_sentinel\Entity\McpPolicyProfile
+   *   The profile to check against.
+   */
+  private function classified(array $rows, ?string $ceiling): McpPolicyProfile {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('classification_map', $rows)
+      ->save();
+    return $this->profile([
+      'egress_ceilings' => $ceiling === NULL ? [] : ['drush' => $ceiling],
+    ]);
+  }
+
+  /**
+   * A table of an over-ceiling entity type is refused with the stable code.
+   *
+   * SQL cannot see bundles, so a single restricted bundle puts the whole
+   * type's tables above the ceiling (deny more, never less).
+   */
+  public function testOverCeilingEntityTypeTableIsRefused(): void {
+    $rows = [['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted']];
+    $sql = 'SELECT nid, title FROM node_field_data';
+
+    $errors = $this->guard->check($sql, $this->classified($rows, 'internal'));
+    $this->assertCount(1, $errors);
+    $this->assertStringContainsString('classification_egress_denied', $errors[0]);
+    $this->assertStringContainsString("'restricted'", $errors[0]);
+    $this->assertStringContainsString("'internal'", $errors[0]);
+
+    $this->assertSame([], $this->guard->check($sql, $this->classified($rows, 'restricted')), 'At ceiling the same statement passes.');
+    $this->assertSame([], $this->guard->check($sql, $this->classified($rows, NULL)), 'No ceiling: dark.');
+    // A statement over another type is untouched.
+    $this->assertSame([], $this->guard->check('SELECT id FROM file_managed', $this->classified($rows, 'internal')));
+  }
+
+  /**
+   * A column backing an over-ceiling field is refused like a redacted column.
+   */
+  public function testOverCeilingFieldColumnIsRefused(): void {
+    $rows = [['entity_type' => 'node', 'bundle' => '', 'field' => 'title', 'label' => 'restricted']];
+    $over = $this->classified($rows, 'internal');
+
+    $errors = $this->guard->check('SELECT title FROM node_field_data', $over);
+    $this->assertCount(1, $errors);
+    $this->assertStringContainsString('classification_egress_denied', $errors[0]);
+    $this->assertStringContainsString("'title'", $errors[0]);
+    $this->assertNotSame([], $this->guard->check('SELECT * FROM node_field_data', $over), 'SELECT * would carry the column.');
+    $this->assertSame([], $this->guard->check('SELECT nid FROM node_field_data', $over), 'Other columns of the type still read.');
+
+    $this->assertSame([], $this->guard->check('SELECT title FROM node_field_data', $this->classified($rows, 'restricted')));
+  }
+
 }

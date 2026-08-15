@@ -311,4 +311,23 @@ final class McpClassificationResolverTest extends UnitTestCase {
     $this->assertFalse($resolver->denies($this->profile([]), McpGovernedSurface::JsonApi, 'restricted'), 'Ships dark: no ceiling, no denial.');
   }
 
+  /**
+   * Entity-level highest label ignores field rows; field rows list per ceiling.
+   */
+  public function testEntityLevelHighestAndFieldsAboveCeiling(): void {
+    $resolver = $this->resolver([
+      'classification_map' => [
+        self::row('node', 'public'),
+        self::row('node', 'internal', 'memo'),
+        self::row('node', 'restricted', 'article', 'field_ssn'),
+        self::row('node', 'internal', '', 'field_notes'),
+      ],
+    ]);
+    $this->assertSame('internal', $resolver->highestEntityLabelForEntityType('node'), 'The restricted field row does not lift the table.');
+    $this->assertSame('public', $resolver->highestEntityLabelForEntityType('media'));
+    $this->assertEqualsCanonicalizing(['field_ssn' => 'restricted', 'field_notes' => 'internal'], $resolver->fieldsAboveCeiling('node', 'public'));
+    $this->assertSame(['field_ssn' => 'restricted'], $resolver->fieldsAboveCeiling('node', 'internal'));
+    $this->assertSame([], $resolver->fieldsAboveCeiling('node', 'restricted'));
+  }
+
 }

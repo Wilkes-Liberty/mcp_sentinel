@@ -248,6 +248,52 @@ final class McpClassificationResolver {
   }
 
   /**
+   * The highest label any entity-level row (type or bundle) assigns to a type.
+   *
+   * Field rows are excluded: they govern column references, not the table.
+   * Raw SQL cannot see bundles, so one restricted bundle puts the whole
+   * type's tables above a lower ceiling.
+   */
+  public function highestEntityLabelForEntityType(string $entityTypeId): string {
+    $highest = $this->lowestLabel();
+    $highestRank = 0;
+    foreach ($this->rows()[$entityTypeId] ?? [] as $fields) {
+      $label = $fields[''] ?? NULL;
+      if ($label === NULL) {
+        continue;
+      }
+      $rank = $this->rank($label) ?? PHP_INT_MAX;
+      if ($rank > $highestRank) {
+        $highestRank = $rank;
+        $highest = $label;
+      }
+    }
+    return $highest;
+  }
+
+  /**
+   * Field names of a type that any row labels above a ceiling.
+   *
+   * @return array<string, string>
+   *   Field name => the offending label (the highest, when several rows).
+   */
+  public function fieldsAboveCeiling(string $entityTypeId, string $ceiling): array {
+    $fields = [];
+    foreach ($this->rows()[$entityTypeId] ?? [] as $byField) {
+      foreach ($byField as $field => $label) {
+        if ($field === '' || !$this->exceeds($label, $ceiling)) {
+          continue;
+        }
+        $current = $fields[$field] ?? NULL;
+        if ($current === NULL || ($this->rank($label) ?? PHP_INT_MAX) > ($this->rank($current) ?? PHP_INT_MAX)) {
+          $fields[$field] = $label;
+        }
+      }
+    }
+    return $fields;
+  }
+
+  /**
    * Whether the site has labelled anything above the lowest label.
    *
    * The half of the status-report question that concerns data: a site that
