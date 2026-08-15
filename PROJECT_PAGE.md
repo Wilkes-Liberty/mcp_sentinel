@@ -74,11 +74,17 @@ attributed to the authenticated account.
 - **Per-profile rate limiting & quotas** — throttle governed agent traffic with
   Drupal's core flood service (max requests per rolling window), keyed on the
   server-resolved user ID so a single compromised token cannot saturate the
-  server. `0` = unlimited.
+  server. Budgets are finite by default: `0` resolves to a configurable site
+  default rather than unlimited (an explicit non-production override restores
+  unlimited and is flagged on the status report).
 - **Exfiltration guards** — cap how much data a governed agent can pull in one
-  call: a per-profile result-item cap (Tool output, JSON:API `page[limit]`, and
-  GraphQL multi-value field lists) and a response-size cap on Tool output. Blocks
-  mass-read and accidental data exfiltration.
+  call and per window: a per-profile result-item cap (Tool output, JSON:API
+  `page[limit]`, and GraphQL multi-value field lists), a response-size cap
+  measured on Tool, JSON:API, and GraphQL responses, and a windowed
+  collection-page budget so pagination cannot amplify a bounded page into an
+  unbounded export. Denials use stable reason codes and leave bounded,
+  non-sensitive audit evidence. Blocks mass-read and accidental data
+  exfiltration.
 - **Per-profile IP allowlisting** — restrict governed connections to specific
   IPv4/IPv6 addresses and CIDR blocks. Trusted-proxy-aware (reads the real client
   IP via Symfony, never a spoofable header) and enforced across entity access,
