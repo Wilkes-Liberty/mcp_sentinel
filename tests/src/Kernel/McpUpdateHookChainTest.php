@@ -669,8 +669,8 @@ final class McpUpdateHookChainTest extends KernelTestBase {
       ->save();
     // A profile that already carries ceilings must keep them.
     McpPolicyProfile::create([
-      'id' => 'ceilinged',
-      'label' => 'Ceilinged',
+      'id' => 'capped',
+      'label' => 'Capped',
       'egress_ceilings' => ['jsonapi' => 'internal'],
     ])->save();
     $this->container->get('config.factory')->reset();
@@ -695,7 +695,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
       'encryption_profile' => 'restricted',
     ], $types);
     $this->assertSame([], $this->config('mcp_sentinel.mcp_policy_profile.default')->get('egress_ceilings'));
-    $this->assertSame(['jsonapi' => 'internal'], $this->config('mcp_sentinel.mcp_policy_profile.ceilinged')->get('egress_ceilings'));
+    $this->assertSame(['jsonapi' => 'internal'], $this->config('mcp_sentinel.mcp_policy_profile.capped')->get('egress_ceilings'));
 
     // Idempotent: a second run is a no-op and never overwrites operator values.
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')

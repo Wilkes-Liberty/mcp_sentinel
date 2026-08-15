@@ -556,6 +556,101 @@ override**: it restores the historical `0 = unlimited` behavior and raises a
 permanent warning on the status report, so a secure-install verification can
 never report clean while the override is active.
 
+## Classification labels & egress ceilings (#3616540, part 2)
+
+Budgets bound *how much* leaves; classification bounds *which data classes*
+may leave *through which destination*. A destination, as far as the source
+can see it, is the pair (policy profile, governed surface) — the profile is
+server-resolved from the OAuth agent channel and the surface is one of
+`tool`, `context`, `jsonapi`, `graphql`, `drush` (the governed drush SQL
+command is a first-class surface).
+
+Classification is configuration, not content inspection. In
+`mcp_sentinel.settings`:
+
+```yaml
+classification_labels:          # ordered, lowest first (site-defined)
+  - public
+  - internal
+  - restricted
+classification_map:             # facts about data (global)
+  - { entity_type: user, bundle: '', field: '', label: restricted }
+  - { entity_type: node, bundle: memo, field: '', label: restricted }
+  - { entity_type: node, bundle: '', field: field_ssn, label: restricted }
+context_schema_label: internal  # the /drupal-mcp/context + site-context document
+```
+
+Unlabelled data carries the lowest label; a bundle row beats a type row; a
+field row beats the entity's label. The shipped map labels the identity and
+credential types the default profile already denies (`user`, `oauth2_token`,
+`key`, `consumer`, `encryption_profile`) `restricted`. Both are editable on the
+settings form (Classification tab).
+
+Per profile, `egress_ceilings` is the highest label the profile may receive
+on each surface (Egress ceilings tab on the profile form):
+
+```yaml
+egress_ceilings:
+  tool: restricted
+  context: internal
+  jsonapi: internal
+  graphql: internal
+  drush: internal
+```
+
+**An absent surface key is no ceiling, and an empty map labels nothing** — the
+mechanism ships dark and changes no read decision until an operator labels
+data and sets ceilings (update 10021 backfills empty ceilings on existing
+profiles). Once set, enforcement reuses the read-budget seams and only ever
+denies more:
+
+- entity reads (`view`, `view label`) — refused after every hard deny list
+  and redaction has had its say (they always win);
+- JSON:API `filter[]` — refused **type-wide** when any row of the type
+  exceeds the ceiling (filter access is per entity type, and a
+  relationship-path filter is a value oracle on a restricted bundle or field);
+- field reads (JSON:API/REST field access, GraphQL) — an over-ceiling field
+  is redacted exactly like a `redacted_fields` entry (`[REDACTED]`);
+- the JSON:API request seam — an over-ceiling routed resource type is refused
+  for **every** method before the controller runs (a write echoes the
+  entity), and the response seam refuses any over-ceiling type that survives
+  to serialization (`data` and `included`; an undecodable body under a
+  ceiling is refused too);
+- the governed raw-SQL command — a table of an over-ceiling entity type is
+  refused (SQL cannot see bundles, so one restricted bundle covers the type);
+  over-ceiling fields are refused as columns like redacted ones;
+- the context endpoint and the site-context tool — refused below the schema
+  label; over-ceiling bundles are not described.
+
+Every HTTP refusal is a JSON:API error document with the stable code
+`classification_egress_denied` (403). Every denial writes one bounded
+`classification_egress_denied` audit row per subject per request — surface,
+profile, entity type/bundle/field, the data label and the ceiling, the
+caller's declarations, the site/environment origin — never a value.
+
+**Northbound declarations (connector contract).** A governed request may
+carry `X-MCP-Declared-Ceiling` and `X-MCP-Declared-Destination`. The declared
+ceiling is *narrow-only*: the effective ceiling is the lower of the profile's
+and the declared one, so declaring higher changes nothing; a malformed or
+unknown declaration narrows to the lowest label. The declared destination is
+recorded in evidence only — attested downstream destinations are the hosted
+model and arrive with the OAuth resource-server work. Ceiling-dependent
+decisions vary by route and by the declared-ceiling header, so caches never
+bleed across surfaces or declarations.
+
+Fail-closed rules: outside every governed surface (a role-fallback account on
+an ordinary route) the profile's strictest configured ceiling applies; a label
+outside the vocabulary counts as the highest label when it describes data and
+as the lowest when it names a ceiling. When data is labelled above the floor
+and a role-bound profile sets no ceilings, the status report warns
+(`mcp_sentinel_classification_ceilings`) until ceilings are set.
+
+Known residuals: GraphQL bodies carry no resource typing, so the response
+seam re-types JSON:API bodies only (entity and field access enforce on
+GraphQL); JSON:API `meta.omitted` and relationship routes still reveal that
+an over-ceiling entity *exists* (type and UUID) — never its content, and the
+client-facing reason is the bare code.
+
 ## Evidence-required actions (#3616539)
 
 For most operations an audit row is a record of what happened. For a

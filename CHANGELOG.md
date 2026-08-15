@@ -6,6 +6,69 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Classification labels and per-surface egress ceilings (#109 / d.o.
+  #3616540, part 2).** The source-side half of P4.8: which data classes may
+  leave through which destination. A destination is the pair (server-resolved
+  policy profile, governed surface); the governed drush SQL command becomes a
+  first-class `McpGovernedSurface` case (`drush`) beside `tool`, `context`,
+  `jsonapi` and `graphql`. Classification is configuration, not content
+  inspection: `mcp_sentinel.settings` gains an ordered site-defined vocabulary
+  (`classification_labels`, shipped `public < internal < restricted`), a
+  global `classification_map` (rows labelling an entity type, optionally one
+  bundle, optionally one field; unlabelled data carries the lowest label; the
+  shipped map labels the identity/credential types the default profile
+  already denies `restricted`), and `context_schema_label` (the schema
+  document is metadata, `internal` by default). Policy profiles gain
+  `egress_ceilings` — the highest label the profile may receive per surface;
+  an absent surface key is no ceiling, so **an empty map or empty ceilings
+  change nothing** (proven by an explicit regression test) and the mechanism
+  ships dark until an operator labels data and sets ceilings. Enforcement
+  reuses the part-1 seams and only ever denies more: entity `view`/`view
+  label` access (evaluated after every hard P0.4 deny, which keeps winning),
+  JSON:API filter access (refused type-wide when any row of the type exceeds
+  the ceiling — a relationship-path filter is a value oracle), field view
+  access and the GraphQL results alter (an over-ceiling field takes the same
+  `[REDACTED]` placeholder as a redacted one), the JSON:API request seam
+  (an over-ceiling routed resource type is refused for every method before
+  the controller runs — a write echoes the entity) and the response seam
+  (an over-ceiling type in `data`/`included` that survived to serialization
+  is refused; an undecodable body under a ceiling is refused too), the raw-SQL
+  guard (a table of an over-ceiling entity type is refused; over-ceiling
+  fields are refused as columns like redacted ones), and the context endpoint
+  and site-context tool (refused below the schema label; over-ceiling bundles
+  are not described). Every HTTP refusal carries the stable structured code
+  `classification_egress_denied` (403, JSON:API error document); every denial
+  writes one bounded `classification_egress_denied` audit row per subject per
+  request naming surface, profile, entity type/bundle/field, the two labels,
+  the caller's declarations and the site/environment origin — never a value.
+  A northbound request may declare `X-MCP-Declared-Ceiling` (narrow-only: the
+  effective ceiling is the lower of the profile's and the declared; declaring
+  higher changes nothing; malformed or unknown declarations narrow to the
+  lowest label) and `X-MCP-Declared-Destination` (recorded in evidence only)
+  — the wire contract drupal-mcp-connector #179 binds northbound; attested
+  destinations remain the hosted residual. Ceiling-dependent access results
+  vary by `route` and by the declared-ceiling header. Outside every governed
+  surface the profile's strictest ceiling applies; a label outside the
+  vocabulary counts as the highest when it describes data and as the lowest
+  when it names a ceiling. A status-report WARNING
+  (`mcp_sentinel_classification_ceilings`) names role-bound profiles that set
+  no ceilings while data is labelled above the floor. Both forms grew:
+  a Classification section (vocabulary, schema label, a row editor for the
+  map) on the settings form and an Egress ceilings tab (one select per
+  surface) on the policy-profile form. Update 10021 seeds the settings keys
+  and backfills `egress_ceilings: {}` on every existing profile so exported
+  configuration round-trips without drift and no read decision changes on
+  upgrade.
+
+### Changed
+- **The dashboard's denial rollup counts every refusal the module writes.**
+  `read_budget_denied`, `classification_egress_denied`, `config_write_denied`,
+  `raw_sql_denied` and `evidence_veto` join `denied_access` and
+  `rate_limit_exceeded` in `McpMetrics`; the top-agents query builds its
+  placeholder list from that constant instead of a fixed pair that silently
+  under-counted (#109 / d.o. #3616540).
+
 ## [2.8.0] - 2026-08-15
 
 ### Added

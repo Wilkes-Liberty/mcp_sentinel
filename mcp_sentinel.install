@@ -219,18 +219,18 @@ function mcp_sentinel_requirements(string $phase): array {
   // this row is the only place the gap is visible.
   if (\Drupal::hasService('mcp_sentinel.classification')
     && \Drupal::service('mcp_sentinel.classification')->assignsAboveLowest()) {
-    $unceilinged = [];
+    $without_ceilings = [];
     /** @var \Drupal\mcp_sentinel\McpPolicyProfileInterface[] $profiles */
     $profiles = \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->loadMultiple();
     foreach ($profiles as $profile) {
       if ($profile->status() && $profile->getRoles() !== [] && $profile->getEgressCeilings() === []) {
-        $unceilinged[] = $profile->id();
+        $without_ceilings[] = $profile->id();
       }
     }
-    if ($unceilinged !== []) {
+    if ($without_ceilings !== []) {
       $requirements['mcp_sentinel_classification_ceilings'] = [
         'title' => t('MCP Sentinel: classified data without egress ceilings'),
-        'value' => t('Profile(s) without ceilings: @profiles', ['@profiles' => implode(', ', $unceilinged)]),
+        'value' => t('Profile(s) without ceilings: @profiles', ['@profiles' => implode(', ', $without_ceilings)]),
         'severity' => REQUIREMENT_WARNING,
         'description' => t('The classification map labels data above the lowest label, but the listed role-bound policy profile(s) set no egress ceilings, so those labels are not enforced for the principals they govern. Set per-surface ceilings (egress_ceilings) on each profile, or remove the labels if classification is not intended here.'),
       ];

@@ -92,13 +92,13 @@ final class McpClassificationConfigTest extends KernelTestBase {
    */
   public function testCeilingsRoundTrip(): void {
     McpPolicyProfile::create([
-      'id' => 'ceilinged',
-      'label' => 'Ceilinged',
+      'id' => 'capped',
+      'label' => 'Capped',
       'egress_ceilings' => ['jsonapi' => 'internal', 'tool' => 'restricted'],
     ])->save();
     \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
 
-    $profile = McpPolicyProfile::load('ceilinged');
+    $profile = McpPolicyProfile::load('capped');
     $this->assertNotNull($profile);
     // Key order follows the config schema after a save; a map is a map.
     $this->assertEqualsCanonicalizing(['jsonapi' => 'internal', 'tool' => 'restricted'], $profile->getEgressCeilings());
@@ -108,7 +108,7 @@ final class McpClassificationConfigTest extends KernelTestBase {
     $this->assertNull($profile->getEgressCeiling(McpGovernedSurface::Drush));
 
     // Exported configuration carries the key, so a round-trip does not drift.
-    $exported = $this->config('mcp_sentinel.mcp_policy_profile.ceilinged')->get('egress_ceilings');
+    $exported = $this->config('mcp_sentinel.mcp_policy_profile.capped')->get('egress_ceilings');
     $this->assertEqualsCanonicalizing(['jsonapi' => 'internal', 'tool' => 'restricted'], $exported);
   }
 
