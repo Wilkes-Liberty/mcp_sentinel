@@ -26,7 +26,14 @@ concurrency:
   # this group apart from the ruleset-required flavor of the same check.
   # Do not simplify this key.
   group: attribution-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}-caller
-  cancel-in-progress: true
+  # FALSE on purpose (Wilkes-Liberty/shared-ci#2): a cancelled duplicate of the
+  # required-class attribution check wears a red X until someone re-runs it.
+  # Duplicate deliveries queue and both finish green instead.
+  cancel-in-progress: false
+  # max, not the single-slot default: with `queue: single` a third delivery in
+  # the same group evicts the pending run as cancelled — the same red X by
+  # another door. `queue: max` is only valid alongside cancel-in-progress: false.
+  queue: max
 
 jobs:
   attribution:
