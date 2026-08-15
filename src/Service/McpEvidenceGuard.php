@@ -394,6 +394,19 @@ class McpEvidenceGuard {
   /**
    * Whether the chain's configured signing key resolves to usable material.
    *
+   * Public so the install verifier can report keyed-evidence posture
+   * without re-deriving the resolution the guard already performs.
+   *
+   * @return bool
+   *   TRUE when the configured key exists and has material.
+   */
+  public function signingKeyIsResolved(): bool {
+    return $this->signingKeyResolves();
+  }
+
+  /**
+   * Whether the chain's configured signing key resolves to usable material.
+   *
    * Mirrors the resolution audit_chain itself performs on append, because the
    * chain deliberately *writes unkeyed* rather than dropping a row when the
    * key will not resolve — correct for ordinary auditing, disqualifying for

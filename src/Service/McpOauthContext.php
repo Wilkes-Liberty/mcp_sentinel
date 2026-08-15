@@ -29,6 +29,17 @@ use Drupal\simple_oauth\Oauth2ScopeInterface;
 class McpOauthContext {
 
   /**
+   * Process-scoped override used by the install verifier.
+   *
+   * The publish-gate constraint consults isAgentChannel() and otherwise
+   * early-returns on a Drush/cookie session. The verifier flips this for
+   * the duration of an in-memory validate() so the real constraint runs,
+   * then clears it. It is never read from HTTP input. When the flag is
+   * FALSE, every answer still comes from the validated token.
+   */
+  private bool $verificationChannel = FALSE;
+
+  /**
    * Constructs the OAuth context service.
    *
    * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
@@ -40,6 +51,19 @@ class McpOauthContext {
     private readonly AccountProxyInterface $currentUser,
     private readonly ConfigFactoryInterface $configFactory,
   ) {}
+
+  /**
+   * Marks (or clears) the current process as the governed agent channel.
+   *
+   * Used only by the install verifier. Callers MUST clear this in a
+   * finally block: leaving it set would govern the rest of the request.
+   *
+   * @param bool $active
+   *   TRUE to treat this process as the agent channel.
+   */
+  public function setVerificationChannel(bool $active): void {
+    $this->verificationChannel = $active;
+  }
 
   /**
    * Returns the granted scope names on the current request's token.
@@ -110,13 +134,18 @@ class McpOauthContext {
    *     (exact match, case-sensitive), OR
    *   - Its token's scopes intersect the agent_scopes allowlist.
    * If the request is not OAuth-authenticated (clientId() returns NULL), it is
-   * never on the agent channel. This guarantee is what keeps admin cookie
-   * sessions ungoverned.
+   * never on the agent channel — unless the install verifier has set the
+   * process-scoped verification flag. That flag is not HTTP input; it exists
+   * so in-memory validate() can reach the publish gate from Drush. The
+   * cookie-session guarantee holds whenever the flag is clear.
    *
    * @return bool
    *   TRUE if this request is the governed agent channel.
    */
   public function isAgentChannel(): bool {
+    if ($this->verificationChannel) {
+      return TRUE;
+    }
     $clientId = $this->clientId();
     if ($clientId === NULL) {
       return FALSE;

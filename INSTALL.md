@@ -179,7 +179,12 @@ Review the active policy and audit/lock counts at any time:
 
 ```bash
 drush mcp-sentinel:status
+drush mcp-sentinel:verify
 ```
+
+`mcp-sentinel:verify` is the evidence document for the secure-install
+claim. It does not write content. Add `--live` to also run the
+hostile-input probes (still no writes). See `docs/verification.md`.
 
 ## Reverse-proxy / trusted-proxy requirement for IP allowlisting
 

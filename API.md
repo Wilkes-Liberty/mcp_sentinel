@@ -188,6 +188,7 @@ content **publishing**. Both layers are additive and default to the safe value
 | Command | Purpose |
 |---------|---------|
 | `mcp-sentinel:status` | Source-contract readiness plus policy, audit, lock, and config-guard state. Exits non-zero whenever the connector-facing source contract is not ready; a ready contract does not claim healthy posture, effective policy, or durable evidence. |
+| `mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Secure-install evidence document. Posture always; hostile-input probes with `--live`. Never persists. Skipped checks fail the run. |
 | `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
 | `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only governed raw-SQL path. Refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement; every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
 | `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. |
@@ -207,6 +208,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |
 | `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) |
+| `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom) |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |

@@ -1126,6 +1126,7 @@ default rather than merely guarded.
 | Command | Purpose |
 |---------|---------|
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
+| `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
 | `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. Refused unless the profile sets `allow_raw_sql`; every attempt is audited. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
