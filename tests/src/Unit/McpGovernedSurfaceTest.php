@@ -27,7 +27,7 @@ final class McpGovernedSurfaceTest extends UnitTestCase {
   /**
    * The drush surface exists with the value the audit metadata already uses.
    */
-  public function testDrushIsAFirstClassSurface(): void {
+  public function testDrushIsFirstClassSurface(): void {
     $this->assertSame('drush', McpGovernedSurface::Drush->value);
     $this->assertSame(McpGovernedSurface::Drush, McpGovernedSurface::from('drush'));
     $this->assertSame(

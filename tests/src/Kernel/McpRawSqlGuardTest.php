@@ -385,7 +385,7 @@ final class McpRawSqlGuardTest extends KernelTestBase {
    * Labels node data and puts the test profile under a drush ceiling.
    *
    * @param array $rows
-   *   classification_map rows.
+   *   The classification_map rows.
    * @param string|null $ceiling
    *   The drush ceiling, or NULL for none.
    *

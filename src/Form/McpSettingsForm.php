@@ -386,7 +386,10 @@ class McpSettingsForm extends ConfigFormBase {
       '#description' => $this->t('Label data by configuration, not content inspection: an ordered vocabulary of classification labels and a map assigning labels to entity types, bundles or fields. Unlabelled data carries the lowest label. Nothing is enforced until a policy profile sets per-surface egress ceilings; profiles that govern agent roles without ceilings are flagged on the status report.'),
       '#group' => 'tabs',
     ];
-    $stored_labels = array_values(array_filter(array_map('strval', (array) ($config->get('classification_labels') ?? [])), 'strlen'));
+    $stored_labels = array_values(array_filter(
+      array_map('strval', (array) ($config->get('classification_labels') ?? [])),
+      static fn (string $label): bool => $label !== '',
+    ));
     $form['classification']['classification_labels'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Classification labels (lowest first)'),
@@ -857,7 +860,10 @@ class McpSettingsForm extends ConfigFormBase {
       elseif (!in_array($label, $labels, TRUE)) {
         $form_state->setErrorByName(
           "classification][classification_map_rows][$i][label",
-          $this->t('Classification assignment @n uses "@label", which is not in the classification vocabulary.', ['@n' => (int) $i + 1, '@label' => $label]),
+          $this->t('Classification assignment @n uses "@label", which is not in the classification vocabulary.', [
+            '@n' => (int) $i + 1,
+            '@label' => $label,
+          ]),
         );
       }
     }

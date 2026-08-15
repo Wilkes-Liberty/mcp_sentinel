@@ -36,6 +36,8 @@ final class McpClassificationResolverTest extends UnitTestCase {
    *
    * @param array $settings
    *   Values for mcp_sentinel.settings.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   The request stack to read the surface and declarations from.
    */
   private function resolver(array $settings, ?RequestStack $requestStack = NULL): McpClassificationResolver {
     $configFactory = $this->getConfigFactoryStub(['mcp_sentinel.settings' => $settings]);
@@ -77,7 +79,7 @@ final class McpClassificationResolverTest extends UnitTestCase {
   }
 
   /**
-   * exceeds() is a strict comparison on vocabulary order; no ceiling = never.
+   * The exceeds() check is strict on vocabulary order; no ceiling = never.
    */
   public function testExceedsFollowsVocabularyOrder(): void {
     $resolver = $this->resolver([]);
@@ -157,7 +159,7 @@ final class McpClassificationResolverTest extends UnitTestCase {
   }
 
   /**
-   * assignsAboveLowest() is the "has this site classified anything" question.
+   * The assignsAboveLowest() check asks whether the site classified anything.
    */
   public function testAssignsAboveLowest(): void {
     $this->assertFalse($this->resolver([])->assignsAboveLowest());
@@ -299,7 +301,7 @@ final class McpClassificationResolverTest extends UnitTestCase {
   }
 
   /**
-   * denies() composes the label lookup with the effective ceiling.
+   * The denies() check composes the label lookup with the effective ceiling.
    */
   public function testDenies(): void {
     $resolver = $this->resolver(['classification_map' => [self::row('node', 'restricted', 'memo')]], self::stack('/jsonapi/node/memo'));

@@ -73,7 +73,7 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
         ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted'],
       ])
       ->save();
-    // uid 1 is a bystander; the governed agent is an ordinary account.
+    // The first account (uid 1) is a bystander; the agent is an ordinary one.
     $this->createUser();
     $agent = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
     \Drupal::currentUser()->setAccount($agent);
@@ -221,7 +221,7 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
   }
 
   /**
-   * A declared ceiling below the profile ceiling refuses; above changes nothing.
+   * A declared ceiling below the profile's refuses; above changes nothing.
    */
   public function testRequestSeamHonoursDeclaredCeiling(): void {
     $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');

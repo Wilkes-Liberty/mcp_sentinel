@@ -235,7 +235,9 @@ final class McpClassificationEmptyMapRegressionTest extends KernelTestBase {
    */
   public function testControlLabelAndCeilingRefuse(): void {
     $this->config('mcp_sentinel.settings')
-      ->set('classification_map', [['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted']])
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted'],
+      ])
       ->save();
     \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.agents')
       ->set('egress_ceilings', ['jsonapi' => 'internal', 'context' => 'internal', 'drush' => 'internal'])

@@ -549,8 +549,10 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   public function getEgressCeilings(): array {
     $ceilings = [];
     foreach ($this->egress_ceilings as $surface => $label) {
-      if (is_string($surface) && is_string($label) && $label !== '') {
-        $ceilings[$surface] = $label;
+      // Hand-edited YAML can carry anything; only non-empty strings count.
+      $label = trim((string) $label);
+      if ($label !== '') {
+        $ceilings[(string) $surface] = $label;
       }
     }
     return $ceilings;

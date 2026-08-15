@@ -169,12 +169,21 @@ final class McpClassificationFormsTest extends KernelTestBase {
     $this->assertIsArray($tab, 'The profile form has an egress ceilings tab.');
     foreach (['tool', 'context', 'jsonapi', 'graphql', 'drush'] as $surface) {
       $this->assertArrayHasKey($surface, $tab['egress_ceilings']);
-      $this->assertSame(['' => '- No ceiling -', 'public' => 'public', 'internal' => 'internal', 'restricted' => 'restricted'], array_map('strval', $tab['egress_ceilings'][$surface]['#options']));
+      $this->assertSame(
+        ['' => '- No ceiling -', 'public' => 'public', 'internal' => 'internal', 'restricted' => 'restricted'],
+        array_map('strval', $tab['egress_ceilings'][$surface]['#options']),
+      );
       $this->assertSame('', $tab['egress_ceilings'][$surface]['#default_value']);
     }
 
     $values = $this->defaultValues($built);
-    $values['egress_ceilings'] = ['tool' => 'restricted', 'context' => '', 'jsonapi' => 'internal', 'graphql' => '', 'drush' => ''];
+    $values['egress_ceilings'] = [
+      'tool' => 'restricted',
+      'context' => '',
+      'jsonapi' => 'internal',
+      'graphql' => '',
+      'drush' => '',
+    ];
     $form_state = (new FormState())->setValues($values);
     // An entity form saves from its Save button's handlers, not the
     // form-level ones; a programmatic submission has to name that button.

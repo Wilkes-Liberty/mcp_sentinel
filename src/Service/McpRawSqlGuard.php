@@ -217,7 +217,8 @@ final class McpRawSqlGuard {
    *   The egress surface.
    *
    * @return string[]
-   *   Refusal reasons; each carries the stable code classification_egress_denied.
+   *   Refusal reasons; each carries the stable code
+   *   classification_egress_denied.
    */
   private function checkClassification(string $normalised, array $resolved, McpPolicyProfileInterface $profile, McpGovernedSurface $surface): array {
     if ($this->classification === NULL || $resolved === [] || !$this->classification->assignsAboveLowest()) {

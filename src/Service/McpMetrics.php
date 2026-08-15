@@ -272,7 +272,7 @@ final class McpMetrics {
       // rollup cannot silently under-count when the list grows.
       $placeholders = [];
       $arguments = [];
-      foreach (array_values(self::DENIED_OPERATIONS) as $i => $operation) {
+      foreach (self::DENIED_OPERATIONS as $i => $operation) {
         $placeholders[] = ':denied_op' . $i;
         $arguments[':denied_op' . $i] = $operation;
       }

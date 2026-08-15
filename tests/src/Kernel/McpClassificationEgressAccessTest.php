@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
-use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -96,9 +96,10 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
         ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted'],
       ])
       ->save();
-    // uid 1 bypasses every access check; burn it on a bystander so the
-    // governed agent is an ordinary account. No permissions argument on the
-    // agent: createUser() would replace the roles value with its own role.
+    // The first account is uid 1, which bypasses every access check; burn it
+    // on a bystander so the governed agent is an ordinary account. No
+    // permissions argument on the agent: createUser() would replace the roles
+    // value with its own role.
     $this->createUser();
     $this->agent = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
 
@@ -348,6 +349,7 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $this->setCeilings(['jsonapi' => 'internal']);
     $this->onRequest('/jsonapi/node/memo');
     $result = $this->memo->access('view', $this->agent, TRUE);
+    $this->assertInstanceOf(AccessResult::class, $result);
     $contexts = $result->getCacheContexts();
     $this->assertContains('route', $contexts);
     $this->assertContains('headers:' . McpClassificationResolver::HEADER_DECLARED_CEILING, $contexts);

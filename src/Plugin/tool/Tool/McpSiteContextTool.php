@@ -76,7 +76,7 @@ final class McpSiteContextTool extends McpGovernedToolBase {
       $schema_label = $this->classification->schemaLabel();
       if ($this->classification->exceeds($schema_label, $ceiling)) {
         $this->classification->evidence($profile, McpGovernedSurface::Tool, 'schema', '', '', $schema_label, $ceiling);
-        return ExecutableResult::failure($this->t('The site schema is classified above this principal\'s egress ceiling (@code).', [
+        return ExecutableResult::failure($this->t("The site schema is classified above this principal's egress ceiling (@code).", [
           '@code' => McpClassificationResolver::DENIAL_CODE,
         ]));
       }

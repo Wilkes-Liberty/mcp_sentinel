@@ -356,10 +356,11 @@ final class McpClassificationResolver {
   /**
    * The ceiling in force for a profile on a surface, after narrowing.
    *
-   * min(profile ceiling, declared ceiling). A profile ceiling naming an
-   * unknown label is the lowest label; an unknown surface takes the strictest
-   * ceiling the profile configures anywhere; a profile with no ceilings and no
-   * declaration has none — that is how the mechanism ships dark.
+   * The minimum of the profile ceiling and the declared ceiling. A profile
+   * ceiling naming an unknown label is the lowest label; an unknown surface
+   * takes the strictest ceiling the profile configures anywhere; a profile
+   * with no ceilings and no declaration has none — that is how the mechanism
+   * ships dark.
    *
    * @return string|null
    *   The effective ceiling label, or NULL for no ceiling.
@@ -448,7 +449,7 @@ final class McpClassificationResolver {
       $this->recorded = [];
       $this->recordedFor = $requestId;
     }
-    $surfaceValue = $surface?->value ?? 'unknown';
+    $surfaceValue = $surface === NULL ? 'unknown' : $surface->value;
     $key = implode("\0", [$surfaceValue, $profile->id(), $entityTypeId, $bundle, $field, $label, $ceiling]);
     if (isset($this->recorded[$key])) {
       return;
