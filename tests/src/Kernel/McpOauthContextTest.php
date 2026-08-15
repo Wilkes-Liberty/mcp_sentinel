@@ -183,4 +183,19 @@ final class McpOauthContextTest extends KernelTestBase {
     $this->assertTrue($ctx->isAgentChannel());
   }
 
+  /**
+   * The verifier's channel flag governs, and clearing it restores the miss.
+   *
+   * @covers ::setVerificationChannel
+   * @covers ::isAgentChannel
+   */
+  public function testVerificationChannelIsRequestScoped(): void {
+    $ctx = $this->container->get('mcp_sentinel.oauth_context');
+    $this->assertFalse($ctx->isAgentChannel());
+    $ctx->setVerificationChannel(TRUE);
+    $this->assertTrue($ctx->isAgentChannel());
+    $ctx->setVerificationChannel(FALSE);
+    $this->assertFalse($ctx->isAgentChannel());
+  }
+
 }

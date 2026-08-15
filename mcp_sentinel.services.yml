@@ -129,6 +129,28 @@ services:
       - '@current_user'
       - '@config.factory'
 
+  mcp_sentinel.install_verifier:
+    class: Drupal\mcp_sentinel\Service\McpInstallVerifier
+    arguments:
+      - '@config.factory'
+      - '@entity_type.manager'
+      - '@module_handler'
+      - '@extension.list.module'
+      - '@mcp_sentinel.governance_readiness'
+      - '@mcp_sentinel.role_assertions'
+      - '@mcp_sentinel.read_budgets'
+      - '@mcp_sentinel.evidence_guard'
+      - '@mcp_sentinel.classification'
+      - '@mcp_sentinel.policy_resolver'
+      - '@mcp_sentinel.access_checker'
+      - '@mcp_sentinel.oauth_context'
+      - '@mcp_sentinel.unmoderated_redirect'
+      - '@current_user'
+      - '@datetime.time'
+      - '@mcp_sentinel.jsonapi_page_limit_subscriber'
+      - '@mcp_sentinel.audit_logger'
+      - '@database'
+
   mcp_sentinel.governance_readiness:
     class: Drupal\mcp_sentinel\Service\McpGovernanceReadiness
     arguments:

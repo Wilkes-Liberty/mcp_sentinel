@@ -61,6 +61,7 @@ normalised
 normalises
 nosniff
 optimised
+organisation
 packagist
 Pathauto
 pcre
@@ -118,5 +119,6 @@ varchar
 vocabs
 webcms
 webonyx
+wilkesliberty
 xaxis
 yaxis

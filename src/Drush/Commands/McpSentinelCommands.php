@@ -12,6 +12,7 @@ use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpInstallVerifier;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
@@ -26,9 +27,9 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * Most maintenance commands here (audit-purge, lock-clear, webhook-prune) are
  * manual triggers for work that also runs on cron; running them by hand simply
  * performs the same cleanup immediately. The inspection commands (status,
- * audit-verify) report state and use their exit code to signal health, so they
- * can be wired into monitoring: a non-zero exit from audit-verify indicates a
- * tampered audit log.
+ * verify, audit-verify) report state and use their exit code to signal
+ * health: a non-zero exit from audit-verify indicates a tampered audit log,
+ * and verify fails on a skipped check as well as a finding.
  */
 final class McpSentinelCommands extends DrushCommands {
 
@@ -59,8 +60,93 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly McpRoleAssertions $roleAssertions,
     #[Autowire(service: 'mcp_sentinel.governance_readiness')]
     private readonly McpGovernanceReadiness $governanceReadiness,
+    #[Autowire(service: 'mcp_sentinel.install_verifier')]
+    private readonly McpInstallVerifier $installVerifier,
   ) {
     parent::__construct();
+  }
+
+  /**
+   * Verify that this install carries the secure, tenant-neutral floor.
+   *
+   * Posture checks always run and never write. Hostile-input probes run
+   * only with --live and also never persist: they decide through
+   * validate() / access / the redirect classifier. A skipped check
+   * fails the run; a not-applicable check does not.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:verify', aliases: ['mcps:verify'])]
+  #[CLI\Option(name: 'live', description: 'Also run the hostile-input probes (still no writes).')]
+  #[CLI\Option(name: 'content-target', description: 'UUID of an existing node for the live-content-edit probe.')]
+  #[CLI\Option(name: 'bundle', description: 'Node type for the in-memory draft and publish probes.')]
+  #[CLI\Option(name: 'json', description: 'Print the evidence document as JSON.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:verify', description: 'Run the read-only posture checks.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:verify --live', description: 'Also run the hostile-input probes; nothing is saved.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:verify --live --content-target=UUID --json', description: 'Live probes plus JSON evidence.')]
+  public function verify(
+    array $options = [
+      'live' => FALSE,
+      'content-target' => NULL,
+      'bundle' => NULL,
+      'json' => FALSE,
+    ],
+  ): int {
+    $result = $this->installVerifier->verify(
+      (bool) $options['live'],
+      isset($options['content-target']) && $options['content-target'] !== ''
+        ? (string) $options['content-target']
+        : NULL,
+      isset($options['bundle']) && $options['bundle'] !== ''
+        ? (string) $options['bundle']
+        : NULL,
+    );
+
+    if (!empty($options['json'])) {
+      $this->output()->writeln(
+        (string) json_encode($result->toArray(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+      );
+      return $result->isOk() ? self::EXIT_SUCCESS : self::EXIT_FAILURE;
+    }
+
+    $this->io()->title('MCP Sentinel verify');
+    $rows = [];
+    foreach ($result->checks() as $check) {
+      $detail = $check->findings() === []
+        ? ''
+        : implode(' ', $check->findings());
+      $rows[] = [
+        $check->id(),
+        strtoupper($check->status()),
+        $check->title(),
+        $detail,
+        implode(',', $check->evidenceIds()),
+      ];
+    }
+    $this->io()->table(['Check', 'Status', 'Claim', 'Findings', 'Evidence'], $rows);
+
+    $summary = $result->summary();
+    $this->output()->writeln(sprintf(
+      'Summary: %d pass, %d fail, %d skipped, %d n/a. Mode=%s.',
+      $summary['pass'],
+      $summary['fail'],
+      $summary['skipped'],
+      $summary['notApplicable'],
+      $result->mode(),
+    ));
+    foreach ($result->residuals() as $residual) {
+      $this->output()->writeln(sprintf(
+        'Residual %s (%s): %s',
+        $residual['id'],
+        $residual['status'],
+        $residual['detail'],
+      ));
+    }
+
+    if (!$result->isOk()) {
+      $this->logger()->error('Install verification failed. Skipped checks fail the run; they are not passes.');
+      return self::EXIT_FAILURE;
+    }
+    $this->logger()->success('Install verification passed. Residuals above are managed, not solved.');
+    return self::EXIT_SUCCESS;
   }
 
   /**

@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Secure-install verifier (#112 / d.o. #3616537).** `drush
+  mcp-sentinel:verify` produces an evidence document for the claim that
+  this install carries the secure, tenant-neutral floor. Posture checks
+  always run (source contract, companions, keyed evidence, finite
+  budgets, a role-bound policy, trust-role separation, no development
+  fallback, tenant neutrality, classification). `--live` adds the
+  hostile-input probes from the issue — allowed draft, denied
+  publication, mass read, configuration change, live-content edit —
+  without creating, updating or deleting content. Write gates are
+  decided through the same `validate()`, access checker and
+  unmoderated-redirect classifier the runtime uses. `skipped` fails the
+  run; `n/a` does not. `--json` records module and Drupal versions, a
+  secrets-redacted config digest, per-check outcomes and the managed
+  residuals (prompt injection, operator trust). Persist-path proof of
+  the same gates stays in the kernel suite against `config/install`.
+  See `docs/verification.md`.
+
 ## [2.9.0] - 2026-08-15
 
 ### Added
