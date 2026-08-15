@@ -19,6 +19,14 @@ agent_scopes:
   - 'mcp_config'
   - 'mcp_config_read'
 governed_role_fallback: false
+require_finite_read_budgets: true
+read_budget_defaults:
+  results: 500
+  bytes: 8388608
+  requests: 600
+  request_window: 60
+  pages: 120
+  page_window: 60
 dlp_enabled: false
 dlp_mask_mode: redact
 dlp_patterns:

@@ -6,6 +6,42 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Read budgets are finite by default (#109 / d.o. #3616540, part 1).**
+  Rate, result-count, and response-size mechanisms existed but shipped
+  unlimited (`0`) defaults, and two governed read channels were unmeasured —
+  no mass-read/exfiltration floor. A profile budget of `0` now resolves to
+  the finite defaults in `mcp_sentinel.settings:read_budget_defaults`
+  (500 results, 8 MiB, 600 requests/60 s, 120 collection pages/60 s); an
+  explicit finite profile value always wins. On the governed JSON:API seam,
+  every request consumes a per-principal request budget and collection reads
+  consume a windowed page budget (429 with stable reason codes
+  `read_budget_exceeded` / `page_budget_exceeded`), an absent `page[limit]`
+  is pinned when the cap is below JSON:API's default page size, and a new
+  response subscriber refuses over-budget governed JSON:API/GraphQL bodies
+  with a 413 (`response_size_cap_exceeded`). The governed raw-SQL drush
+  channel uses the same effective caps. Denials write bounded, non-sensitive
+  `read_budget_denied` evidence rows. Setting
+  `require_finite_read_budgets: false` is the explicit non-production
+  override: it restores `0 = unlimited` and raises a permanent status-report
+  warning, so a secure-install verification cannot pass with the override
+  active. Governed GraphQL requests consume the same per-principal request
+  budget, and both HTTP seams admit a GraphQL request under either governed
+  scope (`mcp_read` or `mcp_write`) — the verb cannot select the scope on a
+  shared POST endpoint, and requiring one fixed scope would refuse
+  write-only tokens before the mutation gate or skip measuring their
+  responses. The `/drupal-mcp/context` schema document consumes the same
+  shared profile-wide request bucket. Flood accounting pins the uid as the flood identifier: the
+  default identifier is the client IP, which would have let IP rotation
+  multiply a principal's quota. Part 2 of d.o. #3616540 (classification-aware
+  egress destinations) is tracked on the same issue.
+
+### Changed
+- `McpRateLimiter` and `McpExfiltrationGuard` now take the new
+  `mcp_sentinel.read_budgets` resolver as a constructor dependency, and the
+  guard exposes `effectiveResultCap()` / `effectiveResponseSizeCap()` for
+  display surfaces.
+
 ## [2.6.0] - 2026-08-14
 
 ### Fixed

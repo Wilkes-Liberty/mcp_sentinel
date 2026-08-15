@@ -295,8 +295,8 @@ final class McpPolicyProfileForm extends EntityForm {
     $form['limits']['rate_limit_requests'] = [
       '#type' => 'number',
       '#min' => 0,
-      '#title' => $this->t('Max requests per window (0 = unlimited)'),
-      '#description' => $this->t('Throttle governed agent traffic per account. 0 = unlimited. Recommended: 300.'),
+      '#title' => $this->t('Max requests per window (0 = site default)'),
+      '#description' => $this->t('Throttle governed agent traffic per account. 0 uses the finite site default (unlimited only when the non-production override is active). Recommended: 300.'),
       '#default_value' => $profile->getRateLimitRequests(),
       '#ajax' => $preview_ajax,
     ];
@@ -316,7 +316,7 @@ final class McpPolicyProfileForm extends EntityForm {
     $form['limits']['result_count_cap'] = [
       '#type' => 'number',
       '#min' => 0,
-      '#title' => $this->t('Max result items (0 = unlimited)'),
+      '#title' => $this->t('Max result items (0 = site default)'),
       // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
       '#description' => $this->t('Maximum items returned per Tool call, JSON:API page request, or GraphQL field result list. Recommended: 500.'),
       '#default_value' => $profile->getResultCountCap(),
@@ -325,7 +325,7 @@ final class McpPolicyProfileForm extends EntityForm {
     $form['limits']['response_size_cap'] = [
       '#type' => 'number',
       '#min' => 0,
-      '#title' => $this->t('Max response size in bytes (0 = unlimited)'),
+      '#title' => $this->t('Max response size in bytes (0 = site default)'),
       // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
       '#description' => $this->t('Maximum serialized response size in bytes for governed Tool calls. Responses exceeding this cap are denied. Recommended: 2097152 (2 MB).'),
       '#default_value' => $profile->getResponseSizeCap(),
@@ -420,9 +420,9 @@ final class McpPolicyProfileForm extends EntityForm {
 
     $rate_str = ($rate_req > 0)
       ? $this->t('@r req / @w s', ['@r' => $rate_req, '@w' => $rate_win])
-      : $this->t('unlimited');
-    $result_str = ($result_cap > 0) ? (string) $result_cap : (string) $this->t('unlimited');
-    $resp_str = ($resp_cap > 0) ? (string) $resp_cap . ' B' : (string) $this->t('unlimited');
+      : $this->t('site default');
+    $result_str = ($result_cap > 0) ? (string) $result_cap : (string) $this->t('site default');
+    $resp_str = ($resp_cap > 0) ? (string) $resp_cap . ' B' : (string) $this->t('site default');
     $items[] = $this->t('Rate limit: @rate · Result cap: @rc · Response cap: @rsc', [
       '@rate' => $rate_str,
       '@rc' => $result_str,

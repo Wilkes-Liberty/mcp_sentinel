@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
+use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -106,6 +107,35 @@ final class McpContextControllerTest extends KernelTestBase {
     $this->assertFalse($payload['claims']['policy_effectiveness']);
     $this->assertFalse($payload['claims']['evidence_chain_verified']);
     $this->assertFalse($payload['claims']['overall_posture']);
+  }
+
+  /**
+   * The schema document consumes the per-principal request budget (#3616540).
+   */
+  public function testContextConsumesRequestBudget(): void {
+    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->switchToDevelopmentGovernedUser();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', ['requests' => 1, 'request_window' => 60])
+      ->save();
+
+    $controller = McpContextController::create($this->container);
+    $this->assertSame(200, $controller->context()->getStatusCode());
+
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $uid = (int) $this->container->get('current_user')->id();
+    /** @var \Drupal\mcp_sentinel\Service\McpRateLimiter $limiter */
+    $limiter = $this->container->get('mcp_sentinel.rate_limiter');
+    $this->assertFalse(
+      $limiter->check($profile, $uid, NULL),
+      'Context must consume the profile-wide flood key shared with JSON:API and GraphQL.',
+    );
+
+    $second = $controller->context();
+    $this->assertSame(429, $second->getStatusCode());
+    $this->assertStringContainsString('read_budget_exceeded', (string) $second->getContent());
   }
 
   /**

@@ -85,9 +85,11 @@ final class McpExfiltrationGuardTest extends KernelTestBase {
   }
 
   /**
-   * When result_count_cap is 0 (unlimited) no truncation occurs.
+   * Cap 0 skips truncation only under the explicit override (#3616540).
    */
   public function testNoTruncationWhenUnlimited(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', FALSE)->save();
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('result_count_cap', 0)->save();
@@ -114,9 +116,11 @@ final class McpExfiltrationGuardTest extends KernelTestBase {
   }
 
   /**
-   * When response_size_cap is 0 (unlimited) no cap fires.
+   * Cap 0 skips the byte cap only under the explicit override (#3616540).
    */
   public function testResponseSizeCapUnlimited(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', FALSE)->save();
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('response_size_cap', 0)->save();

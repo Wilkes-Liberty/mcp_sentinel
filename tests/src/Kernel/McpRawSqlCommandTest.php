@@ -90,6 +90,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
       $this->container->get('entity_type.manager'),
       $this->container->get('mcp_sentinel.policy_resolver'),
       $this->container->get('mcp_sentinel.raw_sql_guard'),
+      $this->container->get('mcp_sentinel.exfiltration_guard'),
       $this->container->get('mcp_sentinel.audit_logger'),
       $this->container->get('database'),
     );

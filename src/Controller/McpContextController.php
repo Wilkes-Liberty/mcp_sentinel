@@ -9,7 +9,9 @@ use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -31,11 +33,17 @@ class McpContextController extends ControllerBase {
    *   The access checker (evaluates the profile's IP allowlist).
    * @param \Drupal\mcp_sentinel\Service\McpGovernanceReadiness $readiness
    *   Source-governance readiness evaluator.
+   * @param \Drupal\mcp_sentinel\Service\McpRateLimiter $rateLimiter
+   *   Per-principal request-budget enforcement (finite by default).
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   Audit logger for bounded budget-denial evidence rows.
    */
   public function __construct(
     private readonly EntityFieldManagerInterface $entityFieldManager,
     private readonly McpAccessChecker $accessChecker,
     private readonly McpGovernanceReadiness $readiness,
+    private readonly McpRateLimiter $rateLimiter,
+    private readonly McpAuditLogger $auditLogger,
   ) {}
 
   /**
@@ -46,6 +54,8 @@ class McpContextController extends ControllerBase {
       $container->get('entity_field.manager'),
       $container->get('mcp_sentinel.access_checker'),
       $container->get('mcp_sentinel.governance_readiness'),
+      $container->get('mcp_sentinel.rate_limiter'),
+      $container->get('mcp_sentinel.audit_logger'),
     );
   }
 
@@ -80,6 +90,27 @@ class McpContextController extends ControllerBase {
         403,
         ['Cache-Control' => 'no-store', 'X-Content-Type-Options' => 'nosniff'],
       );
+    }
+
+    // Request budget (#3616540): the schema document is a governed read and
+    // consumes the same finite-by-default per-principal budget as every
+    // other read path.
+    if ($profile !== NULL) {
+      $uid = (int) $this->currentUser()->id();
+      // NULL is the profile-wide flood key shared with JSON:API and GraphQL.
+      if (!$this->rateLimiter->check($profile, $uid, NULL)) {
+        $this->auditLogger->log('read_budget_denied', [
+          'surface' => 'context',
+          'budget' => 'requests',
+          'profile' => $profile->id(),
+        ]);
+        return new JsonResponse(
+          ['error' => 'MCP Sentinel request budget exceeded (read_budget_exceeded). Retry after the current window.'],
+          429,
+          ['Cache-Control' => 'no-store', 'Retry-After' => '60'],
+        );
+      }
+      $this->rateLimiter->register($profile, $uid, NULL);
     }
 
     return new JsonResponse([

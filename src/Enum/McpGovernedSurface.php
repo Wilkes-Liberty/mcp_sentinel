@@ -21,4 +21,25 @@ enum McpGovernedSurface: string {
     return $this === self::Tool || $this === self::Context;
   }
 
+  /**
+   * Maps a request path to its API surface, or NULL when out of scope.
+   *
+   * Matches by segment rather than prefix so language-prefixed paths
+   * (/en/jsonapi/...) resolve too. Only the two HTTP API surfaces are
+   * path-addressable; Tool and Context requests are identified by their
+   * routes, not here.
+   *
+   * @param string $path
+   *   The request path (Request::getPathInfo()).
+   */
+  public static function fromPath(string $path): ?self {
+    if (str_contains($path, '/jsonapi/')) {
+      return self::JsonApi;
+    }
+    if (str_contains($path, '/graphql')) {
+      return self::Graphql;
+    }
+    return NULL;
+  }
+
 }

@@ -179,6 +179,20 @@ function mcp_sentinel_requirements(string $phase): array {
     }
   }
 
+  // The finite-read-budget override is a deliberate, visible weakening
+  // (#3616540): with require_finite_read_budgets FALSE, an unlimited (0)
+  // profile budget really is unlimited and nothing bounds a mass read. That
+  // is acceptable only as a non-production posture, so it can never sit
+  // silently green — a secure-install verification must always see this row.
+  if ($config->get('require_finite_read_budgets') === FALSE) {
+    $requirements['mcp_sentinel_read_budgets'] = [
+      'title' => t('MCP Sentinel: unlimited read budgets permitted'),
+      'value' => t('Non-production override active'),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('require_finite_read_budgets is disabled, so profiles with unlimited (0) rate, result, size, or page budgets impose no mass-read/exfiltration floor. This override is for non-production use only; remove it (or set finite budgets on every governed profile) before treating this install as production-secure.'),
+    ];
+  }
+
   // Permanently failed webhook deliveries are otherwise invisible
   // (#3613242): rows land in failed / failed_ssrf / failed_redirect and sit
   // silently until retention prunes them — a month of 100% delivery failure
@@ -994,4 +1008,39 @@ function mcp_sentinel_uninstall(): void {
   if ($role) {
     $role->delete();
   }
+}
+
+/**
+ * Seed the finite-by-default read-budget settings (#3616540).
+ *
+ * Sites installed before this feature have neither key in active config. The
+ * resolver treats an absent require_finite_read_budgets as TRUE (the secure
+ * default) and falls back to built-in constants for the default map, so
+ * enforcement does not depend on this hook — it exists so active config states
+ * the posture explicitly and a config export is clean rather than showing a
+ * perpetual missing-key diff against config/install.
+ */
+function mcp_sentinel_update_10019(): string {
+  $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $added = [];
+  if ($settings->get('require_finite_read_budgets') === NULL) {
+    $settings->set('require_finite_read_budgets', TRUE);
+    $added[] = 'require_finite_read_budgets=true';
+  }
+  if ($settings->get('read_budget_defaults') === NULL) {
+    $settings->set('read_budget_defaults', [
+      'results' => 500,
+      'bytes' => 8388608,
+      'requests' => 600,
+      'request_window' => 60,
+      'pages' => 120,
+      'page_window' => 60,
+    ]);
+    $added[] = 'read_budget_defaults (500 results, 8 MiB, 600 req/60 s, 120 pages/60 s)';
+  }
+  if ($added === []) {
+    return 'Read-budget settings already present; nothing to seed.';
+  }
+  $settings->save();
+  return 'Seeded finite-by-default read budgets: ' . implode('; ', $added) . '. Set require_finite_read_budgets to false only as an explicit non-production override.';
 }

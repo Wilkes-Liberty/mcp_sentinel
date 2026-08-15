@@ -10,10 +10,42 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  * Enforces result-count and response-size caps on governed agent responses.
  *
  * Caps are applied BEFORE serialization so the database never exposes excess
- * rows to an agent. A cap of 0 (the default) is treated as unlimited and the
- * guard short-circuits without examining the data.
+ * rows to an agent. Caps are finite by default (#3616540): a profile value of
+ * 0 no longer means unlimited — McpReadBudgetResolver clamps it to the
+ * configured default unless the explicit non-production override is active,
+ * in which case 0 short-circuits the guard as before.
  */
 final class McpExfiltrationGuard {
+
+  public function __construct(
+    private readonly McpReadBudgetResolver $budgets,
+  ) {}
+
+  /**
+   * The effective result cap for a profile (post-clamping).
+   *
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The active governance profile.
+   *
+   * @return int
+   *   A positive cap, or 0 (unlimited) only under the explicit override.
+   */
+  public function effectiveResultCap(McpPolicyProfileInterface $profile): int {
+    return $this->budgets->effectiveResultCap($profile);
+  }
+
+  /**
+   * The effective response-size cap for a profile (post-clamping).
+   *
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The active governance profile.
+   *
+   * @return int
+   *   A positive cap in bytes, or 0 only under the explicit override.
+   */
+  public function effectiveResponseSizeCap(McpPolicyProfileInterface $profile): int {
+    return $this->budgets->effectiveResponseSizeCap($profile);
+  }
 
   /**
    * Truncates $data to the profile's result_count_cap when the cap is active.
@@ -29,7 +61,7 @@ final class McpExfiltrationGuard {
    *   and was_truncated is FALSE.
    */
   public function capResults(array $data, McpPolicyProfileInterface $profile): array {
-    $cap = $profile->getResultCountCap();
+    $cap = $this->budgets->effectiveResultCap($profile);
     if ($cap > 0 && count($data) > $cap) {
       return [array_slice($data, 0, $cap), TRUE];
     }
@@ -51,7 +83,7 @@ final class McpExfiltrationGuard {
    *   cap is unlimited (0) or the response is within the cap.
    */
   public function exceedsResponseSizeCap(int $bytes, McpPolicyProfileInterface $profile): bool {
-    $cap = $profile->getResponseSizeCap();
+    $cap = $this->budgets->effectiveResponseSizeCap($profile);
     return $cap > 0 && $bytes > $cap;
   }
 

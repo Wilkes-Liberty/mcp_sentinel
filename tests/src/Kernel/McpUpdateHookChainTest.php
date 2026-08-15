@@ -618,6 +618,39 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10019 seeds the finite-by-default read-budget settings.
+   */
+  public function testUpdate10019SeedsReadBudgets(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->clear('require_finite_read_budgets')
+      ->clear('read_budget_defaults')
+      ->save();
+
+    $message = mcp_sentinel_update_10019();
+    $this->assertStringContainsString('require_finite_read_budgets', $message);
+    $this->assertStringContainsString('read_budget_defaults', $message);
+
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $settings = $this->config('mcp_sentinel.settings');
+    $this->assertTrue($settings->get('require_finite_read_budgets'));
+    $defaults = $settings->get('read_budget_defaults');
+    $this->assertSame(500, $defaults['results']);
+    $this->assertSame(8388608, $defaults['bytes']);
+    $this->assertSame(600, $defaults['requests']);
+    $this->assertSame(120, $defaults['pages']);
+
+    // Idempotent: a second run is a no-op and never overwrites an operator
+    // value.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', FALSE)->save();
+    $again = mcp_sentinel_update_10019();
+    $this->assertStringContainsString('already present', $again);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertFalse($this->config('mcp_sentinel.settings')->get('require_finite_read_budgets'),
+      'A second run must not overwrite the operator override.');
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

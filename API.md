@@ -218,6 +218,26 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.urgent_conditions` | `McpUrgentConditions` | `evaluate()` → critical/warning/info conditions + operator broadcast for the dashboard banner (pure read) |
 | `mcp_sentinel.chart_renderer` | `McpChartRenderer` | `render($type, $series, $options)` → a `drupal/charts` element when `charts` is enabled, else an inline-SVG fallback (empty-state on empty series) |
 
+### `McpReadBudgetResolver` — finite-by-default read budgets
+
+`mcp_sentinel.read_budgets` resolves the effective budgets for a profile
+(#3616540): a profile value of `0` clamps to
+`mcp_sentinel.settings:read_budget_defaults` unless
+`require_finite_read_budgets` is explicitly disabled (the non-production
+override, surfaced as a status-report warning).
+
+```php
+$budgets = \Drupal::service('mcp_sentinel.read_budgets');
+$cap = $budgets->effectiveResultCap($profile);        // int, 0 only under override
+$bytes = $budgets->effectiveResponseSizeCap($profile); // int
+[$requests, $window] = $budgets->effectiveRateLimit($profile);
+[$pages, $pageWindow] = $budgets->pageBudget();
+```
+
+`McpExfiltrationGuard` and `McpRateLimiter` consume the resolver internally,
+so Tool, JSON:API, GraphQL, and governed drush SQL channels share one budget
+resolution.
+
 ### `McpMetrics` — governance-dashboard data
 
 `mcp_sentinel.metrics` is the single read-only source of dashboard data. It
