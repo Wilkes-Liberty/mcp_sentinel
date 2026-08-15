@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -427,6 +428,30 @@ final class McpClassificationResolver {
       'declared_destination' => $this->declaredDestination(),
       'origin' => $this->origin(),
     ]);
+  }
+
+  /**
+   * The structured refusal every HTTP seam returns for a classification denial.
+   *
+   * One shape for the request seam and the response seam: a JSON:API error
+   * document whose first error carries the stable code. Never cacheable — the
+   * decision is per principal, per surface and per declaration.
+   */
+  public function refusalResponse(): JsonResponse {
+    $refusal = new JsonResponse([
+      'errors' => [
+        [
+          'status' => '403',
+          'code' => self::DENIAL_CODE,
+          'title' => 'Classification exceeds the MCP Sentinel egress ceiling',
+          'detail' => 'The requested data carries a classification label above the ceiling this principal may receive on this surface.',
+        ],
+      ],
+    ], 403);
+    $refusal->setPrivate();
+    $refusal->headers->set('Cache-Control', 'private, no-store');
+    $refusal->headers->set('Content-Type', 'application/vnd.api+json');
+    return $refusal;
   }
 
   /**

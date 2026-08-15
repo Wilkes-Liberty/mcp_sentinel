@@ -7,7 +7,9 @@ namespace Drupal\mcp_sentinel\EventSubscriber;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpReadBudgetResolver;
@@ -67,6 +69,10 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *   Effective read-budget resolution.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Audit logger for bounded budget-denial evidence rows.
+   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver|null $classification
+   *   Classification egress ceilings (d.o #3616540 part 2). Nullable for the
+   *   deploy window in which the cached container still passes six arguments;
+   *   without it no ceiling is evaluated here, exactly the previous behavior.
    */
   public function __construct(
     private readonly McpAccessChecker $accessChecker,
@@ -75,6 +81,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     private readonly McpRateLimiter $rateLimiter,
     private readonly McpReadBudgetResolver $budgets,
     private readonly McpAuditLogger $auditLogger,
+    private readonly ?McpClassificationResolver $classification = NULL,
   ) {}
 
   /**
@@ -172,6 +179,24 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       );
     }
     $this->rateLimiter->register($profile, $uid, NULL);
+
+    // Classification egress ceiling (d.o #3616540 part 2): the routed
+    // resource type names the entity type and bundle before the controller
+    // runs, so an over-ceiling type is refused here for EVERY method — a
+    // JSON:API write echoes the entity, which is egress too. Evaluated after
+    // the request budget on purpose: probing costs budget.
+    if ($surface === McpGovernedSurface::JsonApi && $this->classification !== NULL) {
+      $resourceType = $request->attributes->get('resource_type');
+      if ($resourceType instanceof ResourceType && $this->classification->assignsAboveLowest()) {
+        $ceiling = $this->classification->effectiveCeiling($profile, $surface);
+        $label = $this->classification->labelForEntityType($resourceType->getEntityTypeId(), $resourceType->getBundle());
+        if ($ceiling !== NULL && $this->classification->exceeds($label, $ceiling)) {
+          $this->classification->evidence($profile, $surface, $resourceType->getEntityTypeId(), $resourceType->getBundle(), '', $label, $ceiling);
+          $event->setResponse($this->classification->refusalResponse());
+          return;
+        }
+      }
+    }
 
     if ($surface !== McpGovernedSurface::JsonApi) {
       // The GraphQL surface shares only the request budget at this seam; row

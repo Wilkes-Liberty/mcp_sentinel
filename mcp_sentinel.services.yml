@@ -190,6 +190,7 @@ services:
       - '@mcp_sentinel.rate_limiter'
       - '@mcp_sentinel.read_budgets'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.classification'
     tags:
       - { name: event_subscriber }
 
@@ -200,6 +201,8 @@ services:
       - '@current_user'
       - '@mcp_sentinel.exfiltration_guard'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.classification'
+      - '@jsonapi.resource_type.repository'
     tags:
       - { name: event_subscriber }
 
