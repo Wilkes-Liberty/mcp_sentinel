@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Drush\Commands;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
@@ -166,7 +167,7 @@ final class McpSentinelSqlCommands extends DrushCommands {
     }
 
     $this->auditLogger->log('raw_sql_query', [
-      'channel' => 'drush',
+      'channel' => McpGovernedSurface::Drush->value,
       'profile' => $profile->id(),
       'statement' => $query,
       'row_count' => count($rows),
@@ -205,7 +206,7 @@ final class McpSentinelSqlCommands extends DrushCommands {
     // raw-SQL attempt is a security event and is recorded even when read
     // logging is off.
     $metadata = [
-      'channel' => 'drush',
+      'channel' => McpGovernedSurface::Drush->value,
       'profile' => $profile?->id() ?? '(unresolved)',
       'statement' => $query,
       'reasons' => $reasons,

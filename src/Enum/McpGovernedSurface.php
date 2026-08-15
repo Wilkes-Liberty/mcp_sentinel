@@ -13,12 +13,17 @@ enum McpGovernedSurface: string {
   case Context = 'context';
   case JsonApi = 'jsonapi';
   case Graphql = 'graphql';
+  case Drush = 'drush';
 
   /**
    * Whether the surface is intrinsically a Sentinel product path.
+   *
+   * Tool, Context and the governed drush SQL command exist only because
+   * Sentinel provides them; JSON:API and GraphQL are site APIs the module
+   * governs when the request is on the agent channel.
    */
   public function isDedicated(): bool {
-    return $this === self::Tool || $this === self::Context;
+    return $this === self::Tool || $this === self::Context || $this === self::Drush;
   }
 
   /**
@@ -27,7 +32,7 @@ enum McpGovernedSurface: string {
    * Matches by segment rather than prefix so language-prefixed paths
    * (/en/jsonapi/...) resolve too. Only the two HTTP API surfaces are
    * path-addressable; Tool and Context requests are identified by their
-   * routes, not here.
+   * routes, and Drush has no request at all, so none of those resolve here.
    *
    * @param string $path
    *   The request path (Request::getPathInfo()).
