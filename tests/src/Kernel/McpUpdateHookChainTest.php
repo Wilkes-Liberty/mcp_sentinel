@@ -651,6 +651,66 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10021 seeds the classification settings and backfills ceilings.
+   *
+   * Upgrades change nothing: the seeded map labels only the identity and
+   * credential types, and every existing profile gets an EMPTY ceilings map,
+   * so no read decision changes until an operator sets a ceiling.
+   */
+  public function testUpdate10021SeedsClassificationAndBackfillsCeilings(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->clear('classification_labels')
+      ->clear('classification_map')
+      ->clear('context_schema_label')
+      ->save();
+    // A profile saved before the knob existed has no egress_ceilings key.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->clear('egress_ceilings')
+      ->save();
+    // A profile that already carries ceilings must keep them.
+    McpPolicyProfile::create([
+      'id' => 'ceilinged',
+      'label' => 'Ceilinged',
+      'egress_ceilings' => ['jsonapi' => 'internal'],
+    ])->save();
+    $this->container->get('config.factory')->reset();
+
+    $message = mcp_sentinel_update_10021();
+    $this->assertStringContainsString('classification_labels', $message);
+    $this->assertStringContainsString('classification_map', $message);
+    $this->assertStringContainsString('context_schema_label', $message);
+    $this->assertStringContainsString('egress_ceilings', $message);
+    $this->assertStringContainsString('1 policy profile', $message);
+
+    $this->container->get('config.factory')->reset();
+    $settings = $this->config('mcp_sentinel.settings');
+    $this->assertSame(['public', 'internal', 'restricted'], $settings->get('classification_labels'));
+    $this->assertSame('internal', $settings->get('context_schema_label'));
+    $types = array_column($settings->get('classification_map'), 'label', 'entity_type');
+    $this->assertSame([
+      'user' => 'restricted',
+      'oauth2_token' => 'restricted',
+      'key' => 'restricted',
+      'consumer' => 'restricted',
+      'encryption_profile' => 'restricted',
+    ], $types);
+    $this->assertSame([], $this->config('mcp_sentinel.mcp_policy_profile.default')->get('egress_ceilings'));
+    $this->assertSame(['jsonapi' => 'internal'], $this->config('mcp_sentinel.mcp_policy_profile.ceilinged')->get('egress_ceilings'));
+
+    // Idempotent: a second run is a no-op and never overwrites operator values.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('classification_labels', ['open', 'secret'])
+      ->set('classification_map', [])
+      ->save();
+    $again = mcp_sentinel_update_10021();
+    $this->assertStringContainsString('already present', $again);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertSame(['open', 'secret'], $this->config('mcp_sentinel.settings')->get('classification_labels'));
+    $this->assertSame([], $this->config('mcp_sentinel.settings')->get('classification_map'),
+      'An operator-emptied map is a decision, not a gap to re-seed.');
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

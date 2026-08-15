@@ -1087,3 +1087,57 @@ function mcp_sentinel_update_10020(): string {
     . 'Listing entity_write or entity_delete on a profile makes those governed actions '
     . 'execute only when their evidence can commit to the keyed audit chain (#3616539).';
 }
+
+/**
+ * Seed the classification vocabulary and map; backfill empty egress ceilings.
+ *
+ * Part 2 of d.o #3616540. Settings gain the ordered classification vocabulary
+ * (public < internal < restricted), the global classification map (the
+ * identity/credential types the default profile already denies, labelled
+ * restricted), and the label of the context schema document. Every existing
+ * policy profile gets an EMPTY egress_ceilings map so exported configuration
+ * round-trips without drift. Empty on purpose: an absent ceiling is no
+ * ceiling, so an upgrade changes no read decision until an operator sets one.
+ */
+function mcp_sentinel_update_10021(): string {
+  $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $added = [];
+  if ($settings->get('classification_labels') === NULL) {
+    $settings->set('classification_labels', ['public', 'internal', 'restricted']);
+    $added[] = 'classification_labels (public < internal < restricted)';
+  }
+  if ($settings->get('classification_map') === NULL) {
+    $map = [];
+    foreach (['user', 'oauth2_token', 'key', 'consumer', 'encryption_profile'] as $type) {
+      $map[] = ['entity_type' => $type, 'bundle' => '', 'field' => '', 'label' => 'restricted'];
+    }
+    $settings->set('classification_map', $map);
+    $added[] = 'classification_map (identity/credential types labelled restricted)';
+  }
+  if ($settings->get('context_schema_label') === NULL) {
+    $settings->set('context_schema_label', 'internal');
+    $added[] = 'context_schema_label=internal';
+  }
+  if ($added !== []) {
+    $settings->save();
+  }
+
+  $count = 0;
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    if ($e->get('egress_ceilings') === NULL) {
+      $e->set('egress_ceilings', [])->save();
+      $count++;
+    }
+  }
+
+  $settingsPart = $added === []
+    ? 'Classification settings already present; nothing to seed.'
+    : 'Seeded classification settings: ' . implode('; ', $added) . '.';
+  return $settingsPart . " Added egress_ceilings (empty - no ceiling) to {$count} policy profile(s). "
+    . 'Set per-surface ceilings on a profile to enforce classification-aware egress (#3616540).';
+}
