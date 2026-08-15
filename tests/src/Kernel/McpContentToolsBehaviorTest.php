@@ -380,4 +380,44 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
       'Ungoverned account must receive the full schema response.');
   }
 
+  /**
+   * The site-context tool honours the Tool ceiling like the context endpoint.
+   */
+  public function testSiteContextToolHonoursCeiling(): void {
+    $this->createGovernedAccount();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'page', 'field' => '', 'label' => 'restricted'],
+      ])
+      ->save();
+
+    // Below the schema label the whole document is refused.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['tool' => 'public'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertFalse($tool->getResultStatus());
+    $this->assertStringContainsString('classification_egress_denied', (string) $tool->getResultMessage());
+
+    // At the schema label the document is served, minus over-ceiling bundles.
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['tool' => 'internal'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertTrue($tool->getResultStatus());
+    $this->assertArrayNotHasKey('page', $tool->getResult()->getContextValues()['content_types']);
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['tool' => 'restricted'])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertArrayHasKey('page', $tool->getResult()->getContextValues()['content_types']);
+  }
+
 }

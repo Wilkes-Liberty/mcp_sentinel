@@ -477,6 +477,18 @@ final class McpClassificationResolver {
   }
 
   /**
+   * The classification label of the schema documents (context, site-context).
+   *
+   * Schema is metadata, not content, and is classified `internal` by default
+   * (mcp_sentinel.settings:context_schema_label). A label outside the
+   * vocabulary is judged as the highest label by exceeds().
+   */
+  public function schemaLabel(): string {
+    $label = trim((string) ($this->configFactory->get('mcp_sentinel.settings')->get('context_schema_label') ?? ''));
+    return $label === '' ? 'internal' : $label;
+  }
+
+  /**
    * The structured refusal every HTTP seam returns for a classification denial.
    *
    * One shape for the request seam and the response seam: a JSON:API error
