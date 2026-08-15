@@ -309,3 +309,9 @@ mcp_sentinel.mcp_policy_profile.*:
     allow_raw_sql:
       type: boolean
       label: 'Allow raw SQL through the governed Drush command (off by default)'
+    evidence_required_actions:
+      type: sequence
+      label: 'Action classes requiring durable keyed evidence before execution'
+      sequence:
+        type: string
+        label: 'Action class (entity_write, entity_delete)'

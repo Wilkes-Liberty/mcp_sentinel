@@ -150,6 +150,23 @@ function mcp_sentinel_requirements(string $phase): array {
     return $requirements;
   }
 
+  // Uncertain evidence receipts (#3616539): a governed evidence-required
+  // mutation is durable but its execution receipt has not committed. Cron
+  // retries reconciliation; until the ledger drains, the gap is an ERROR —
+  // a high-assurance action without its proof is exactly what the
+  // evidence-required class exists to prevent, and it must never sit green.
+  // Before the enabled early-return on purpose: disabling governance after
+  // the fact must not hide a ledger that has not drained.
+  $uncertain = \Drupal::service('mcp_sentinel.evidence_guard')->uncertainCount();
+  if ($uncertain > 0) {
+    $requirements['mcp_sentinel_evidence_uncertain'] = [
+      'title' => t('MCP Sentinel: evidence receipts awaiting reconciliation'),
+      'value' => t('@count uncertain receipt(s) pending', ['@count' => $uncertain]),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('One or more governed evidence-required mutations are durable but their execution receipts could not commit to the audit chain. Reconciliation retries on cron; if this persists, check the audit chain storage and signing key. These outcomes are recorded as uncertain and are not reported as proven successes.'),
+    ];
+  }
+
   $config = \Drupal::config('mcp_sentinel.settings');
   if (!$config->get('enabled')) {
     // The operator has explicitly turned governance off; nothing to warn about.
@@ -1043,4 +1060,30 @@ function mcp_sentinel_update_10019(): string {
   }
   $settings->save();
   return 'Seeded finite-by-default read budgets: ' . implode('; ', $added) . '. Set require_finite_read_budgets to false only as an explicit non-production override.';
+}
+
+/**
+ * Add the evidence-required action list to existing policy profiles, empty.
+ *
+ * Backfills evidence_required_actions = [] on every profile saved before the
+ * knob existed, so exported configuration round-trips without drift. Empty on
+ * purpose: an upgrade must never opt an existing profile into the
+ * evidence-required veto it never asked for.
+ */
+function mcp_sentinel_update_10020(): string {
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  $count = 0;
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    if ($e->get('evidence_required_actions') === NULL) {
+      $e->set('evidence_required_actions', [])->save();
+      $count++;
+    }
+  }
+  return "Added evidence_required_actions (empty - veto off) to {$count} policy profile(s). "
+    . 'Listing entity_write or entity_delete on a profile makes those governed actions '
+    . 'execute only when their evidence can commit to the keyed audit chain (#3616539).';
 }

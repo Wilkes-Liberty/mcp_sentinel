@@ -81,6 +81,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "forbidden_role_permissions",
  *     "acknowledged_role_permissions",
  *     "allow_raw_sql",
+ *     "evidence_required_actions",
  *   },
  * )
  */
@@ -305,6 +306,17 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   protected bool $allow_raw_sql = FALSE;
 
   /**
+   * Action classes whose execution requires durable keyed evidence.
+   *
+   * Empty by default and on every profile that predates the knob, so the
+   * evidence-required veto is opt-in per profile and an upgrade changes no
+   * behavior until an operator marks a class.
+   *
+   * @var string[]
+   */
+  protected array $evidence_required_actions = [];
+
+  /**
    * {@inheritdoc}
    */
   public function getRoles(): array {
@@ -501,6 +513,20 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function allowsRawSql(): bool {
     return (bool) $this->allow_raw_sql;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getEvidenceRequiredActions(): array {
+    return array_values(array_filter($this->evidence_required_actions));
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function requiresEvidenceFor(string $actionClass): bool {
+    return in_array($actionClass, $this->getEvidenceRequiredActions(), TRUE);
   }
 
 }
