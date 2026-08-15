@@ -132,17 +132,22 @@ class McpAuditLogger {
    *   A short operation identifier (e.g. 'content_lock_conflict').
    * @param array $metadata
    *   Optional metadata (same contract as log()).
+   * @param bool $always
+   *   When TRUE the row is written through logAlways(), bypassing the
+   *   audit_enabled gate. The evidence-required veto needs this: an
+   *   evidence_audit_disabled refusal recorded through log() would be
+   *   suppressed by the very flag it is reporting on (d.o #3616539).
    */
-  public function logSurvivingRollback(string $operation, array $metadata = []): void {
+  public function logSurvivingRollback(string $operation, array $metadata = [], bool $always = FALSE): void {
     if ($this->database !== NULL && $this->database->inTransaction()) {
       $this->database->transactionManager()->addPostTransactionCallback(
-        function () use ($operation, $metadata): void {
-          $this->log($operation, $metadata);
+        function () use ($operation, $metadata, $always): void {
+          $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
         }
       );
       return;
     }
-    $this->log($operation, $metadata);
+    $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
   }
 
   /**

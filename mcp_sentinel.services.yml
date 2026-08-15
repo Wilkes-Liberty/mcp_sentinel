@@ -74,6 +74,25 @@ services:
       - '@mcp_sentinel.content_lock'
       - '@entity_type.manager'
 
+  # Evidence-required action veto (d.o #3616539). Both chain and key
+  # references are optional for the same container-compilation reason as the
+  # audit logger's: their absence is a veto condition the guard reports, not a
+  # wiring error that takes the site down.
+  mcp_sentinel.evidence_guard:
+    class: Drupal\mcp_sentinel\Service\McpEvidenceGuard
+    arguments:
+      - '@config.factory'
+      - '@?audit_chain.logger'
+      - '@?key.repository'
+      - '@mcp_sentinel.audit_logger'
+      - '@uuid'
+      - '@current_user'
+      - '@keyvalue'
+      - '@datetime.time'
+      - '@mcp_sentinel.oauth_context'
+      - '@request_stack'
+      - '@database'
+
   mcp_sentinel.unmoderated_redirect:
     class: Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision
     arguments:

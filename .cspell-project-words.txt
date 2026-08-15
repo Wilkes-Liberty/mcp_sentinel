@@ -69,6 +69,9 @@ phpcs
 phpstan
 phpunit
 PKCE
+precommit
+precommits
+precommitted
 preflighted
 preflights
 preg

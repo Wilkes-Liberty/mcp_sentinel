@@ -556,6 +556,37 @@ override**: it restores the historical `0 = unlimited` behavior and raises a
 permanent warning on the status report, so a secure-install verification can
 never report clean while the override is active.
 
+## Evidence-required actions (#3616539)
+
+For most operations an audit row is a record of what happened. For a
+high-assurance action class, that is backwards: the evidence is a
+*precondition*, and an action whose evidence cannot commit must not run at
+all. Marking a class in a profile's `evidence_required_actions` (empty by
+default; `entity_write` and `entity_delete` are the supported classes) turns
+that contract on for the principals the profile governs:
+
+- **The veto.** Before the mutation, the guard verifies evidence can commit:
+  the audit chain module is installed, auditing is enabled, and the chain's
+  configured signing key resolves. Any miss refuses the action with a stable
+  reason code (`evidence_chain_missing`, `evidence_audit_disabled`,
+  `evidence_unkeyed`) and a rollback-surviving `evidence_veto` row. No
+  fallback to unkeyed integrity or best-effort logging satisfies the class —
+  an unsigned chain proves nothing against a writer who can recompute it.
+- **Atomic co-commit.** The `evidence_precommit` row (correlation id,
+  principal, policy digest, decision, target) is appended inside the same
+  transaction as the mutation: both become durable together or neither does.
+  An evidence-store outage aborts the save; a save that fails after its
+  precommit takes the precommit down with it. There is no reachable state in
+  which the mutation persists without its evidence.
+- **Receipts and explicit uncertainty.** The post-save `entity_save` /
+  `entity_delete` row is the execution receipt, completing the precommit's
+  correlation id. If a receipt fails when the mutation is already durable
+  (a non-transactional path), the outcome is recorded once per correlation id
+  in a reconciliation ledger and refused to the caller as
+  `evidence_uncertain` — never reported as a proven success. Cron retries the
+  ledger; reconciled receipts are appended marked `reconciled`, and pending
+  entries raise a status-report error until they drain.
+
 ## IP allowlisting per profile
 
 Each policy profile can restrict governed agent connections to a specific set of

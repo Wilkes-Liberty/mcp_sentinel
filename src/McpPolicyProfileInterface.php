@@ -271,4 +271,25 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    */
   public function allowsRawSql(): bool;
 
+  /**
+   * Action classes whose execution requires durable keyed evidence.
+   *
+   * A governed action in a listed class may execute only when its evidence
+   * precommit can be appended to the keyed audit chain; otherwise the action
+   * is vetoed (d.o #3616539). Empty means no class on this profile carries the
+   * high-assurance requirement.
+   *
+   * @return string[]
+   *   Action class identifiers, e.g. 'entity_write', 'entity_delete'.
+   */
+  public function getEvidenceRequiredActions(): array;
+
+  /**
+   * Whether one action class requires durable keyed evidence on this profile.
+   *
+   * @param string $actionClass
+   *   An action class identifier, e.g. 'entity_write'.
+   */
+  public function requiresEvidenceFor(string $actionClass): bool;
+
 }

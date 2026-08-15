@@ -43,3 +43,4 @@ forbidden_role_permissions:
   - 'administer site configuration'
 acknowledged_role_permissions: {  }
 allow_raw_sql: false
+evidence_required_actions: {  }

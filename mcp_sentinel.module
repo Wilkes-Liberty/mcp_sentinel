@@ -12,6 +12,7 @@ use Drupal\mcp_sentinel\Controller\McpBannerController;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
@@ -292,6 +293,25 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     }
   }
 
+  // Evidence-required veto (d.o #3616539): when the resolved profile marks
+  // entity writes evidence-required, the save may proceed only when its
+  // evidence can commit to the keyed audit chain. Evaluated after the shaping
+  // gates above so the evidence describes the entity as it will actually be
+  // saved, and before the event dispatch so downstream consumers never see a
+  // write that is about to be refused. The veto's own refusal row survives
+  // the rollback the abort causes.
+  // Content entities only, like the write-precondition boundary above: the
+  // config plane has its own governance seam (McpConfigSaveSubscriber) and
+  // gets its evidence-required leg as a separate slice.
+  if ($entity instanceof ContentEntityInterface) {
+    _mcp_sentinel_evidence_gate(
+      $entity,
+      McpEvidenceGuard::ACTION_ENTITY_WRITE,
+      $entity->isNew() ? 'create' : 'update',
+      'Evidence-required governed write vetoed; the save was aborted before mutation.'
+    );
+  }
+
   \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
 }
 
@@ -351,6 +371,18 @@ function _mcp_sentinel_log_entity_save(EntityInterface $entity, string $operatio
     }
   }
 
+  // Complete the evidence-required precommit, when the presave wrote one:
+  // this row is the execution receipt, sharing the precommit's correlation id
+  // and refusing explicitly instead of reporting an unproven success
+  // (d.o #3616539).
+  /** @var \Drupal\mcp_sentinel\Service\McpEvidenceGuard $evidence_guard */
+  $evidence_guard = \Drupal::service('mcp_sentinel.evidence_guard');
+  $correlation = $evidence_guard->takeCorrelation($entity);
+  if ($correlation !== NULL) {
+    $evidence_guard->receipt($correlation, 'entity_save', $metadata);
+    return;
+  }
+
   $logger->log('entity_save', $metadata);
 }
 
@@ -380,6 +412,73 @@ function mcp_sentinel_entity_predelete(EntityInterface $entity): void {
     ]);
     throw new \RuntimeException($preconditions->messageFor($conflict));
   }
+
+  // Evidence-required veto, delete leg (d.o #3616539): same contract as the
+  // presave gate — an evidence-required governed delete executes only when
+  // its precommit can commit to the keyed chain, and the precommit co-commits
+  // with the removal.
+  _mcp_sentinel_evidence_gate(
+    $entity,
+    McpEvidenceGuard::ACTION_ENTITY_DELETE,
+    'delete',
+    'Evidence-required governed delete vetoed; nothing was removed.'
+  );
+}
+
+/**
+ * Runs the evidence-required gate for one governed content mutation.
+ *
+ * Shared by the presave and predelete legs (d.o #3616539): when the resolved
+ * profile marks $action_class evidence-required, either the veto refuses the
+ * action — with a rollback-surviving refusal row and a stable reason code —
+ * or the evidence precommit is appended so it co-commits with the mutation.
+ * A no-op for ungoverned requests and profiles without the class.
+ *
+ * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+ *   The entity about to be mutated.
+ * @param string $action_class
+ *   One of the McpEvidenceGuard::ACTION_* classes.
+ * @param string $operation
+ *   The concrete operation recorded in the precommit.
+ * @param string $note
+ *   The refusal row's human note.
+ *
+ * @throws \RuntimeException
+ *   When the action is vetoed; the surrounding save/delete aborts with it.
+ */
+function _mcp_sentinel_evidence_gate(ContentEntityInterface $entity, string $action_class, string $operation, string $note): void {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  if (!$resolver->isGoverned()) {
+    return;
+  }
+  /** @var \Drupal\mcp_sentinel\Service\McpEvidenceGuard $evidence_guard */
+  $evidence_guard = \Drupal::service('mcp_sentinel.evidence_guard');
+  $profile = $resolver->resolve();
+  if (!$evidence_guard->requiresEvidence($profile, $action_class)) {
+    return;
+  }
+  $veto = $evidence_guard->vetoReason();
+  if ($veto !== NULL) {
+    // Always-write: an evidence_audit_disabled refusal recorded through the
+    // ordinary log() path would be suppressed by the very flag it reports on.
+    // And with no chain at all there is nowhere to record the refusal — the
+    // loud throw IS the record there, matching requireChain()'s philosophy —
+    // so the chain-missing veto skips the row instead of throwing a second,
+    // message-masking exception from the deferred write.
+    if ($veto !== McpEvidenceGuard::REASON_CHAIN_MISSING) {
+      \Drupal::service('mcp_sentinel.audit_logger')->logSurvivingRollback('evidence_veto', [
+        'entity_type'  => $entity->getEntityTypeId(),
+        'bundle'       => $entity->bundle(),
+        'id'           => $entity->id() ?: '(new)',
+        'label'        => $entity->label(),
+        'reason'       => $veto,
+        'action_class' => $action_class,
+        'note'         => $note,
+      ], TRUE);
+    }
+    throw new \RuntimeException($evidence_guard->messageFor($veto, $action_class));
+  }
+  $evidence_guard->precommit($profile, $action_class, $entity, $operation);
 }
 
 /**
@@ -421,12 +520,24 @@ function mcp_sentinel_entity_delete(EntityInterface $entity): void {
   if ($resolver->isGoverned()) {
     /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
     $logger = \Drupal::service('mcp_sentinel.audit_logger');
-    $logger->log('entity_delete', [
+    $metadata = [
       'entity_type' => $entity->getEntityTypeId(),
       'bundle'      => $entity->bundle(),
       'id'          => $entity->id(),
       'label'       => $entity->label(),
-    ]);
+    ];
+    // Complete the evidence-required precommit when the predelete wrote one
+    // (d.o #3616539): this row is the delete's execution receipt, refusing
+    // explicitly instead of reporting an unproven success.
+    /** @var \Drupal\mcp_sentinel\Service\McpEvidenceGuard $evidence_guard */
+    $evidence_guard = \Drupal::service('mcp_sentinel.evidence_guard');
+    $correlation = $evidence_guard->takeCorrelation($entity);
+    if ($correlation !== NULL) {
+      $evidence_guard->receipt($correlation, 'entity_delete', $metadata);
+    }
+    else {
+      $logger->log('entity_delete', $metadata);
+    }
     \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.delete', $entity);
   }
 }
@@ -674,6 +785,26 @@ function mcp_sentinel_cron(): void {
   catch (\Throwable $e) {
     \Drupal::logger('mcp_sentinel')->error(
       'Anomaly detection failed during cron: @message',
+      ['@message' => $e->getMessage()]
+    );
+  }
+
+  // Retry uncertain evidence receipts (d.o #3616539). Each reconciled
+  // receipt leaves the ledger; whatever still cannot commit stays visible on
+  // the status report. Guarded so a chain that is still down never breaks
+  // cron — the ledger is the durable record of that state.
+  try {
+    $result = \Drupal::service('mcp_sentinel.evidence_guard')->reconcile();
+    if ($result['reconciled'] > 0 || $result['remaining'] > 0) {
+      \Drupal::logger('mcp_sentinel')->info(
+        'Evidence reconciliation: @done receipt(s) appended, @left still pending.',
+        ['@done' => $result['reconciled'], '@left' => $result['remaining']]
+      );
+    }
+  }
+  catch (\Throwable $e) {
+    \Drupal::logger('mcp_sentinel')->error(
+      'Evidence reconciliation failed during cron: @message',
       ['@message' => $e->getMessage()]
     );
   }

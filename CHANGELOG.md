@@ -6,6 +6,36 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Evidence-required action veto (#110 / d.o. #3616539).** Policy profiles
+  gain `evidence_required_actions` (empty by default — opt-in per profile):
+  a governed mutation in a listed action class (`entity_write`,
+  `entity_delete`) executes only when its evidence can commit to the *keyed*
+  audit chain. Before the mutation, the new `mcp_sentinel.evidence_guard`
+  refuses the action outright — with a rollback-surviving `evidence_veto` row
+  and a stable reason code — when the chain is absent
+  (`evidence_chain_missing`), auditing is disabled
+  (`evidence_audit_disabled`), or the configured signing key does not resolve
+  (`evidence_unkeyed`); no fallback to unkeyed integrity or best-effort
+  logging satisfies the class. When the action may proceed, an
+  `evidence_precommit` row — correlation id, principal, the validated OAuth
+  consumer client id, the caller's `X-Request-Id`, policy digest, decision,
+  and target — is appended inside the same transaction as the mutation, so
+  both become durable together or neither does: an evidence store outage or
+  append timeout aborts the save, a save that fails after its precommit
+  takes the precommit down with it (no orphaned evidence), and the signing
+  key is re-checked after the append so signing that degrades mid-request
+  aborts the transaction too. The
+  post-save `entity_save` / `entity_delete` row is the execution receipt,
+  completing the precommit's correlation id. A receipt that fails once the
+  mutation is already durable is recorded — exactly once per correlation id —
+  in a reconciliation ledger and refused to the caller as explicit
+  `evidence_uncertain`, never reported as a proven success; cron retries the
+  ledger, reconciled receipts are appended marked as such, and pending
+  entries raise a status-report error until they drain — visible even with
+  governance disabled. Update 10020 backfills the key (empty) on existing
+  profiles so exported configuration round-trips without drift.
+
 ## [2.7.0] - 2026-08-14
 
 ### Security
