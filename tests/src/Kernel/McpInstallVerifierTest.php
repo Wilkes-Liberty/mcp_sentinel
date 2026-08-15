@@ -11,6 +11,7 @@ use Drupal\mcp_sentinel\Value\McpInstallCheck;
 use Drupal\mcp_sentinel\Value\McpInstallOutcome;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -36,6 +37,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[RunTestsInSeparateProcesses]
 final class McpInstallVerifierTest extends KernelTestBase {
 
+  use ContentModerationTestTrait;
   use UserCreationTrait;
 
   /**
@@ -60,6 +62,8 @@ final class McpInstallVerifierTest extends KernelTestBase {
     'simple_oauth',
     'encrypt',
     'audit_chain',
+    'workflows',
+    'content_moderation',
     'mcp_sentinel',
   ];
 
@@ -75,7 +79,8 @@ final class McpInstallVerifierTest extends KernelTestBase {
     $this->installSchema('node', ['node_access']);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
-    $this->installConfig(['mcp_sentinel', 'node', 'user']);
+    $this->installEntitySchema('content_moderation_state');
+    $this->installConfig(['mcp_sentinel', 'node', 'user', 'content_moderation']);
   }
 
   /**
@@ -232,6 +237,38 @@ final class McpInstallVerifierTest extends KernelTestBase {
       ),
       'Shipped deny_publish must refuse persisting a publish: ' . implode(' ', $messages),
     );
+  }
+
+  /**
+   * A moderated bundle is probed via published moderation_state, not status.
+   */
+  public function testPublicationProbeFiresOnModeratedGoLive(): void {
+    $this->wireGovernedRole();
+    NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
+    $workflow = $this->createEditorialWorkflow();
+    $this->addEntityTypeAndBundleToWorkflow($workflow, 'node', 'article');
+
+    $result = $this->verifier()->verify(TRUE, NULL, 'article');
+    $publication = $result->check('probe_denied_publication');
+    $this->assertInstanceOf(McpInstallCheck::class, $publication);
+    $this->assertSame(
+      McpInstallOutcome::PASS,
+      $publication->status(),
+      implode(' ', $publication->findings()),
+    );
+  }
+
+  /**
+   * A silent log() does not attach some other operation's id.
+   */
+  public function testEvidenceIdOmittedWhenAuditIsOff(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->save();
+    $result = $this->verifier()->verify(FALSE);
+    $check = $result->check('tenant_neutrality');
+    $this->assertInstanceOf(McpInstallCheck::class, $check);
+    $this->assertSame([], $check->evidenceIds());
   }
 
   /**

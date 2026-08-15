@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\content_moderation\ContentModerationState;
+use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
@@ -149,6 +151,7 @@ final class McpInstallVerifier {
     private readonly McpJsonApiPageLimitSubscriber $pageLimitSubscriber,
     private readonly McpAuditLogger $auditLogger,
     private readonly Connection $database,
+    private readonly ?ModerationInformationInterface $moderationInformation = NULL,
   ) {}
 
   /**
@@ -223,13 +226,23 @@ final class McpInstallVerifier {
 
   /**
    * Appends an install_verify audit row and copies its id onto the check.
+   *
+   * Only an install_verify row written after this call is attached. A
+   * no-op log() (audit off) or a concurrent other-operation row is not
+   * claimed as this check's evidence.
    */
   private function record(McpInstallCheck $check): McpInstallCheck {
-    $this->auditLogger->log('install_verify', [
-      'check' => $check->id(),
-      'status' => $check->status(),
-    ]);
-    $id = $this->lastAuditId();
+    $before = $this->watermarkId();
+    try {
+      $this->auditLogger->log('install_verify', [
+        'check' => $check->id(),
+        'status' => $check->status(),
+      ]);
+    }
+    catch (\Throwable) {
+      return $check;
+    }
+    $id = $this->latestInstallVerifyId($before);
     if ($id === NULL) {
       return $check;
     }
@@ -244,16 +257,35 @@ final class McpInstallVerifier {
   }
 
   /**
-   * Most recent audit_chain row id, or NULL when none can be read.
+   * Highest audit-chain id before this check logs, any operation.
    */
-  private function lastAuditId(): ?string {
+  private function watermarkId(): ?string {
+    return $this->latestRowId(FALSE, NULL);
+  }
+
+  /**
+   * Newest install_verify row written after $after.
+   */
+  private function latestInstallVerifyId(?string $after): ?string {
+    return $this->latestRowId(TRUE, $after);
+  }
+
+  /**
+   * Newest matching audit-chain id.
+   */
+  private function latestRowId(bool $installVerifyOnly, ?string $after): ?string {
     try {
-      $id = $this->database->select('audit_chain_log', 'l')
+      $query = $this->database->select('audit_chain_log', 'l')
         ->fields('l', ['id'])
         ->orderBy('id', 'DESC')
-        ->range(0, 1)
-        ->execute()
-        ?->fetchField();
+        ->range(0, 1);
+      if ($installVerifyOnly) {
+        $query->condition('l.operation', 'install_verify');
+      }
+      if ($after !== NULL) {
+        $query->condition('l.id', $after, '>');
+      }
+      $id = $query->execute()?->fetchField();
     }
     catch (\Throwable) {
       return NULL;
@@ -575,6 +607,13 @@ final class McpInstallVerifier {
       return McpInstallCheck::skipped('probe_denied_publication', $title, 'no node type exists, so a publication attempt cannot be evaluated.');
     }
     $node = $this->unsavedNode($bundle, TRUE);
+    if (!$this->applyGoLive($node)) {
+      return McpInstallCheck::skipped(
+        'probe_denied_publication',
+        $title,
+        'the bundle is moderated but has no published state, so a go-live cannot be evaluated.',
+      );
+    }
     $violations = $this->asGovernedAgent(
       fn() => $node->validate(),
     );
@@ -591,7 +630,7 @@ final class McpInstallVerifier {
       ]);
     }
     return McpInstallCheck::fail('probe_denied_publication', $title, [
-      'validate() did not raise the deny-publish constraint for a new published node.',
+      'validate() did not raise the deny-publish constraint for a go-live.',
     ]);
   }
 
@@ -718,10 +757,16 @@ final class McpInstallVerifier {
   }
 
   /**
-   * Role-bound profile if any, otherwise the role-less default.
+   * Profile of the same account the write probes validate as.
+   *
+   * Uses that account's roles, not the union of every governed role, so
+   * access and validate() cannot disagree on which policy applies.
    */
   private function productionProfile(): ?McpPolicyProfileInterface {
-    $roles = $this->policyResolver->getGovernedRoles();
+    $account = $this->firstGovernedAccount();
+    $roles = $account !== NULL
+      ? $account->getRoles()
+      : $this->policyResolver->getGovernedRoles();
     return $this->policyResolver->resolveForRoles($roles);
   }
 
@@ -772,6 +817,35 @@ final class McpInstallVerifier {
       $node->setUnpublished();
     }
     return $node;
+  }
+
+  /**
+   * Puts the unsaved node into a go-live shape the deny-publish gate sees.
+   *
+   * Unmoderated types publish via status. Moderated types publish via
+   * moderation_state; status alone stays at the workflow default (usually
+   * draft) and the constraint never fires.
+   *
+   * @return bool
+   *   TRUE when a go-live could be represented on this entity.
+   */
+  private function applyGoLive(Node $node): bool {
+    $node->setPublished();
+    if ($this->moderationInformation === NULL
+      || !$this->moderationInformation->isModeratedEntity($node)) {
+      return TRUE;
+    }
+    $workflow = $this->moderationInformation->getWorkflowForEntity($node);
+    if ($workflow === NULL) {
+      return FALSE;
+    }
+    foreach ($workflow->getTypePlugin()->getStates() as $state) {
+      if ($state instanceof ContentModerationState && $state->isPublishedState()) {
+        $node->set('moderation_state', $state->id());
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
   /**

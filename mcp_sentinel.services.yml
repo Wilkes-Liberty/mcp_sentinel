@@ -150,6 +150,8 @@ services:
       - '@mcp_sentinel.jsonapi_page_limit_subscriber'
       - '@mcp_sentinel.audit_logger'
       - '@database'
+      # Optional: NULL when Content Moderation is not installed.
+      - '@?content_moderation.moderation_information'
 
   mcp_sentinel.governance_readiness:
     class: Drupal\mcp_sentinel\Service\McpGovernanceReadiness
