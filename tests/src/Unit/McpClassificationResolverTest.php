@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\Core\Site\Settings;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -34,9 +37,9 @@ final class McpClassificationResolverTest extends UnitTestCase {
    * @param array $settings
    *   Values for mcp_sentinel.settings.
    */
-  private function resolver(array $settings): McpClassificationResolver {
+  private function resolver(array $settings, ?RequestStack $requestStack = NULL): McpClassificationResolver {
     $configFactory = $this->getConfigFactoryStub(['mcp_sentinel.settings' => $settings]);
-    $requestStack = new RequestStack();
+    $requestStack ??= new RequestStack();
     return new McpClassificationResolver(
       $configFactory,
       $requestStack,
@@ -179,6 +182,133 @@ final class McpClassificationResolverTest extends UnitTestCase {
     ]);
     $this->assertSame('public', $resolver->labelForEntityType('node'));
     $this->assertSame('internal', $resolver->labelForEntityType('node', 'memo'));
+  }
+
+  /**
+   * A profile mock carrying the given per-surface ceilings.
+   *
+   * @param array<string, string> $ceilings
+   *   Surface value => label.
+   */
+  private function profile(array $ceilings): McpPolicyProfileInterface {
+    $profile = $this->createMock(McpPolicyProfileInterface::class);
+    $profile->method('id')->willReturn('p');
+    $profile->method('getEgressCeilings')->willReturn($ceilings);
+    $profile->method('getEgressCeiling')->willReturnCallback(
+      static fn (McpGovernedSurface $s): ?string => $ceilings[$s->value] ?? NULL,
+    );
+    return $profile;
+  }
+
+  /**
+   * A request stack holding one request for the given path.
+   */
+  private static function stack(string $path, array $headers = [], array $attributes = []): RequestStack {
+    $request = Request::create($path);
+    foreach ($headers as $name => $value) {
+      $request->headers->set($name, $value);
+    }
+    foreach ($attributes as $name => $value) {
+      $request->attributes->set($name, $value);
+    }
+    $stack = new RequestStack();
+    $stack->push($request);
+    return $stack;
+  }
+
+  /**
+   * The current surface comes from the request path for the two HTTP APIs.
+   */
+  public function testCurrentSurfaceFromPath(): void {
+    $this->assertSame(McpGovernedSurface::JsonApi, $this->resolver([], self::stack('/en/jsonapi/node/article'))->currentSurface());
+    $this->assertSame(McpGovernedSurface::Graphql, $this->resolver([], self::stack('/graphql'))->currentSurface());
+    $this->assertNull($this->resolver([], self::stack('/node/1'))->currentSurface());
+    $this->assertNull($this->resolver([])->currentSurface(), 'No request, no surface.');
+  }
+
+  /**
+   * Tool, context and drush call sites name their surface explicitly.
+   */
+  public function testCurrentSurfaceExplicit(): void {
+    $tool = $this->resolver([], self::stack('/_mcp', [], [McpClassificationResolver::REQUEST_ATTRIBUTE_SURFACE => 'tool']));
+    $this->assertSame(McpGovernedSurface::Tool, $tool->currentSurface());
+
+    $context = $this->resolver([], self::stack('/drupal-mcp/context', [], ['_route' => 'mcp_sentinel.context']));
+    $this->assertSame(McpGovernedSurface::Context, $context->currentSurface());
+
+    // The CLI override wins over whatever request the stack holds.
+    $drush = $this->resolver([], self::stack('/jsonapi/node/article'));
+    $drush->setSurface(McpGovernedSurface::Drush);
+    $this->assertSame(McpGovernedSurface::Drush, $drush->currentSurface());
+    $drush->setSurface(NULL);
+    $this->assertSame(McpGovernedSurface::JsonApi, $drush->currentSurface());
+  }
+
+  /**
+   * The profile ceiling is per surface; an unknown surface takes the strictest.
+   */
+  public function testProfileCeilingPerSurface(): void {
+    $resolver = $this->resolver([]);
+    $profile = $this->profile(['jsonapi' => 'internal', 'tool' => 'restricted']);
+    $this->assertSame('internal', $resolver->effectiveCeiling($profile, McpGovernedSurface::JsonApi));
+    $this->assertSame('restricted', $resolver->effectiveCeiling($profile, McpGovernedSurface::Tool));
+    $this->assertNull($resolver->effectiveCeiling($profile, McpGovernedSurface::Graphql), 'No key, no ceiling.');
+    $this->assertSame('internal', $resolver->effectiveCeiling($profile, NULL), 'Unknown surface: the strictest configured ceiling.');
+    $this->assertNull($resolver->effectiveCeiling($this->profile([]), NULL), 'No ceilings anywhere: nothing to apply.');
+    // A ceiling naming an unknown label is the lowest label.
+    $this->assertSame('public', $resolver->effectiveCeiling($this->profile(['jsonapi' => 'bogus']), McpGovernedSurface::JsonApi));
+  }
+
+  /**
+   * A northbound declared ceiling can only lower the effective ceiling.
+   */
+  public function testDeclaredCeilingNarrowsOnly(): void {
+    $profile = $this->profile(['jsonapi' => 'restricted']);
+    $surface = McpGovernedSurface::JsonApi;
+
+    $below = $this->resolver([], self::stack('/jsonapi/node/article', ['X-MCP-Declared-Ceiling' => 'internal']));
+    $this->assertSame('internal', $below->effectiveCeiling($profile, $surface), 'Declaring below the profile ceiling lowers it.');
+    $this->assertSame('internal', $below->declaredCeiling());
+
+    $above = $this->resolver([], self::stack('/jsonapi/node/article', ['X-MCP-Declared-Ceiling' => 'restricted']));
+    $this->assertSame('internal', $above->effectiveCeiling($this->profile(['jsonapi' => 'internal']), $surface), 'Declaring above the profile ceiling changes nothing.');
+
+    $absent = $this->resolver([], self::stack('/jsonapi/node/article'));
+    $this->assertSame('restricted', $absent->effectiveCeiling($profile, $surface));
+    $this->assertNull($absent->declaredCeiling());
+
+    $none = $this->resolver([], self::stack('/jsonapi/node/article', ['X-MCP-Declared-Ceiling' => 'internal']));
+    $this->assertSame('internal', $none->effectiveCeiling($this->profile([]), $surface), 'A declaration narrows even a profile without a ceiling.');
+
+    // Unknown or malformed declarations fail closed to the lowest label.
+    $bogus = $this->resolver([], self::stack('/jsonapi/node/article', ['X-MCP-Declared-Ceiling' => 'top secret!']));
+    $this->assertSame('public', $bogus->effectiveCeiling($profile, $surface));
+    $long = $this->resolver([], self::stack('/jsonapi/node/article', ['X-MCP-Declared-Ceiling' => str_repeat('a', 200)]));
+    $this->assertSame('public', $long->effectiveCeiling($profile, $surface));
+  }
+
+  /**
+   * The declared destination is evidence-only and bounded.
+   */
+  public function testDeclaredDestinationIsBounded(): void {
+    $this->assertNull($this->resolver([], self::stack('/jsonapi/x'))->declaredDestination());
+    $ok = $this->resolver([], self::stack('/jsonapi/x', ['X-MCP-Declared-Destination' => 'tenant-a:crm.export']));
+    $this->assertSame('tenant-a:crm.export', $ok->declaredDestination());
+    $bad = $this->resolver([], self::stack('/jsonapi/x', ['X-MCP-Declared-Destination' => "evil\n" . str_repeat('x', 300)]));
+    $this->assertNull($bad->declaredDestination(), 'A malformed declaration is not recorded verbatim.');
+  }
+
+  /**
+   * denies() composes the label lookup with the effective ceiling.
+   */
+  public function testDenies(): void {
+    $resolver = $this->resolver(['classification_map' => [self::row('node', 'restricted', 'memo')]], self::stack('/jsonapi/node/memo'));
+    $internal = $this->profile(['jsonapi' => 'internal']);
+    $restricted = $this->profile(['jsonapi' => 'restricted']);
+    $this->assertTrue($resolver->denies($internal, McpGovernedSurface::JsonApi, 'restricted'));
+    $this->assertFalse($resolver->denies($restricted, McpGovernedSurface::JsonApi, 'restricted'));
+    $this->assertFalse($resolver->denies($internal, McpGovernedSurface::JsonApi, 'public'));
+    $this->assertFalse($resolver->denies($this->profile([]), McpGovernedSurface::JsonApi, 'restricted'), 'Ships dark: no ceiling, no denial.');
   }
 
 }

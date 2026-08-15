@@ -7,6 +7,9 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Site\Settings;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -40,6 +43,48 @@ final class McpClassificationResolver {
    * The stable structured code carried by every classification refusal.
    */
   public const DENIAL_CODE = 'classification_egress_denied';
+
+  /**
+   * Request attribute through which a call site names its surface.
+   *
+   * Tool execution has no path of its own (the MCP transport is another
+   * module's route), so the governed Tool base stamps the request when it
+   * gates access; the same request object is what the Tool later executes
+   * under. The context controller is identified by its route name.
+   */
+  public const REQUEST_ATTRIBUTE_SURFACE = '_mcp_sentinel_surface';
+
+  /**
+   * Northbound declared ceiling — the connector's narrow-only context.
+   *
+   * The wire contract for drupal-mcp-connector #179: a governed request may
+   * declare a ceiling; the effective ceiling is min(profile, declared).
+   * Declaring higher than the profile permits changes nothing.
+   */
+  public const HEADER_DECLARED_CEILING = 'X-MCP-Declared-Ceiling';
+
+  /**
+   * Northbound declared destination — recorded in evidence, never enforced.
+   *
+   * Attested destinations are the hosted residual (#177/#178); until then the
+   * declaration is a bounded identifier the source writes into its evidence.
+   */
+  public const HEADER_DECLARED_DESTINATION = 'X-MCP-Declared-Destination';
+
+  /**
+   * Bound on caller-supplied declaration values before use or evidence.
+   */
+  private const DECLARATION_MAX_LENGTH = 128;
+
+  /**
+   * Characters a declaration may carry; anything else is malformed.
+   */
+  private const DECLARATION_PATTERN = '/^[A-Za-z0-9._:-]+$/';
+
+  /**
+   * An explicit surface set by a call site without a request (drush).
+   */
+  private ?McpGovernedSurface $explicitSurface = NULL;
 
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -189,6 +234,152 @@ final class McpClassificationResolver {
       }
     }
     return FALSE;
+  }
+
+  /**
+   * Names the surface explicitly for call sites that have no request.
+   *
+   * The governed drush SQL command runs on the CLI, where there is nothing to
+   * read a surface from; it sets Drush here before checking a statement.
+   * NULL clears the override so request-derived detection resumes.
+   */
+  public function setSurface(?McpGovernedSurface $surface): void {
+    $this->explicitSurface = $surface;
+  }
+
+  /**
+   * The governed surface the current request is on, or NULL when unknown.
+   *
+   * Resolution order: an explicit CLI override; the request attribute stamped
+   * by a Tool call site; the context route; the two path-addressable HTTP
+   * APIs. NULL means a governed principal reached a read outside every
+   * governed surface — the ceiling logic then applies the strictest configured
+   * ceiling rather than none (deny more, never less).
+   */
+  public function currentSurface(): ?McpGovernedSurface {
+    if ($this->explicitSurface !== NULL) {
+      return $this->explicitSurface;
+    }
+    $request = $this->requestStack->getCurrentRequest();
+    if ($request === NULL) {
+      return NULL;
+    }
+    $stamped = $request->attributes->get(self::REQUEST_ATTRIBUTE_SURFACE);
+    if (is_string($stamped)) {
+      $surface = McpGovernedSurface::tryFrom($stamped);
+      if ($surface !== NULL) {
+        return $surface;
+      }
+    }
+    if ($request->attributes->get('_route') === 'mcp_sentinel.context') {
+      return McpGovernedSurface::Context;
+    }
+    return McpGovernedSurface::fromPath($request->getPathInfo());
+  }
+
+  /**
+   * The ceiling in force for a profile on a surface, after narrowing.
+   *
+   * min(profile ceiling, declared ceiling). A profile ceiling naming an
+   * unknown label is the lowest label; an unknown surface takes the strictest
+   * ceiling the profile configures anywhere; a profile with no ceilings and no
+   * declaration has none — that is how the mechanism ships dark.
+   *
+   * @return string|null
+   *   The effective ceiling label, or NULL for no ceiling.
+   */
+  public function effectiveCeiling(McpPolicyProfileInterface $profile, ?McpGovernedSurface $surface): ?string {
+    $ceiling = $this->profileCeiling($profile, $surface);
+    $declared = $this->declaredCeiling();
+    if ($declared === NULL) {
+      return $ceiling;
+    }
+    if ($ceiling === NULL) {
+      return $declared;
+    }
+    return ($this->rank($declared) ?? 0) < ($this->rank($ceiling) ?? 0) ? $declared : $ceiling;
+  }
+
+  /**
+   * The northbound declared ceiling, normalized, or NULL when none was sent.
+   *
+   * A declaration outside the vocabulary — or malformed — is the lowest label:
+   * the caller asked to narrow and cannot be granted more than the floor.
+   */
+  public function declaredCeiling(): ?string {
+    $raw = $this->rawDeclaration(self::HEADER_DECLARED_CEILING);
+    if ($raw === NULL) {
+      return NULL;
+    }
+    return $this->isWellFormedDeclaration($raw) && $this->rank($raw) !== NULL
+      ? $raw
+      : $this->lowestLabel();
+  }
+
+  /**
+   * The northbound declared destination, bounded, or NULL when none/malformed.
+   *
+   * Recorded in evidence only. A malformed value is dropped rather than
+   * written into the audit chain verbatim.
+   */
+  public function declaredDestination(): ?string {
+    $raw = $this->rawDeclaration(self::HEADER_DECLARED_DESTINATION);
+    return $raw !== NULL && $this->isWellFormedDeclaration($raw) ? $raw : NULL;
+  }
+
+  /**
+   * Whether data carrying $label may not leave through (profile, surface).
+   */
+  public function denies(McpPolicyProfileInterface $profile, ?McpGovernedSurface $surface, string $label): bool {
+    return $this->exceeds($label, $this->effectiveCeiling($profile, $surface));
+  }
+
+  /**
+   * The profile's own ceiling for a surface (strictest when surface unknown).
+   */
+  private function profileCeiling(McpPolicyProfileInterface $profile, ?McpGovernedSurface $surface): ?string {
+    if ($surface !== NULL) {
+      $ceiling = $profile->getEgressCeiling($surface);
+      return $ceiling === NULL ? NULL : $this->normalizeCeiling($ceiling);
+    }
+    $strictest = NULL;
+    $strictestRank = PHP_INT_MAX;
+    foreach ($profile->getEgressCeilings() as $ceiling) {
+      $normalized = $this->normalizeCeiling($ceiling);
+      $rank = $this->rank($normalized) ?? 0;
+      if ($rank < $strictestRank) {
+        $strictestRank = $rank;
+        $strictest = $normalized;
+      }
+    }
+    return $strictest;
+  }
+
+  /**
+   * A configured ceiling outside the vocabulary is the lowest label.
+   */
+  private function normalizeCeiling(string $ceiling): string {
+    return $this->rank($ceiling) === NULL ? $this->lowestLabel() : $ceiling;
+  }
+
+  /**
+   * The trimmed value of one declaration header, or NULL when absent/empty.
+   */
+  private function rawDeclaration(string $header): ?string {
+    $request = $this->requestStack->getCurrentRequest();
+    if (!$request instanceof Request || !$request->headers->has($header)) {
+      return NULL;
+    }
+    $value = trim((string) $request->headers->get($header, ''));
+    return $value === '' ? NULL : $value;
+  }
+
+  /**
+   * Whether a caller-supplied declaration is within the accepted bound.
+   */
+  private function isWellFormedDeclaration(string $value): bool {
+    return strlen($value) <= self::DECLARATION_MAX_LENGTH
+      && preg_match(self::DECLARATION_PATTERN, $value) === 1;
   }
 
   /**
