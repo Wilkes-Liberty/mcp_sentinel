@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-08-15
+
 ### Added
 - **Classification labels and per-surface egress ceilings (#109 / d.o.
   #3616540, part 2).** The source-side half of P4.8: which data classes may

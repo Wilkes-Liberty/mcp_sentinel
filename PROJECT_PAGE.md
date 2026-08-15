@@ -85,6 +85,14 @@ attributed to the authenticated account.
   unbounded export. Denials use stable reason codes and leave bounded,
   non-sensitive audit evidence. Blocks mass-read and accidental data
   exfiltration.
+- **Classification labels and egress ceilings** — label data by configuration
+  (an ordered site vocabulary, assigned by entity type, bundle or field) and
+  give each policy profile a ceiling per governed surface: Tool, context,
+  JSON:API, GraphQL and the governed drush SQL command. Data above a surface's
+  ceiling is refused or redacted before it leaves, with the stable code
+  `classification_egress_denied` and bounded evidence that names labels, never
+  values. A northbound declaration can only narrow a ceiling, never widen it.
+  Ships inert: label nothing and set no ceilings and no read decision changes.
 - **Evidence-required actions** — mark action classes on a profile whose
   governed mutations execute only when their evidence can commit to the keyed
   audit chain: the precommit is appended in the same transaction as the
