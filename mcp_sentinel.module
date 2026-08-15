@@ -12,6 +12,7 @@ use Drupal\mcp_sentinel\Controller\McpBannerController;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
@@ -651,11 +652,37 @@ function mcp_sentinel_entity_field_access(
   // agent response is never served to a cookie-session request, and vice versa.
   $redacted = $profile !== NULL
     && in_array($field_definition->getName(), $profile->getRedactedFields(), TRUE);
-  $result = $redacted
-    ? AccessResult::forbidden('Field redacted by MCP Sentinel.')
-    : AccessResult::neutral();
-  return $result
+  if ($redacted) {
+    return AccessResult::forbidden('Field redacted by MCP Sentinel.')
+      ->addCacheContexts($contexts)
+      ->addCacheTags($tags);
+  }
+  $result = AccessResult::neutral()->addCacheContexts($contexts)->addCacheTags($tags);
+  if ($profile === NULL) {
+    return $result;
+  }
+
+  // Classification egress ceiling (d.o #3616540 part 2): an over-ceiling
+  // field behaves exactly like a redacted one on this seam. Evaluated after
+  // the hard redaction so labels only ever deny more.
+  /** @var \Drupal\mcp_sentinel\Service\McpClassificationResolver $classification */
+  $classification = \Drupal::service('mcp_sentinel.classification');
+  if (!$classification->assignsAboveLowest()) {
+    return $result;
+  }
+  $entity_type_id = $field_definition->getTargetEntityTypeId();
+  $bundle = $items?->getEntity()->bundle() ?? $field_definition->getTargetBundle();
+  $surface = $classification->currentSurface();
+  $ceiling = $classification->effectiveCeiling($profile, $surface);
+  $label = $classification->labelForField($entity_type_id, $bundle, $field_definition->getName());
+  $result->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
+  if ($ceiling === NULL || !$classification->exceeds($label, $ceiling)) {
+    return $result;
+  }
+  $classification->evidence($profile, $surface, $entity_type_id, (string) $bundle, $field_definition->getName(), $label, $ceiling);
+  return AccessResult::forbidden(McpClassificationResolver::DENIAL_CODE)
     ->addCacheContexts($contexts)
+    ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS)
     ->addCacheTags($tags);
 }
 

@@ -12,6 +12,7 @@ use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -19,6 +20,7 @@ use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\CoversFunction;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Kernel tests for hook_entity_field_access redaction (G15).
@@ -319,6 +321,66 @@ final class McpFieldAccessRedactionTest extends KernelTestBase {
       $result,
       'Ungoverned account must get AccessResultNeutral for any field.'
     );
+  }
+
+  /**
+   * Puts the profile under a ceiling and labels the title field.
+   *
+   * @param string $ceiling
+   *   The JSON:API ceiling for redact_profile.
+   */
+  private function classifyTitle(string $ceiling): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'page', 'field' => 'title', 'label' => 'restricted'],
+      ])
+      ->save();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.redact_profile')
+      ->set('egress_ceilings', ['jsonapi' => $ceiling])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+    $stack = $this->container->get('request_stack');
+    $request = Request::create('/jsonapi/node/page');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+  }
+
+  /**
+   * An over-ceiling field behaves exactly like a redacted field (view denied).
+   */
+  public function testOverCeilingFieldIsForbiddenLikeRedaction(): void {
+    $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_agent']]);
+    \Drupal::currentUser()->setAccount($account);
+
+    $this->classifyTitle('internal');
+    $result = $this->callHook('view', 'title', $account);
+    $this->assertInstanceOf(AccessResultForbidden::class, $result);
+    $this->assertSame(McpClassificationResolver::DENIAL_CODE, (string) $result->getReason());
+    $this->assertContains('route', $result->getCacheContexts());
+    $this->assertContains('headers:' . McpClassificationResolver::HEADER_DECLARED_CEILING, $result->getCacheContexts());
+    // The hard redaction of field_secret is untouched by classification.
+    $this->assertInstanceOf(AccessResultForbidden::class, $this->callHook('view', 'field_secret', $account));
+
+    // At ceiling the same field reads unchanged.
+    $this->classifyTitle('restricted');
+    $result = $this->callHook('view', 'title', $account);
+    $this->assertInstanceOf(AccessResultNeutral::class, $result);
+    // Edit is not egress: the ceiling never gates it.
+    $this->classifyTitle('internal');
+    $this->assertInstanceOf(AccessResultNeutral::class, $this->callHook('edit', 'title', $account));
+  }
+
+  /**
+   * An ungoverned account is never subject to a ceiling.
+   */
+  public function testUngovernedAccountUnaffectedByCeiling(): void {
+    $account = $this->createUser();
+    \Drupal::currentUser()->setAccount($account);
+    $this->classifyTitle('internal');
+    $this->assertInstanceOf(AccessResultNeutral::class, $this->callHook('view', 'title', $account));
   }
 
 }

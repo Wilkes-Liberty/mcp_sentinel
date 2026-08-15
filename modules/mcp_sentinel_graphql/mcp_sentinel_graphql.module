@@ -12,10 +12,14 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Url;
 use Drupal\graphql\GraphQL\Execution\FieldContext;
 use Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterface;
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 
 /**
  * Implements hook_help().
@@ -71,8 +75,14 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
     return;
   }
 
-  // Pass 1: field-name redaction (existing behaviour).
-  if ($redacted && in_array($plugin->getFieldName(), $redacted, TRUE)) {
+  // Pass 1: field-name redaction (existing behaviour), then the classification
+  // egress ceiling (d.o #3616540 part 2) — an over-ceiling field takes the
+  // same placeholder, so labels only ever deny more.
+  $redact = $redacted && in_array($plugin->getFieldName(), $redacted, TRUE);
+  if (!$redact) {
+    $redact = _mcp_sentinel_graphql_field_over_ceiling($entity, $plugin, $profile, $context);
+  }
+  if ($redact) {
     if ($results === []) {
       $results = ['[REDACTED]'];
       return;
@@ -113,4 +123,54 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
     // to a non-truncated (different-cap) profile request.
     $context->addCacheContexts(['user.roles', 'oauth2_scopes']);
   }
+}
+
+/**
+ * Whether a GraphQL field's classification exceeds the profile's ceiling.
+ *
+ * The entity type and bundle come from the entity being resolved, or from the
+ * plugin's field definition when the resolver passed none; without either
+ * there is nothing to classify. Ceiling-dependent results vary by route and by
+ * the caller's declared ceiling, and graphql_compose does not bubble field
+ * access cacheability itself, so the contexts are added here.
+ *
+ * @param mixed $entity
+ *   The entity being resolved, when the field plugin passes one.
+ * @param \Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterface $plugin
+ *   The field plugin.
+ * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+ *   The resolved policy profile.
+ * @param \Drupal\graphql\GraphQL\Execution\FieldContext $context
+ *   The field context receiving cache contexts.
+ *
+ * @return bool
+ *   TRUE when the field must be replaced with the redaction placeholder.
+ */
+function _mcp_sentinel_graphql_field_over_ceiling(mixed $entity, GraphQLComposeFieldTypeInterface $plugin, McpPolicyProfileInterface $profile, FieldContext $context): bool {
+  /** @var \Drupal\mcp_sentinel\Service\McpClassificationResolver $classification */
+  $classification = \Drupal::service('mcp_sentinel.classification');
+  if (!$classification->assignsAboveLowest()) {
+    return FALSE;
+  }
+  if ($entity instanceof EntityInterface) {
+    $entity_type_id = $entity->getEntityTypeId();
+    $bundle = $entity->bundle();
+  }
+  else {
+    $definition = $plugin->getFieldDefinition();
+    if ($definition === NULL) {
+      return FALSE;
+    }
+    $entity_type_id = $definition->getTargetEntityTypeId();
+    $bundle = $definition->getTargetBundle();
+  }
+  $context->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
+  $surface = $classification->currentSurface() ?? McpGovernedSurface::Graphql;
+  $ceiling = $classification->effectiveCeiling($profile, $surface);
+  $label = $classification->labelForField($entity_type_id, $bundle, $plugin->getFieldName());
+  if ($ceiling === NULL || !$classification->exceeds($label, $ceiling)) {
+    return FALSE;
+  }
+  $classification->evidence($profile, $surface, $entity_type_id, (string) $bundle, $plugin->getFieldName(), $label, $ceiling);
+  return TRUE;
 }
