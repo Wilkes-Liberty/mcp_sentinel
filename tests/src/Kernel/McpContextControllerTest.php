@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
+use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -121,6 +122,16 @@ final class McpContextControllerTest extends KernelTestBase {
 
     $controller = McpContextController::create($this->container);
     $this->assertSame(200, $controller->context()->getStatusCode());
+
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $uid = (int) $this->container->get('current_user')->id();
+    /** @var \Drupal\mcp_sentinel\Service\McpRateLimiter $limiter */
+    $limiter = $this->container->get('mcp_sentinel.rate_limiter');
+    $this->assertFalse(
+      $limiter->check($profile, $uid, NULL),
+      'Context must consume the profile-wide flood key shared with JSON:API and GraphQL.',
+    );
 
     $second = $controller->context();
     $this->assertSame(429, $second->getStatusCode());

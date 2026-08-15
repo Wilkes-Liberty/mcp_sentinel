@@ -105,12 +105,16 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       return;
     }
 
-    // GraphQL reads travel over POST; the verb cannot select the scope there
-    // (#3616540). The JSON:API surface keeps the verb-derived scope.
+    // GraphQL travels over POST for queries and mutations; the HTTP seam
+    // cannot see the operation type. Accept either GraphQL-relevant scope
+    // so write-only mutation agents are not refused here and read-only
+    // query agents are still measured. Operation scope is applied by
+    // GraphqlGovernanceSubscriber. JSON:API keeps the verb-derived scope.
     $requiredScope = $surface === McpGovernedSurface::Graphql
-      || in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
-      ? 'mcp_read'
-      : 'mcp_write';
+      ? ['mcp_read', 'mcp_write']
+      : (in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
+        ? 'mcp_read'
+        : 'mcp_write');
     $readiness = $this->readiness->evaluate(
       $surface,
       $this->currentUser,

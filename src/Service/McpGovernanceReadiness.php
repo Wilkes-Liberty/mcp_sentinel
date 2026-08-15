@@ -132,11 +132,24 @@ final class McpGovernanceReadiness {
    * Ordinary JSON:API/GraphQL traffic remains neutral. Dedicated Tool/context
    * paths always require either a designated OAuth principal or the explicit
    * development role fallback.
+   *
+   * $requiredScope is one exact scope, or a list of acceptable scopes when
+   * the HTTP seam cannot see the GraphQL operation type.
+   *
+   * @param \Drupal\mcp_sentinel\Enum\McpGovernedSurface $surface
+   *   The governed surface being evaluated.
+   * @param \Drupal\Core\Session\AccountInterface $account
+   *   The requesting account.
+   * @param string|string[] $requiredScope
+   *   Exact required OAuth scope, or any-of scopes for the GraphQL HTTP seam.
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpGovernanceReadinessResult
+   *   The readiness decision.
    */
   public function evaluate(
     McpGovernedSurface $surface,
     AccountInterface $account,
-    string $requiredScope,
+    string|array $requiredScope,
   ): McpGovernanceReadinessResult {
     $settings = $this->configFactory->get('mcp_sentinel.settings');
     $oauthRequest = $this->oauthContext->isOauthRequest();
@@ -174,7 +187,15 @@ final class McpGovernanceReadiness {
     if (!$designated) {
       return $this->denied(McpGovernanceReadinessReason::RequestConsumerNotDesignated);
     }
-    if (!$this->oauthContext->hasScope($requiredScope)) {
+    $requiredScopes = is_array($requiredScope) ? $requiredScope : [$requiredScope];
+    $hasRequiredScope = FALSE;
+    foreach ($requiredScopes as $scope) {
+      if ($this->oauthContext->hasScope($scope)) {
+        $hasRequiredScope = TRUE;
+        break;
+      }
+    }
+    if (!$hasRequiredScope) {
       return $this->denied(McpGovernanceReadinessReason::RequiredScopeMissing);
     }
     $profile = $this->policyResolver->resolveForRoles($account->getRoles());

@@ -97,7 +97,8 @@ class McpContextController extends ControllerBase {
     // other read path.
     if ($profile !== NULL) {
       $uid = (int) $this->currentUser()->id();
-      if (!$this->rateLimiter->check($profile, $uid, 'context')) {
+      // NULL is the profile-wide flood key shared with JSON:API and GraphQL.
+      if (!$this->rateLimiter->check($profile, $uid, NULL)) {
         $this->auditLogger->log('read_budget_denied', [
           'surface' => 'context',
           'budget' => 'requests',
@@ -109,7 +110,7 @@ class McpContextController extends ControllerBase {
           ['Cache-Control' => 'no-store', 'Retry-After' => '60'],
         );
       }
-      $this->rateLimiter->register($profile, $uid, 'context');
+      $this->rateLimiter->register($profile, $uid, NULL);
     }
 
     return new JsonResponse([

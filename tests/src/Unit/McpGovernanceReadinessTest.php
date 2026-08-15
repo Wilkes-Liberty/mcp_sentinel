@@ -378,6 +378,24 @@ final class McpGovernanceReadinessTest extends UnitTestCase {
   }
 
   /**
+   * The GraphQL HTTP seam accepts a write-only token (mcp_write, no mcp_read).
+   */
+  public function testGraphqlHttpSeamAcceptsWriteOnlyScope(): void {
+    $fixture = $this->secureFixture();
+    $fixture['oauth']['scopes'] = ['mcp_write'];
+    $account = $this->createMock(UserInterface::class);
+    $account->method('getRoles')->willReturn(['mcp_content_editor']);
+
+    $result = $this->createReadiness($fixture)->evaluate(
+      McpGovernedSurface::Graphql,
+      $account,
+      ['mcp_read', 'mcp_write'],
+    );
+
+    $this->assertTrue($result->isReady());
+  }
+
+  /**
    * Returns a complete production-ready fixture.
    *
    * @return array<string, mixed>

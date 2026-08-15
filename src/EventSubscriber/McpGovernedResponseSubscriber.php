@@ -69,14 +69,16 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
       return;
     }
 
-    // GraphQL reads travel over POST, so scope cannot be derived from the
-    // HTTP verb there — a read-only principal's query would evaluate as a
-    // write, fail readiness, and skip measurement entirely. Egress
-    // measurement is a read-class control on every surface it covers.
+    // GraphQL travels over POST for queries and mutations; the HTTP seam
+    // cannot see the operation type. Accept either GraphQL-relevant scope
+    // so write-only mutation responses are still measured and read-only
+    // query agents are not skipped. Operation scope is applied by
+    // GraphqlGovernanceSubscriber. JSON:API keeps the verb-derived scope.
     $requiredScope = $surface === McpGovernedSurface::Graphql
-      || in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
-      ? 'mcp_read'
-      : 'mcp_write';
+      ? ['mcp_read', 'mcp_write']
+      : (in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)
+        ? 'mcp_read'
+        : 'mcp_write');
     $readiness = $this->readiness->evaluate($surface, $this->currentUser, $requiredScope);
     if (!$readiness->isApplicable() || !$readiness->isReady()) {
       // Ungoverned traffic is out of scope; a not-ready governed request was

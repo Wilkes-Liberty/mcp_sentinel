@@ -26,10 +26,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   override: it restores `0 = unlimited` and raises a permanent status-report
   warning, so a secure-install verification cannot pass with the override
   active. Governed GraphQL requests consume the same per-principal request
-  budget, and the response measurement evaluates the read scope on POST —
-  GraphQL reads travel over POST, so verb-derived scope would have skipped
-  them. The `/drupal-mcp/context` schema document consumes the request
-  budget too. Flood accounting pins the uid as the flood identifier: the
+  budget, and both HTTP seams admit a GraphQL request under either governed
+  scope (`mcp_read` or `mcp_write`) — the verb cannot select the scope on a
+  shared POST endpoint, and requiring one fixed scope would refuse
+  write-only tokens before the mutation gate or skip measuring their
+  responses. The `/drupal-mcp/context` schema document consumes the same
+  shared profile-wide request bucket. Flood accounting pins the uid as the flood identifier: the
   default identifier is the client IP, which would have let IP rotation
   multiply a principal's quota. Part 2 of d.o. #3616540 (classification-aware
   egress destinations) is tracked on the same issue.
