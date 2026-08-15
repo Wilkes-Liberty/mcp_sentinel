@@ -210,6 +210,33 @@ function mcp_sentinel_requirements(string $phase): array {
     ];
   }
 
+  // Classification without ceilings (d.o #3616540 part 2): the site has
+  // labelled data above the floor, but a production-oriented profile — one
+  // bound to agent roles; the role-less default is a fallback, not a
+  // production policy — sets no egress ceiling, so nothing enforces those
+  // labels for it. Not silent nothing: an advisory warning until ceilings
+  // are set (or the labels removed). The mechanism itself ships dark, so
+  // this row is the only place the gap is visible.
+  if (\Drupal::hasService('mcp_sentinel.classification')
+    && \Drupal::service('mcp_sentinel.classification')->assignsAboveLowest()) {
+    $unceilinged = [];
+    /** @var \Drupal\mcp_sentinel\McpPolicyProfileInterface[] $profiles */
+    $profiles = \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->loadMultiple();
+    foreach ($profiles as $profile) {
+      if ($profile->status() && $profile->getRoles() !== [] && $profile->getEgressCeilings() === []) {
+        $unceilinged[] = $profile->id();
+      }
+    }
+    if ($unceilinged !== []) {
+      $requirements['mcp_sentinel_classification_ceilings'] = [
+        'title' => t('MCP Sentinel: classified data without egress ceilings'),
+        'value' => t('Profile(s) without ceilings: @profiles', ['@profiles' => implode(', ', $unceilinged)]),
+        'severity' => REQUIREMENT_WARNING,
+        'description' => t('The classification map labels data above the lowest label, but the listed role-bound policy profile(s) set no egress ceilings, so those labels are not enforced for the principals they govern. Set per-surface ceilings (egress_ceilings) on each profile, or remove the labels if classification is not intended here.'),
+      ];
+    }
+  }
+
   // Permanently failed webhook deliveries are otherwise invisible
   // (#3613242): rows land in failed / failed_ssrf / failed_redirect and sit
   // silently until retention prunes them — a month of 100% delivery failure

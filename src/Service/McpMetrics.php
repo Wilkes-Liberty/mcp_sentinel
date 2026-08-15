@@ -50,10 +50,24 @@ final class McpMetrics {
    * Operation strings that represent a denial / security event.
    *
    * These match the strings the module actually writes: 'denied_access' from
-   * McpEntityToolTrait::logDeniedAccess() and 'rate_limit_exceeded' from
-   * McpEntityToolTrait::checkRateLimit().
+   * McpEntityToolTrait::logDeniedAccess(), 'rate_limit_exceeded' from
+   * McpEntityToolTrait::checkRateLimit(), 'read_budget_denied' from the
+   * budget seams, 'classification_egress_denied' from the classification
+   * resolver, 'config_write_denied' from the config-save subscriber,
+   * 'raw_sql_denied' from the governed drush command, and 'evidence_veto'
+   * from the evidence guard. A refusal that is not listed here is invisible
+   * to the dashboard's denial rollup, so a new denial operation belongs here
+   * the day it is introduced (d.o #3616540 part 2).
    */
-  private const DENIED_OPERATIONS = ['denied_access', 'rate_limit_exceeded'];
+  private const DENIED_OPERATIONS = [
+    'denied_access',
+    'rate_limit_exceeded',
+    'read_budget_denied',
+    'classification_egress_denied',
+    'config_write_denied',
+    'raw_sql_denied',
+    'evidence_veto',
+  ];
 
   /**
    * Per-request static result cache, keyed by "method:window".
@@ -254,11 +268,16 @@ final class McpMetrics {
       // on both MySQL/MariaDB and PostgreSQL (the :name[] array-expansion
       // convention is only documented for condition() and does not reliably
       // bind inside addExpression() on pgsql).
-      $denied = "SUM(CASE WHEN l.operation IN (:denied_op0, :denied_op1) THEN 1 ELSE 0 END)";
-      $query->addExpression($denied, 'denied', [
-        ':denied_op0' => self::DENIED_OPERATIONS[0],
-        ':denied_op1' => self::DENIED_OPERATIONS[1],
-      ]);
+      // One placeholder per listed operation, built from the constant so the
+      // rollup cannot silently under-count when the list grows.
+      $placeholders = [];
+      $arguments = [];
+      foreach (array_values(self::DENIED_OPERATIONS) as $i => $operation) {
+        $placeholders[] = ':denied_op' . $i;
+        $arguments[':denied_op' . $i] = $operation;
+      }
+      $denied = 'SUM(CASE WHEN l.operation IN (' . implode(', ', $placeholders) . ') THEN 1 ELSE 0 END)';
+      $query->addExpression($denied, 'denied', $arguments);
       $query->groupBy('l.uid');
       $query->orderBy('total', 'DESC');
       $query->range(0, max($limit, 1));

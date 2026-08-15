@@ -147,6 +147,10 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
  *   TRUE when the field must be replaced with the redaction placeholder.
  */
 function _mcp_sentinel_graphql_field_over_ceiling(mixed $entity, GraphQLComposeFieldTypeInterface $plugin, McpPolicyProfileInterface $profile, FieldContext $context): bool {
+  if (!\Drupal::hasService('mcp_sentinel.classification')) {
+    // Deploy window: the cached container predates the service.
+    return FALSE;
+  }
   /** @var \Drupal\mcp_sentinel\Service\McpClassificationResolver $classification */
   $classification = \Drupal::service('mcp_sentinel.classification');
   if (!$classification->assignsAboveLowest()) {

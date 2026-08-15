@@ -664,7 +664,12 @@ function mcp_sentinel_entity_field_access(
 
   // Classification egress ceiling (d.o #3616540 part 2): an over-ceiling
   // field behaves exactly like a redacted one on this seam. Evaluated after
-  // the hard redaction so labels only ever deny more.
+  // the hard redaction so labels only ever deny more. The service guard
+  // covers the deploy window in which the cached container predates it —
+  // no ceiling is evaluated then, exactly the previous behavior.
+  if (!\Drupal::hasService('mcp_sentinel.classification')) {
+    return $result;
+  }
   /** @var \Drupal\mcp_sentinel\Service\McpClassificationResolver $classification */
   $classification = \Drupal::service('mcp_sentinel.classification');
   if (!$classification->assignsAboveLowest()) {

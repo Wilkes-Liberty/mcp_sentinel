@@ -377,4 +377,39 @@ class McpMetricsTest extends KernelTestBase {
     $this->assertSame(0, $chain['rows']);
   }
 
+  /**
+   * Every denial operation the module writes is counted in the rollup (§5.10).
+   *
+   * Budget, classification, config-write, raw-SQL and evidence refusals were
+   * invisible to auditCounts()/topAgents()/deniedReasons() before part 2 of
+   * d.o #3616540 folded them into DENIED_OPERATIONS.
+   */
+  public function testDenialRollupCountsEveryDenialOperation(): void {
+    $now = \Drupal::time()->getRequestTime();
+    $this->seedAudit('entity_save', $now - 100, [], 5);
+    $this->seedAudit('denied_access', $now - 100, ['reason' => 'policy'], 5);
+    $this->seedAudit('rate_limit_exceeded', $now - 100, [], 5);
+    $this->seedAudit('read_budget_denied', $now - 100, ['budget' => 'bytes'], 5);
+    $this->seedAudit('classification_egress_denied', $now - 100, ['reason' => 'classification_egress_denied'], 5);
+    $this->seedAudit('config_write_denied', $now - 100, [], 5);
+    $this->seedAudit('raw_sql_denied', $now - 100, [], 5);
+    $this->seedAudit('evidence_veto', $now - 100, ['reason' => 'evidence_unkeyed'], 5);
+    // A read is not a denial.
+    $this->seedAudit('entity_read', $now - 100, [], 5);
+    /** @var \Drupal\mcp_sentinel\Service\McpMetrics $m */
+    $m = \Drupal::service('mcp_sentinel.metrics');
+
+    $this->assertSame(['total' => 9, 'denied' => 7], $m->auditCounts('24h'));
+    $agents = $m->topAgents('24h', 5);
+    $this->assertSame(5, $agents[0]['uid']);
+    $this->assertSame(9, $agents[0]['total']);
+    $this->assertSame(7, $agents[0]['denied'], 'topAgents() must not under-count when the denial list grows.');
+    $reasons = $m->deniedReasons('24h');
+    $this->assertSame(1, $reasons['classification_egress_denied']);
+    $this->assertSame(1, $reasons['read_budget_denied']);
+    $this->assertSame(1, $reasons['policy']);
+    $this->assertSame(1, $reasons['evidence_unkeyed']);
+    $this->assertArrayNotHasKey('entity_read', $reasons);
+  }
+
 }
