@@ -220,6 +220,7 @@ final class McpActionManifestTest extends KernelTestBase {
     $this->assertNotNull($manifest);
     $storage = $this->container->get('entity_type.manager')
       ->getStorage('mcp_approval_request');
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
     $request = $storage->create([
       'requested_by' => (int) $account->id(),
       'operation' => 'delete',
