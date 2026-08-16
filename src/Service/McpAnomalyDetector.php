@@ -6,7 +6,10 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Database\Query\SelectInterface;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
 
 /**
@@ -40,12 +43,15 @@ final class McpAnomalyDetector {
    *   The state service for debounce timestamps.
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface|null $entityTypeManager
+   *   Used by bulk-read to size the live collection. NULL in isolated tests.
    */
   public function __construct(
     private readonly Connection $database,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly StateInterface $state,
     private readonly TimeInterface $time,
+    private readonly ?EntityTypeManagerInterface $entityTypeManager = NULL,
   ) {}
 
   /**
@@ -91,7 +97,12 @@ final class McpAnomalyDetector {
 
       // Count matching audit rows within the lookback window.
       $since = $now - $window;
-      $count = $this->countOps($pattern, $since);
+      $signal = (string) ($rule['signal'] ?? 'count');
+      $count = match ($signal) {
+        'off_hours' => $this->countOffHours($pattern, $since, $config),
+        'bulk_read' => $this->countBulkRead($pattern, $since, $rule),
+        default => $this->countOps($pattern, $since),
+      };
 
       if ($count >= $threshold) {
         $fired[] = ['rule' => $rule, 'count' => $count];
@@ -144,6 +155,148 @@ final class McpAnomalyDetector {
     }
 
     return (int) $query->countQuery()->execute()->fetchField();
+  }
+
+  /**
+   * Counts matching operations whose timestamp falls outside operating hours.
+   *
+   * When the schedule is disabled, off-hours rules do not fire (count 0).
+   *
+   * @param string $pattern
+   *   Operation pattern (same semantics as countOps()).
+   * @param int $since
+   *   Lookback start.
+   * @param \Drupal\Core\Config\ImmutableConfig $config
+   *   Module settings.
+   */
+  private function countOffHours(string $pattern, int $since, ImmutableConfig $config): int {
+    if (!(bool) $config->get('anomaly_hours_enabled')) {
+      return 0;
+    }
+    $query = $this->opsQuery($pattern, $since)->fields('l', ['timestamp']);
+    $count = 0;
+    foreach ($query->execute() as $row) {
+      if ($this->isOffHours((int) $row->timestamp, $config)) {
+        $count++;
+      }
+    }
+    return $count;
+  }
+
+  /**
+   * Whether a unix timestamp is outside the configured operating-hours window.
+   */
+  public function isOffHours(int $timestamp, ?ImmutableConfig $config = NULL): bool {
+    $config ??= $this->configFactory->get('mcp_sentinel.settings');
+    if (!(bool) $config->get('anomaly_hours_enabled')) {
+      return FALSE;
+    }
+    $tzName = (string) ($config->get('anomaly_hours_timezone') ?? 'UTC');
+    try {
+      $tz = new \DateTimeZone($tzName !== '' ? $tzName : 'UTC');
+    }
+    catch (\Throwable) {
+      $tz = new \DateTimeZone('UTC');
+    }
+    $local = (new \DateTimeImmutable('@' . $timestamp))->setTimezone($tz);
+    $days = array_map('intval', (array) ($config->get('anomaly_hours_days') ?? [1, 2, 3, 4, 5]));
+    $dow = (int) $local->format('N');
+    if ($days !== [] && !in_array($dow, $days, TRUE)) {
+      return TRUE;
+    }
+    $start = (string) ($config->get('anomaly_hours_start') ?? '09:00');
+    $end = (string) ($config->get('anomaly_hours_end') ?? '17:00');
+    $hm = $local->format('H:i');
+    if ($start <= $end) {
+      return $hm < $start || $hm >= $end;
+    }
+    // Overnight window (e.g. 22:00–06:00): on-hours wrap midnight.
+    return $hm < $start && $hm >= $end;
+  }
+
+  /**
+   * Counts distinct entity IDs read in the window for complete bulk-read.
+   *
+   * Returns the distinct-read count when it meets the absolute threshold or
+   * the complete-ratio of the live collection size; otherwise 0 so the
+   * existing `>= threshold` comparison stays deterministic.
+   *
+   * @param string $pattern
+   *   Operation pattern (typically entity_read*).
+   * @param int $since
+   *   Lookback start.
+   * @param array $rule
+   *   The rule map (threshold, optional complete_ratio and entity_type).
+   */
+  private function countBulkRead(string $pattern, int $since, array $rule): int {
+    $query = $this->opsQuery($pattern, $since)->fields('l', ['entity_type', 'entity_id']);
+    $byType = [];
+    foreach ($query->execute() as $row) {
+      $type = (string) $row->entity_type;
+      $id = (string) $row->entity_id;
+      if ($type === '' || $id === '') {
+        continue;
+      }
+      $byType[$type][$id] = TRUE;
+    }
+    $only = trim((string) ($rule['entity_type'] ?? ''));
+    if ($only !== '') {
+      $byType = isset($byType[$only]) ? [$only => $byType[$only]] : [];
+    }
+    $threshold = (int) ($rule['threshold'] ?? 0);
+    $ratio = (float) ($rule['complete_ratio'] ?? 0.8);
+    if ($ratio <= 0 || $ratio > 1) {
+      $ratio = 0.8;
+    }
+    $best = 0;
+    foreach ($byType as $type => $ids) {
+      $distinct = count($ids);
+      $best = max($best, $distinct);
+      $total = $this->entityCount($type);
+      if ($distinct >= $threshold) {
+        return $distinct;
+      }
+      if ($total > 0 && $distinct >= (int) ceil($total * $ratio)) {
+        return max($distinct, $threshold);
+      }
+    }
+    return $best >= $threshold ? $best : 0;
+  }
+
+  /**
+   * Live entity count for a type, or 0 when the type is unknown.
+   */
+  private function entityCount(string $entityTypeId): int {
+    if ($this->entityTypeManager === NULL || !$this->entityTypeManager->hasDefinition($entityTypeId)) {
+      return 0;
+    }
+    try {
+      return (int) $this->entityTypeManager->getStorage($entityTypeId)->getQuery()
+        ->accessCheck(FALSE)
+        ->count()
+        ->execute();
+    }
+    catch (\Throwable) {
+      return 0;
+    }
+  }
+
+  /**
+   * Shared audit query for an operation pattern in a window.
+   */
+  private function opsQuery(string $pattern, int $since): SelectInterface {
+    $query = $this->database
+      ->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
+      ->condition('l.timestamp', $since, '>');
+    if (str_ends_with($pattern, '*')) {
+      $prefix = substr($pattern, 0, -1);
+      $query->condition('l.operation', $this->database->escapeLike($prefix) . '%', 'LIKE');
+    }
+    else {
+      $query->condition('l.operation', $pattern);
+    }
+    return $query;
   }
 
 }

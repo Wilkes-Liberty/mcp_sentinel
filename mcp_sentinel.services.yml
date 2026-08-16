@@ -262,6 +262,7 @@ services:
       - '@config.factory'
       - '@state'
       - '@datetime.time'
+      - '@entity_type.manager'
 
   mcp_sentinel.anomaly_alert_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpAlertDispatcher
