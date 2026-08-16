@@ -7,6 +7,7 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Drupal\user\RoleInterface;
 
@@ -95,4 +96,25 @@ function mcp_sentinel_approval_update_10001(): string {
     return 'Installed the mcp_admin_grant entity type (time-boxed break-glass grants).';
   }
   return 'The mcp_admin_grant entity type is already installed.';
+}
+
+/**
+ * Add the sealed action-manifest field on approval requests.
+ */
+function mcp_sentinel_approval_update_10002(): string {
+  $manager = \Drupal::entityDefinitionUpdateManager();
+  if ($manager->getFieldStorageDefinition('manifest', 'mcp_approval_request') !== NULL) {
+    return 'The sealed action-manifest field is already installed.';
+  }
+  $definition = BaseFieldDefinition::create('string_long')
+    ->setLabel(t('Sealed action manifest'))
+    ->setDescription(t('HMAC-sealed immutable action manifest. Empty when none was minted.'))
+    ->setRequired(FALSE);
+  $manager->installFieldStorageDefinition(
+    'manifest',
+    'mcp_approval_request',
+    'mcp_sentinel_approval',
+    $definition,
+  );
+  return 'Added the sealed action-manifest field on approval requests.';
 }
