@@ -15,6 +15,14 @@ services:
       - '@mcp_sentinel_approval.manifest_binder'
       - '@current_user'
 
+  mcp_sentinel_approval.reviewer_context:
+    class: Drupal\mcp_sentinel_approval\Service\McpReviewerContext
+    arguments:
+      - '@mcp_sentinel.action_manifest_sealer'
+      - '@entity_type.manager'
+      - '@config.factory'
+      - '@module_handler'
+
   mcp_sentinel_approval.manifest_binder:
     class: Drupal\mcp_sentinel_approval\Service\McpManifestBinder
     arguments:
