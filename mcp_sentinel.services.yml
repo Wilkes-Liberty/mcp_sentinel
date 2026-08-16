@@ -79,6 +79,16 @@ services:
   # references are optional for the same container-compilation reason as the
   # audit logger's: their absence is a veto condition the guard reports, not a
   # wiring error that takes the site down.
+  mcp_sentinel.action_manifest_sealer:
+    class: Drupal\mcp_sentinel\Service\McpActionManifestSealer
+    arguments:
+      - '@config.factory'
+      - '@?key.repository'
+      - '@mcp_sentinel.oauth_context'
+      - '@request_stack'
+      - '@datetime.time'
+      - '@uuid'
+
   mcp_sentinel.evidence_guard:
     class: Drupal\mcp_sentinel\Service\McpEvidenceGuard
     arguments:

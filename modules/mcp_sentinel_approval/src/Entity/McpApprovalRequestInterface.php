@@ -50,6 +50,25 @@ interface McpApprovalRequestInterface extends ContentEntityInterface {
   public function getPayload(): array;
 
   /**
+   * Gets the sealed action-manifest JSON, if one was minted.
+   *
+   * Empty on requests queued before slice 2, or when the signing key
+   * could not resolve at mint time. Slice 3 is what starts refusing
+   * an empty value.
+   */
+  public function getSealedManifest(): string;
+
+  /**
+   * Stores the sealed action-manifest JSON.
+   *
+   * @param string $manifest
+   *   Sealed JSON from McpActionManifest::toJson().
+   *
+   * @return $this
+   */
+  public function setSealedManifest(string $manifest): static;
+
+  /**
    * Gets the current status (pending/approved/denied).
    */
   public function getStatus(): string;

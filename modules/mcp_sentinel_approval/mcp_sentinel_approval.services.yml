@@ -30,6 +30,8 @@ services:
       - '@mcp_sentinel_approval.gate'
       - '@entity_type.manager'
       - '@logger.channel.mcp_sentinel'
+      - '@mcp_sentinel.action_manifest_sealer'
+      - '@mcp_sentinel.policy_resolver'
     tags:
       - { name: event_subscriber }
 
@@ -39,6 +41,8 @@ services:
       - '@mcp_sentinel_approval.gate'
       - '@entity_type.manager'
       - '@logger.channel.mcp_sentinel'
+      - '@mcp_sentinel.action_manifest_sealer'
+      - '@mcp_sentinel.policy_resolver'
     tags:
       - { name: event_subscriber }
 

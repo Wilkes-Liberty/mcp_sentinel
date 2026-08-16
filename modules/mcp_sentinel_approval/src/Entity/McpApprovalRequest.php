@@ -80,6 +80,10 @@ final class McpApprovalRequest extends ContentEntityBase implements McpApprovalR
       ->setLabel(new TranslatableMarkup('Payload'))
       ->setDescription(new TranslatableMarkup('JSON-encoded replay data for the operation.'));
 
+    $fields['manifest'] = BaseFieldDefinition::create('string_long')
+      ->setLabel(new TranslatableMarkup('Sealed action manifest'))
+      ->setDescription(new TranslatableMarkup('HMAC-sealed immutable action manifest. Empty when none was minted.'));
+
     $fields['status'] = BaseFieldDefinition::create('string')
       ->setLabel(new TranslatableMarkup('Status'))
       ->setSetting('max_length', 32)
@@ -132,6 +136,21 @@ final class McpApprovalRequest extends ContentEntityBase implements McpApprovalR
     }
     $decoded = json_decode($raw, TRUE);
     return is_array($decoded) ? $decoded : [];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getSealedManifest(): string {
+    return (string) ($this->get('manifest')->value ?? '');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setSealedManifest(string $manifest): static {
+    $this->set('manifest', $manifest);
+    return $this;
   }
 
   /**

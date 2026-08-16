@@ -16,6 +16,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   changing who is gated: `requiresApproval()` and every existing
   call site keep today's allow/hold behaviour. No production path
   requires a sealed manifest.
+- **Sealed action manifest (#111 / d.o. #3616538, slice 2).** When a
+  gated operation is queued, the source may mint an HMAC-sealed
+  `McpActionManifest` binding actor, OAuth delegation, normalized
+  arguments, target type/id/uuid/revision, the active policy digest,
+  preconditions, expiry and a single-use idempotency key. The seal
+  uses the same audit-chain signing key the evidence guard fails
+  closed on. A missing key stores nothing and does not change who is
+  gated or what executes — the approval payload is still an unsealed
+  string. Execution does not yet require a valid manifest.
 
 ## [2.10.0] - 2026-08-16
 

@@ -6,7 +6,10 @@ namespace Drupal\mcp_sentinel_approval\EventSubscriber;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Logger\LoggerChannelInterface;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
+use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
+use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\mcp_sentinel_approval\Service\McpApprovalGate;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -32,11 +35,17 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
    *   The entity type manager.
    * @param \Drupal\Core\Logger\LoggerChannelInterface $logger
    *   The mcp_sentinel logger channel.
+   * @param \Drupal\mcp_sentinel\Service\McpActionManifestSealer $sealer
+   *   Mints a sealed manifest when the signing key resolves.
+   * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
+   *   Resolves the active profile for the policy digest.
    */
   public function __construct(
     private readonly McpApprovalGate $gate,
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly LoggerChannelInterface $logger,
+    private readonly McpActionManifestSealer $sealer,
+    private readonly McpPolicyResolver $policyResolver,
   ) {}
 
   /**
@@ -64,6 +73,16 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
       'target_id'   => $event->getTargetId(),
       'operation'   => $event->getOperation(),
     ] + $event->getPayload();
+    $manifest = $this->sealer->tryMint(
+      $event->getAccount(),
+      $event->getOperation(),
+      [
+        'type' => $event->getTargetType(),
+        'id' => $event->getTargetId(),
+      ],
+      $payload,
+      $this->policyDigest($event->getAccount()),
+    );
 
     try {
       $storage = $this->entityTypeManager->getStorage('mcp_approval_request');
@@ -76,6 +95,7 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
         'entity_id'    => $event->getTargetId(),
         'payload'      => (string) json_encode($payload),
         'status'       => McpApprovalRequestInterface::STATUS_PENDING,
+        'manifest'     => $manifest?->toJson() ?? '',
       ]);
       $request->save();
     }
@@ -96,6 +116,17 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
     }
 
     $event->veto(sprintf('Queued for approval (request #%s).', (string) $request->id()));
+  }
+
+  /**
+   * Policy digest for the actor, or NULL when no profile resolved.
+   */
+  private function policyDigest(AccountInterface $account): ?string {
+    $profile = $this->policyResolver->resolve($account);
+    if ($profile === NULL) {
+      return NULL;
+    }
+    return 'sha256:' . hash('sha256', (string) json_encode($profile->toArray()));
   }
 
 }
