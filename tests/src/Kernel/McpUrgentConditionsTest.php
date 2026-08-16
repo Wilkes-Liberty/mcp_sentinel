@@ -97,6 +97,53 @@ class McpUrgentConditionsTest extends KernelTestBase {
   }
 
   /**
+   * An unset last-verify is a warning, never silent clear.
+   *
+   * @covers ::evaluate
+   */
+  public function testUnverifiedChainFiresWarning(): void {
+    $keys = array_column($this->evaluate(), 'key');
+    $this->assertContains('chain_unverified', $keys);
+    $this->assertNotContains('chain_broken', $keys);
+  }
+
+  /**
+   * New rows after a successful verify make the chain stale.
+   *
+   * @covers ::evaluate
+   */
+  public function testStaleChainFiresWarning(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => TRUE,
+      'broken_at' => NULL,
+      'rows' => 0,
+      'time' => \Drupal::time()->getRequestTime() - 60,
+    ]);
+    $this->seedAudit('entity_save', \Drupal::time()->getRequestTime() - 10);
+    $keys = array_column($this->evaluate(), 'key');
+    $this->assertContains('chain_stale', $keys);
+  }
+
+  /**
+   * A successful recent verify with a matching row count is silent.
+   *
+   * @covers ::evaluate
+   */
+  public function testVerifiedChainIsSilent(): void {
+    $this->seedAudit('entity_save', \Drupal::time()->getRequestTime() - 10);
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => TRUE,
+      'broken_at' => NULL,
+      'rows' => 1,
+      'time' => \Drupal::time()->getRequestTime() - 5,
+    ]);
+    $keys = array_column($this->evaluate(), 'key');
+    $this->assertNotContains('chain_unverified', $keys);
+    $this->assertNotContains('chain_stale', $keys);
+    $this->assertNotContains('chain_broken', $keys);
+  }
+
+  /**
    * @covers ::evaluate
    */
   public function testMasterSwitchOffWithRecentAuditRowsWarns(): void {
@@ -216,6 +263,12 @@ class McpUrgentConditionsTest extends KernelTestBase {
    * @covers ::evaluate
    */
   public function testNoConditionsWhenHealthy(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => TRUE,
+      'broken_at' => NULL,
+      'rows' => 0,
+      'time' => \Drupal::time()->getRequestTime(),
+    ]);
     $this->assertSame([], $this->evaluate());
   }
 
