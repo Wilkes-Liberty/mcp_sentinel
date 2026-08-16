@@ -448,4 +448,120 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     $this->assertGreaterThanOrEqual($now, (int) $stateVal);
   }
 
+  /**
+   * Off-hours activity fires; in-hours activity does not.
+   */
+  public function testOffHoursSignal(): void {
+    $saturday = (int) (new \DateTimeImmutable('last saturday 03:00:00', new \DateTimeZone('UTC')))->format('U');
+    $wednesday = (int) (new \DateTimeImmutable('last wednesday 12:00:00', new \DateTimeZone('UTC')))->format('U');
+    $this->insertOp('entity_read', $saturday, '1');
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_hours_enabled', TRUE)
+      ->set('anomaly_hours_timezone', 'UTC')
+      ->set('anomaly_hours_days', [1, 2, 3, 4, 5])
+      ->set('anomaly_hours_start', '09:00')
+      ->set('anomaly_hours_end', '17:00')
+      ->set('anomaly_rules', [[
+        'id' => 'after_hours',
+        'label' => 'After hours',
+        'signal' => 'off_hours',
+        'operation_pattern' => 'entity_read',
+        'window_seconds' => 1209600,
+        'threshold' => 1,
+        'debounce_seconds' => 0,
+        'enabled' => TRUE,
+      ],
+      ])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.after_hours');
+    $detector = $this->container->get('mcp_sentinel.anomaly_detector');
+    $this->assertCount(1, $detector->evaluate(), 'Saturday 03:00 UTC must fire the off-hours rule.');
+
+    \Drupal::database()->delete('audit_chain_log')->execute();
+    $this->insertOp('entity_read', $wednesday, '1');
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.after_hours');
+    $this->assertCount(0, $detector->evaluate(), 'Wednesday noon UTC must not fire the off-hours rule.');
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_hours_enabled', FALSE)->save();
+    \Drupal::database()->delete('audit_chain_log')->execute();
+    $this->insertOp('entity_read', $saturday, '1');
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.after_hours');
+    $this->assertCount(0, $detector->evaluate(), 'A disabled schedule must not fire off-hours rules.');
+  }
+
+  /**
+   * Bulk-read fires on a complete collection read and not on a partial one.
+   */
+  public function testBulkReadCompleteVersusPartial(): void {
+    $now = \Drupal::time()->getRequestTime();
+    foreach (['1', '2', '3', '4', '5'] as $id) {
+      $this->insertOp('entity_read', $now - 10, $id);
+    }
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id' => 'mass_read',
+        'label' => 'Mass read',
+        'signal' => 'bulk_read',
+        'operation_pattern' => 'entity_read*',
+        'window_seconds' => 300,
+        'threshold' => 5,
+        'debounce_seconds' => 0,
+        'enabled' => TRUE,
+      ],
+      ])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.mass_read');
+    $detector = $this->container->get('mcp_sentinel.anomaly_detector');
+    $this->assertCount(1, $detector->evaluate(), 'Five distinct reads must meet the bulk-read threshold.');
+
+    \Drupal::database()->delete('audit_chain_log')->execute();
+    $this->insertOp('entity_read', $now - 10, '1');
+    $this->insertOp('entity_read', $now - 9, '2');
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.mass_read');
+    $this->assertCount(0, $detector->evaluate(), 'A partial read must not fire.');
+  }
+
+  /**
+   * Denied-access storms still fire after the new signals land.
+   */
+  public function testDeniedAccessStormStillFires(): void {
+    $now = \Drupal::time()->getRequestTime();
+    for ($i = 0; $i < 3; $i++) {
+      $this->insertOp('denied_access', $now - 5, (string) $i);
+    }
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id' => 'storm',
+        'label' => 'Storm',
+        'signal' => 'count',
+        'operation_pattern' => 'denied_access',
+        'window_seconds' => 300,
+        'threshold' => 3,
+        'debounce_seconds' => 0,
+        'enabled' => TRUE,
+      ],
+      ])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.storm');
+    $this->assertCount(1, $this->container->get('mcp_sentinel.anomaly_detector')->evaluate());
+  }
+
+  /**
+   * Inserts one audit row for the detector tests.
+   */
+  private function insertOp(string $operation, int $timestamp, string $entityId): void {
+    \Drupal::database()->insert('audit_chain_log')->fields([
+      'timestamp' => $timestamp,
+      'uid' => 1,
+      'operation' => $operation,
+      'entity_type' => 'node',
+      'bundle' => 'article',
+      'entity_id' => $entityId,
+      'channel' => 'mcp_sentinel',
+      'prev_hash' => NULL,
+      'row_hash' => NULL,
+    ])->execute();
+  }
+
 }
