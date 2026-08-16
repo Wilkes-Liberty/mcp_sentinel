@@ -56,6 +56,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identity, field-level diff, obligations) before a decision is
   possible. A missing or invalid manifest hides the Approve action.
   Secret-looking config keys are redacted in the diff.
+- **DLP as a classification-aware, tighten-only detector (#136 / d.o.
+  #3617061).** A `dlp_patterns` row may declare an optional
+  `classification` label. A hit of that pattern is data of that label:
+  it may lower the effective egress ceiling for the rest of the
+  response and is fully redacted when it exceeds the ceiling in force.
+  It can never raise a ceiling, and it cannot invent one when none is
+  set. Patterns without the key stay mask-only (the shipped defaults
+  do not declare a label). GraphQL field results and Tool success
+  context are scanned. JSON:API and REST field values, the context
+  schema document, and governed drush SQL are named residuals
+  (`dlp_jsonapi_unscanned`, `dlp_rest_unscanned`,
+  `dlp_context_unscanned`, `dlp_drush_unscanned`) — there is no stable
+  per-value rewrite hook on the first two, and the last two do not
+  serialize entity field values. Classification type/field ceilings
+  still refuse over-ceiling subjects on those surfaces.
 
 ## [2.10.0] - 2026-08-16
 

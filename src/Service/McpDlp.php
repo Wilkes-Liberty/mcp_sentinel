@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\mcp_sentinel\Value\McpDlpScanResult;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -24,15 +25,18 @@ use Psr\Log\LoggerInterface;
  * skipped after logging a warning to the mcp_sentinel channel, so a
  * badly-formed custom regex cannot cause a fatal error or suppress others.
  *
- * V1 output scope: DLP scanning is applied to:
- *  - Governed GraphQL field-results output (via
- *    mcp_sentinel_graphql_graphql_compose_field_results_alter).
- *  - Audit change-diff values captured by McpAuditLogger::computeChangeDiff().
- *
- * JSON:API and REST per-field value scanning is deferred to a future release
- * because the hook_entity_field_access path cannot rewrite values (only
- * deny/allow access), and Drupal's normalizer stack has no stable alter hook
- * for individual field values.
+ * Output coverage (d.o #3617061):
+ *  - Governed GraphQL field-results: scanned, and a labelled hit may
+ *    tighten the response ceiling (never widen it).
+ *  - Governed Tool success context: scanned the same way.
+ *  - Audit change-diff values (McpAuditLogger::computeChangeDiff):
+ *    masked for storage; not an agent egress path, so no ceiling.
+ *  - JSON:API and REST field values: named residual. hook_entity_field_access
+ *    can only deny, not rewrite, and Drupal's normalizer stack has no stable
+ *    per-value alter hook. Classification already refuses over-ceiling
+ *    resource types on those surfaces; DLP does not scan their bodies.
+ *  - Context schema documents and governed drush SQL: named residual.
+ *    Those paths do not serialize entity field values.
  */
 final class McpDlp {
 
@@ -58,6 +62,8 @@ final class McpDlp {
    *     '[a-z]+@[a-z]+\.[a-z]{2,}').
    *   - mask (string): mask character (currently only '*' is honoured; kept
    *     for forward-compatibility with per-pattern mask chars).
+   *   - classification (string, optional): vocabulary label a hit carries.
+   *     Absent means the pattern only masks; it does not touch a ceiling.
    * @param string $maskMode
    *   Either 'redact' (replace the full match with REDACT_PLACEHOLDER) or
    *   'partial' (replace all but the last 4 characters of the match with '*').
@@ -88,10 +94,28 @@ final class McpDlp {
    *   The (possibly masked) output string.
    */
   public function scan(string $value): string {
+    return $this->inspect($value)->value();
+  }
+
+  /**
+   * Scans a string and reports which labelled patterns hit.
+   *
+   * Masking is identical to scan(). Classification labels are collected from
+   * patterns that both match and declare a non-empty classification key.
+   * A missing key is mask-only — existing pattern semantics do not change.
+   *
+   * @param string $value
+   *   The value to scan.
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpDlpScanResult
+   *   The masked value and any hit labels.
+   */
+  public function inspect(string $value): McpDlpScanResult {
     if (!$this->enabled || $value === '' || $this->patterns === []) {
-      return $value;
+      return new McpDlpScanResult($value, []);
     }
 
+    $hits = [];
     foreach ($this->patterns as $pattern) {
       $label = (string) ($pattern['label'] ?? 'unknown');
       $regex_body = (string) ($pattern['regex'] ?? '');
@@ -115,10 +139,99 @@ final class McpDlp {
         continue;
       }
 
+      if (preg_match($regex, $value) === 1) {
+        $classification = trim((string) ($pattern['classification'] ?? ''));
+        if ($classification !== '' && !in_array($classification, $hits, TRUE)) {
+          $hits[] = $classification;
+        }
+      }
+
       $value = $this->replaceMatches($value, $regex);
     }
 
-    return $value;
+    return new McpDlpScanResult($value, $hits);
+  }
+
+  /**
+   * Masks a value and applies tighten-only classification for egress.
+   *
+   * A labelled hit is recorded on the resolver so later reads on this
+   * request see a lower (never higher) ceiling. If a hit exceeds the
+   * ceiling in force when this value is judged, the value is fully
+   * redacted regardless of mask mode.
+   *
+   * @param string $value
+   *   The value to scan.
+   * @param string|null $ceiling
+   *   The effective ceiling before this value is judged, or NULL for none.
+   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver $classification
+   *   The resolver that records detector hits and compares labels.
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpDlpScanResult
+   *   The egress value (masked or fully redacted) and any hit labels.
+   */
+  public function applyForEgress(
+    string $value,
+    ?string $ceiling,
+    McpClassificationResolver $classification,
+  ): McpDlpScanResult {
+    $result = $this->inspect($value);
+    $denied = NULL;
+    foreach ($result->classifications() as $label) {
+      $classification->observeDetectorHit($label);
+      if ($denied === NULL && $classification->exceeds($label, $ceiling)) {
+        $denied = $label;
+      }
+    }
+    if ($denied !== NULL) {
+      return new McpDlpScanResult(self::REDACT_PLACEHOLDER, $result->classifications(), $denied);
+    }
+    return $result;
+  }
+
+  /**
+   * Recursively scans string leaves of a nested array (Tool context).
+   *
+   * Non-string, non-array values are returned unchanged. When a
+   * classification resolver is supplied, each string leaf uses
+   * applyForEgress(); otherwise only scan() masking applies.
+   *
+   * @param mixed $data
+   *   A string, an array of values, or anything else.
+   * @param string|null $ceiling
+   *   The effective ceiling, or NULL for none.
+   * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver|null $classification
+   *   The resolver, or NULL to mask without tightening.
+   *
+   * @return mixed
+   *   The scanned structure, same shape as $data.
+   */
+  public function scanTree(
+    mixed $data,
+    ?string $ceiling = NULL,
+    ?McpClassificationResolver $classification = NULL,
+  ): mixed {
+    if (is_string($data)) {
+      return $classification === NULL
+        ? $this->scan($data)
+        : $this->applyForEgress($data, $ceiling, $classification)->value();
+    }
+    if (!is_array($data)) {
+      return $data;
+    }
+    foreach ($data as $key => $item) {
+      $data[$key] = $this->scanTree($item, $ceiling, $classification);
+      // A hit deeper in this walk may have lowered the request ceiling;
+      // later siblings must be judged against the tighter one.
+      if ($classification !== NULL) {
+        $detected = $classification->detectorCeiling();
+        if ($detected !== NULL && $ceiling !== NULL
+          && ($classification->rank($detected) ?? 0) < ($classification->rank($ceiling) ?? 0)) {
+          $ceiling = $detected;
+        }
+      }
+    }
+    return $data;
   }
 
   /**
@@ -157,7 +270,7 @@ final class McpDlp {
    * These patterns are inserted into config/install/mcp_sentinel.settings.yml
    * but are off-by-default (dlp_enabled = FALSE). Each entry follows the
    * sequence-of-mapping shape used in the config schema:
-   * {label: string, regex: string, mask: string}.
+   * {label: string, regex: string, mask: string} (classification omitted).
    *
    * Pattern bodies do not include PCRE delimiters. The service wraps them in
    * '#...#i' at runtime.

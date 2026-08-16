@@ -314,6 +314,27 @@ final class McpClassificationResolverTest extends UnitTestCase {
   }
 
   /**
+   * A detector hit may lower the effective ceiling and may never raise it.
+   *
+   * @covers ::observeDetectorHit
+   * @covers ::detectorCeiling
+   * @covers ::effectiveCeiling
+   */
+  public function testDetectorHitTightensOnly(): void {
+    $resolver = $this->resolver([], self::stack('/graphql'));
+    $restricted = $this->profile(['graphql' => 'restricted']);
+    $public = $this->profile(['graphql' => 'public']);
+
+    $resolver->observeDetectorHit('internal');
+    $this->assertSame('internal', $resolver->detectorCeiling());
+    $this->assertSame('internal', $resolver->effectiveCeiling($restricted, McpGovernedSurface::Graphql), 'An internal hit lowers a restricted ceiling.');
+
+    $resolver->observeDetectorHit('restricted');
+    $this->assertSame('internal', $resolver->detectorCeiling(), 'A later restricted hit cannot raise the detector ceiling.');
+    $this->assertSame('public', $resolver->effectiveCeiling($public, McpGovernedSurface::Graphql), 'A detector hit cannot raise a public profile ceiling.');
+  }
+
+  /**
    * Entity-level highest label ignores field rows; field rows list per ceiling.
    */
   public function testEntityLevelHighestAndFieldsAboveCeiling(): void {

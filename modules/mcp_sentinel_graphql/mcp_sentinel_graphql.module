@@ -51,11 +51,11 @@ function mcp_sentinel_graphql_help(string $route_name, RouteMatchInterface $rout
  *    single-value fields keep a value and do not trip GraphQL Compose's
  *    non-null guard.
  *
- * 2. DLP value-pattern masking (V1 scope): for fields that pass the name-
- *    redaction step, string values are scanned by the McpDlp service for
- *    configured PII patterns (email, phone, SSN, credit-card, custom). Matches
- *    are either fully redacted or partially masked depending on the
- *    dlp_mask_mode setting. DLP is a no-op when dlp_enabled is FALSE (opt-in).
+ * 2. DLP value-pattern masking (d.o #3617061): for fields that pass the
+ *    name-redaction step, string values are scanned by the McpDlp service.
+ *    A pattern may declare a classification label; a hit may tighten the
+ *    response ceiling and is fully redacted when it exceeds the ceiling.
+ *    It can never raise one. DLP is a no-op when dlp_enabled is FALSE.
  *
  * The 'user.roles' and 'oauth2_scopes' cache contexts are added so governed and
  * non-governed responses are cached separately.
@@ -93,15 +93,48 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
     return;
   }
 
-  // Pass 2: DLP value-pattern masking (V1: GraphQL output only).
-  // Only applies when DLP is enabled and there are string values to scan.
-  // Non-string deltas (objects, arrays, booleans) are skipped — they are
-  // complex types that DLP cannot meaningfully scan as a flat string.
+  // Pass 2: DLP value-pattern masking, classification-aware (d.o #3617061).
+  // A labelled hit may tighten the request ceiling and is fully redacted
+  // when it exceeds the ceiling in force; it can never raise one. Non-string
+  // deltas are skipped — DLP cannot meaningfully scan them as a flat string.
   /** @var \Drupal\mcp_sentinel\Service\McpDlp $dlp */
   $dlp = \Drupal::service('mcp_sentinel.dlp');
+  $classification = \Drupal::hasService('mcp_sentinel.classification')
+    ? \Drupal::service('mcp_sentinel.classification')
+    : NULL;
+  $surface = McpGovernedSurface::Graphql;
+  $ceiling = $classification?->effectiveCeiling($profile, $surface);
   foreach ($results as $delta => $value) {
-    if (is_string($value)) {
+    if (!is_string($value)) {
+      continue;
+    }
+    if ($classification === NULL) {
       $results[$delta] = $dlp->scan($value);
+      continue;
+    }
+    $context->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
+    $egress = $dlp->applyForEgress($value, $ceiling, $classification);
+    $results[$delta] = $egress->value();
+    if ($egress->isDenied()) {
+      $entity_type_id = '';
+      $bundle = '';
+      if ($entity instanceof EntityInterface) {
+        $entity_type_id = $entity->getEntityTypeId();
+        $bundle = (string) $entity->bundle();
+      }
+      $classification->evidence(
+        $profile,
+        $surface,
+        $entity_type_id !== '' ? $entity_type_id : 'dlp',
+        $bundle,
+        $plugin->getFieldName(),
+        (string) $egress->deniedLabel(),
+        $ceiling ?? $classification->lowestLabel(),
+      );
+    }
+    if ($classification->detectorCeiling() !== NULL) {
+      $context->mergeCacheMaxAge(0);
+      $ceiling = $classification->effectiveCeiling($profile, $surface);
     }
   }
 
