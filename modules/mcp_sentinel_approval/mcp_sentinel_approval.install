@@ -159,3 +159,24 @@ function mcp_sentinel_approval_update_10003(): string {
   $schema->createTable('mcp_sentinel_manifest_used', $spec['mcp_sentinel_manifest_used']);
   return 'Installed the consumed-manifest idempotency table.';
 }
+
+/**
+ * Add the sealed grant-manifest field on break-glass grants.
+ */
+function mcp_sentinel_approval_update_10004(): string {
+  $manager = \Drupal::entityDefinitionUpdateManager();
+  if ($manager->getFieldStorageDefinition('manifest', 'mcp_admin_grant') !== NULL) {
+    return 'The sealed grant-manifest field is already installed.';
+  }
+  $definition = BaseFieldDefinition::create('string_long')
+    ->setLabel(t('Sealed grant manifest'))
+    ->setDescription(t('HMAC-sealed single-use grant. Empty on grants minted before this field existed.'))
+    ->setRequired(FALSE);
+  $manager->installFieldStorageDefinition(
+    'manifest',
+    'mcp_admin_grant',
+    'mcp_sentinel_approval',
+    $definition,
+  );
+  return 'Added the sealed grant-manifest field on break-glass grants.';
+}

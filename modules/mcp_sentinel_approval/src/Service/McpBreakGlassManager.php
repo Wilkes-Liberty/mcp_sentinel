@@ -7,6 +7,8 @@ namespace Drupal\mcp_sentinel_approval\Service;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface;
 use Drupal\user\RoleInterface;
@@ -28,11 +30,14 @@ use Drupal\user\UserInterface;
  *   superuser.
  * - Grant refuses when the role is missing, is_admin, or holds any permission
  *   outside ALLOWED_PERMISSIONS (the allowlist is an elevation invariant).
+ * - Grant refuses uid 1 and any account that already holds an is_admin role.
+ * - Each grant is HMAC-sealed and single-use. A missing signing key refuses.
  * - A narrower subset of the allowlist still grants (safer); status report
  *   WARNINGs incomplete operator shells.
  * - "approve mcp sentinel operations" is outside the allowlist so break-glass
  *   cannot rubber-stamp the next elevation.
  * - Agent capability changes stay on the policy profile, not this role.
+ *   Break-glass cannot promote policy or lift the no-agent-publish floor.
  */
 final class McpBreakGlassManager {
 
@@ -67,6 +72,11 @@ final class McpBreakGlassManager {
   private const DEFAULT_TTL = 3600;
 
   /**
+   * Request id stored when consuming a grant-issued seal (not an approval).
+   */
+  public const int GRANT_CONSUME_REQUEST_ID = 0;
+
+  /**
    * The stored 'revoked' value for a live grant, as an int rather than FALSE.
    *
    * An entity query passes its condition value to the database layer unchanged,
@@ -92,12 +102,21 @@ final class McpBreakGlassManager {
    *   The config factory (reads break_glass_ttl_seconds).
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   The base audit logger.
+   * @param \Drupal\mcp_sentinel\Service\McpActionManifestSealer $sealer
+   *   Mints the sealed grant manifest.
+   * @param \Drupal\mcp_sentinel_approval\Service\McpManifestBinder $binder
+   *   Consumes the grant's idempotency key.
+   * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
+   *   The acting account (the seal's actor).
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly TimeInterface $time,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly McpAuditLogger $auditLogger,
+    private readonly McpActionManifestSealer $sealer,
+    private readonly McpManifestBinder $binder,
+    private readonly AccountProxyInterface $currentUser,
   ) {}
 
   /**
@@ -161,6 +180,18 @@ final class McpBreakGlassManager {
       ];
     }
 
+    if ($this->accountIsStandingSuperuser($user)) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf(
+          'Refusing to grant %s: user %d is a standing superuser identity (uid 1 or an is_admin role). Break-glass is not available to that account.',
+          self::ROLE_ID,
+          $uid,
+        ),
+        'expires' => 0,
+      ];
+    }
+
     $role = $this->entityTypeManager->getStorage('user_role')->load(self::ROLE_ID);
     // Role must exist as config (optional install or site-created). We never
     // invent a standing superuser role at grant time.
@@ -202,11 +233,53 @@ final class McpBreakGlassManager {
       ];
     }
 
+    if (!$this->sealer->canSeal()) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf(
+          'Refusing to grant %s: the audit-chain signing key is not available, so the grant cannot be sealed.',
+          self::ROLE_ID,
+        ),
+        'expires' => 0,
+      ];
+    }
+
+    $manifest = $this->sealer->tryMint(
+      $this->currentUser,
+      'grant_mcp_admin',
+      [
+        'type' => 'user',
+        'id' => (string) $uid,
+        'uuid' => (string) $user->uuid(),
+      ],
+      ['uid' => $uid],
+    );
+    if ($manifest === NULL) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf(
+          'Refusing to grant %s: a sealed grant manifest could not be minted.',
+          self::ROLE_ID,
+        ),
+        'expires' => 0,
+      ];
+    }
+    if (!$this->binder->consume($manifest, self::GRANT_CONSUME_REQUEST_ID)) {
+      return [
+        'granted' => FALSE,
+        'message' => sprintf(
+          'Refusing to grant %s: this sealed grant has already been used.',
+          self::ROLE_ID,
+        ),
+        'expires' => 0,
+      ];
+    }
+
     $now = $this->time->getRequestTime();
     $expires = $now + $this->ttl();
 
     // Overlapping grants (renew before first expiry) re-use the role on the
-    // account; each grant row still has its own expiry for the reaper.
+    // account; each grant row still has its own expiry and its own seal.
     if (!$user->hasRole(self::ROLE_ID)) {
       $user->addRole(self::ROLE_ID);
       $user->save();
@@ -218,6 +291,7 @@ final class McpBreakGlassManager {
       'expires' => $expires,
       // FALSE here; entity queries bind NOT_REVOKED (0). See constant.
       'revoked' => FALSE,
+      'manifest' => $manifest->toJson(),
     ]);
     $grant->save();
 
@@ -226,6 +300,8 @@ final class McpBreakGlassManager {
       'id' => (string) $uid,
       'expires' => $expires,
       'grant_id' => (int) $grant->id(),
+      'manifest_id' => $manifest->id(),
+      'idempotency_key' => $manifest->idempotencyKey(),
     ]);
 
     return [
@@ -406,6 +482,25 @@ final class McpBreakGlassManager {
       ->range(0, 1)
       ->execute();
     return $ids !== [];
+  }
+
+  /**
+   * Whether the account is uid 1 or already holds an is_admin role.
+   *
+   * Break-glass is an enumerated, time-boxed elevation. A standing
+   * superuser identity does not need it and must not receive it.
+   */
+  private function accountIsStandingSuperuser(UserInterface $user): bool {
+    if ((int) $user->id() === 1) {
+      return TRUE;
+    }
+    foreach ($user->getRoles() as $rid) {
+      $role = $this->entityTypeManager->getStorage('user_role')->load($rid);
+      if ($role instanceof RoleInterface && $role->isAdmin()) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
   /**

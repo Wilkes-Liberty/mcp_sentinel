@@ -5,7 +5,13 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Config\ConfigCrudEvent;
+use Drupal\Core\Config\ConfigException;
+use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel_approval\EventSubscriber\McpBreakGlassConductSubscriber;
 use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
@@ -62,7 +68,12 @@ final class McpBreakGlassConductTest extends KernelTestBase {
     $this->installEntitySchema('mcp_admin_grant');
     $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
+    $this->installSchema('mcp_sentinel_approval', ['mcp_sentinel_manifest_used']);
     $this->installConfig(['mcp_sentinel', 'mcp_sentinel_approval']);
+    $this->configureSigningKey();
+    if (User::load(1) === NULL) {
+      User::create(['name' => 'root', 'status' => 1])->save();
+    }
 
     if (Role::load(McpBreakGlassManager::ROLE_ID) === NULL) {
       Role::create([
@@ -83,10 +94,29 @@ final class McpBreakGlassConductTest extends KernelTestBase {
       $time,
       $this->container->get('config.factory'),
       $this->container->get('mcp_sentinel.audit_logger'),
+      $this->container->get('mcp_sentinel.action_manifest_sealer'),
+      $this->container->get('mcp_sentinel_approval.manifest_binder'),
+      $this->container->get('current_user'),
     ));
 
     // Ensure audit is on for ordinary paths; tests that flip it use logAlways.
     $this->config('mcp_sentinel.settings')->set('audit_enabled', TRUE)->save();
+  }
+
+  /**
+   * Configures the audit-chain signing key the sealer shares with evidence.
+   */
+  private function configureSigningKey(): void {
+    Key::create([
+      'id' => 'break_glass_conduct_key',
+      'label' => 'Break-glass conduct key',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'break-glass-conduct-secret'],
+    ])->save();
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'break_glass_conduct_key')
+      ->save();
   }
 
   /**
@@ -242,6 +272,140 @@ final class McpBreakGlassConductTest extends KernelTestBase {
     $before = $this->auditCount('config_save_break_glass');
     $this->config('system.site')->set('name', 'Stale role site')->save();
     $this->assertSame($before, $this->auditCount('config_save_break_glass'));
+  }
+
+  /**
+   * Changing break-glass settings is audited as configuration, not use.
+   *
+   * @covers ::onConfigSave
+   */
+  public function testSettingsSaveIsConfiguredEvent(): void {
+    $beforeConfigured = $this->auditCount('break_glass_configured');
+    $beforeUse = $this->auditCount('config_save_break_glass');
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 1800)->save();
+    $this->assertSame($beforeConfigured + 1, $this->auditCount('break_glass_configured'));
+    $this->assertSame($beforeUse, $this->auditCount('config_save_break_glass'));
+    $meta = $this->latestMetadata('break_glass_configured');
+    $this->assertContains('break_glass_ttl_seconds', $meta['changed_keys'] ?? []);
+  }
+
+  /**
+   * An elevated operator cannot save a policy profile.
+   *
+   * @covers ::onConfigSave
+   */
+  public function testElevatedPolicySaveIsRefused(): void {
+    $this->elevateCurrentUser();
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $original = $profile->label();
+    $profile->set('label', 'Promoted by break-glass');
+    $before = $this->auditCount('break_glass_refused');
+    $caught = NULL;
+    try {
+      $profile->save();
+    }
+    catch (\Throwable $e) {
+      $caught = $e;
+    }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->assertStringContainsString('cannot promote policy', $caught->getMessage());
+    $reloaded = McpPolicyProfile::load('default');
+    $this->assertNotNull($reloaded);
+    $this->assertSame($original, $reloaded->label());
+    $this->assertSame($before + 1, $this->auditCount('break_glass_refused'));
+    $meta = $this->latestMetadata('break_glass_refused');
+    $this->assertSame('break_glass_policy_promotion', $meta['reason'] ?? NULL);
+  }
+
+  /**
+   * An elevated operator cannot turn deny_publish off.
+   *
+   * @covers ::onConfigSave
+   */
+  public function testElevatedPublishFloorLiftIsRefused(): void {
+    $this->elevateCurrentUser();
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $this->assertTrue($profile->deniesPublish());
+    $profile->set('deny_publish', FALSE);
+    $caught = NULL;
+    try {
+      $profile->save();
+    }
+    catch (\Throwable $e) {
+      $caught = $e;
+    }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->assertStringContainsString('no-agent-publish floor', $caught->getMessage());
+    $reloaded = McpPolicyProfile::load('default');
+    $this->assertNotNull($reloaded);
+    $this->assertTrue($reloaded->deniesPublish());
+    $meta = $this->latestMetadata('break_glass_refused');
+    $this->assertSame('break_glass_publish_floor', $meta['reason'] ?? NULL);
+  }
+
+  /**
+   * An elevated operator cannot delete a policy profile.
+   *
+   * @covers ::onConfigDelete
+   */
+  public function testElevatedPolicyDeleteIsRefused(): void {
+    $this->elevateCurrentUser();
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $caught = NULL;
+    try {
+      $profile->delete();
+    }
+    catch (\Throwable $e) {
+      $caught = $e;
+    }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->assertStringContainsString('cannot promote policy', $caught->getMessage());
+    $reloaded = McpPolicyProfile::load('default');
+    $this->assertNotNull($reloaded, 'The refused delete must restore the profile.');
+    $this->assertTrue($reloaded->deniesPublish());
+    $meta = $this->latestMetadata('break_glass_refused');
+    $this->assertSame('break_glass_policy_promotion', $meta['reason'] ?? NULL);
+  }
+
+  /**
+   * A failed break-glass settings audit reverts the save.
+   *
+   * @covers ::onConfigSave
+   */
+  public function testSettingsSaveAuditFailureReverts(): void {
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 3600)->save();
+    $logger = $this->createMock(McpAuditLogger::class);
+    $logger->method('logAlways')->willThrowException(new \RuntimeException('audit down'));
+    $subscriber = new McpBreakGlassConductSubscriber(
+      $this->container->get('mcp_sentinel.policy_resolver'),
+      $logger,
+      $this->container->get('current_user'),
+      $this->container->get('config.factory'),
+      $this->container->get('config.storage'),
+      $this->container,
+    );
+    $editable = $this->config('mcp_sentinel_approval.settings');
+    $editable->set('break_glass_ttl_seconds', 99);
+    $this->container->get('config.storage')->write(
+      'mcp_sentinel_approval.settings',
+      $editable->getRawData(),
+    );
+    $caught = NULL;
+    try {
+      $subscriber->onConfigSave(new ConfigCrudEvent($editable));
+    }
+    catch (\Throwable $e) {
+      $caught = $e;
+    }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->container->get('config.factory')->reset('mcp_sentinel_approval.settings');
+    $this->assertSame(
+      3600,
+      (int) $this->config('mcp_sentinel_approval.settings')->get('break_glass_ttl_seconds'),
+    );
   }
 
 }

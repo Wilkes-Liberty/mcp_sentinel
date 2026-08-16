@@ -42,6 +42,17 @@ Enterprise posture: least privilege and separation of duties.
 - **Fail closed (grant-time allowlist):** grants refuse when the role is
   missing, flagged `is_admin`, or holds **any** permission outside the
   allowlist. A proper subset of the allowlist still grants (narrower is safer).
+- **Sealed, single-use, not for superusers:** each grant is HMAC-sealed
+  with the audit-chain signing key and the idempotency key is consumed
+  once. Uid 1 and any account that already holds an `is_admin` role
+  cannot receive the role. A missing signing key refuses the grant.
+- **Cannot promote policy or lift the publish floor:** while a grant is
+  live the holder cannot save or delete a policy profile and cannot
+  turn `deny_publish` off. Those refusals are audited as
+  `break_glass_refused`.
+- **Configuration vs use:** changing `mcp_sentinel_approval.settings`
+  is audited as `break_glass_configured`. Other config saves while
+  elevated stay `config_save_break_glass`.
 - **Empty / narrow role edge:** if every shipped permission is stripped, the
   empty set is still a subset of the allowlist, so **grant succeeds** and the
   Status report only WARNINGs the missing shell permissions. That is

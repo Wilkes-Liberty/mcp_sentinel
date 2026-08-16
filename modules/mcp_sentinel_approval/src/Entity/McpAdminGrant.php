@@ -75,6 +75,10 @@ final class McpAdminGrant extends ContentEntityBase implements McpAdminGrantInte
       ->setDescription(new TranslatableMarkup('Whether the role has been revoked.'))
       ->setDefaultValue(FALSE);
 
+    $fields['manifest'] = BaseFieldDefinition::create('string_long')
+      ->setLabel(new TranslatableMarkup('Sealed grant manifest'))
+      ->setDescription(new TranslatableMarkup('HMAC-sealed single-use grant. Empty on grants minted before this field existed.'));
+
     return $fields;
   }
 
@@ -104,6 +108,21 @@ final class McpAdminGrant extends ContentEntityBase implements McpAdminGrantInte
    */
   public function setRevoked(bool $revoked = TRUE): static {
     $this->set('revoked', $revoked);
+    return $this;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getSealedManifest(): string {
+    return (string) ($this->get('manifest')->value ?? '');
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function setSealedManifest(string $manifest): static {
+    $this->set('manifest', $manifest);
     return $this;
   }
 
