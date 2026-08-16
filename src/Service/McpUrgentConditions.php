@@ -13,6 +13,7 @@ use Drupal\Core\State\StateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileInterface;
 use Drupal\key\KeyRepositoryInterface;
+use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 
 /**
@@ -21,6 +22,10 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  * Pure read; no side effects. Returns a list of
  * `['severity', 'key', 'message', 'url']` entries for:
  *  - chain_broken (critical): the stored last-verify result is FALSE.
+ *  - chain_unverified (warning): evidence has never been verified.
+ *  - chain_stale (warning): a prior verify is older than 24h or grew.
+ *  - chain_degraded (warning): last-verify metadata is incomplete.
+ *  - chain_unavailable (warning): the last verify attempt threw.
  *  - encryption_unresolvable (critical): an audit_encryption_profile is set but
  *    its EncryptionProfile (or its Key) cannot be loaded.
  *  - master_switch_off (warning): governance is OFF yet an agent audit row was
@@ -207,16 +212,64 @@ final class McpUrgentConditions {
    */
   private function evaluateChain(array &$conditions): void {
     $last = $this->state->get('mcp_sentinel.last_verify');
-    if (is_array($last) && array_key_exists('ok', $last) && $last['ok'] === FALSE) {
-      $brokenAt = isset($last['broken_at']) ? (int) $last['broken_at'] : NULL;
-      $conditions[] = [
-        'severity' => 'critical',
-        'key' => 'chain_broken',
-        'message' => $brokenAt !== NULL
-          ? sprintf('Audit hash chain integrity check FAILED at row %d. Tampering or data loss is indicated.', $brokenAt)
-          : 'Audit hash chain integrity check FAILED. Tampering or data loss is indicated.',
-        'url' => $this->routeUrl('mcp_sentinel.audit_log'),
-      ];
+    $last = is_array($last) ? $last : NULL;
+    $rows = (int) $this->database->select('audit_chain_log', 'l')
+      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
+      ->countQuery()->execute()->fetchField();
+    $state = McpEvidenceState::fromLastVerify($last, $rows, $this->time->getRequestTime());
+    $url = $this->routeUrl('mcp_sentinel.audit_log');
+    switch ($state) {
+      case McpEvidenceState::Failed:
+        $brokenAt = isset($last['broken_at']) ? (int) $last['broken_at'] : NULL;
+        $conditions[] = [
+          'severity' => 'critical',
+          'key' => 'chain_broken',
+          'message' => $brokenAt !== NULL
+            ? sprintf('Audit hash chain integrity check FAILED at row %d. Tampering or data loss is indicated.', $brokenAt)
+            : 'Audit hash chain integrity check FAILED. Tampering or data loss is indicated.',
+          'url' => $url,
+        ];
+        return;
+
+      case McpEvidenceState::Pending:
+      case McpEvidenceState::Unknown:
+        $conditions[] = [
+          'severity' => 'warning',
+          'key' => 'chain_unverified',
+          'message' => 'Audit hash chain has not been verified. Run "Verify chain now" before treating governance posture as clear.',
+          'url' => $url,
+        ];
+        return;
+
+      case McpEvidenceState::Stale:
+        $conditions[] = [
+          'severity' => 'warning',
+          'key' => 'chain_stale',
+          'message' => 'Audit hash chain verification is stale (new rows or older than 24 hours). Re-verify before treating posture as clear.',
+          'url' => $url,
+        ];
+        return;
+
+      case McpEvidenceState::Degraded:
+        $conditions[] = [
+          'severity' => 'warning',
+          'key' => 'chain_degraded',
+          'message' => 'Audit hash chain verification metadata is incomplete. Re-verify the chain.',
+          'url' => $url,
+        ];
+        return;
+
+      case McpEvidenceState::Unavailable:
+        $conditions[] = [
+          'severity' => 'warning',
+          'key' => 'chain_unavailable',
+          'message' => 'Audit hash chain verification could not be completed. The last attempt failed before a result was recorded.',
+          'url' => $url,
+        ];
+        return;
+
+      case McpEvidenceState::Verified:
+        return;
     }
   }
 

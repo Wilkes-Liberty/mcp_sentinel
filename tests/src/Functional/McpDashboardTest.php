@@ -192,6 +192,60 @@ final class McpDashboardTest extends BrowserTestBase {
     $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
     $this->drupalGet('/admin/reports/mcp-sentinel');
     $this->assertSession()->elementExists('css', '.mcp-banner--critical');
+    $this->assertSession()->pageTextNotContains('All clear');
+    $this->assertSession()->elementAttributeContains('css', '.mcp-hero', 'data-evidence', 'failed');
+  }
+
+  /**
+   * First-run never reports all-clear while the chain is unverified.
+   */
+  public function testFirstRunIsNotAllClear(): void {
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->pageTextNotContains('All clear');
+    $this->assertSession()->elementAttributeContains('css', '.mcp-hero', 'data-evidence', 'unknown');
+    $this->assertSession()->pageTextContains('Evidence not yet verified');
+  }
+
+  /**
+   * A successful recent verify can report all-clear when nothing else is wrong.
+   */
+  public function testVerifiedChainCanBeAllClear(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => TRUE,
+      'broken_at' => NULL,
+      'rows' => 0,
+      'time' => \Drupal::time()->getRequestTime(),
+    ]);
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->pageTextContains('All clear');
+    $this->assertSession()->elementAttributeContains('css', '.mcp-hero', 'data-evidence', 'verified');
+  }
+
+  /**
+   * A previously verified chain that gains rows is no longer clear.
+   */
+  public function testStaleEvidenceIsNotAllClear(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => TRUE,
+      'broken_at' => NULL,
+      'rows' => 0,
+      'time' => \Drupal::time()->getRequestTime() - 60,
+    ]);
+    $now = \Drupal::time()->getRequestTime();
+    \Drupal::database()->insert('audit_chain_log')->fields([
+      'timestamp' => $now - 10,
+      'uid' => 1,
+      'operation' => 'entity_save',
+      'entity_type' => 'node',
+      'entity_id' => '1',
+      'metadata' => '{}',
+    ])->execute();
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->pageTextNotContains('All clear');
+    $this->assertSession()->elementAttributeContains('css', '.mcp-hero', 'data-evidence', 'stale');
   }
 
 }
