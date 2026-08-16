@@ -58,6 +58,13 @@ parameters:
     -
       identifier: method.alreadyNarrowedType
       path: tests/src/Unit/McpGovernedSurfaceTest.php
+    # McpDecisionTest pins the outcome/reason backed values the same way:
+    # the strings are the public contract. PHPStan sees cases() compared
+    # to the literals those cases define, and tryFrom() of a non-case
+    # narrowed to null.
+    -
+      identifier: method.alreadyNarrowedType
+      path: tests/src/Unit/McpDecisionTest.php
     # Update-hook tests call assertIsString() on hook return values that
     # phpstan narrows to string from the function signature; the assertion
     # is intentional (it documents the contract) and harmless.
