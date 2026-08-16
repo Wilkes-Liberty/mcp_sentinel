@@ -177,6 +177,24 @@ mcp_sentinel.settings:
     anomaly_alert_log:
       type: boolean
       label: 'Log alerts to mcp_sentinel channel'
+    anomaly_hours_enabled:
+      type: boolean
+      label: 'Off-hours schedule enabled'
+    anomaly_hours_timezone:
+      type: string
+      label: 'Operating-hours timezone'
+    anomaly_hours_days:
+      type: sequence
+      label: 'Operating days (ISO 8601 weekday numbers, 1=Monday)'
+      sequence:
+        type: integer
+        label: 'Weekday'
+    anomaly_hours_start:
+      type: string
+      label: 'Operating-hours start (HH:MM)'
+    anomaly_hours_end:
+      type: string
+      label: 'Operating-hours end (HH:MM)'
     anomaly_rules:
       type: sequence
       label: 'Anomaly detection rules'
@@ -205,6 +223,15 @@ mcp_sentinel.settings:
           enabled:
             type: boolean
             label: 'Rule enabled'
+          signal:
+            type: string
+            label: 'Signal (count, off_hours, or bulk_read)'
+          complete_ratio:
+            type: float
+            label: 'Bulk-read complete ratio (0-1)'
+          entity_type:
+            type: string
+            label: 'Optional entity type for bulk-read'
     dashboard_broadcast:
       type: mapping
       label: 'Operator broadcast banner'

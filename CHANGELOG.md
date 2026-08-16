@@ -7,6 +7,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Off-hours and complete bulk-read anomaly signals (#116 / d.o.
+  #3616612).** Administrators can define an operating-hours schedule
+  (timezone, weekdays, start/end). A rule whose signal is `off_hours`
+  fires on matching governed activity outside that window; a disabled
+  schedule never fires. A `bulk_read` signal fires when distinct
+  entity reads in the window meet the absolute threshold or a
+  complete/near-complete ratio of the live collection. Existing
+  count-based denied-access storm rules are unchanged. Hosted
+  tenant/principal correlation remains out of scope.
 - **Typed decision contract (#111 / d.o. #3616538, slice 1).**
   `McpDecision` is an immutable outcome plus a stable reason code,
   following `McpGovernanceReadinessReason`. Outcomes are `deny`,
