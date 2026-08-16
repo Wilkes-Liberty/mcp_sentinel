@@ -13,6 +13,7 @@ use Drupal\Core\Url;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpChartRenderer;
 use Drupal\mcp_sentinel\Service\McpMetrics;
+use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -194,9 +195,11 @@ class McpDashboardController extends ControllerBase {
    * Builds the posture-hero summary.
    *
    * Rolls up the count of items needing attention from the urgent conditions
-   * plus pending approvals, anomaly alerts, and webhook failures.
+   * plus pending approvals, anomaly alerts, and webhook failures. Overall
+   * clear also requires verified evidence (d.o #3616611): an unverified,
+   * stale, failed or unavailable chain can never be reported as clear.
    *
-   * @return array{attention: int, all_clear: bool, headline: string}
+   * @return array{attention: int, all_clear: bool, headline: string, evidence: string}
    *   The posture summary.
    */
   private function buildStatus(): array {
@@ -209,18 +212,40 @@ class McpDashboardController extends ControllerBase {
     $attention += $this->metrics->approvalSummary()['pending'];
     $attention += $this->metrics->anomalySummary('24h')['alerts'];
     $attention += $this->metrics->webhookHealth('24h')['failed'];
+    $evidence = $this->metrics->evidenceState();
+    $state = $evidence['state'];
+    $allClear = $attention === 0 && $state->allowsClear();
 
     return [
       'attention' => $attention,
-      'all_clear' => $attention === 0,
-      'headline' => $attention === 0
-        ? (string) $this->t('All clear — no governance items need attention.')
-        : (string) $this->formatPlural(
-          $attention,
-          '1 item needs attention',
-          '@count items need attention',
-      ),
+      'all_clear' => $allClear,
+      'evidence' => $state->value,
+      'headline' => $this->statusHeadline($allClear, $attention, $state),
     ];
+  }
+
+  /**
+   * Headline for the posture hero.
+   */
+  private function statusHeadline(bool $allClear, int $attention, McpEvidenceState $state): string {
+    if ($allClear) {
+      return (string) $this->t('All clear — no governance items need attention.');
+    }
+    if (!$state->allowsClear() && $attention <= 1) {
+      return match ($state) {
+        McpEvidenceState::Unknown, McpEvidenceState::Pending => (string) $this->t('Evidence not yet verified — posture cannot be reported clear.'),
+        McpEvidenceState::Stale => (string) $this->t('Evidence is stale — re-verify the audit chain.'),
+        McpEvidenceState::Failed => (string) $this->t('Evidence verification failed — posture is not clear.'),
+        McpEvidenceState::Unavailable => (string) $this->t('Evidence verification is unavailable.'),
+        McpEvidenceState::Degraded => (string) $this->t('Evidence verification is degraded — re-verify the audit chain.'),
+        McpEvidenceState::Verified => (string) $this->formatPlural($attention, '1 item needs attention', '@count items need attention'),
+      };
+    }
+    return (string) $this->formatPlural(
+      max(1, $attention),
+      '1 item needs attention',
+      '@count items need attention',
+    );
   }
 
   /**
@@ -306,31 +331,48 @@ class McpDashboardController extends ControllerBase {
    *   The chain card.
    */
   private function buildChain(): array {
-    $chain = $this->metrics->chainIntegrity();
-    $rows = $chain['rows'];
-    $ok = $chain['ok'];
-    if ($ok === NULL) {
-      return [
-        'state' => 'warn',
-        'label' => (string) $this->t('Not yet verified'),
-        'detail' => (string) $this->t('@n audit rows. Run "Verify now" to check integrity.', ['@n' => $rows]),
-      ];
-    }
-    if ($ok === TRUE) {
-      return [
+    $evidence = $this->metrics->evidenceState();
+    $rows = $evidence['rows'];
+    $brokenAt = $evidence['broken_at'];
+    return match ($evidence['state']) {
+      McpEvidenceState::Verified => [
         'state' => 'ok',
-        'label' => (string) $this->t('Chain intact'),
+        'label' => (string) $this->t('Verified'),
         'detail' => (string) $this->t('@n rows verified.', ['@n' => $rows]),
-      ];
-    }
-    $brokenAt = $chain['broken_at'];
-    return [
-      'state' => 'crit',
-      'label' => (string) $this->t('Chain broken'),
-      'detail' => $brokenAt !== NULL
-        ? (string) $this->t('Tampering indicated at row @id.', ['@id' => (int) $brokenAt])
-        : (string) $this->t('Tampering indicated.'),
-    ];
+      ],
+      McpEvidenceState::Failed => [
+        'state' => 'crit',
+        'label' => (string) $this->t('Failed'),
+        'detail' => $brokenAt !== NULL
+          ? (string) $this->t('Tampering indicated at row @id.', ['@id' => (int) $brokenAt])
+          : (string) $this->t('Tampering indicated.'),
+      ],
+      McpEvidenceState::Stale => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Stale'),
+        'detail' => (string) $this->t('@n audit rows. Re-verify; the last successful check is out of date.', ['@n' => $rows]),
+      ],
+      McpEvidenceState::Degraded => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Degraded'),
+        'detail' => (string) $this->t('Last-verify metadata is incomplete. Re-verify the chain.'),
+      ],
+      McpEvidenceState::Unavailable => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Unavailable'),
+        'detail' => (string) $this->t('The last verification attempt did not complete.'),
+      ],
+      McpEvidenceState::Pending => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Pending'),
+        'detail' => (string) $this->t('@n audit rows. Run "Verify now" before treating posture as clear.', ['@n' => $rows]),
+      ],
+      McpEvidenceState::Unknown => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Unknown'),
+        'detail' => (string) $this->t('Audit evidence has not been verified on this install.'),
+      ],
+    };
   }
 
   /**
@@ -632,6 +674,13 @@ class McpDashboardController extends ControllerBase {
     }
     catch (\Throwable $e) {
       $this->logger->error('Verify-now failed: @message', ['@message' => $e->getMessage()]);
+      $this->state->set('mcp_sentinel.last_verify', [
+        'ok' => NULL,
+        'error' => TRUE,
+        'broken_at' => NULL,
+        'rows' => NULL,
+        'time' => $this->time->getRequestTime(),
+      ]);
       $this->messenger()->addError($this->t('Audit hash chain verification could not be completed.'));
     }
 

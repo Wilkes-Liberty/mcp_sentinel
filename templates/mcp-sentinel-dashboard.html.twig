@@ -5,7 +5,7 @@
  *
  * Available variables:
  * - banner: a themed urgent-conditions banner render array (may be empty).
- * - status: posture rollup with attention/all_clear/headline.
+ * - status: posture rollup with attention/all_clear/headline/evidence.
  * - tiles: a list of status tiles (label, value, sub, state, url).
  * - chain: chain-integrity card (state, label, detail).
  * - panels: top_agents + denied_reasons row data.
@@ -23,7 +23,7 @@
   {% endif %}
 
   {% if status %}
-    <div class="mcp-hero mcp-hero--{{ status.all_clear ? 'ok' : 'attention' }}">
+    <div class="mcp-hero mcp-hero--{{ status.all_clear ? 'ok' : 'attention' }}" data-evidence="{{ status.evidence }}">
       <span class="mcp-hero__count">{{ status.attention }}</span>
       <span class="mcp-hero__headline">{{ status.headline }}</span>
     </div>
