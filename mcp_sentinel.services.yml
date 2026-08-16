@@ -26,6 +26,15 @@ services:
       # entity-save transaction must survive its rollback.
       - '@database'
 
+  mcp_sentinel.policy_bundle_registry:
+    class: Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry
+    arguments:
+      - '@config.factory'
+      - '@state'
+      - '@datetime.time'
+      - '@uuid'
+      - '@?key.repository'
+
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver
     arguments:
