@@ -108,6 +108,12 @@ class McpAuditLogger {
    *   refusal evidence can survive its rollback (logSurvivingRollback()).
    *   NULL is accepted for the same test-construction reason as $dlp; without
    *   it, logSurvivingRollback() degrades to an immediate log().
+   * @param \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry|null $policyBundles
+   *   Active portable-policy attestation. When a digest is attested, every
+   *   row cites it so a later reader can see which signed floor was in force.
+   *   NULL is accepted so existing tests that construct the logger without
+   *   this argument continue to work; without it the row is written with
+   *   no digest, same as an install that has never activated a bundle.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -115,6 +121,7 @@ class McpAuditLogger {
     private readonly ?AuditChainLoggerInterface $auditChain,
     private readonly ?McpDlp $dlp = NULL,
     private readonly ?Connection $database = NULL,
+    private readonly ?McpPolicyBundleRegistry $policyBundles = NULL,
   ) {}
 
   /**
@@ -157,7 +164,9 @@ class McpAuditLogger {
    *   A short operation identifier (e.g. 'entity_save', 'entity_delete').
    * @param array $metadata
    *   Optional metadata. Recognised keys: entity_type, bundle, id, label.
-   *   Remaining keys are JSON-encoded into the metadata column.
+   *   Remaining keys are JSON-encoded into the metadata column. When a
+   *   portable policy bundle is attested, `policy_bundle_digest` is added
+   *   unless the caller already set it.
    */
   public function log(string $operation, array $metadata = []): void {
     $config = $this->configFactory->get('mcp_sentinel.settings');
@@ -212,6 +221,16 @@ class McpAuditLogger {
       : '';
     if ($mcpClient !== '') {
       $metadata['mcp_client'] = $mcpClient;
+    }
+
+    // Cite the attested floor on every row. A caller that already named a
+    // digest (activate/revoke/rollback of a specific bundle) keeps that
+    // value; the logger never invents one when nothing is attested.
+    if (!isset($metadata['policy_bundle_digest']) && $this->policyBundles !== NULL) {
+      $digest = $this->policyBundles->activeDigest();
+      if ($digest !== NULL) {
+        $metadata['policy_bundle_digest'] = $digest;
+      }
     }
 
     $this->requireChain()->log(self::CHANNEL, $operation, $metadata);
