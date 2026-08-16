@@ -25,6 +25,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   closed on. A missing key stores nothing and does not change who is
   gated or what executes — the approval payload is still an unsealed
   string. Execution does not yet require a valid manifest.
+- **Approval binds to one sealed manifest (#111 / d.o. #3616538,
+  slice 3).** Approving a gated operation now requires a valid
+  HMAC-sealed manifest: the seal is re-checked, expiry is enforced,
+  the live target uuid/revision must still match, and the idempotency
+  key is consumed once. The requester cannot approve their own
+  request. Execution follows the sealed arguments, not a tampered
+  payload. Config-plane actions are not a new gated class — only the
+  operations already in the gate are bound.
 
 ## [2.10.0] - 2026-08-16
 

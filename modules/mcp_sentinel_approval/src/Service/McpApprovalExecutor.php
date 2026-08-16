@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Extension\ModuleInstallerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\mcp_sentinel\Enum\McpDecisionReason;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 
@@ -46,6 +47,8 @@ final class McpApprovalExecutor {
    *   The break-glass manager, used to replay grant_mcp_admin.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
    *   The module handler, used to check module_disable targets.
+   * @param \Drupal\mcp_sentinel_approval\Service\McpManifestBinder $binder
+   *   Binds the decision to one sealed manifest.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -56,6 +59,7 @@ final class McpApprovalExecutor {
     private readonly ModuleInstallerInterface $moduleInstaller,
     private readonly McpBreakGlassManager $breakGlass,
     private readonly ModuleHandlerInterface $moduleHandler,
+    private readonly McpManifestBinder $binder,
   ) {}
 
   /**
@@ -86,10 +90,25 @@ final class McpApprovalExecutor {
       throw new \LogicException(sprintf('Cannot decide request #%s: status is already "%s".', $request->id(), $request->getStatus()));
     }
 
+    $bound = $this->binder->validate($request);
+    if (!$bound['ok']) {
+      if ($bound['error']) {
+        return [
+          'executed' => FALSE,
+          'error' => TRUE,
+          'message' => $bound['message'],
+        ];
+      }
+      return $this->recordApprovedNotExecuted($request, $bound['reason'] ?? 'manifest_invalid', $bound['message']);
+    }
+    /** @var \Drupal\mcp_sentinel\Value\McpActionManifest $manifest */
+    $manifest = $bound['manifest'];
+
     $uid = (int) $this->currentUser->id();
     $now = $this->time->getRequestTime();
-    $entity_type = $request->getTargetEntityTypeId();
-    $entity_id = $request->getTargetEntityId();
+    $entity_type = $manifest->target()['type'];
+    $entity_id = $manifest->target()['id'];
+    $arguments = $manifest->arguments();
 
     $executed = FALSE;
     $reason = NULL;
@@ -110,11 +129,9 @@ final class McpApprovalExecutor {
           $reason = 'target_already_deleted';
           $message = 'Target already deleted; request marked approved.';
         }
-        elseif (($expected_uuid = (string) ($request->getPayload()['entity_uuid'] ?? '')) !== '' && $expected_uuid !== (string) $entity->uuid()) {
-          // Fix 4: the stored id now resolves to a DIFFERENT entity (the
-          // original was deleted and the auto-increment id was reused). Do not
-          // delete the wrong entity; block and record the mismatch.
-          $reason = 'uuid_mismatch';
+        elseif (($expected_uuid = (string) ($manifest->target()['uuid'] ?? $arguments['entity_uuid'] ?? '')) !== '' && $expected_uuid !== (string) $entity->uuid()) {
+          // The sealed target is not the entity now occupying this id.
+          $reason = McpDecisionReason::TargetStale->value;
           $message = 'Target identity changed (UUID mismatch); the original entity no longer exists. Request marked approved but not executed.';
         }
         elseif (!$entity->access('delete', $this->currentUser)) {
@@ -127,19 +144,29 @@ final class McpApprovalExecutor {
           ];
         }
         else {
-          $entity->delete();
-          $executed = TRUE;
-          $message = 'Target deleted.';
+          if (!$this->binder->consume($manifest, (int) $request->id())) {
+            $reason = McpDecisionReason::IdempotencyReplay->value;
+            $message = 'This sealed manifest has already been used.';
+          }
+          else {
+            $entity->delete();
+            $executed = TRUE;
+            $message = 'Target deleted.';
+          }
         }
       }
     }
     elseif ($request->getOperation() === 'config_import') {
       // Replay the queued config write. The approver is a human admin (not a
       // governed agent), so McpConfigSaveSubscriber no-ops on this save.
-      $data = (array) ($request->getPayload()['data'] ?? []);
+      $data = (array) ($arguments['data'] ?? []);
       if ($data === []) {
         $reason = 'empty_config_payload';
         $message = 'No queued config values to apply; request marked approved but not executed.';
+      }
+      elseif (!$this->binder->consume($manifest, (int) $request->id())) {
+        $reason = McpDecisionReason::IdempotencyReplay->value;
+        $message = 'This sealed manifest has already been used.';
       }
       else {
         $editable = $this->configFactory->getEditable($entity_id);
@@ -156,6 +183,10 @@ final class McpApprovalExecutor {
         $reason = 'module_not_installed';
         $message = sprintf('Module "%s" is not installed; request marked approved but not executed.', $entity_id);
       }
+      elseif (!$this->binder->consume($manifest, (int) $request->id())) {
+        $reason = McpDecisionReason::IdempotencyReplay->value;
+        $message = 'This sealed manifest has already been used.';
+      }
       else {
         $this->moduleInstaller->uninstall([$entity_id]);
         $executed = TRUE;
@@ -163,11 +194,17 @@ final class McpApprovalExecutor {
       }
     }
     elseif ($request->getOperation() === 'grant_mcp_admin') {
-      $result = $this->breakGlass->grant((int) $entity_id);
-      $executed = $result['granted'];
-      $message = $result['message'];
-      if (!$executed) {
-        $reason = 'break_glass_grant_failed';
+      if (!$this->binder->consume($manifest, (int) $request->id())) {
+        $reason = McpDecisionReason::IdempotencyReplay->value;
+        $message = 'This sealed manifest has already been used.';
+      }
+      else {
+        $result = $this->breakGlass->grant((int) $entity_id);
+        $executed = $result['granted'];
+        $message = $result['message'];
+        if (!$executed) {
+          $reason = 'break_glass_grant_failed';
+        }
       }
     }
     else {
@@ -188,6 +225,8 @@ final class McpApprovalExecutor {
       'operation'   => $request->getOperation(),
       'executed'    => $executed,
       'decided_by'  => $uid,
+      'manifest_id' => $manifest->id(),
+      'idempotency_key' => $manifest->idempotencyKey(),
     ];
     if (!$executed && $reason !== NULL) {
       $metadata['reason'] = $reason;
@@ -196,6 +235,36 @@ final class McpApprovalExecutor {
     $this->auditLogger->log('approval_decision', $metadata);
 
     return ['executed' => $executed, 'error' => FALSE, 'message' => $message];
+  }
+
+  /**
+   * Records an approved-but-not-executed terminal refusal.
+   *
+   * @return array{executed: bool, error: bool, message: string}
+   *   The executor result.
+   */
+  private function recordApprovedNotExecuted(
+    McpApprovalRequestInterface $request,
+    string $reason,
+    string $message,
+  ): array {
+    $uid = (int) $this->currentUser->id();
+    $request
+      ->setStatus(McpApprovalRequestInterface::STATUS_APPROVED)
+      ->setDecision($uid, $this->time->getRequestTime())
+      ->save();
+    $this->auditLogger->log('approval_decision', [
+      'entity_type' => $request->getTargetEntityTypeId(),
+      'id' => $request->getTargetEntityId(),
+      'decision' => 'approved',
+      'request_id' => (int) $request->id(),
+      'operation' => $request->getOperation(),
+      'executed' => FALSE,
+      'decided_by' => $uid,
+      'reason' => $reason,
+      'note' => $message,
+    ]);
+    return ['executed' => FALSE, 'error' => FALSE, 'message' => $message];
   }
 
   /**

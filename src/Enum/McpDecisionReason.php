@@ -9,9 +9,7 @@ namespace Drupal\mcp_sentinel\Enum;
  *
  * The backed value is the contract, following
  * McpGovernanceReadinessReason. Later slices add cases; they do not
- * rename these. Slice 1 only emits the three reasons the approval gate
- * can already distinguish: always-gated privilege escalation, a
- * configured gated operation, and an operation that is not gated.
+ * rename these.
  */
 enum McpDecisionReason: string {
 
@@ -23,5 +21,26 @@ enum McpDecisionReason: string {
 
   // The operation is not in the gated set and is not always-gated.
   case NotGated = 'not_gated';
+
+  // No sealed manifest was stored on the request.
+  case ManifestMissing = 'manifest_missing';
+
+  // The stored document is not a valid seal for the current key.
+  case ManifestInvalid = 'manifest_invalid';
+
+  // The manifest expiry has passed.
+  case ManifestExpired = 'manifest_expired';
+
+  // The live target revision is not the revision that was sealed.
+  case TargetStale = 'target_stale';
+
+  // The idempotency key has already been consumed.
+  case IdempotencyReplay = 'idempotency_replay';
+
+  // The approver is the requester.
+  case SelfApproval = 'self_approval';
+
+  // The current account lacks the approve permission.
+  case ApproverUnauthorized = 'approver_unauthorized';
 
 }

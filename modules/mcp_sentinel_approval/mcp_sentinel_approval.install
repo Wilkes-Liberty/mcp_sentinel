@@ -12,6 +12,34 @@ use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Drupal\user\RoleInterface;
 
 /**
+ * Implements hook_schema().
+ */
+function mcp_sentinel_approval_schema(): array {
+  $schema['mcp_sentinel_manifest_used'] = [
+    'description' => 'Consumed single-use idempotency keys for sealed manifests.',
+    'fields' => [
+      'idempotency_key' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+      ],
+      'request_id' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+      'used' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ],
+    ],
+    'primary key' => ['idempotency_key'],
+  ];
+  return $schema;
+}
+
+/**
  * Implements hook_requirements().
  *
  * Break-glass is only safe as a least-privilege, time-boxed role. Report
@@ -117,4 +145,17 @@ function mcp_sentinel_approval_update_10002(): string {
     $definition,
   );
   return 'Added the sealed action-manifest field on approval requests.';
+}
+
+/**
+ * Install the consumed-manifest idempotency table.
+ */
+function mcp_sentinel_approval_update_10003(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->tableExists('mcp_sentinel_manifest_used')) {
+    return 'The manifest idempotency table is already installed.';
+  }
+  $spec = mcp_sentinel_approval_schema();
+  $schema->createTable('mcp_sentinel_manifest_used', $spec['mcp_sentinel_manifest_used']);
+  return 'Installed the consumed-manifest idempotency table.';
 }
