@@ -7,6 +7,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Portable policy bundles (#113 / d.o. #3616536).** A versioned
+  bundle carries an immutable SHA-256 digest and an HMAC-SHA256 seal
+  over that digest using the same audit-chain signing key as action
+  manifests. Verify rejects invalid, revoked and expired documents.
+  Activation attests the exact digest and keeps last-known-good for
+  rollback. Simulate evaluates a candidate without executing; a local
+  deny cannot be widened by an upstream allow. Revoke of the active
+  digest arms emergency deny. Disconnected operation (no signing key)
+  cannot mint or activate new authority. Provider-neutral: Drupal
+  state is the only store. Citing the digest on every audit row is
+  the remaining residual of this issue.
 - **Typed decision contract (#111 / d.o. #3616538, slice 1).**
   `McpDecision` is an immutable outcome plus a stable reason code,
   following `McpGovernanceReadinessReason`. Outcomes are `deny`,

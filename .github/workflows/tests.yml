@@ -233,7 +233,7 @@ jobs:
           # plus 26 (approval) + 14 (graphql) + 7 + 14 (server) in the
           # submodules. The floor sits just under that, so losing any one
           # submodule suite — the smallest is 7 tests — trips it.
-          MIN_TESTS: '530'
+          MIN_TESTS: '537'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
