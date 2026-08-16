@@ -10,6 +10,7 @@ use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
+use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Psr\Log\LoggerInterface;
 
@@ -464,6 +465,40 @@ final class McpMetrics {
         'broken_at' => isset($last['broken_at']) ? (int) $last['broken_at'] : NULL,
         'verified_at' => isset($last['time']) ? (int) $last['time'] : NULL,
         'rows' => $rows,
+      ];
+    });
+  }
+
+  /**
+   * Distinct evidence-verification state for the dashboard posture rollup.
+   *
+   * Does not re-walk the chain. Classifies the stored last-verify result
+   * against the live row count so an unverified, stale, failed or
+   * unavailable chain cannot be reported as clear (d.o #3616611).
+   *
+   * @return array{state: \Drupal\mcp_sentinel\Enum\McpEvidenceState, rows: int, verified_at: int|null, broken_at: int|null}
+   *   The classified state plus the numbers the UI cites.
+   */
+  public function evidenceState(): array {
+    $empty = [
+      'state' => McpEvidenceState::Unknown,
+      'rows' => 0,
+      'verified_at' => NULL,
+      'broken_at' => NULL,
+    ];
+    return $this->guard(__FUNCTION__, NULL, $empty, function (): array {
+      $chain = $this->chainIntegrity();
+      $last = $this->state->get('mcp_sentinel.last_verify');
+      $last = is_array($last) ? $last : NULL;
+      return [
+        'state' => McpEvidenceState::fromLastVerify(
+          $last,
+          $chain['rows'],
+          $this->time->getRequestTime(),
+        ),
+        'rows' => $chain['rows'],
+        'verified_at' => $chain['verified_at'],
+        'broken_at' => $chain['broken_at'],
       ];
     });
   }
