@@ -165,6 +165,9 @@ mcp_sentinel.settings:
           mask:
             type: string
             label: 'Mask character'
+          classification:
+            type: string
+            label: 'Optional classification label a hit of this pattern carries'
     anomaly_enabled:
       type: boolean
       label: 'Anomaly detection enabled'

@@ -54,4 +54,14 @@ final class McpGovernedToolBaseTest extends UnitTestCase {
     }
   }
 
+  /**
+   * Successful Tool context is scanned through the shared DLP egress helper.
+   */
+  public function testGovernedExecuteAppliesDlpOnTheBase(): void {
+    $method = new \ReflectionMethod(McpGovernedToolBase::class, 'execute');
+    $this->assertSame(McpGovernedToolBase::class, $method->getDeclaringClass()->getName());
+    $dlp = new \ReflectionMethod(McpGovernedToolBase::class, 'applyDlpToResult');
+    $this->assertTrue($dlp->isPrivate());
+  }
+
 }

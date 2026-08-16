@@ -51,6 +51,41 @@ final class McpSettingsDlpEditorTest extends BrowserTestBase {
   }
 
   /**
+   * An optional classification label round-trips; a blank one is omitted.
+   */
+  public function testClassificationRoundTripsAndBlankIsOmitted(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('dlp_enabled', TRUE)
+      ->set('dlp_patterns', [
+        [
+          'label' => 'employee_id',
+          'regex' => 'EMP-\\d{6}',
+          'mask' => '*',
+          'classification' => 'restricted',
+        ],
+      ])->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->fieldValueEquals('dlp_patterns_rows[0][classification]', 'restricted');
+    $this->submitForm([
+      'dlp_patterns_rows[1][label]' => 'badge',
+      'dlp_patterns_rows[1][regex]' => 'B-\\d{4}',
+      'dlp_patterns_rows[1][mask]' => '*',
+      'dlp_patterns_rows[1][classification]' => '',
+    ], 'Save configuration');
+    $stored = \Drupal::config('mcp_sentinel.settings')->get('dlp_patterns');
+    $this->assertSame([
+      [
+        'label' => 'employee_id',
+        'regex' => 'EMP-\\d{6}',
+        'mask' => '*',
+        'classification' => 'restricted',
+      ],
+      ['label' => 'badge', 'regex' => 'B-\\d{4}', 'mask' => '*'],
+    ], $stored);
+  }
+
+  /**
    * Adding a row appends in the same shape; removing a row drops it.
    */
   public function testAddAndRemoveRowMutateStoredSequence(): void {

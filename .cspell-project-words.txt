@@ -110,6 +110,7 @@ unkeyed
 unmoderated
 unpublishing
 unregisters
+unscanned
 untampered
 unthrottled
 unvalidated

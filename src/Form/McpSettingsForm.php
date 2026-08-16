@@ -47,6 +47,11 @@ class McpSettingsForm extends ConfigFormBase {
   protected McpGovernanceReadiness $governanceReadiness;
 
   /**
+   * Classification vocabulary for the optional DLP pattern label.
+   */
+  protected ?McpClassificationResolver $classification = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
@@ -55,6 +60,9 @@ class McpSettingsForm extends ConfigFormBase {
     $instance->encryptionProfileManager = $container->get('encrypt.encryption_profile.manager');
     $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
     $instance->governanceReadiness = $container->get('mcp_sentinel.governance_readiness');
+    $instance->classification = $container->has('mcp_sentinel.classification')
+      ? $container->get('mcp_sentinel.classification')
+      : NULL;
     return $instance;
   }
 
@@ -288,7 +296,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['dlp']['dlp_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable DLP value-pattern scanning'),
-      '#description'   => $this->t('When enabled, outbound governed field values are scanned against the configured patterns and masked before delivery. V1 scope: GraphQL field output and audit change-diff capture. JSON:API/REST per-value scanning is deferred.'),
+      '#description'   => $this->t('When enabled, outbound governed field values are scanned against the configured patterns and masked before delivery. GraphQL field results and Tool success context are scanned; a classified hit may tighten the response ceiling and never raise it. JSON:API, REST, context schema and governed drush SQL are named residuals.'),
       '#default_value' => $config->get('dlp_enabled') ?? FALSE,
     ];
     $form['dlp']['dlp_mask_mode'] = [
@@ -312,7 +320,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['dlp']['dlp_patterns_help'] = [
       '#type' => 'item',
       '#title' => $this->t('Custom DLP patterns'),
-      '#description' => $this->t('Each row is a pattern: <code>label</code>, <code>regex</code> and an optional <code>mask</code> (defaults to <code>*</code>). The <code>regex</code> is a PCRE body WITHOUT delimiters — wrapped in <code>#…#i</code> automatically (example: <code>EMP-\d{6}</code>). Leave all rows blank to fall back to the four built-in defaults (email, US phone, SSN, credit card). Invalid regular expressions are rejected.'),
+      '#description' => $this->t('Each row is a pattern: <code>label</code>, <code>regex</code>, an optional <code>mask</code> (defaults to <code>*</code>), and an optional classification. A hit of a classified pattern tightens the effective egress ceiling for that response and is refused when it exceeds the ceiling; it can never raise a ceiling. The <code>regex</code> is a PCRE body WITHOUT delimiters — wrapped in <code>#…#i</code> automatically (example: <code>EMP-\d{6}</code>). Leave all rows blank to fall back to the four built-in defaults (email, US phone, SSN, credit card). Invalid regular expressions are rejected.'),
       '#states' => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
     $form['dlp']['dlp_patterns_rows'] = [
@@ -322,6 +330,11 @@ class McpSettingsForm extends ConfigFormBase {
       '#suffix' => '</div>',
       '#states' => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
+    $vocab = $this->classification?->labels() ?? McpClassificationResolver::DEFAULT_LABELS;
+    $classification_options = ['' => $this->t('- None -')];
+    foreach ($vocab as $vocab_label) {
+      $classification_options[$vocab_label] = $vocab_label;
+    }
     for ($i = 0; $i < $dlp_count; $i++) {
       $row = $stored_patterns[$i] ?? [];
       $form['dlp']['dlp_patterns_rows'][$i] = [
@@ -348,6 +361,13 @@ class McpSettingsForm extends ConfigFormBase {
         '#default_value' => (string) ($row['mask'] ?? ''),
         '#size' => 6,
         '#maxlength' => 16,
+      ];
+      $form['dlp']['dlp_patterns_rows'][$i]['classification'] = [
+        '#type' => 'select',
+        '#title' => $this->t('Classification'),
+        '#options' => $classification_options,
+        '#default_value' => (string) ($row['classification'] ?? ''),
+        '#description' => $this->t('Optional. A hit is treated as this label: it may tighten the response ceiling and is refused when it exceeds the ceiling. It can never raise a ceiling.'),
       ];
       $form['dlp']['dlp_patterns_rows'][$i]['remove'] = [
         '#type' => 'submit',
@@ -911,6 +931,19 @@ class McpSettingsForm extends ConfigFormBase {
           ),
         );
       }
+      $classification = trim((string) ($row['classification'] ?? ''));
+      if ($classification !== '') {
+        $vocab = $this->classification?->labels() ?? McpClassificationResolver::DEFAULT_LABELS;
+        if (!in_array($classification, $vocab, TRUE)) {
+          $form_state->setErrorByName(
+            "dlp][dlp_patterns_rows][$i][classification",
+            $this->t('DLP pattern "@label" uses "@classification", which is not in the classification vocabulary.', [
+              '@label' => $label,
+              '@classification' => $classification,
+            ]),
+          );
+        }
+      }
     }
 
     // Validate the anomaly rules multi-row editor.
@@ -1120,13 +1153,18 @@ class McpSettingsForm extends ConfigFormBase {
       }
       $label = trim((string) ($row['label'] ?? ''));
       $regex = trim((string) ($row['regex'] ?? ''));
-      $mask  = trim((string) ($row['mask'] ?? ''));
+      $mask = trim((string) ($row['mask'] ?? ''));
+      $classification = trim((string) ($row['classification'] ?? ''));
       if ($label !== '' && $regex !== '') {
-        $dlp_patterns[] = [
+        $entry = [
           'label' => $label,
           'regex' => $regex,
           'mask'  => $mask !== '' ? $mask : '*',
         ];
+        if ($classification !== '') {
+          $entry['classification'] = $classification;
+        }
+        $dlp_patterns[] = $entry;
       }
     }
     // Assemble the classification map from the row editor, dropping rows that

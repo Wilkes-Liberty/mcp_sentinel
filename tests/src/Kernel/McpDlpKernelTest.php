@@ -26,12 +26,12 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *  - When DLP is disabled (default), values pass through unchanged.
  *  - In partial mode, DLP keeps the last 4 chars and masks the rest.
  *
- * V1 scope: DLP is wired into the audit change-diff capture path
- * (McpAuditLogger::computeChangeDiff). GraphQL field output scanning is
- * provided by hook_graphql_compose_field_results_alter in
- * mcp_sentinel_graphql.module; that path is not exercised here because the
- * mcp_sentinel_graphql submodule depends on graphql_compose which is not
- * available in the test environment. JSON:API per-value scanning is deferred.
+ * Audit change-diff capture is one DLP wiring; GraphQL and Tool egress
+ * are the others. This kernel file covers the service factory and the
+ * audit-diff path (McpAuditLogger::computeChangeDiff). GraphQL field
+ * output scanning is provided by hook_graphql_compose_field_results_alter
+ * in mcp_sentinel_graphql.module. JSON:API per-value scanning is the
+ * named residual dlp_jsonapi_unscanned.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpDlp
  * @group mcp_sentinel
