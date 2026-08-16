@@ -40,6 +40,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `break_glass_configured`; use while elevated stays
   `config_save_break_glass`. An elevated operator cannot save or
   delete a policy profile and cannot turn `deny_publish` off.
+- **Reviewer context (#111 / d.o. #3616538, slice 5).** The approve
+  form shows the sealed action against the live target (operation,
+  identity, field-level diff, obligations) before a decision is
+  possible. A missing or invalid manifest hides the Approve action.
+  Secret-looking config keys are redacted in the diff.
 
 ## [2.10.0] - 2026-08-16
 

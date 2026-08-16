@@ -9,6 +9,7 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor;
+use Drupal\mcp_sentinel_approval\Service\McpReviewerContext;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
@@ -42,9 +43,12 @@ final class McpApprovalDecisionForm extends ConfirmFormBase {
    *
    * @param \Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor $executor
    *   The approval executor service.
+   * @param \Drupal\mcp_sentinel_approval\Service\McpReviewerContext $reviewerContext
+   *   Builds the sealed-vs-live context the reviewer must see.
    */
   public function __construct(
     protected McpApprovalExecutor $executor,
+    protected McpReviewerContext $reviewerContext,
   ) {}
 
   /**
@@ -53,6 +57,7 @@ final class McpApprovalDecisionForm extends ConfirmFormBase {
   public static function create(ContainerInterface $container): static {
     return new static(
       $container->get('mcp_sentinel_approval.executor'),
+      $container->get('mcp_sentinel_approval.reviewer_context'),
     );
   }
 
@@ -69,7 +74,16 @@ final class McpApprovalDecisionForm extends ConfirmFormBase {
   public function buildForm(array $form, FormStateInterface $form_state, ?McpApprovalRequestInterface $mcp_approval_request = NULL, string $decision = 'approve'): array {
     $this->request = $mcp_approval_request;
     $this->decision = $decision === 'deny' ? 'deny' : 'approve';
-    return parent::buildForm($form, $form_state);
+    $form = parent::buildForm($form, $form_state);
+    if ($this->request === NULL) {
+      return $form;
+    }
+    $context = $this->reviewerContext->build($this->request);
+    $form['reviewer_context'] = $this->reviewerContext->toRenderArray($context);
+    if ($this->decision === 'approve' && empty($context['visible'])) {
+      $form['actions']['submit']['#access'] = FALSE;
+    }
+    return $form;
   }
 
   /**

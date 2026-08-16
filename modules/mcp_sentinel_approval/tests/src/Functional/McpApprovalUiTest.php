@@ -138,6 +138,9 @@ final class McpApprovalUiTest extends BrowserTestBase {
     // Visit the approve confirm form and submit it.
     $this->drupalGet('/admin/reports/mcp-sentinel/approvals/' . $request->id() . '/approve');
     $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('Sealed action');
+    $this->assertSession()->pageTextContains('Awaiting approval');
+    $this->assertSession()->pageTextContains('delete');
     $this->submitForm([], 'Approve');
 
     // Target node deleted.
@@ -160,6 +163,32 @@ final class McpApprovalUiTest extends BrowserTestBase {
       ->execute()
       ->fetchField();
     $this->assertGreaterThan(0, $count, 'An approval_decision audit row must be written.');
+  }
+
+  /**
+   * An unsealed request cannot be approved from the UI.
+   */
+  public function testUnsealedRequestHidesApprove(): void {
+    NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
+    $node = Node::create(['type' => 'article', 'title' => 'No seal']);
+    $node->save();
+    $request = McpApprovalRequest::create([
+      'requested_by' => 1,
+      'operation'    => 'delete',
+      'entity_type'  => 'node',
+      'entity_id'    => (string) $node->id(),
+      'payload'      => '{}',
+      'status'       => McpApprovalRequestInterface::STATUS_PENDING,
+      'manifest'     => '',
+    ]);
+    $request->save();
+    $this->drupalLogin($this->drupalCreateUser([
+      'approve mcp sentinel operations',
+    ]));
+    $this->drupalGet('/admin/reports/mcp-sentinel/approvals/' . $request->id() . '/approve');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('no sealed action manifest');
+    $this->assertSession()->buttonNotExists('Approve');
   }
 
 }
