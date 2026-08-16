@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_approval\Service;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\mcp_sentinel\Enum\McpDecisionReason;
+use Drupal\mcp_sentinel\Value\McpDecision;
 
 /**
  * Decides whether a destructive operation requires human approval.
@@ -47,6 +49,33 @@ final class McpApprovalGate {
       ->get('mcp_sentinel_approval.settings')
       ->get('gated_operations');
     return in_array($op, $gated, TRUE);
+  }
+
+  /**
+   * Typed decision for the same gate as requiresApproval().
+   *
+   * Ships dark: existing subscribers still call requiresApproval() and
+   * the gated set is unchanged. decide() names why an operation is
+   * held or released.
+   *
+   * @param string $op
+   *   The operation identifier (e.g. 'delete').
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpDecision
+   *   require_approval for always-gated and configured gated
+   *   operations; allow otherwise.
+   */
+  public function decide(string $op): McpDecision {
+    if (in_array($op, self::ALWAYS_GATED, TRUE)) {
+      return McpDecision::requireApproval(McpDecisionReason::AlwaysGated);
+    }
+    $gated = (array) $this->configFactory
+      ->get('mcp_sentinel_approval.settings')
+      ->get('gated_operations');
+    if (in_array($op, $gated, TRUE)) {
+      return McpDecision::requireApproval(McpDecisionReason::ApprovalRequired);
+    }
+    return McpDecision::allow(McpDecisionReason::NotGated);
   }
 
 }

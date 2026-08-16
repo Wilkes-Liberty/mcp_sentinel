@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Typed decision contract (#111 / d.o. #3616538, slice 1).**
+  `McpDecision` is an immutable outcome plus a stable reason code,
+  following `McpGovernanceReadinessReason`. Outcomes are `deny`,
+  `allow`, `require_approval`, and `allow_with_obligations`.
+  Obligations are valid only on `allow_with_obligations`. The
+  approval gate can return the typed form (`decide()`) without
+  changing who is gated: `requiresApproval()` and every existing
+  call site keep today's allow/hold behaviour. No production path
+  requires a sealed manifest.
+
 ## [2.10.0] - 2026-08-16
 
 ### Added
