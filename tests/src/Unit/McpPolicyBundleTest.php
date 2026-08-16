@@ -158,11 +158,12 @@ final class McpPolicyBundleTest extends UnitTestCase {
     $factory = $this->createMock(ConfigFactoryInterface::class);
     $factory->method('get')->willReturn($settings);
 
+    /** @var array<string, mixed> $store */
     $store = [];
     $state = $this->createMock(StateInterface::class);
     $state->method('get')->willReturnCallback(
       static function (string $key, mixed $default = NULL) use (&$store): mixed {
-        return $store[$key] ?? $default;
+        return array_key_exists($key, $store) ? $store[$key] : $default;
       },
     );
     $state->method('set')->willReturnCallback(
