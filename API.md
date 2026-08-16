@@ -210,7 +210,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
-| `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom) |
+| `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |
 | `mcp_sentinel.raw_sql_guard` | `McpRawSqlGuard` | `check($sql, $profile, $surface = Drush)` → refusal reasons (`[]` = permitted). Resolves `denied_entity_types`, `redacted_fields` and classification ceilings down to physical tables and columns via the entity table mapping; fail-closed on anything it cannot resolve |
@@ -375,8 +375,8 @@ For reference, MCP Sentinel governs the request stack through these core hooks
 `hook_mail` (anomaly email), `hook_help`, `hook_theme` (the dashboard and
 urgent-banner templates), and `hook_page_top` (the site-wide critical urgent
 banner). The `mcp_sentinel_graphql` submodule adds a
-`graphql_compose_field_results_alter` hook for GraphQL redaction, DLP, and
-result caps.
+`graphql_compose_field_results_alter` hook for GraphQL redaction, DLP
+(classification-aware, tighten-only), and result caps.
 
 ## Dashboard-support routes
 

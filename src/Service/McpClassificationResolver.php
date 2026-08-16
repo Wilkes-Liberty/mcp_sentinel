@@ -116,6 +116,20 @@ final class McpClassificationResolver {
    */
   private int $recordedFor = 0;
 
+  /**
+   * Tighten-only ceiling contributed by DLP hits on the current request.
+   *
+   * A labelled detector hit may lower this, and may never raise it. NULL
+   * means no detector has spoken; a detector cannot invent a ceiling when
+   * the profile and the caller declared none (the mechanism stays dark).
+   */
+  private ?string $detectorCeiling = NULL;
+
+  /**
+   * The request the detector ceiling belongs to (spl_object_id), or 0.
+   */
+  private int $detectorFor = 0;
+
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
@@ -356,11 +370,12 @@ final class McpClassificationResolver {
   /**
    * The ceiling in force for a profile on a surface, after narrowing.
    *
-   * The minimum of the profile ceiling and the declared ceiling. A profile
-   * ceiling naming an unknown label is the lowest label; an unknown surface
-   * takes the strictest ceiling the profile configures anywhere; a profile
-   * with no ceilings and no declaration has none — that is how the mechanism
-   * ships dark.
+   * The minimum of the profile ceiling, the declared ceiling, and any
+   * detector hits recorded on this request. A profile ceiling naming an
+   * unknown label is the lowest label; an unknown surface takes the
+   * strictest ceiling the profile configures anywhere; a profile with no
+   * ceilings and no declaration has none — that is how the mechanism ships
+   * dark. A detector hit cannot invent a ceiling when none is in force.
    *
    * @return string|null
    *   The effective ceiling label, or NULL for no ceiling.
@@ -368,13 +383,59 @@ final class McpClassificationResolver {
   public function effectiveCeiling(McpPolicyProfileInterface $profile, ?McpGovernedSurface $surface): ?string {
     $ceiling = $this->profileCeiling($profile, $surface);
     $declared = $this->declaredCeiling();
-    if ($declared === NULL) {
+    if ($declared !== NULL) {
+      $ceiling = $ceiling === NULL
+        ? $declared
+        : (($this->rank($declared) ?? 0) < ($this->rank($ceiling) ?? 0) ? $declared : $ceiling);
+    }
+    $detector = $this->detectorCeiling();
+    if ($detector === NULL || $ceiling === NULL) {
+      // No detector, or nothing in force to tighten: stay dark.
       return $ceiling;
     }
-    if ($ceiling === NULL) {
-      return $declared;
+    return ($this->rank($detector) ?? 0) < ($this->rank($ceiling) ?? 0) ? $detector : $ceiling;
+  }
+
+  /**
+   * Records a DLP hit label as a tighten-only ceiling contribution.
+   *
+   * The hit may lower the request-scoped detector ceiling and may never
+   * raise it. A label outside the vocabulary behaves as the lowest label
+   * (the same fail-closed rule as an unknown declared ceiling).
+   *
+   * @param string $label
+   *   The classification label declared on the pattern that hit.
+   */
+  public function observeDetectorHit(string $label): void {
+    $this->resetDetectorScope();
+    $normalized = $this->rank($label) !== NULL ? $label : $this->lowestLabel();
+    if ($this->detectorCeiling === NULL) {
+      $this->detectorCeiling = $normalized;
+      return;
     }
-    return ($this->rank($declared) ?? 0) < ($this->rank($ceiling) ?? 0) ? $declared : $ceiling;
+    if (($this->rank($normalized) ?? 0) < ($this->rank($this->detectorCeiling) ?? 0)) {
+      $this->detectorCeiling = $normalized;
+    }
+  }
+
+  /**
+   * The request-scoped detector ceiling, or NULL when no labelled hit fired.
+   */
+  public function detectorCeiling(): ?string {
+    $this->resetDetectorScope();
+    return $this->detectorCeiling;
+  }
+
+  /**
+   * Drops detector state when the request changes.
+   */
+  private function resetDetectorScope(): void {
+    $request = $this->requestStack->getCurrentRequest();
+    $id = $request === NULL ? 0 : spl_object_id($request);
+    if ($id !== $this->detectorFor) {
+      $this->detectorCeiling = NULL;
+      $this->detectorFor = $id;
+    }
   }
 
   /**

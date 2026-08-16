@@ -407,10 +407,10 @@ Operators can configure custom patterns directly from the settings form's
    (`mask` is optional and defaults to `*`). Use **Add pattern** to add a row and
    **Remove pattern N** to drop one. For example, add two rows:
 
-   | Label | Pattern (regex) | Mask |
-   |-------|-----------------|------|
-   | `employee_id` | `EMP-\d{6}` | `*` |
-   | `internal_ref` | `CUST-\d{8}` | |
+   | Label | Pattern (regex) | Mask | Classification |
+   |-------|-----------------|------|----------------|
+   | `employee_id` | `EMP-\d{6}` | `*` | `restricted` |
+   | `internal_ref` | `CUST-\d{8}` | | |
 
 3. Save. Invalid regex rows are rejected with a validation error before saving.
 
@@ -424,6 +424,7 @@ dlp_patterns:
   - label: my_pattern
     regex: 'CUST-\d{8}'
     mask: '*'
+    classification: restricted   # optional; omit for mask-only
 ```
 
 **Regex convention:** store the PCRE pattern body **without** delimiters. The
@@ -433,20 +434,31 @@ delimiter avoids escaping `/` in URLs). Do **not** include leading or trailing
 skipped with a warning logged to the `mcp_sentinel` logger channel so a
 badly-formed custom regex cannot cause a fatal error.
 
-### V1 scope
+### Coverage and classification
 
-DLP scanning is wired into two output paths:
+A pattern may declare an optional `classification` label from the site
+vocabulary. A hit of that pattern is treated as data of that label: it may
+**lower** the effective egress ceiling for the rest of the response and is
+fully redacted when it exceeds the ceiling in force. It can never raise a
+ceiling. Patterns without the key stay mask-only (the shipped defaults do
+not declare a label).
 
-1. **GraphQL Compose field output** (`mcp_sentinel_graphql` submodule): string
-   field values returned by `hook_graphql_compose_field_results_alter` are
-   scanned before delivery to the agent.
-2. **Audit change-diff capture** (`McpAuditLogger::computeChangeDiff`): field
-   values in the `changes` diff stored in audit log metadata are masked before
-   storage, so PII never appears in the audit trail in plaintext.
+| Governed path | DLP value scan | Classification-aware tighten |
+|---------------|----------------|------------------------------|
+| GraphQL Compose field results | implemented | implemented |
+| Tool success context | implemented | implemented |
+| Audit change diffs | implemented (storage masking) | not applicable — not agent egress |
+| JSON:API field values | residual (`dlp_jsonapi_unscanned`) | residual — type/field ceilings still apply |
+| REST field values | residual (`dlp_rest_unscanned`) | residual — REST is not a governed surface |
+| Context schema document | residual (`dlp_context_unscanned`) | schema label already refuses the document |
+| Governed drush SQL | residual (`dlp_drush_unscanned`) | table/column ceilings already refuse |
 
-JSON:API and REST per-field value scanning is deferred to a future release.
-Drupal core's normalizer stack has no stable per-value alter hook, so a clean
-wiring point does not yet exist.
+JSON:API and REST have no stable per-value alter hook:
+`hook_entity_field_access` can only deny, not rewrite, and Drupal's
+normalizer stack does not offer a supported per-field value decorator.
+Scanning a rendered JSON:API body and refusing the whole document on a
+regex hit would 403 on false positives. Those paths stay a named residual;
+classification already refuses over-ceiling resource types there.
 
 ## Rate limiting & quotas
 
