@@ -171,7 +171,7 @@ final class McpReviewerContext {
   /**
    * Obligations from the sealed arguments only.
    *
-   * The request payload is tamperable; slice 3 executes the seal.
+   * The request payload can be edited after queue; slice 3 executes the seal.
    *
    * @return list<string>
    *   Obligation codes.
