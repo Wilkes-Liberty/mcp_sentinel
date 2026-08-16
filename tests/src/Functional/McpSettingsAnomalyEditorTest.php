@@ -128,6 +128,31 @@ final class McpSettingsAnomalyEditorTest extends BrowserTestBase {
   }
 
   /**
+   * An off-hours signal is stored; a count signal is omitted.
+   */
+  public function testOffHoursSignalIsStoredAndCountIsOmitted(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_hours_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id' => 'after_hours',
+        'label' => 'After hours',
+        'operation_pattern' => 'entity_read',
+        'signal' => 'off_hours',
+        'window_seconds' => 300,
+        'threshold' => 1,
+        'debounce_seconds' => 3600,
+        'enabled' => TRUE,
+      ]])->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->fieldValueEquals('anomaly_rules_rows[0][signal]', 'off_hours');
+    $this->submitForm([], 'Save configuration');
+    $stored = \Drupal::config('mcp_sentinel.settings')->get('anomaly_rules');
+    $this->assertSame('off_hours', $stored[0]['signal'] ?? NULL);
+  }
+
+  /**
    * A duplicate rule id is rejected.
    */
   public function testDuplicateRuleIdRejected(): void {

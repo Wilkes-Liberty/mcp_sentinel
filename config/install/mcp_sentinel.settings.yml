@@ -81,6 +81,16 @@ anomaly_enabled: false
 anomaly_alert_email: ''
 anomaly_alert_webhook: false
 anomaly_alert_log: true
+anomaly_hours_enabled: false
+anomaly_hours_timezone: UTC
+anomaly_hours_days:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+anomaly_hours_start: '09:00'
+anomaly_hours_end: '17:00'
 anomaly_rules: {  }
 dashboard_broadcast:
   message: ''

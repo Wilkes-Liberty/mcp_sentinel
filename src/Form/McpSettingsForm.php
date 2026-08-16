@@ -537,6 +537,53 @@ class McpSettingsForm extends ConfigFormBase {
       '#default_value' => $config->get('anomaly_alert_webhook') ?? FALSE,
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
     ];
+    $form['anomaly']['anomaly_hours_enabled'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Enable operating-hours schedule'),
+      '#description' => $this->t('When enabled, rules whose signal is <em>Off-hours</em> fire on governed activity outside this window. Days use ISO weekdays (1 = Monday).'),
+      '#default_value' => (bool) $config->get('anomaly_hours_enabled'),
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['anomaly']['anomaly_hours_timezone'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Timezone'),
+      '#default_value' => (string) ($config->get('anomaly_hours_timezone') ?? 'UTC'),
+      '#description' => $this->t('IANA timezone name, for example <code>UTC</code> or <code>America/New_York</code>.'),
+      '#size' => 32,
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $day_options = [
+      1 => $this->t('Monday'),
+      2 => $this->t('Tuesday'),
+      3 => $this->t('Wednesday'),
+      4 => $this->t('Thursday'),
+      5 => $this->t('Friday'),
+      6 => $this->t('Saturday'),
+      7 => $this->t('Sunday'),
+    ];
+    $form['anomaly']['anomaly_hours_days'] = [
+      '#type' => 'checkboxes',
+      '#title' => $this->t('Operating days'),
+      '#options' => $day_options,
+      '#default_value' => array_map('intval', (array) ($config->get('anomaly_hours_days') ?? [1, 2, 3, 4, 5])),
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['anomaly']['anomaly_hours_start'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Start (HH:MM)'),
+      '#default_value' => (string) ($config->get('anomaly_hours_start') ?? '09:00'),
+      '#size' => 8,
+      '#maxlength' => 5,
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['anomaly']['anomaly_hours_end'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('End (HH:MM)'),
+      '#default_value' => (string) ($config->get('anomaly_hours_end') ?? '17:00'),
+      '#size' => 8,
+      '#maxlength' => 5,
+      '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
+    ];
 
     // Build the anomaly rules multi-row editor from stored config. At least two
     // rows are shown so an operator can add several rules without round trips.
@@ -579,6 +626,16 @@ class McpSettingsForm extends ConfigFormBase {
         '#default_value' => (string) ($rule['label'] ?? ''),
         '#size' => 24,
         '#maxlength' => 128,
+      ];
+      $form['anomaly']['anomaly_rules_rows'][$i]['signal'] = [
+        '#type' => 'select',
+        '#title' => $this->t('Signal'),
+        '#options' => [
+          'count' => $this->t('Count (operation threshold)'),
+          'off_hours' => $this->t('Off-hours'),
+          'bulk_read' => $this->t('Bulk-read (complete / near-complete)'),
+        ],
+        '#default_value' => (string) ($rule['signal'] ?? 'count'),
       ];
       $form['anomaly']['anomaly_rules_rows'][$i]['operation_pattern'] = [
         '#type' => 'textfield',
@@ -1200,15 +1257,25 @@ class McpSettingsForm extends ConfigFormBase {
       if ($rId === '' || $rOp === '') {
         continue;
       }
-      $anomaly_rules[] = [
-        'id'                => $rId,
-        'label'             => trim((string) ($row['label'] ?? '')),
+      $signal = (string) ($row['signal'] ?? 'count');
+      if (!in_array($signal, ['count', 'off_hours', 'bulk_read'], TRUE)) {
+        $signal = 'count';
+      }
+      $entry = [
+        'id' => $rId,
+        'label' => trim((string) ($row['label'] ?? '')),
         'operation_pattern' => $rOp,
-        'window_seconds'    => max(1, (int) ($row['window_seconds'] ?? 300)),
-        'threshold'         => max(1, (int) ($row['threshold'] ?? 10)),
-        'debounce_seconds'  => max(0, (int) ($row['debounce_seconds'] ?? 3600)),
-        'enabled'           => !empty($row['enabled']),
+        'window_seconds' => max(1, (int) ($row['window_seconds'] ?? 300)),
+        'threshold' => max(1, (int) ($row['threshold'] ?? 10)),
+        'debounce_seconds' => max(0, (int) ($row['debounce_seconds'] ?? 3600)),
+        'enabled' => !empty($row['enabled']),
       ];
+      // Count is the historical default; omit it so existing rules stay
+      // byte-identical on a no-op save.
+      if ($signal !== 'count') {
+        $entry['signal'] = $signal;
+      }
+      $anomaly_rules[] = $entry;
     }
 
     // Serialize the webhook endpoint slots into the config sequence, dropping
@@ -1256,6 +1323,11 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('anomaly_alert_log', (bool) $form_state->getValue('anomaly_alert_log'))
       ->set('anomaly_alert_email', trim((string) ($form_state->getValue('anomaly_alert_email') ?? '')))
       ->set('anomaly_alert_webhook', (bool) $form_state->getValue('anomaly_alert_webhook'))
+      ->set('anomaly_hours_enabled', (bool) $form_state->getValue('anomaly_hours_enabled'))
+      ->set('anomaly_hours_timezone', $this->normalizedTimezone((string) ($form_state->getValue('anomaly_hours_timezone') ?? 'UTC')))
+      ->set('anomaly_hours_days', $this->submittedHoursDays($form_state))
+      ->set('anomaly_hours_start', $this->normalizedClock((string) ($form_state->getValue('anomaly_hours_start') ?? '09:00'), '09:00'))
+      ->set('anomaly_hours_end', $this->normalizedClock((string) ($form_state->getValue('anomaly_hours_end') ?? '17:00'), '17:00'))
       ->set('anomaly_rules', $anomaly_rules)
       ->set('webhook_endpoints', $webhook_endpoints)
       ->set('webhook_delivery_retention_days', (int) $form_state->getValue([
@@ -1272,6 +1344,47 @@ class McpSettingsForm extends ConfigFormBase {
       ->save();
 
     parent::submitForm($form, $form_state);
+  }
+
+  /**
+   * Operating days as a list of ISO weekday numbers.
+   *
+   * @return int[]
+   *   Selected weekdays, 1–7.
+   */
+  private function submittedHoursDays(FormStateInterface $form_state): array {
+    $days = [];
+    foreach ((array) $form_state->getValue('anomaly_hours_days') as $day => $checked) {
+      if ($checked) {
+        $days[] = (int) $day;
+      }
+    }
+    return $days;
+  }
+
+  /**
+   * A valid IANA timezone, or UTC when the submitted value is unknown.
+   */
+  private function normalizedTimezone(string $name): string {
+    $name = trim($name);
+    if ($name === '') {
+      return 'UTC';
+    }
+    try {
+      new \DateTimeZone($name);
+      return $name;
+    }
+    catch (\Throwable) {
+      return 'UTC';
+    }
+  }
+
+  /**
+   * A HH:MM clock value, or $fallback when the submitted value is not one.
+   */
+  private function normalizedClock(string $value, string $fallback): string {
+    $value = trim($value);
+    return preg_match('/^\d{2}:\d{2}$/', $value) === 1 ? $value : $fallback;
   }
 
 }
