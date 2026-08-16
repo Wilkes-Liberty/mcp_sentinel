@@ -1223,16 +1223,21 @@ class McpSettingsForm extends ConfigFormBase {
       if (!in_array($signal, ['count', 'off_hours', 'bulk_read'], TRUE)) {
         $signal = 'count';
       }
-      $anomaly_rules[] = [
+      $entry = [
         'id' => $rId,
         'label' => trim((string) ($row['label'] ?? '')),
         'operation_pattern' => $rOp,
-        'signal' => $signal,
         'window_seconds' => max(1, (int) ($row['window_seconds'] ?? 300)),
         'threshold' => max(1, (int) ($row['threshold'] ?? 10)),
         'debounce_seconds' => max(0, (int) ($row['debounce_seconds'] ?? 3600)),
         'enabled' => !empty($row['enabled']),
       ];
+      // Count is the historical default; omit it so existing rules stay
+      // byte-identical on a no-op save.
+      if ($signal !== 'count') {
+        $entry['signal'] = $signal;
+      }
+      $anomaly_rules[] = $entry;
     }
 
     // Serialize the webhook endpoint slots into the config sequence, dropping
