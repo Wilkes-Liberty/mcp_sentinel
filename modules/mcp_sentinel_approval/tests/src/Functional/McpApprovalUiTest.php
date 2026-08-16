@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_approval\Functional;
 
+use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequest;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\node\Entity\Node;
@@ -84,13 +85,42 @@ final class McpApprovalUiTest extends BrowserTestBase {
     $node->save();
     $nid = (int) $node->id();
 
+    Key::create([
+      'id' => 'ui_manifest_key',
+      'label' => 'UI manifest key',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'ui-manifest-secret'],
+    ])->save();
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'ui_manifest_key')
+      ->save();
+
+    $requester = $this->drupalCreateUser([]);
+    $payload = [
+      'entity_type' => 'node',
+      'entity_id' => (string) $nid,
+      'entity_uuid' => (string) $node->uuid(),
+    ];
+    $manifest = \Drupal::service('mcp_sentinel.action_manifest_sealer')->tryMint(
+      $requester,
+      'delete',
+      [
+        'type' => 'node',
+        'id' => (string) $nid,
+        'uuid' => (string) $node->uuid(),
+      ],
+      $payload,
+    );
+    $this->assertNotNull($manifest);
     $request = McpApprovalRequest::create([
-      'requested_by' => 1,
+      'requested_by' => (int) $requester->id(),
       'operation'    => 'delete',
       'entity_type'  => 'node',
       'entity_id'    => (string) $nid,
-      'payload'      => (string) json_encode(['entity_type' => 'node', 'entity_id' => (string) $nid]),
+      'payload'      => (string) json_encode($payload),
       'status'       => McpApprovalRequestInterface::STATUS_PENDING,
+      'manifest'     => $manifest->toJson(),
     ]);
     $request->save();
 

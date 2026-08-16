@@ -117,7 +117,18 @@ final class McpDecisionTest extends UnitTestCase {
       ),
     );
     $this->assertSame(
-      ['always_gated', 'approval_required', 'not_gated'],
+      [
+        'always_gated',
+        'approval_required',
+        'not_gated',
+        'manifest_missing',
+        'manifest_invalid',
+        'manifest_expired',
+        'target_stale',
+        'idempotency_replay',
+        'self_approval',
+        'approver_unauthorized',
+      ],
       array_map(
         static fn (McpDecisionReason $case): string => $case->value,
         McpDecisionReason::cases(),

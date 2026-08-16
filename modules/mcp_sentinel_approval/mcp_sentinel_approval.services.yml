@@ -12,6 +12,15 @@ services:
       - '@config.factory'
       - '@mcp_sentinel.audit_logger'
 
+  mcp_sentinel_approval.manifest_binder:
+    class: Drupal\mcp_sentinel_approval\Service\McpManifestBinder
+    arguments:
+      - '@mcp_sentinel.action_manifest_sealer'
+      - '@database'
+      - '@datetime.time'
+      - '@current_user'
+      - '@entity_type.manager'
+
   mcp_sentinel_approval.executor:
     class: Drupal\mcp_sentinel_approval\Service\McpApprovalExecutor
     arguments:
@@ -23,6 +32,7 @@ services:
       - '@module_installer'
       - '@mcp_sentinel_approval.break_glass'
       - '@module_handler'
+      - '@mcp_sentinel_approval.manifest_binder'
 
   mcp_sentinel_approval.destructive_op_subscriber:
     class: Drupal\mcp_sentinel_approval\EventSubscriber\McpDestructiveOpSubscriber

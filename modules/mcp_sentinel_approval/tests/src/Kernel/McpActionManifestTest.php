@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
+use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -66,6 +68,7 @@ final class McpActionManifestTest extends KernelTestBase {
     $this->installEntitySchema('path_alias');
     $this->installEntitySchema('mcp_approval_request');
     $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('mcp_sentinel_approval', ['mcp_sentinel_manifest_used']);
     $this->installSchema('mcp_sentinel', [
       'mcp_sentinel_content_locks',
     ]);
@@ -172,10 +175,68 @@ final class McpActionManifestTest extends KernelTestBase {
     $request = reset($loaded);
     $this->assertNotSame('', $request->getSealedManifest());
 
+    $current = $this->container->get('current_user');
+    $current->setAccount(new AnonymousUserSession());
+    $current->setAccount($this->createUser(
+      ['approve mcp sentinel operations'],
+      NULL,
+      TRUE,
+    ));
     $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
     $this->assertTrue($result['executed']);
     $this->assertNull(
       $this->container->get('entity_type.manager')->getStorage('node')->load($nid),
+    );
+  }
+
+  /**
+   * The requester cannot approve their own request.
+   */
+  public function testRequesterCannotSelfApprove(): void {
+    $this->configureSigningKey();
+    $account = $this->createUser(
+      ['approve mcp sentinel operations'],
+      NULL,
+      TRUE,
+    );
+    $this->container->get('current_user')->setAccount($account);
+    $node = Node::create(['type' => 'article', 'title' => 'Self']);
+    $node->save();
+    $payload = [
+      'entity_type' => 'node',
+      'entity_id' => (string) $node->id(),
+      'entity_uuid' => (string) $node->uuid(),
+    ];
+    $manifest = $this->container->get('mcp_sentinel.action_manifest_sealer')->tryMint(
+      $account,
+      'delete',
+      [
+        'type' => 'node',
+        'id' => (string) $node->id(),
+        'uuid' => (string) $node->uuid(),
+      ],
+      $payload,
+    );
+    $this->assertNotNull($manifest);
+    $storage = $this->container->get('entity_type.manager')
+      ->getStorage('mcp_approval_request');
+    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
+    $request = $storage->create([
+      'requested_by' => (int) $account->id(),
+      'operation' => 'delete',
+      'entity_type' => 'node',
+      'entity_id' => (string) $node->id(),
+      'payload' => (string) json_encode($payload),
+      'status' => McpApprovalRequestInterface::STATUS_PENDING,
+      'manifest' => $manifest->toJson(),
+    ]);
+    $request->save();
+    $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
+    $this->assertTrue($result['error']);
+    $this->assertStringContainsString('requester cannot approve', $result['message']);
+    $this->assertTrue($request->isPending());
+    $this->assertNotNull(
+      $this->container->get('entity_type.manager')->getStorage('node')->load($node->id()),
     );
   }
 

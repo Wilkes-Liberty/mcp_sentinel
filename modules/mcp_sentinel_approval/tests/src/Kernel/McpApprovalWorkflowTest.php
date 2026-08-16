@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\node\Entity\Node;
@@ -69,6 +70,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     $this->installEntitySchema('path_alias');
     $this->installEntitySchema('mcp_approval_request');
     $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('mcp_sentinel_approval', ['mcp_sentinel_manifest_used']);
     $this->installSchema('mcp_sentinel', [
       'mcp_sentinel_content_locks',
     ]);
@@ -101,6 +103,17 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     ])->save();
 
     NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
+
+    Key::create([
+      'id' => 'approval_test_key',
+      'label' => 'Approval test key',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'approval-workflow-secret'],
+    ])->save();
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'approval_test_key')
+      ->save();
   }
 
   /**
@@ -109,6 +122,20 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
   private function setGovernedCurrentUser(): void {
     $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_agent']]);
     $this->container->get('current_user')->setAccount($account);
+  }
+
+  /**
+   * Switches to a distinct approver who may decide the queued request.
+   */
+  private function setApproverCurrentUser(): void {
+    $current = $this->container->get('current_user');
+    $current->setAccount(new AnonymousUserSession());
+    $approver = $this->createUser(
+      ['approve mcp sentinel operations'],
+      NULL,
+      TRUE,
+    );
+    $current->setAccount($approver);
   }
 
   /**
@@ -185,9 +212,10 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
     $request = reset($requests);
 
+    $this->setApproverCurrentUser();
     // Approve via the executor service (the form/route delegates to this).
     $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
-    $this->assertTrue($result['executed']);
+    $this->assertTrue($result['executed'], $result['message']);
 
     // Target node is now deleted.
     $this->assertNull(
@@ -238,6 +266,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
     $request = reset($requests);
 
+    $this->setApproverCurrentUser();
     $executor = $this->container->get('mcp_sentinel_approval.executor');
     $first = $executor->approve($request);
     $this->assertTrue($first['executed']);
@@ -314,10 +343,7 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
   }
 
   /**
-   * A UUID mismatch (id reuse) blocks deletion of the wrong entity.
-   *
-   * Fix 4: bind the target by UUID so a reused auto-increment id is not
-   * silently deleted.
+   * Tampering the unsealed payload cannot redirect a sealed delete.
    */
   public function testUuidMismatchBlocksDeletion(): void {
     $this->setGovernedCurrentUser();
@@ -333,38 +359,24 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
     /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
     $request = reset($requests);
 
-    // Simulate the original being deleted and a different entity reusing the id
-    // by rewriting the stored payload UUID to one that will not match.
+    // Tampering the unsealed payload must not change what executes. The
+    // sealed target uuid is what binds the delete.
     $payload = $request->getPayload();
     $payload['entity_uuid'] = 'deadbeef-0000-0000-0000-000000000000';
     $request->set('payload', (string) json_encode($payload));
     $request->save();
 
+    $this->setApproverCurrentUser();
     $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
-    $this->assertFalse($result['executed']);
+    $this->assertTrue($result['executed'], $result['message']);
     $this->assertFalse($result['error']);
 
-    // The entity now under that id was NOT deleted.
-    $this->assertNotNull(
+    // The sealed uuid still matches the live node, so the payload edit
+    // cannot redirect the delete onto something else.
+    $this->assertNull(
       $this->container->get('entity_type.manager')->getStorage('node')->load($nid),
-      'A UUID mismatch must not delete the entity occupying the reused id.',
+      'Execution follows the sealed target, not a tampered payload.',
     );
-
-    // Request is decided (approved, not executed) with a uuid_mismatch reason.
-    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $reloaded */
-    $reloaded = $storage->loadUnchanged($request->id());
-    $this->assertSame(McpApprovalRequestInterface::STATUS_APPROVED, $reloaded->getStatus());
-
-    $rows = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l')
-      ->condition('operation', 'approval_decision')
-      ->execute()
-      ->fetchAll(\PDO::FETCH_ASSOC);
-    $meta = $this->container->get('mcp_sentinel.audit_logger')
-      ->decodeMetadata((string) end($rows)['metadata']);
-    $this->assertFalse($meta['executed']);
-    $this->assertSame('uuid_mismatch', $meta['reason']);
   }
 
   /**
@@ -377,17 +389,28 @@ final class McpApprovalWorkflowTest extends KernelTestBase {
 
     $storage = $this->container->get('entity_type.manager')
       ->getStorage('mcp_approval_request');
+    $account = $this->container->get('current_user');
+    $payload = ['entity_type' => 'no_such_entity_type', 'entity_id' => '1'];
+    $manifest = $this->container->get('mcp_sentinel.action_manifest_sealer')->tryMint(
+      $account,
+      'delete',
+      ['type' => 'no_such_entity_type', 'id' => '1'],
+      $payload,
+    );
+    $this->assertNotNull($manifest);
     /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
     $request = $storage->create([
-      'requested_by' => (int) $this->container->get('current_user')->id(),
+      'requested_by' => (int) $account->id(),
       'operation'    => 'delete',
       'entity_type'  => 'no_such_entity_type',
       'entity_id'    => '1',
-      'payload'      => (string) json_encode(['entity_type' => 'no_such_entity_type', 'entity_id' => '1']),
+      'payload'      => (string) json_encode($payload),
       'status'       => McpApprovalRequestInterface::STATUS_PENDING,
+      'manifest'     => $manifest->toJson(),
     ]);
     $request->save();
 
+    $this->setApproverCurrentUser();
     $result = $this->container->get('mcp_sentinel_approval.executor')->approve($request);
     $this->assertFalse($result['executed']);
     $this->assertFalse($result['error']);

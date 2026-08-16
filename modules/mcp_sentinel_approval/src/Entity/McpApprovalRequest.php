@@ -115,6 +115,13 @@ final class McpApprovalRequest extends ContentEntityBase implements McpApprovalR
   /**
    * {@inheritdoc}
    */
+  public function getRequestedById(): int {
+    return (int) ($this->get('requested_by')->target_id ?? 0);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function getTargetEntityTypeId(): string {
     return (string) $this->get('entity_type')->value;
   }

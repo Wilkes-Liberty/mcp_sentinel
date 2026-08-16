@@ -32,6 +32,11 @@ interface McpApprovalRequestInterface extends ContentEntityInterface {
   public function getOperation(): string;
 
   /**
+   * Gets the requester user id.
+   */
+  public function getRequestedById(): int;
+
+  /**
    * Gets the target entity type id.
    */
   public function getTargetEntityTypeId(): string;
