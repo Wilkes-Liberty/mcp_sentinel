@@ -298,13 +298,15 @@ final class McpBreakGlassConductTest extends KernelTestBase {
     $original = $profile->label();
     $profile->set('label', 'Promoted by break-glass');
     $before = $this->auditCount('break_glass_refused');
+    $caught = NULL;
     try {
       $profile->save();
-      $this->fail('Elevated policy save must throw.');
     }
-    catch (ConfigException $e) {
-      $this->assertStringContainsString('cannot promote policy', $e->getMessage());
+    catch (\Throwable $e) {
+      $caught = $e;
     }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->assertStringContainsString('cannot promote policy', $caught->getMessage());
     $reloaded = McpPolicyProfile::load('default');
     $this->assertNotNull($reloaded);
     $this->assertSame($original, $reloaded->label());
@@ -324,13 +326,15 @@ final class McpBreakGlassConductTest extends KernelTestBase {
     $this->assertNotNull($profile);
     $this->assertTrue($profile->deniesPublish());
     $profile->set('deny_publish', FALSE);
+    $caught = NULL;
     try {
       $profile->save();
-      $this->fail('Elevated publish-floor lift must throw.');
     }
-    catch (ConfigException $e) {
-      $this->assertStringContainsString('no-agent-publish floor', $e->getMessage());
+    catch (\Throwable $e) {
+      $caught = $e;
     }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->assertStringContainsString('no-agent-publish floor', $caught->getMessage());
     $reloaded = McpPolicyProfile::load('default');
     $this->assertNotNull($reloaded);
     $this->assertTrue($reloaded->deniesPublish());
