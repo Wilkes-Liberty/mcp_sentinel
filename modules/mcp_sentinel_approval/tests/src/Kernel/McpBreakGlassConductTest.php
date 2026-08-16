@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Config\ConfigCrudEvent;
 use Drupal\Core\Config\ConfigException;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel_approval\EventSubscriber\McpBreakGlassConductSubscriber;
 use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
@@ -340,6 +343,69 @@ final class McpBreakGlassConductTest extends KernelTestBase {
     $this->assertTrue($reloaded->deniesPublish());
     $meta = $this->latestMetadata('break_glass_refused');
     $this->assertSame('break_glass_publish_floor', $meta['reason'] ?? NULL);
+  }
+
+  /**
+   * An elevated operator cannot delete a policy profile.
+   *
+   * @covers ::onConfigDelete
+   */
+  public function testElevatedPolicyDeleteIsRefused(): void {
+    $this->elevateCurrentUser();
+    $profile = McpPolicyProfile::load('default');
+    $this->assertNotNull($profile);
+    $caught = NULL;
+    try {
+      $profile->delete();
+    }
+    catch (\Throwable $e) {
+      $caught = $e;
+    }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->assertStringContainsString('cannot promote policy', $caught->getMessage());
+    $reloaded = McpPolicyProfile::load('default');
+    $this->assertNotNull($reloaded, 'The refused delete must restore the profile.');
+    $this->assertTrue($reloaded->deniesPublish());
+    $meta = $this->latestMetadata('break_glass_refused');
+    $this->assertSame('break_glass_policy_promotion', $meta['reason'] ?? NULL);
+  }
+
+  /**
+   * A failed break-glass settings audit reverts the save.
+   *
+   * @covers ::onConfigSave
+   */
+  public function testSettingsSaveAuditFailureReverts(): void {
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 3600)->save();
+    $logger = $this->createMock(McpAuditLogger::class);
+    $logger->method('logAlways')->willThrowException(new \RuntimeException('audit down'));
+    $subscriber = new McpBreakGlassConductSubscriber(
+      $this->container->get('mcp_sentinel.policy_resolver'),
+      $logger,
+      $this->container->get('current_user'),
+      $this->container->get('config.factory'),
+      $this->container->get('config.storage'),
+      $this->container,
+    );
+    $editable = $this->config('mcp_sentinel_approval.settings');
+    $editable->set('break_glass_ttl_seconds', 99);
+    $this->container->get('config.storage')->write(
+      'mcp_sentinel_approval.settings',
+      $editable->getRawData(),
+    );
+    $caught = NULL;
+    try {
+      $subscriber->onConfigSave(new ConfigCrudEvent($editable));
+    }
+    catch (\Throwable $e) {
+      $caught = $e;
+    }
+    $this->assertInstanceOf(ConfigException::class, $caught);
+    $this->container->get('config.factory')->reset('mcp_sentinel_approval.settings');
+    $this->assertSame(
+      3600,
+      (int) $this->config('mcp_sentinel_approval.settings')->get('break_glass_ttl_seconds'),
+    );
   }
 
 }

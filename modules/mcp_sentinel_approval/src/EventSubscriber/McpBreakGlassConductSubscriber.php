@@ -125,7 +125,7 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
 
     // Configuration of the control is a distinct elevated event from use.
     if ($name === self::SETTINGS_NAME) {
-      $this->recordConfigured($name, $changedKeys);
+      $this->recordConfigured($name, $changedKeys, $original);
       return;
     }
 
@@ -201,11 +201,17 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
     if (!str_starts_with($name, self::POLICY_PREFIX)) {
       return;
     }
+    // Config::delete() clears getRawData() before dispatching DELETE.
+    // originalData is still the loaded document until after the event.
+    $original = $config instanceof Config
+      ? $config->getOriginal('', FALSE)
+      : (array) $config->getOriginal('');
     $this->refuse(
       $name,
-      $config->getRawData(),
+      is_array($original) ? $original : [],
       'break_glass_policy_promotion',
       'Break-glass cannot promote policy.',
+      FALSE,
     );
   }
 
@@ -265,11 +271,13 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
    *   Config object name.
    * @param list<string> $changedKeys
    *   Changed top-level keys.
+   * @param array $original
+   *   Pre-save raw data, used to revert if the audit write fails.
    *
    * @throws \Drupal\Core\Config\ConfigException
    *   When the audit write fails.
    */
-  private function recordConfigured(string $name, array $changedKeys): void {
+  private function recordConfigured(string $name, array $changedKeys, array $original): void {
     try {
       $this->auditLogger->logAlways('break_glass_configured', [
         'entity_type' => 'config',
@@ -279,6 +287,7 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
       ]);
     }
     catch (\Throwable $e) {
+      $this->revert($name, $original);
       throw new ConfigException(sprintf(
         "MCP Sentinel: break-glass configuration of '%s' refused because the audit row could not be written: %s",
         $name,
@@ -308,12 +317,15 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
    *   Stable reason code.
    * @param string $message
    *   Exception message.
+   * @param bool $emptyMeansDelete
+   *   TRUE when an empty $original should delete the object (a refused
+   *   create). FALSE on DELETE, where empty data must not delete again.
    *
    * @throws \Drupal\Core\Config\ConfigException
    *   Always.
    */
-  private function refuse(string $name, array $original, string $reason, string $message): never {
-    $this->revert($name, $original);
+  private function refuse(string $name, array $original, string $reason, string $message, bool $emptyMeansDelete = TRUE): never {
+    $this->revert($name, $original, $emptyMeansDelete);
     $grant = $this->activeGrant();
     $this->auditLogger->logAlways('break_glass_refused', [
       'entity_type' => 'config',
@@ -332,10 +344,17 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
    *   Config object name.
    * @param array $original
    *   Pre-save raw data ([] deletes a newly-created object).
+   * @param bool $emptyMeansDelete
+   *   FALSE leaves an already-deleted object alone when we have no restore
+   *   payload.
    */
-  private function revert(string $name, array $original): void {
+  private function revert(string $name, array $original, bool $emptyMeansDelete = TRUE): void {
     if ($original === []) {
-      $this->configStorage->delete($name);
+      if ($emptyMeansDelete) {
+        $this->configStorage->delete($name);
+      }
+      $this->configFactory->reset($name);
+      return;
     }
     else {
       $this->configStorage->write($name, $original);
