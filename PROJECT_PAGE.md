@@ -100,6 +100,13 @@ attributed to the authenticated account.
   correlation, an uncertain receipt is refused to the caller and reconciled on
   cron instead of being reported as an unproven success, and no fallback to
   unkeyed integrity or best-effort logging satisfies the class.
+- **Secure-install verifier** — `drush mcp-sentinel:verify` produces an
+  evidence document that this install carries the secure, tenant-neutral
+  floor. Posture checks always run. `--live` adds the hostile-input probes
+  (allowed draft, denied publication, mass read, configuration change,
+  live-content edit) without creating, updating or deleting content. A
+  skipped check fails the run; `n/a` does not. Residuals (prompt injection,
+  operator trust) are recorded as managed.
 - **Per-profile IP allowlisting** — restrict governed connections to specific
   IPv4/IPv6 addresses and CIDR blocks. Trusted-proxy-aware (reads the real client
   IP via Symfony, never a spoofable header) and enforced across entity access,
