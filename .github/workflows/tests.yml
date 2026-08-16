@@ -229,11 +229,11 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 538 collect today: 91 Unit + 386 Kernel in the top-level module,
-          # plus 26 (approval) + 14 (graphql) + 7 + 14 (server) in the
+          # 557 collect today: 103 Unit + 392 Kernel in the top-level module,
+          # plus 26 (approval) + 17 (graphql) + 7 + 14 (server) in the
           # submodules. The floor sits just under that, so losing any one
           # submodule suite — the smallest is 7 tests — trips it.
-          MIN_TESTS: '534'
+          MIN_TESTS: '549'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
