@@ -33,6 +33,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   request. Execution follows the sealed arguments, not a tampered
   payload. Config-plane actions are not a new gated class — only the
   operations already in the gate are bound.
+- **Break-glass hardening (#111 / d.o. #3616538, slice 4).** A grant
+  is HMAC-sealed and single-use. Uid 1 and any account that already
+  holds an `is_admin` role cannot receive the role. A missing signing
+  key refuses the grant. Changing break-glass settings is audited as
+  `break_glass_configured`; use while elevated stays
+  `config_save_break_glass`. An elevated operator cannot save or
+  delete a policy profile and cannot turn `deny_publish` off.
 
 ## [2.10.0] - 2026-08-16
 

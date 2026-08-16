@@ -43,4 +43,10 @@ enum McpDecisionReason: string {
   // The current account lacks the approve permission.
   case ApproverUnauthorized = 'approver_unauthorized';
 
+  // The grantee is uid 1 or already holds an is_admin role.
+  case SuperuserRefused = 'superuser_refused';
+
+  // The signing key will not resolve, so a seal cannot be minted.
+  case ManifestUnsealed = 'manifest_unsealed';
+
 }

@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Serialization\Yaml;
+use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -69,7 +70,10 @@ final class McpBreakGlassTest extends KernelTestBase {
     $this->installEntitySchema('mcp_admin_grant');
     $this->installSchema('audit_chain', ['audit_chain_log']);
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
+    $this->installSchema('mcp_sentinel_approval', ['mcp_sentinel_manifest_used']);
     $this->installConfig(['mcp_sentinel', 'mcp_sentinel_approval']);
+    $this->configureSigningKey();
+    $this->ensureRootUserExists();
 
     // Kernel module enable may already install config/optional when deps are
     // satisfied. Creating again would throw EntityStorageException. Prefer the
@@ -96,7 +100,38 @@ final class McpBreakGlassTest extends KernelTestBase {
       $time,
       $this->container->get('config.factory'),
       $this->container->get('mcp_sentinel.audit_logger'),
+      $this->container->get('mcp_sentinel.action_manifest_sealer'),
+      $this->container->get('mcp_sentinel_approval.manifest_binder'),
+      $this->container->get('current_user'),
     ));
+  }
+
+  /**
+   * Configures the audit-chain signing key the sealer shares with evidence.
+   */
+  private function configureSigningKey(): void {
+    Key::create([
+      'id' => 'break_glass_test_key',
+      'label' => 'Break-glass test key',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'break-glass-seal-secret'],
+    ])->save();
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'break_glass_test_key')
+      ->save();
+  }
+
+  /**
+   * Ensures uid 1 exists so later grantees are not the standing root user.
+   */
+  private function ensureRootUserExists(): void {
+    if (User::load(1) !== NULL) {
+      return;
+    }
+    $root = User::create(['name' => 'root', 'status' => 1]);
+    $root->save();
+    $this->assertSame(1, (int) $root->id());
   }
 
   /**
@@ -501,6 +536,93 @@ final class McpBreakGlassTest extends KernelTestBase {
     $user = User::load($uid);
     $this->assertNotNull($user);
     $this->assertTrue($user->hasRole(McpBreakGlassManager::ROLE_ID));
+  }
+
+  /**
+   * Grant refuses uid 1.
+   *
+   * @covers ::grant
+   */
+  public function testGrantRefusesUid1(): void {
+    $root = User::load(1);
+    $this->assertNotNull($root);
+    $result = $this->manager()->grant(1);
+    $this->assertFalse($result['granted']);
+    $this->assertStringContainsString('standing superuser', $result['message']);
+    $root = User::load(1);
+    $this->assertNotNull($root);
+    $this->assertFalse($root->hasRole(McpBreakGlassManager::ROLE_ID));
+  }
+
+  /**
+   * Grant refuses an account that already holds an is_admin role.
+   *
+   * @covers ::grant
+   */
+  public function testGrantRefusesStandingAdminRole(): void {
+    $adminRole = Role::create([
+      'id' => 'standing_super',
+      'label' => 'Standing super',
+      'is_admin' => TRUE,
+    ]);
+    $adminRole->save();
+    $user = User::create(['name' => 'already_admin', 'status' => 1]);
+    $user->addRole('standing_super');
+    $user->save();
+    $this->assertGreaterThan(1, (int) $user->id());
+
+    $result = $this->manager()->grant((int) $user->id());
+    $this->assertFalse($result['granted']);
+    $this->assertStringContainsString('standing superuser', $result['message']);
+    $user = User::load($user->id());
+    $this->assertNotNull($user);
+    $this->assertFalse($user->hasRole(McpBreakGlassManager::ROLE_ID));
+  }
+
+  /**
+   * A successful grant stores a sealed, consumed manifest.
+   *
+   * @covers ::grant
+   */
+  public function testGrantIsSealedAndSingleUse(): void {
+    $this->config('mcp_sentinel_approval.settings')->set('break_glass_ttl_seconds', 100)->save();
+    $user = User::create(['name' => 'sealed_grantee', 'status' => 1]);
+    $user->save();
+
+    $result = $this->manager()->grant((int) $user->id());
+    $this->assertTrue($result['granted']);
+    $grant = $this->manager()->findActiveGrantFor((int) $user->id());
+    $this->assertNotNull($grant);
+    $raw = $grant->getSealedManifest();
+    $this->assertNotSame('', $raw);
+    $manifest = $this->container->get('mcp_sentinel.action_manifest_sealer')->open($raw);
+    $this->assertNotNull($manifest);
+    $this->assertSame('grant_mcp_admin', $manifest->operation());
+    $this->assertSame((string) $user->id(), $manifest->target()['id']);
+    $this->assertFalse(
+      $this->container->get('mcp_sentinel_approval.manifest_binder')->consume(
+        $manifest,
+        McpBreakGlassManager::GRANT_CONSUME_REQUEST_ID,
+      ),
+      'The grant seal must already be consumed.',
+    );
+  }
+
+  /**
+   * Grant refuses when the signing key will not resolve.
+   *
+   * @covers ::grant
+   */
+  public function testGrantRefusesWithoutSigningKey(): void {
+    $this->config('audit_chain.settings')->set('hash_key', '')->save();
+    $user = User::create(['name' => 'no_seal', 'status' => 1]);
+    $user->save();
+    $result = $this->manager()->grant((int) $user->id());
+    $this->assertFalse($result['granted']);
+    $this->assertStringContainsString('signing key', $result['message']);
+    $user = User::load($user->id());
+    $this->assertNotNull($user);
+    $this->assertFalse($user->hasRole(McpBreakGlassManager::ROLE_ID));
   }
 
 }

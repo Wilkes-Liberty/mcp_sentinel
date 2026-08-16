@@ -13,6 +13,7 @@ use Drupal\Core\Config\StorageInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel_approval\Entity\McpAdminGrantInterface;
 use Drupal\mcp_sentinel_approval\Service\McpBreakGlassManager;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -73,11 +74,22 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
   ) {}
 
   /**
+   * Config object that holds break-glass TTL and related control settings.
+   */
+  private const SETTINGS_NAME = 'mcp_sentinel_approval.settings';
+
+  /**
+   * Prefix of policy-profile config objects.
+   */
+  private const POLICY_PREFIX = 'mcp_sentinel.mcp_policy_profile.';
+
+  /**
    * {@inheritdoc}
    */
   public static function getSubscribedEvents(): array {
     return [
       ConfigEvents::SAVE => ['onConfigSave', -20],
+      ConfigEvents::DELETE => ['onConfigDelete', -20],
     ];
   }
 
@@ -96,26 +108,55 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
       return;
     }
 
-    $uid = (int) $this->currentUser->id();
-    if ($uid <= 0 || !in_array(McpBreakGlassManager::ROLE_ID, $this->currentUser->getRoles(), TRUE)) {
-      return;
-    }
-
-    $grant = $this->breakGlass()->findActiveGrantFor($uid);
-    if ($grant === NULL) {
-      return;
-    }
-
     $config = $event->getConfig();
     $name = $config->getName();
     $new = $config->getRawData();
     $original = $config instanceof Config
       ? $config->getOriginal('', FALSE)
       : (array) $config->getOriginal('');
+    if (!is_array($original)) {
+      $original = [];
+    }
     $changedKeys = $this->changedTopLevelKeys($original, $new);
     // No-op saves (identical data) leave no useful record.
     if ($changedKeys === []) {
       return;
+    }
+
+    // Configuration of the control is a distinct elevated event from use.
+    if ($name === self::SETTINGS_NAME) {
+      $this->recordConfigured($name, $changedKeys);
+      return;
+    }
+
+    $grant = $this->activeGrant();
+    if ($grant === NULL) {
+      return;
+    }
+
+    if (str_starts_with($name, self::POLICY_PREFIX)) {
+      if ($this->liftsPublishFloor($new)) {
+        $this->refuse(
+          $name,
+          $original,
+          'break_glass_publish_floor',
+          'Break-glass cannot lift the no-agent-publish floor.',
+        );
+      }
+      $this->refuse(
+        $name,
+        $original,
+        'break_glass_policy_promotion',
+        'Break-glass cannot promote policy.',
+      );
+    }
+    if ($this->liftsPublishFloor($new)) {
+      $this->refuse(
+        $name,
+        $original,
+        'break_glass_publish_floor',
+        'Break-glass cannot lift the no-agent-publish floor.',
+      );
     }
 
     try {
@@ -125,17 +166,47 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
         'id' => $name,
         'changed_keys' => $changedKeys,
         'grant_id' => (int) $grant->id(),
-        'uid' => $uid,
+        'uid' => (int) $this->currentUser->id(),
       ]);
     }
     catch (\Throwable $e) {
-      $this->revert($name, is_array($original) ? $original : []);
+      $this->revert($name, $original);
       throw new ConfigException(sprintf(
         "MCP Sentinel: break-glass config save of '%s' refused because the audit row could not be written: %s",
         $name,
         $e->getMessage(),
       ), 0, $e);
     }
+  }
+
+  /**
+   * Refuses policy-profile deletion while a grant is live.
+   *
+   * @param \Drupal\Core\Config\ConfigCrudEvent $event
+   *   The config CRUD event.
+   *
+   * @throws \Drupal\Core\Config\ConfigException
+   *   When an elevated account tries to remove a policy profile.
+   */
+  public function onConfigDelete(ConfigCrudEvent $event): void {
+    if ($this->policyResolver->isGoverned()) {
+      return;
+    }
+    $grant = $this->activeGrant();
+    if ($grant === NULL) {
+      return;
+    }
+    $config = $event->getConfig();
+    $name = $config->getName();
+    if (!str_starts_with($name, self::POLICY_PREFIX)) {
+      return;
+    }
+    $this->refuse(
+      $name,
+      $config->getRawData(),
+      'break_glass_policy_promotion',
+      'Break-glass cannot promote policy.',
+    );
   }
 
   /**
@@ -174,6 +245,84 @@ final class McpBreakGlassConductSubscriber implements EventSubscriberInterface {
     }
     sort($changed);
     return $changed;
+  }
+
+  /**
+   * The live grant for the current user, if elevation is in effect.
+   */
+  private function activeGrant(): ?McpAdminGrantInterface {
+    $uid = (int) $this->currentUser->id();
+    if ($uid <= 0 || !in_array(McpBreakGlassManager::ROLE_ID, $this->currentUser->getRoles(), TRUE)) {
+      return NULL;
+    }
+    return $this->breakGlass()->findActiveGrantFor($uid);
+  }
+
+  /**
+   * Records a change to break-glass control settings.
+   *
+   * @param string $name
+   *   Config object name.
+   * @param list<string> $changedKeys
+   *   Changed top-level keys.
+   *
+   * @throws \Drupal\Core\Config\ConfigException
+   *   When the audit write fails.
+   */
+  private function recordConfigured(string $name, array $changedKeys): void {
+    try {
+      $this->auditLogger->logAlways('break_glass_configured', [
+        'entity_type' => 'config',
+        'id' => $name,
+        'changed_keys' => $changedKeys,
+        'uid' => (int) $this->currentUser->id(),
+      ]);
+    }
+    catch (\Throwable $e) {
+      throw new ConfigException(sprintf(
+        "MCP Sentinel: break-glass configuration of '%s' refused because the audit row could not be written: %s",
+        $name,
+        $e->getMessage(),
+      ), 0, $e);
+    }
+  }
+
+  /**
+   * Whether the new raw data turns deny_publish off.
+   *
+   * @param array<string, mixed> $new
+   *   Post-save raw data.
+   */
+  private function liftsPublishFloor(array $new): bool {
+    return array_key_exists('deny_publish', $new) && $new['deny_publish'] === FALSE;
+  }
+
+  /**
+   * Reverts a save and refuses it as a break-glass elevation overreach.
+   *
+   * @param string $name
+   *   Config object name.
+   * @param array $original
+   *   Pre-save raw data.
+   * @param string $reason
+   *   Stable reason code.
+   * @param string $message
+   *   Exception message.
+   *
+   * @throws \Drupal\Core\Config\ConfigException
+   *   Always.
+   */
+  private function refuse(string $name, array $original, string $reason, string $message): never {
+    $this->revert($name, $original);
+    $grant = $this->activeGrant();
+    $this->auditLogger->logAlways('break_glass_refused', [
+      'entity_type' => 'config',
+      'id' => $name,
+      'reason' => $reason,
+      'uid' => (int) $this->currentUser->id(),
+      'grant_id' => $grant !== NULL ? (int) $grant->id() : 0,
+    ]);
+    throw new ConfigException(sprintf('MCP Sentinel: %s (%s)', $message, $name));
   }
 
   /**

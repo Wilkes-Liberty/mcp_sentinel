@@ -11,6 +11,9 @@ services:
       - '@datetime.time'
       - '@config.factory'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.action_manifest_sealer'
+      - '@mcp_sentinel_approval.manifest_binder'
+      - '@current_user'
 
   mcp_sentinel_approval.manifest_binder:
     class: Drupal\mcp_sentinel_approval\Service\McpManifestBinder
