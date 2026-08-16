@@ -28,8 +28,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   deny cannot be widened by an upstream allow. Revoke of the active
   digest arms emergency deny. Disconnected operation (no signing key)
   cannot mint or activate new authority. Provider-neutral: Drupal
-  state is the only store. Citing the digest on every audit row is
-  the remaining residual of this issue.
+  state is the only store. Every audit row cites the attested digest
+  as `policy_bundle_digest` when a bundle is active (omitted when
+  none is).
 - **Off-hours and complete bulk-read anomaly signals (#116 / d.o.
   #3616612).** Administrators can define an operating-hours schedule
   (timezone, weekdays, start/end). A rule whose signal is `off_hours`

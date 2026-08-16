@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
@@ -122,6 +123,98 @@ final class McpAuditLoggerTest extends KernelTestBase {
 
     $metadata = json_decode((string) $row['metadata'], TRUE);
     $this->assertArrayNotHasKey('mcp_client', $metadata ?? []);
+  }
+
+  /**
+   * No attested bundle means the row does not invent a digest.
+   *
+   * @covers ::log
+   */
+  public function testLogOmitsPolicyBundleDigestWhenNoneActive(): void {
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '9']);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->execute()
+      ->fetchAssoc();
+
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertArrayNotHasKey('policy_bundle_digest', $metadata ?? []);
+  }
+
+  /**
+   * An attested digest is cited on every ordinary audit row.
+   *
+   * @covers ::log
+   */
+  public function testLogCitesActivePolicyBundleDigest(): void {
+    $this->container->get('state')->set(McpPolicyBundleRegistry::STATE_ACTIVE, [
+      'digest' => 'sha256:cited-floor',
+      'activated_at' => 1,
+    ]);
+
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '10']);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->execute()
+      ->fetchAssoc();
+
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertSame('sha256:cited-floor', $metadata['policy_bundle_digest'] ?? NULL);
+  }
+
+  /**
+   * LogAlways cites the attested digest even when audit_enabled is off.
+   *
+   * @covers ::logAlways
+   */
+  public function testLogAlwaysCitesActivePolicyBundleDigest(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    $this->container->get('state')->set(McpPolicyBundleRegistry::STATE_ACTIVE, [
+      'digest' => 'sha256:always-floor',
+      'activated_at' => 1,
+    ]);
+
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('config_save_break_glass', [
+      'id' => '11',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->execute()
+      ->fetchAssoc();
+
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertSame('sha256:always-floor', $metadata['policy_bundle_digest'] ?? NULL);
+  }
+
+  /**
+   * A caller that already named a digest keeps that value.
+   *
+   * @covers ::log
+   */
+  public function testLogPreservesCallerPolicyBundleDigest(): void {
+    $this->container->get('state')->set(McpPolicyBundleRegistry::STATE_ACTIVE, [
+      'digest' => 'sha256:active-floor',
+      'activated_at' => 1,
+    ]);
+
+    $this->container->get('mcp_sentinel.audit_logger')->log('policy_bundle_activate', [
+      'policy_bundle_digest' => 'sha256:activating',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->execute()
+      ->fetchAssoc();
+
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertSame('sha256:activating', $metadata['policy_bundle_digest'] ?? NULL);
   }
 
   /**

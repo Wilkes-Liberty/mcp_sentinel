@@ -25,6 +25,9 @@ services:
       # Transaction awareness: refusal evidence written inside an aborting
       # entity-save transaction must survive its rollback.
       - '@database'
+      # Optional so a missing bundle registry cannot break the 2.0.0-style
+      # container compile path the audit_chain argument already protects.
+      - '@?mcp_sentinel.policy_bundle_registry'
 
   mcp_sentinel.policy_bundle_registry:
     class: Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry
