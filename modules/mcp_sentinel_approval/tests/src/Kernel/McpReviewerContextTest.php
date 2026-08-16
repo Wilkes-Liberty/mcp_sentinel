@@ -115,6 +115,7 @@ final class McpReviewerContextTest extends KernelTestBase {
       'entity_type' => 'node',
       'entity_id' => (string) $node->id(),
       'entity_uuid' => (string) $node->uuid(),
+      'label' => 'Review me',
       'obligations' => ['log_receipt'],
     ];
     $manifest = $this->container->get('mcp_sentinel.action_manifest_sealer')->tryMint(
@@ -128,6 +129,8 @@ final class McpReviewerContextTest extends KernelTestBase {
       $payload,
     );
     $this->assertNotNull($manifest);
+    $node->setTitle('Changed after queue');
+    $node->save();
     $storage = $this->container->get('entity_type.manager')
       ->getStorage('mcp_approval_request');
     /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request */
@@ -136,7 +139,10 @@ final class McpReviewerContextTest extends KernelTestBase {
       'operation' => 'delete',
       'entity_type' => 'node',
       'entity_id' => (string) $node->id(),
-      'payload' => (string) json_encode($payload),
+      'payload' => (string) json_encode([
+        'label' => 'tampered',
+        'obligations' => ['not_from_seal'],
+      ]),
       'status' => McpApprovalRequestInterface::STATUS_PENDING,
       'manifest' => $manifest->toJson(),
     ]);
@@ -147,8 +153,9 @@ final class McpReviewerContextTest extends KernelTestBase {
     $fields = array_column($context['rows'], 'field');
     $this->assertContains('uuid', $fields);
     $this->assertContains('label', $fields);
-    $labels = array_column($context['rows'], 'live', 'field');
-    $this->assertSame('Review me', $labels['label']);
+    $byField = array_column($context['rows'], NULL, 'field');
+    $this->assertSame('Review me', $byField['label']['sealed']);
+    $this->assertSame('Changed after queue', $byField['label']['live']);
   }
 
   /**
@@ -163,6 +170,10 @@ final class McpReviewerContextTest extends KernelTestBase {
       'data' => [
         'name' => 'Sealed name',
         'webhook_secret' => 'should-not-appear',
+        'key_provider_settings' => [
+          'key_value' => 'nested-secret',
+          'safe' => 'visible',
+        ],
       ],
     ];
     $manifest = $this->container->get('mcp_sentinel.action_manifest_sealer')->tryMint(
@@ -193,6 +204,9 @@ final class McpReviewerContextTest extends KernelTestBase {
     $this->assertSame('Sealed name', $byField['name']['sealed']);
     $this->assertSame('Live name', $byField['name']['live']);
     $this->assertSame('[REDACTED]', $byField['webhook_secret']['sealed']);
+    $this->assertStringContainsString('[REDACTED]', $byField['key_provider_settings']['sealed']);
+    $this->assertStringNotContainsString('nested-secret', $byField['key_provider_settings']['sealed']);
+    $this->assertStringContainsString('visible', $byField['key_provider_settings']['sealed']);
   }
 
 }

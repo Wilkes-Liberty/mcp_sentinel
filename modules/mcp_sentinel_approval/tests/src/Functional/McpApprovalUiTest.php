@@ -101,6 +101,7 @@ final class McpApprovalUiTest extends BrowserTestBase {
       'entity_type' => 'node',
       'entity_id' => (string) $nid,
       'entity_uuid' => (string) $node->uuid(),
+      'label' => 'Awaiting approval',
     ];
     $manifest = \Drupal::service('mcp_sentinel.action_manifest_sealer')->tryMint(
       $requester,

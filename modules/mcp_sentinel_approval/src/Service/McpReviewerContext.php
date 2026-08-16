@@ -72,7 +72,7 @@ final class McpReviewerContext {
       'actor_uid' => $manifest->actorUid(),
       'expires' => $manifest->expires(),
       'policy_digest' => $manifest->policyDigest(),
-      'obligations' => $this->obligations($request, $manifest),
+      'obligations' => $this->obligations($manifest),
       'rows' => $this->rows($manifest),
     ];
   }
@@ -169,15 +169,15 @@ final class McpReviewerContext {
   }
 
   /**
-   * Obligations from the request payload, if present.
+   * Obligations from the sealed arguments only.
+   *
+   * The request payload is tamperable; slice 3 executes the seal.
    *
    * @return list<string>
    *   Obligation codes.
    */
-  private function obligations(McpApprovalRequestInterface $request, McpActionManifest $manifest): array {
-    $fromPayload = $request->getPayload()['obligations'] ?? NULL;
-    $fromArgs = $manifest->arguments()['obligations'] ?? NULL;
-    $raw = is_array($fromPayload) ? $fromPayload : $fromArgs;
+  private function obligations(McpActionManifest $manifest): array {
+    $raw = $manifest->arguments()['obligations'] ?? NULL;
     if (!is_array($raw)) {
       return [];
     }
@@ -227,8 +227,10 @@ final class McpReviewerContext {
     if ($sealedRevision !== '' || $liveRevision !== '') {
       $rows[] = $this->row('revision', $sealedRevision, $liveRevision === '' ? 'n/a' : $liveRevision);
     }
-    if ($live !== NULL) {
-      $rows[] = $this->row('label', (string) $live->label(), (string) $live->label());
+    $sealedLabel = (string) ($manifest->arguments()['label'] ?? '');
+    $liveLabel = $live !== NULL ? (string) $live->label() : 'missing';
+    if ($sealedLabel !== '' || $live !== NULL) {
+      $rows[] = $this->row('label', $sealedLabel, $liveLabel);
     }
     return $rows;
   }
@@ -336,22 +338,37 @@ final class McpReviewerContext {
   }
 
   /**
-   * Stringifies a value, redacting secret-looking keys.
+   * Stringifies a value, redacting secret-looking keys at any depth.
    */
   private function displayValue(string $key, mixed $value): string {
-    if (preg_match('/secret|password|token|hash_key|key_value/i', $key) === 1) {
-      return $value === NULL ? '' : '[REDACTED]';
-    }
-    if ($value === NULL) {
+    $redacted = $this->redact($key, $value);
+    if ($redacted === NULL) {
       return '';
     }
-    if (is_bool($value)) {
-      return $value ? 'true' : 'false';
+    if (is_bool($redacted)) {
+      return $redacted ? 'true' : 'false';
     }
-    if (is_scalar($value)) {
-      return (string) $value;
+    if (is_scalar($redacted)) {
+      return (string) $redacted;
     }
-    return (string) json_encode($value, JSON_UNESCAPED_SLASHES);
+    return (string) json_encode($redacted, JSON_UNESCAPED_SLASHES);
+  }
+
+  /**
+   * Replaces secret-looking keys with a redaction marker.
+   */
+  private function redact(string $key, mixed $value): mixed {
+    if (preg_match('/secret|password|token|hash_key|key_value/i', $key) === 1) {
+      return $value === NULL ? NULL : '[REDACTED]';
+    }
+    if (!is_array($value)) {
+      return $value;
+    }
+    $out = [];
+    foreach ($value as $childKey => $child) {
+      $out[$childKey] = $this->redact((string) $childKey, $child);
+    }
+    return $out;
   }
 
 }
