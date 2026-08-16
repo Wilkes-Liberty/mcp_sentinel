@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Dashboard never reports all-clear before evidence is verified
+  (#115 / d.o. #3616611).** The posture hero previously treated
+  zero urgent-condition attention as "All clear" even when the
+  audit hash chain had never been verified. Overall clear now
+  requires a successful, non-stale verification. The dashboard
+  distinguishes unknown, pending, stale, degraded, failed,
+  unavailable and verified evidence states. A not-yet-verified,
+  stale, failed or unavailable chain is a non-clear warning (or
+  critical, when broken) with an actionable explanation that
+  links to the audit log.
+
 ### Added
 - **Off-hours and complete bulk-read anomaly signals (#116 / d.o.
   #3616612).** Administrators can define an operating-hours schedule

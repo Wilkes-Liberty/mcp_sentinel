@@ -964,11 +964,15 @@ stores — it performs no writes and re-verifies nothing on load. It surfaces:
   profile or webhook signing key, governance switched off while traffic flows,
   and the operator broadcast message);
 - a **posture hero** rolling up how many items need attention (urgent
-  conditions + pending approvals + anomaly alerts + webhook failures), or an
-  all-clear state;
+  conditions + pending approvals + anomaly alerts + webhook failures).
+  All-clear also requires a successful, non-stale audit-chain verification —
+  unknown, pending, stale, degraded, failed or unavailable evidence can
+  never be reported as clear;
 - **five status tiles** — Governance, Audit, Anomaly, Approvals, Webhooks —
   each linking into the relevant report;
-- a **chain-integrity card** reflecting the last stored verify result;
+- a **chain-integrity card** reflecting the last stored verify result as
+  one of unknown / pending / verified / stale / degraded / failed /
+  unavailable;
 - **top-agents** and **denied-by-policy** panels;
 - a **quick-actions** bar (including **Verify chain now**, a CSRF-protected
   action that re-runs the hash-chain check, records the result, and returns to
