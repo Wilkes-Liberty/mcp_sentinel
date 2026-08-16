@@ -15,7 +15,9 @@ Compose responses:
 - **Field-name redaction** — fields in the profile's `redacted_fields` list are
   replaced with `[REDACTED]`.
 - **DLP value-pattern masking** — string values are scanned for configured PII
-  patterns (opt-in via the DLP settings).
+  patterns (opt-in via the DLP settings). A pattern may declare a
+  classification label; a hit may tighten the response ceiling and is
+  fully redacted when it exceeds the ceiling.
 - **Exfiltration result caps** — multi-value field lists are truncated to the
   profile's `result_count_cap`.
 - **Mutation gating and audit** — governed mutations are gated and audited.

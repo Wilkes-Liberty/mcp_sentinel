@@ -411,4 +411,95 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
     $this->assertSame(['top secret'], $results);
   }
 
+  /**
+   * A labelled DLP hit that exceeds the ceiling is fully redacted.
+   *
+   * Even in partial-mask mode the value must not leave: the hit is
+   * restricted and the GraphQL ceiling is public (d.o #3617061).
+   */
+  public function testDlpHitTightensWhenItExceedsCeiling(): void {
+    $this->makeGoverned([], 0);
+    $this->enableClassifiedDlp('restricted', 'partial');
+    $this->setGraphqlCeiling('public');
+
+    $results = ['EMP-123456'];
+    $this->invokeHook($results, $this->makePlugin('title'), $this->makeFieldContext());
+    $this->assertSame(['[REDACTED]'], $results);
+  }
+
+  /**
+   * A labelled hit at the ceiling is masked, not refused.
+   */
+  public function testDlpHitAtCeilingIsMaskedNotRefused(): void {
+    $this->makeGoverned([], 0);
+    $this->enableClassifiedDlp('restricted', 'partial');
+    $this->setGraphqlCeiling('restricted');
+
+    $results = ['EMP-123456'];
+    $this->invokeHook($results, $this->makePlugin('title'), $this->makeFieldContext());
+    $this->assertStringEndsWith('3456', (string) $results[0]);
+    $this->assertStringStartsWith('*', (string) $results[0]);
+    $this->assertNotSame('[REDACTED]', $results[0]);
+  }
+
+  /**
+   * A public-labelled DLP hit cannot let a restricted field through.
+   */
+  public function testDlpHitCannotWidenRestrictedField(): void {
+    $this->makeGoverned([], 0);
+    $this->enableClassifiedDlp('public', 'redact');
+    $this->classifySecret('public');
+
+    $results = ['EMP-123456'];
+    $this->invokeHook($results, $this->makePlugin('title'), $this->makeFieldContext());
+    $this->assertStringNotContainsString('EMP-123456', (string) $results[0]);
+
+    $secret = ['top secret'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter(
+      $secret,
+      $this->makeEntity('node', 'page'),
+      $this->makePlugin('field_secret'),
+      $this->makeFieldContext(),
+    );
+    $this->assertSame(['[REDACTED]'], $secret);
+  }
+
+  /**
+   * Enables DLP with one classified custom pattern and rebuilds DI.
+   */
+  private function enableClassifiedDlp(string $classification, string $maskMode): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('dlp_enabled', TRUE)
+      ->set('dlp_mask_mode', $maskMode)
+      ->set('dlp_patterns', [
+        [
+          'label' => 'employee_id',
+          'regex' => 'EMP-\d{6}',
+          'mask' => '*',
+          'classification' => $classification,
+        ],
+      ])
+      ->save();
+    $this->container->get('kernel')->rebuildContainer();
+    // @phpstan-ignore assign.propertyType
+    $this->container = $this->container->get('kernel')->getContainer();
+  }
+
+  /**
+   * Sets the test agent's GraphQL ceiling.
+   */
+  private function setGraphqlCeiling(string $ceiling): void {
+    $this->config('mcp_sentinel.mcp_policy_profile.test_agent')
+      ->set('egress_ceilings', ['graphql' => $ceiling])
+      ->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+    $stack = $this->container->get('request_stack');
+    $request = Request::create('/graphql', 'POST');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+  }
+
 }

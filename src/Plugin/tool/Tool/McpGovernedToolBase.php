@@ -10,8 +10,11 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
+use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -47,6 +50,21 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?RequestStack $governanceRequestStack = NULL;
 
   /**
+   * DLP scanner applied to successful Tool context.
+   */
+  protected ?McpDlp $governanceDlp = NULL;
+
+  /**
+   * Classification resolver used to tighten Tool egress (NULL in unit tests).
+   */
+  protected ?McpClassificationResolver $governanceClassification = NULL;
+
+  /**
+   * Policy resolver used to read the Tool ceiling (NULL in unit tests).
+   */
+  protected ?McpPolicyResolver $governancePolicyResolver = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -55,7 +73,63 @@ abstract class McpGovernedToolBase extends ToolBase {
     $instance->governanceAccessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->governanceRequiredScope = McpToolScopeResolver::resolveDefinition($plugin_definition);
     $instance->governanceRequestStack = $container->get('request_stack');
+    $instance->governanceDlp = $container->has('mcp_sentinel.dlp')
+      ? $container->get('mcp_sentinel.dlp')
+      : NULL;
+    $instance->governanceClassification = $container->has('mcp_sentinel.classification')
+      ? $container->get('mcp_sentinel.classification')
+      : NULL;
+    $instance->governancePolicyResolver = $container->has('mcp_sentinel.policy_resolver')
+      ? $container->get('mcp_sentinel.policy_resolver')
+      : NULL;
     return $instance;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function execute(): static {
+    parent::execute();
+    $this->applyDlpToResult();
+    return $this;
+  }
+
+  /**
+   * Scans successful Tool context through DLP (tighten-only).
+   *
+   * Failure results are left alone — they carry no entity values. Unit
+   * tests that construct a Tool without the container skip this pass.
+   */
+  private function applyDlpToResult(): void {
+    if ($this->governanceDlp === NULL || $this->result === NULL || !$this->result->isSuccess()) {
+      return;
+    }
+    $ceiling = NULL;
+    if ($this->governanceClassification !== NULL && $this->governancePolicyResolver !== NULL) {
+      $profile = $this->governancePolicyResolver->resolve();
+      if ($profile !== NULL) {
+        $ceiling = $this->governanceClassification->effectiveCeiling($profile, McpGovernedSurface::Tool);
+      }
+    }
+    $scanned = $this->governanceDlp->scanTree(
+      $this->result->getContextValues(),
+      $ceiling,
+      $this->governanceClassification,
+    );
+    if (!is_array($scanned)) {
+      return;
+    }
+    $this->result = ExecutableResult::success($this->result->getMessage(), $scanned);
+    $provided = $this->getOutputDefinitions();
+    if ($provided === []) {
+      return;
+    }
+    $this->outputs = [];
+    foreach ($scanned as $name => $value) {
+      if (isset($provided[$name])) {
+        $this->setOutputValue($name, $value);
+      }
+    }
   }
 
   /**
