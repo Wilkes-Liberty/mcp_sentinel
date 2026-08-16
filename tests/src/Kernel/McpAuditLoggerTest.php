@@ -167,7 +167,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
   }
 
   /**
-   * logAlways cites the attested digest even when audit_enabled is off.
+   * LogAlways cites the attested digest even when audit_enabled is off.
    *
    * @covers ::logAlways
    */
