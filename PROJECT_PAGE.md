@@ -49,7 +49,8 @@ attributed to the authenticated account.
   `/admin/reports/mcp-sentinel` with an urgent-conditions banner, a posture
   rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy
   panels, charts, quick actions, and an active-controls strip — all built from
-  data the module already stores.
+  data the module already stores. The hero never reports all-clear until
+  audit-chain evidence is verified (and not stale).
 - **Audit logging** — every MCP entity operation and GraphQL query/mutation is
   written to a dedicated, query-optimised log with user, IP, timestamp, and
   payload metadata. Configurable retention with automatic pruning. The admin
@@ -70,7 +71,8 @@ attributed to the authenticated account.
   Monolog.
 - **DLP value-pattern redaction (opt-in)** — scan governed field values for PII
   patterns (email, US phone, SSN, credit card, plus custom patterns) and fully
-  redact or partially mask matches.
+  redact or partially mask matches. A pattern may declare a classification
+  label: a hit can only lower the egress ceiling, never raise or invent one.
 - **Per-profile rate limiting & quotas** — throttle governed agent traffic with
   Drupal's core flood service (max requests per rolling window), keyed on the
   server-resolved user ID so a single compromised token cannot saturate the
@@ -113,10 +115,15 @@ attributed to the authenticated account.
   the governed Tool plugins, and the context endpoint. Empty list = no
   restriction.
 - **Anomaly detection & alerting** — cron-evaluated rules over the audit log
-  (operation pattern, time window, count threshold) that fire alerts via log,
-  email, or webhook channels, with per-rule debounce to prevent alert storms.
-  Includes governed `denied_access` auditing as a detection signal. Ships with no
+  (operation pattern, time window, count threshold, off-hours schedule, or
+  complete/near-complete bulk read) that fire alerts via log, email, or
+  webhook channels, with per-rule debounce to prevent alert storms. Includes
+  governed `denied_access` auditing as a detection signal. Ships with no
   rules enabled.
+- **Portable policy bundles** — a versioned, HMAC-sealed artifact that can
+  be verified, activated (with last-known-good rollback), simulated, revoked,
+  or used to arm emergency deny. Every audit row cites the attested digest
+  when a bundle is active. Local deny cannot be widened by an upstream allow.
 - **Content locks** — prevent agents from overwriting content a human is
   editing, with TTL-based expiry.
 - **Reliable webhooks** — queue-backed, HTTPS-only, HMAC-SHA256-signed delivery
@@ -143,11 +150,12 @@ attributed to the authenticated account.
   applies field redaction for MCP requests.
 - **MCP Sentinel Approval** (`mcp_sentinel_approval`) — optional human-approval
   gate: queues governed destructive operations (bulk delete) as approval
-  requests for an authorized human to approve or deny instead of executing
-  them immediately. Includes time-boxed break-glass elevation into a shipped
-  non-admin `mcp_admin` role (permission allowlist, grant-time seal, status
-  drift, live-grant posture revalidation, and audit of config saves while
-  elevated).
+  requests bound to one HMAC-sealed action manifest. The requester cannot
+  approve their own request; the form shows the sealed action against the
+  live target before a decision is possible. Includes time-boxed break-glass
+  elevation into a shipped non-admin `mcp_admin` role (single-use sealed
+  grant, uid 1 and standing `is_admin` refused, and no promotion of policy
+  or the no-agent-publish floor while elevated).
 
 ## Requirements
 
