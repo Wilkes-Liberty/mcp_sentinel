@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel_graphql\EventSubscriber;
 
+use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\graphql\Event\OperationEvent;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use GraphQL\Error\Error;
@@ -40,12 +42,16 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    *   Source-governance readiness evaluator.
    * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
    *   Current authenticated account.
+   * @param \Drupal\mcp_sentinel\Service\McpAccessChecker|null $accessChecker
+   *   Live access checker (d.o #3617702). Nullable for the deploy window
+   *   in which the cached container still passes four arguments.
    */
   public function __construct(
     private readonly McpAuditLogger $auditLogger,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly McpGovernanceReadiness $readiness,
     private readonly AccountProxyInterface $currentUser,
+    private readonly ?McpAccessChecker $accessChecker = NULL,
   ) {}
 
   /**
@@ -109,12 +115,31 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       if (!$profile->allowsWrite() || !$profile->allowsGraphqlMutations()) {
         throw new Error('GraphQL mutations are disabled by MCP Sentinel.');
       }
+      $this->refuseIfBundleDenies('update');
       return;
     }
 
     // Read gate (queries only; leave subscriptions/other types untouched).
     if ($type === 'query' && !$profile->allowsRead()) {
       throw new Error('GraphQL read access is disabled by MCP Sentinel.');
+    }
+    if ($type === 'query') {
+      $this->refuseIfBundleDenies('view');
+    }
+  }
+
+  /**
+   * Throws when the attested portable-policy floor refuses this operation.
+   *
+   * @throws \GraphQL\Error\Error
+   *   When the active bundle or emergency deny refuses.
+   */
+  private function refuseIfBundleDenies(string $operation): void {
+    if ($this->accessChecker === NULL) {
+      return;
+    }
+    if ($this->accessChecker->checkBundleFloor($operation, AccessResult::neutral())->isForbidden()) {
+      throw new Error('MCP access is denied (' . McpAccessChecker::BUNDLE_DENIAL_CODE . ').');
     }
   }
 

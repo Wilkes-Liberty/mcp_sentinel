@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Uuid\UuidInterface;
+use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\State\StateInterface;
@@ -137,6 +138,26 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
+   * Activate, revoke, rollback and emergency deny drop cached access results.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::activate
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::revoke
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::emergencyDeny
+   */
+  public function testMutationsInvalidateAccessCacheTag(): void {
+    $invalidator = $this->createMock(CacheTagsInvalidatorInterface::class);
+    $invalidator->expects($this->atLeast(3))
+      ->method('invalidateTags')
+      ->with([McpPolicyBundleRegistry::CACHE_TAG]);
+    $registry = $this->registry('secret', invalidator: $invalidator);
+    $bundle = $registry->mint(['delete']);
+    $this->assertNotNull($bundle);
+    $registry->activate($bundle);
+    $registry->revoke($bundle->digest());
+    $registry->emergencyDeny();
+  }
+
+  /**
    * Disconnected operation (no key) cannot mint new authority.
    *
    * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::activate
@@ -152,7 +173,7 @@ final class McpPolicyBundleTest extends UnitTestCase {
   /**
    * Builds a registry over in-memory state and an optional signing secret.
    */
-  private function registry(?string $secret, int $now = 1_700_000_000): McpPolicyBundleRegistry {
+  private function registry(?string $secret, int $now = 1_700_000_000, ?CacheTagsInvalidatorInterface $invalidator = NULL): McpPolicyBundleRegistry {
     $settings = $this->createMock(ImmutableConfig::class);
     $settings->method('get')->willReturn($secret === NULL ? '' : 'bundle_key');
     $factory = $this->createMock(ConfigFactoryInterface::class);
@@ -185,7 +206,7 @@ final class McpPolicyBundleTest extends UnitTestCase {
       $keys->method('getKey')->willReturn($key);
     }
 
-    return new McpPolicyBundleRegistry($factory, $state, $time, $uuid, $keys);
+    return new McpPolicyBundleRegistry($factory, $state, $time, $uuid, $keys, $invalidator);
   }
 
 }

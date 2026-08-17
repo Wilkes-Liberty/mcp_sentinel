@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Access\AccessResultForbidden;
+use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\taxonomy\Entity\Term;
@@ -359,6 +362,149 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $this->assertContains('oauth2_scopes', $result->getCacheContexts());
     $this->assertSame(0, $result->getCacheMaxAge(),
       'An IP-restricted profile must make the filter-access deny uncacheable.');
+  }
+
+  /**
+   * An attested bundle deny refuses the named operation on the live path.
+   *
+   * @covers ::checkEntityAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testAttestedBundleDenyForbidsNamedOperation(): void {
+    $this->setMaster(TRUE);
+    $this->activateBundle(['delete']);
+    $p = $this->profile(['allow_write' => TRUE, 'allow_delete' => TRUE]);
+    $denied = $this->checker()->checkEntityAccess($this->node, 'delete', $p);
+    $this->assertInstanceOf(AccessResultForbidden::class, $denied);
+    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $denied->getReason());
+    $this->assertContains(McpPolicyBundleRegistry::CACHE_TAG, $denied->getCacheTags());
+    $view = $this->checker()->checkEntityAccess($this->node, 'view', $p);
+    $this->assertFalse($view->isForbidden(), 'A bundle that names only delete must not refuse view.');
+    $this->assertContains(McpPolicyBundleRegistry::CACHE_TAG, $view->getCacheTags());
+  }
+
+  /**
+   * A local deny is not widened when the attested bundle allows the operation.
+   *
+   * @covers ::checkEntityAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testLocalDenyIsNotWidenedByBundleAllow(): void {
+    $this->setMaster(TRUE);
+    $this->activateBundle([]);
+    $p = $this->profile(['allow_write' => FALSE]);
+    $denied = $this->checker()->checkEntityAccess($this->node, 'update', $p);
+    $this->assertInstanceOf(AccessResultForbidden::class, $denied);
+    $this->assertNotSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $denied->getReason());
+  }
+
+  /**
+   * Emergency deny refuses every live operation.
+   *
+   * @covers ::checkEntityAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testEmergencyDenyForbidsLiveAccess(): void {
+    $this->setMaster(TRUE);
+    $this->container->get('mcp_sentinel.policy_bundle_registry')->emergencyDeny();
+    $p = $this->profile(['allow_write' => TRUE, 'allow_delete' => TRUE]);
+    foreach (['view', 'update', 'delete'] as $operation) {
+      $result = $this->checker()->checkEntityAccess($this->node, $operation, $p);
+      $this->assertInstanceOf(AccessResultForbidden::class, $result, $operation . ' must be refused under emergency deny.');
+      $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+    }
+  }
+
+  /**
+   * Revoke of the active digest arms emergency deny on the live path.
+   *
+   * @covers ::checkEntityAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testRevokeOfActiveDigestArmsEmergencyDeny(): void {
+    $this->setMaster(TRUE);
+    $digest = $this->activateBundle(['delete']);
+    $this->container->get('mcp_sentinel.policy_bundle_registry')->revoke($digest);
+    $p = $this->profile(['allow_write' => TRUE]);
+    $result = $this->checker()->checkEntityAccess($this->node, 'view', $p);
+    $this->assertInstanceOf(AccessResultForbidden::class, $result);
+    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+  }
+
+  /**
+   * Create access honours a bundle that names create.
+   *
+   * @covers ::checkCreateAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testBundleDenyCreateAccess(): void {
+    $this->setMaster(TRUE);
+    $this->activateBundle(['create']);
+    $p = $this->profile(['allow_write' => TRUE]);
+    $result = $this->checker()->checkCreateAccess('node', $p);
+    $this->assertInstanceOf(AccessResultForbidden::class, $result);
+    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+  }
+
+  /**
+   * Config write honours a bundle that names update.
+   *
+   * @covers ::checkConfigAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testBundleDenyConfigWrite(): void {
+    $this->setMaster(TRUE);
+    $this->activateBundle(['update']);
+    $p = $this->profile(['allow_config_write' => TRUE, 'allow_config_read' => TRUE]);
+    $write = $this->checker()->checkConfigAccess('system.site', 'write', $p);
+    $this->assertInstanceOf(AccessResultForbidden::class, $write);
+    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $write->getReason());
+    $read = $this->checker()->checkConfigAccess('system.site', 'read', $p);
+    $this->assertFalse($read->isForbidden(), 'A bundle that names only update must not refuse config read.');
+  }
+
+  /**
+   * JSON:API filter access honours a bundle that names view.
+   *
+   * @covers ::getJsonApiFilterAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testBundleDenyJsonApiFilterAccess(): void {
+    $this->setMaster(TRUE);
+    $this->activateBundle(['view']);
+    $p = $this->profile([]);
+    $access = $this->checker()->getJsonApiFilterAccess('node', $p);
+    $result = $access[JSONAPI_FILTER_AMONG_ALL] ?? NULL;
+    $this->assertInstanceOf(AccessResultForbidden::class, $result);
+    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+  }
+
+  /**
+   * Installs a signing key, mints a bundle and attests it.
+   *
+   * @param string[] $deniedOperations
+   *   Operations the portable floor refuses.
+   *
+   * @return string
+   *   The attested digest.
+   */
+  private function activateBundle(array $deniedOperations): string {
+    if (Key::load('bundle_live_key') === NULL) {
+      Key::create([
+        'id' => 'bundle_live_key',
+        'label' => 'Bundle live key',
+        'key_type' => 'authentication',
+        'key_provider' => 'config',
+        'key_provider_settings' => ['key_value' => 'bundle-live-deny-secret'],
+      ])->save();
+    }
+    $this->config('audit_chain.settings')->set('hash_key', 'bundle_live_key')->save();
+    $registry = $this->container->get('mcp_sentinel.policy_bundle_registry');
+    $bundle = $registry->mint($deniedOperations);
+    $this->assertNotNull($bundle);
+    $attestation = $registry->activate($bundle);
+    $this->assertNotNull($attestation);
+    return $bundle->digest();
   }
 
 }

@@ -8,6 +8,7 @@ use Drupal\graphql\Event\OperationEvent;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
@@ -252,6 +253,21 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   }
 
   /**
+   * Emergency deny refuses a GraphQL query that the profile would allow.
+   *
+   * @covers ::onOperation
+   */
+  public function testQueryRefusedUnderEmergencyDeny(): void {
+    $this->setUpGovernedAgent(['allow_read' => TRUE]);
+    $this->container->get('mcp_sentinel.policy_bundle_registry')->emergencyDeny();
+
+    $this->expectException(Error::class);
+    $this->expectExceptionMessage(McpAccessChecker::BUNDLE_DENIAL_CODE);
+
+    $this->subscriber()->onOperation($this->makeEvent('query'));
+  }
+
+  /**
    * Returns a fresh GraphqlGovernanceSubscriber from real container services.
    */
   private function subscriber(): GraphqlGovernanceSubscriber {
@@ -260,6 +276,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $this->container->get('config.factory'),
       $this->container->get('mcp_sentinel.governance_readiness'),
       $this->container->get('current_user'),
+      $this->container->get('mcp_sentinel.access_checker'),
     );
   }
 

@@ -37,6 +37,7 @@ services:
       - '@datetime.time'
       - '@uuid'
       - '@?key.repository'
+      - '@cache_tags.invalidator'
 
   mcp_sentinel.policy_resolver:
     class: Drupal\mcp_sentinel\Service\McpPolicyResolver
@@ -53,6 +54,7 @@ services:
       - '@request_stack'
       - '@entity_type.manager'
       - '@mcp_sentinel.classification'
+      - '@?mcp_sentinel.policy_bundle_registry'
 
   mcp_sentinel.moderation_gate:
     class: Drupal\mcp_sentinel\Service\McpModerationGate
@@ -227,6 +229,7 @@ services:
     arguments:
       - '@entity_type.manager'
       - '@mcp_sentinel.classification'
+      - '@?mcp_sentinel.policy_bundle_registry'
 
   mcp_sentinel.jsonapi_page_limit_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber
