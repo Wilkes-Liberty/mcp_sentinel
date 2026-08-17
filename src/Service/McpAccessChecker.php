@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Cache\Cache;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
@@ -578,14 +579,30 @@ final class McpAccessChecker {
     if ($prior->isForbidden()) {
       return $prior;
     }
-    $prior->addCacheTags([McpPolicyBundleRegistry::CACHE_TAG]);
+    $this->applyBundleCacheability($prior);
     $sim = $this->policyBundles->simulate($operation, FALSE);
     if ($sim['allow']) {
       return $prior;
     }
-    return AccessResult::forbidden(self::BUNDLE_DENIAL_CODE)
-      ->addCacheTags([McpPolicyBundleRegistry::CACHE_TAG])
+    $deny = AccessResult::forbidden(self::BUNDLE_DENIAL_CODE)
       ->addCacheableDependency($prior);
+    $this->applyBundleCacheability($deny);
+    return $deny;
+  }
+
+  /**
+   * Tags a result and caps its max-age to the attested remaining TTL.
+   */
+  private function applyBundleCacheability(AccessResult $result): void {
+    $result->addCacheTags([McpPolicyBundleRegistry::CACHE_TAG]);
+    $ttl = $this->policyBundles?->remainingTtl();
+    if ($ttl === NULL) {
+      return;
+    }
+    $current = $result->getCacheMaxAge();
+    if ($current === Cache::PERMANENT || $current > $ttl) {
+      $result->setCacheMaxAge($ttl);
+    }
   }
 
 }

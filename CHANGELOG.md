@@ -19,7 +19,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   results that consulted the floor carry `mcp_sentinel.policy_bundle`,
   invalidated on activate, revoke, rollback and emergency deny. An
   attested digest whose document will not verify (expired, revoked,
-  tampered, or missing key) fails closed rather than allowing.
+  tampered, or missing key) fails closed rather than allowing. Cached
+  allows do not outlive the attested document's remaining TTL.
 
 ## [2.11.0] - 2026-08-17
 

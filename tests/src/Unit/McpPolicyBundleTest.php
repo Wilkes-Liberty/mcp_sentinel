@@ -163,6 +163,22 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
+   * Remaining TTL is the minted lifetime, then zero after expiry.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::remainingTtl
+   */
+  public function testRemainingTtlFollowsExpiry(): void {
+    $registry = $this->registry('secret');
+    $this->assertNull($registry->remainingTtl());
+    $bundle = $registry->mint(['delete'], 3600);
+    $this->assertNotNull($bundle);
+    $registry->activate($bundle);
+    $this->assertSame(3600, $registry->remainingTtl());
+    $expired = $this->registry('secret', now: 2_000_000_000, reuseStore: TRUE);
+    $this->assertSame(0, $expired->remainingTtl());
+  }
+
+  /**
    * Activate, revoke, rollback and emergency deny drop cached access results.
    *
    * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::activate

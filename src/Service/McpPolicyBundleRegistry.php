@@ -191,6 +191,25 @@ final class McpPolicyBundleRegistry {
   }
 
   /**
+   * Seconds until the active attestation expires, or NULL if none / no TTL.
+   *
+   * Zero means the document is already past its expiry. Callers that cache
+   * a live allow must not outlive this window.
+   */
+  public function remainingTtl(): ?int {
+    $attestation = $this->attestation();
+    $document = is_array($attestation) ? ($attestation['bundle'] ?? NULL) : NULL;
+    if (!is_array($document)) {
+      return NULL;
+    }
+    $expires = (int) ($document['expires'] ?? 0);
+    if ($expires <= 0) {
+      return NULL;
+    }
+    return max(0, $expires - $this->time->getRequestTime());
+  }
+
+  /**
    * Simulates an operation against the candidate without executing.
    *
    * Local denials always win: an upstream allow cannot widen a local deny.

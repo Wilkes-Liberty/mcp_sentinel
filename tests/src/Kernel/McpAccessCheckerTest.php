@@ -381,6 +381,8 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $view = $this->checker()->checkEntityAccess($this->node, 'view', $p);
     $this->assertFalse($view->isForbidden(), 'A bundle that names only delete must not refuse view.');
     $this->assertContains(McpPolicyBundleRegistry::CACHE_TAG, $view->getCacheTags());
+    $this->assertLessThanOrEqual(McpPolicyBundleRegistry::DEFAULT_TTL, $view->getCacheMaxAge());
+    $this->assertGreaterThan(0, $view->getCacheMaxAge());
   }
 
   /**
