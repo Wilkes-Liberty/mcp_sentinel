@@ -222,6 +222,16 @@ final class McpPolicyBundleRegistry {
     if ($bundle === NULL) {
       $document = is_array($attestation) ? ($attestation['bundle'] ?? NULL) : NULL;
       $bundle = is_array($document) ? $this->verify($document) : NULL;
+      // An attested digest with no verifiable document is not an allow.
+      // Expired, revoked, tampered or unreadable state must fail closed;
+      // audit rows may still cite the digest.
+      if ($bundle === NULL && $digest !== NULL) {
+        return [
+          'allow' => FALSE,
+          'reason' => 'bundle_unverified',
+          'digest' => $digest,
+        ];
+      }
     }
     if ($bundle !== NULL && ($bundle->denies($operation) || $bundle->denies(self::EMERGENCY_DENY))) {
       return ['allow' => FALSE, 'reason' => 'bundle_deny', 'digest' => $bundle->digest()];

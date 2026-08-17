@@ -138,6 +138,25 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
+   * An active attestation that will not verify is a deny, not an allow.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::simulate
+   */
+  public function testActiveUnverifiableAttestationFailsClosed(): void {
+    $store = [];
+    $registry = $this->registry('secret', store: $store);
+    $bundle = $registry->mint(['delete']);
+    $this->assertNotNull($bundle);
+    $registry->activate($bundle);
+
+    $expired = $this->registry('secret', now: 2_000_000_000, store: $store);
+    $sim = $expired->simulate('view', FALSE);
+    $this->assertFalse($sim['allow']);
+    $this->assertSame('bundle_unverified', $sim['reason']);
+    $this->assertSame($bundle->digest(), $sim['digest']);
+  }
+
+  /**
    * Activate, revoke, rollback and emergency deny drop cached access results.
    *
    * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::activate
@@ -172,15 +191,25 @@ final class McpPolicyBundleTest extends UnitTestCase {
 
   /**
    * Builds a registry over in-memory state and an optional signing secret.
+   *
+   * @param string|null $secret
+   *   Signing key material, or NULL to simulate a missing key.
+   * @param int $now
+   *   Request time returned by the clock.
+   * @param \Drupal\Core\Cache\CacheTagsInvalidatorInterface|null $invalidator
+   *   Optional cache-tag invalidator.
+   * @param array<string, mixed>|null $store
+   *   Shared state bag. When omitted a fresh bag is used.
    */
-  private function registry(?string $secret, int $now = 1_700_000_000, ?CacheTagsInvalidatorInterface $invalidator = NULL): McpPolicyBundleRegistry {
+  private function registry(?string $secret, int $now = 1_700_000_000, ?CacheTagsInvalidatorInterface $invalidator = NULL, ?array &$store = NULL): McpPolicyBundleRegistry {
     $settings = $this->createMock(ImmutableConfig::class);
     $settings->method('get')->willReturn($secret === NULL ? '' : 'bundle_key');
     $factory = $this->createMock(ConfigFactoryInterface::class);
     $factory->method('get')->willReturn($settings);
 
-    /** @var array<string, mixed> $store */
-    $store = [];
+    if ($store === NULL) {
+      $store = [];
+    }
     $state = $this->createMock(StateInterface::class);
     $state->method('get')->willReturnCallback(
       static function (string $key, mixed $default = NULL) use (&$store): mixed {

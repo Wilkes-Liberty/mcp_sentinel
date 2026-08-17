@@ -17,7 +17,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live access. The client-facing reason is the stable code
   `policy_bundle_denied` (the digest stays on the audit row). Access
   results that consulted the floor carry `mcp_sentinel.policy_bundle`,
-  invalidated on activate, revoke, rollback and emergency deny.
+  invalidated on activate, revoke, rollback and emergency deny. An
+  attested digest whose document will not verify (expired, revoked,
+  tampered, or missing key) fails closed rather than allowing.
 
 ## [2.11.0] - 2026-08-17
 

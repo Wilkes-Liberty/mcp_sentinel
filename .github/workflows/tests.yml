@@ -229,10 +229,10 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 591 collect today after #3617702: previous 580 plus 11 live-deny
+          # 592 collect today after #3617702: previous 580 plus 12 live-deny
           # tests. The floor sits just under that, so losing any one
           # submodule suite — the smallest is 7 tests — trips it.
-          MIN_TESTS: '584'
+          MIN_TESTS: '585'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
