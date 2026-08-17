@@ -31,6 +31,13 @@ use PHPUnit\Framework\Attributes\Group;
 final class McpPolicyBundleTest extends UnitTestCase {
 
   /**
+   * In-memory state bag shared when reuseStore is TRUE.
+   *
+   * @var array<string, mixed>
+   */
+  private array $stateStore = [];
+
+  /**
    * Digest is stable across key order.
    *
    * @covers ::digestOf
@@ -143,13 +150,12 @@ final class McpPolicyBundleTest extends UnitTestCase {
    * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::simulate
    */
   public function testActiveUnverifiableAttestationFailsClosed(): void {
-    $store = [];
-    $registry = $this->registry('secret', store: $store);
+    $registry = $this->registry('secret');
     $bundle = $registry->mint(['delete']);
     $this->assertNotNull($bundle);
     $registry->activate($bundle);
 
-    $expired = $this->registry('secret', now: 2_000_000_000, store: $store);
+    $expired = $this->registry('secret', now: 2_000_000_000, reuseStore: TRUE);
     $sim = $expired->simulate('view', FALSE);
     $this->assertFalse($sim['allow']);
     $this->assertSame('bundle_unverified', $sim['reason']);
@@ -198,27 +204,27 @@ final class McpPolicyBundleTest extends UnitTestCase {
    *   Request time returned by the clock.
    * @param \Drupal\Core\Cache\CacheTagsInvalidatorInterface|null $invalidator
    *   Optional cache-tag invalidator.
-   * @param array<string, mixed>|null $store
-   *   Shared state bag. When omitted a fresh bag is used.
+   * @param bool $reuseStore
+   *   TRUE to keep the previous in-memory state bag (for clock-skew cases).
    */
-  private function registry(?string $secret, int $now = 1_700_000_000, ?CacheTagsInvalidatorInterface $invalidator = NULL, ?array &$store = NULL): McpPolicyBundleRegistry {
+  private function registry(?string $secret, int $now = 1_700_000_000, ?CacheTagsInvalidatorInterface $invalidator = NULL, bool $reuseStore = FALSE): McpPolicyBundleRegistry {
     $settings = $this->createMock(ImmutableConfig::class);
     $settings->method('get')->willReturn($secret === NULL ? '' : 'bundle_key');
     $factory = $this->createMock(ConfigFactoryInterface::class);
     $factory->method('get')->willReturn($settings);
 
-    if ($store === NULL) {
-      $store = [];
+    if (!$reuseStore) {
+      $this->stateStore = [];
     }
     $state = $this->createMock(StateInterface::class);
     $state->method('get')->willReturnCallback(
-      static function (string $key, mixed $default = NULL) use (&$store): mixed {
-        return array_key_exists($key, $store) ? $store[$key] : $default;
+      function (string $key, mixed $default = NULL): mixed {
+        return array_key_exists($key, $this->stateStore) ? $this->stateStore[$key] : $default;
       },
     );
     $state->method('set')->willReturnCallback(
-      static function (string $key, mixed $value) use (&$store): void {
-        $store[$key] = $value;
+      function (string $key, mixed $value): void {
+        $this->stateStore[$key] = $value;
       },
     );
 
