@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Cache\Cache;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
@@ -27,6 +28,14 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 final class McpAccessChecker {
 
   /**
+   * Stable reason on a live bundle / emergency deny.
+   *
+   * The bare code is the reason on purpose: JSON:API repeats access reasons
+   * to the client in meta.omitted, so the digest must not travel there.
+   */
+  public const string BUNDLE_DENIAL_CODE = 'policy_bundle_denied';
+
+  /**
    * Constructs an McpAccessChecker.
    *
    * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
@@ -44,12 +53,17 @@ final class McpAccessChecker {
    *   The classification resolver enforcing per-surface egress ceilings
    *   (d.o #3616540 part 2). Nullable for the same deploy window; without it
    *   no ceiling is evaluated, which is exactly the pre-upgrade behavior.
+   * @param \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry|null $policyBundles
+   *   Attested portable-policy floor (d.o #3617702). Nullable for the same
+   *   deploy window; without it the live path does not consult a bundle,
+   *   which is exactly the 2.11.0 behaviour.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly RequestStack $requestStack,
     private readonly ?EntityTypeManagerInterface $entityTypeManager = NULL,
     private readonly ?McpClassificationResolver $classification = NULL,
+    private readonly ?McpPolicyBundleRegistry $policyBundles = NULL,
   ) {}
 
   /**
@@ -138,13 +152,14 @@ final class McpAccessChecker {
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
-    // Classification egress ceiling (d.o #3616540 part 2), evaluated LAST:
-    // every hard deny above wins first, so labels only ever deny more. Reads
-    // include 'view label' — a label-only representation is still egress.
+    // Classification egress ceiling (d.o #3616540 part 2), then the attested
+    // bundle floor (d.o #3617702). Both only ever deny more. Reads include
+    // 'view label' — a label-only representation is still egress.
     $result = AccessResult::neutral()->addCacheTags($tags);
     if (in_array($operation, ['view', 'view label'], TRUE) && $this->classification !== NULL) {
       $result = $this->checkClassification($entity, $profile, $result);
     }
+    $result = $this->checkBundleFloor($operation, $result);
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
   }
 
@@ -282,11 +297,12 @@ final class McpAccessChecker {
     // host save runs the full governance stack.
     $definition = $this->entityTypeManager?->getDefinition($entityTypeId, FALSE);
     if ($definition !== NULL && $definition->get('entity_revision_parent_type_field') !== NULL) {
-      $result = AccessResult::allowed()->addCacheTags($tags);
+      $result = $this->checkBundleFloor('create', AccessResult::allowed()->addCacheTags($tags));
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
     $result = AccessResult::neutral()->addCacheTags($tags);
+    $result = $this->checkBundleFloor('create', $result);
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
   }
 
@@ -352,7 +368,7 @@ final class McpAccessChecker {
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
-    $result = AccessResult::neutral()->addCacheTags($tags);
+    $result = $this->checkBundleFloor($operation, AccessResult::neutral()->addCacheTags($tags));
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
   }
 
@@ -519,11 +535,74 @@ final class McpAccessChecker {
       // declared ceiling; a neutral result carrying those contexts keeps a
       // permitted collection from being re-served to a narrowed caller.
       return [
-        JSONAPI_FILTER_AMONG_ALL => $decorate(AccessResult::neutral())
-          ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS),
+        JSONAPI_FILTER_AMONG_ALL => $this->checkBundleFloor(
+          'view',
+          $decorate(AccessResult::neutral())
+            ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS),
+        ),
       ];
     }
-    return [];
+    return [
+      JSONAPI_FILTER_AMONG_ALL => $this->checkBundleFloor(
+        'view',
+        $decorate(AccessResult::neutral()),
+      ),
+    ];
+  }
+
+  /**
+   * Applies the attested portable-policy floor to a live access result.
+   *
+   * A local / classification forbid already won and is never widened. When
+   * the prior result is allow or neutral, simulate() against the active
+   * attestation may still refuse (bundle deny or emergency deny). Every
+   * consulted result carries CACHE_TAG so activate / revoke / rollback /
+   * emergency deny can drop a stale allow.
+   *
+   * @param string $operation
+   *   Drupal operation id (view, update, create, delete, or config aliases).
+   * @param \Drupal\Core\Access\AccessResult $prior
+   *   The result after local gates.
+   *
+   * @return \Drupal\Core\Access\AccessResult
+   *   The prior result, or a forbidden result with BUNDLE_DENIAL_CODE.
+   */
+  public function checkBundleFloor(string $operation, AccessResult $prior): AccessResult {
+    if ($this->policyBundles === NULL) {
+      return $prior;
+    }
+    $operation = match ($operation) {
+      'view label', 'read' => 'view',
+      'write' => 'update',
+      default => $operation,
+    };
+    if ($prior->isForbidden()) {
+      return $prior;
+    }
+    $this->applyBundleCacheability($prior);
+    $sim = $this->policyBundles->simulate($operation, FALSE);
+    if ($sim['allow']) {
+      return $prior;
+    }
+    $deny = AccessResult::forbidden(self::BUNDLE_DENIAL_CODE)
+      ->addCacheableDependency($prior);
+    $this->applyBundleCacheability($deny);
+    return $deny;
+  }
+
+  /**
+   * Tags a result and caps its max-age to the attested remaining TTL.
+   */
+  private function applyBundleCacheability(AccessResult $result): void {
+    $result->addCacheTags([McpPolicyBundleRegistry::CACHE_TAG]);
+    $ttl = $this->policyBundles?->remainingTtl();
+    if ($ttl === NULL) {
+      return;
+    }
+    $current = $result->getCacheMaxAge();
+    if ($current === Cache::PERMANENT || $current > $ttl) {
+      $result->setCacheMaxAge($ttl);
+    }
   }
 
 }

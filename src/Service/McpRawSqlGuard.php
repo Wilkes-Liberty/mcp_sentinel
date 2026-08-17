@@ -91,10 +91,14 @@ final class McpRawSqlGuard {
    *   Classification egress ceilings (d.o #3616540 part 2). Nullable for the
    *   deploy window in which the cached container still passes one argument;
    *   without it no ceiling is evaluated, exactly the previous behavior.
+   * @param \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry|null $policyBundles
+   *   Attested portable-policy floor (d.o #3617702). Nullable for the same
+   *   deploy window; without it raw SQL does not consult a bundle.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly ?McpClassificationResolver $classification = NULL,
+    private readonly ?McpPolicyBundleRegistry $policyBundles = NULL,
   ) {}
 
   /**
@@ -116,6 +120,12 @@ final class McpRawSqlGuard {
     $trimmed = trim($sql);
     if ($trimmed === '') {
       return ['The statement is empty.'];
+    }
+    if ($this->policyBundles !== NULL) {
+      $sim = $this->policyBundles->simulate('view', FALSE);
+      if (!$sim['allow']) {
+        return [McpAccessChecker::BUNDLE_DENIAL_CODE];
+      }
     }
     if (strlen($trimmed) > self::MAX_LENGTH) {
       return [sprintf('The statement exceeds the %d-byte limit.', self::MAX_LENGTH)];

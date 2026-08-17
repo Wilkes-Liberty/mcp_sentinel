@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Uuid\UuidInterface;
+use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\key\KeyRepositoryInterface;
@@ -45,12 +46,21 @@ final class McpPolicyBundleRegistry {
    */
   public const string EMERGENCY_DENY = '*';
 
+  /**
+   * Cache tag on every live access result that consulted this registry.
+   *
+   * Invalidated on activate, revoke, rollback and emergency deny so a
+   * previously cached allow cannot outlive a newly armed floor.
+   */
+  public const string CACHE_TAG = 'mcp_sentinel.policy_bundle';
+
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly StateInterface $state,
     private readonly TimeInterface $time,
     private readonly UuidInterface $uuid,
     private readonly ?KeyRepositoryInterface $keyRepository = NULL,
+    private readonly ?CacheTagsInvalidatorInterface $cacheTagsInvalidator = NULL,
   ) {}
 
   /**
@@ -152,6 +162,7 @@ final class McpPolicyBundleRegistry {
       'bundle' => $bundle->toArray(),
     ];
     $this->state->set(self::STATE_ACTIVE, $attestation);
+    $this->invalidateAccessCache();
     return [
       'digest' => $attestation['digest'],
       'activated_at' => $attestation['activated_at'],
@@ -177,6 +188,25 @@ final class McpPolicyBundleRegistry {
     $attestation = $this->attestation();
     $digest = $attestation['digest'] ?? NULL;
     return is_string($digest) && $digest !== '' ? $digest : NULL;
+  }
+
+  /**
+   * Seconds until the active attestation expires, or NULL if none / no TTL.
+   *
+   * Zero means the document is already past its expiry. Callers that cache
+   * a live allow must not outlive this window.
+   */
+  public function remainingTtl(): ?int {
+    $attestation = $this->attestation();
+    $document = is_array($attestation) ? ($attestation['bundle'] ?? NULL) : NULL;
+    if (!is_array($document)) {
+      return NULL;
+    }
+    $expires = (int) ($document['expires'] ?? 0);
+    if ($expires <= 0) {
+      return NULL;
+    }
+    return max(0, $expires - $this->time->getRequestTime());
   }
 
   /**
@@ -211,6 +241,16 @@ final class McpPolicyBundleRegistry {
     if ($bundle === NULL) {
       $document = is_array($attestation) ? ($attestation['bundle'] ?? NULL) : NULL;
       $bundle = is_array($document) ? $this->verify($document) : NULL;
+      // An attested digest with no verifiable document is not an allow.
+      // Expired, revoked, tampered or unreadable state must fail closed;
+      // audit rows may still cite the digest.
+      if ($bundle === NULL && $digest !== NULL) {
+        return [
+          'allow' => FALSE,
+          'reason' => 'bundle_unverified',
+          'digest' => $digest,
+        ];
+      }
     }
     if ($bundle !== NULL && ($bundle->denies($operation) || $bundle->denies(self::EMERGENCY_DENY))) {
       return ['allow' => FALSE, 'reason' => 'bundle_deny', 'digest' => $bundle->digest()];
@@ -227,7 +267,9 @@ final class McpPolicyBundleRegistry {
     $this->state->set(self::STATE_REVOKED, $revoked);
     if ($this->activeDigest() === $digest) {
       $this->emergencyDeny();
+      return;
     }
+    $this->invalidateAccessCache();
   }
 
   /**
@@ -253,6 +295,7 @@ final class McpPolicyBundleRegistry {
       return NULL;
     }
     $this->state->set(self::STATE_ACTIVE, $last);
+    $this->invalidateAccessCache();
     return $last;
   }
 
@@ -280,6 +323,14 @@ final class McpPolicyBundleRegistry {
         'issued' => $this->time->getRequestTime(),
       ],
     ]);
+    $this->invalidateAccessCache();
+  }
+
+  /**
+   * Drops cached access results that consulted the attested floor.
+   */
+  private function invalidateAccessCache(): void {
+    $this->cacheTagsInvalidator?->invalidateTags([self::CACHE_TAG]);
   }
 
   /**

@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Uuid\UuidInterface;
+use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\State\StateInterface;
@@ -28,6 +29,13 @@ use PHPUnit\Framework\Attributes\Group;
 #[CoversClass(McpPolicyBundleRegistry::class)]
 #[Group('mcp_sentinel')]
 final class McpPolicyBundleTest extends UnitTestCase {
+
+  /**
+   * In-memory state bag shared when reuseStore is TRUE.
+   *
+   * @var array<string, mixed>
+   */
+  private array $stateStore = [];
 
   /**
    * Digest is stable across key order.
@@ -137,6 +145,60 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
+   * An active attestation that will not verify is a deny, not an allow.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::simulate
+   */
+  public function testActiveUnverifiableAttestationFailsClosed(): void {
+    $registry = $this->registry('secret');
+    $bundle = $registry->mint(['delete']);
+    $this->assertNotNull($bundle);
+    $registry->activate($bundle);
+
+    $expired = $this->registry('secret', now: 2_000_000_000, reuseStore: TRUE);
+    $sim = $expired->simulate('view', FALSE);
+    $this->assertFalse($sim['allow']);
+    $this->assertSame('bundle_unverified', $sim['reason']);
+    $this->assertSame($bundle->digest(), $sim['digest']);
+  }
+
+  /**
+   * Remaining TTL is the minted lifetime, then zero after expiry.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::remainingTtl
+   */
+  public function testRemainingTtlFollowsExpiry(): void {
+    $registry = $this->registry('secret');
+    $this->assertNull($registry->remainingTtl());
+    $bundle = $registry->mint(['delete'], 3600);
+    $this->assertNotNull($bundle);
+    $registry->activate($bundle);
+    $this->assertSame(3600, $registry->remainingTtl());
+    $expired = $this->registry('secret', now: 2_000_000_000, reuseStore: TRUE);
+    $this->assertSame(0, $expired->remainingTtl());
+  }
+
+  /**
+   * Activate, revoke, rollback and emergency deny drop cached access results.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::activate
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::revoke
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::emergencyDeny
+   */
+  public function testMutationsInvalidateAccessCacheTag(): void {
+    $invalidator = $this->createMock(CacheTagsInvalidatorInterface::class);
+    $invalidator->expects($this->atLeast(3))
+      ->method('invalidateTags')
+      ->with([McpPolicyBundleRegistry::CACHE_TAG]);
+    $registry = $this->registry('secret', invalidator: $invalidator);
+    $bundle = $registry->mint(['delete']);
+    $this->assertNotNull($bundle);
+    $registry->activate($bundle);
+    $registry->revoke($bundle->digest());
+    $registry->emergencyDeny();
+  }
+
+  /**
    * Disconnected operation (no key) cannot mint new authority.
    *
    * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::activate
@@ -151,24 +213,34 @@ final class McpPolicyBundleTest extends UnitTestCase {
 
   /**
    * Builds a registry over in-memory state and an optional signing secret.
+   *
+   * @param string|null $secret
+   *   Signing key material, or NULL to simulate a missing key.
+   * @param int $now
+   *   Request time returned by the clock.
+   * @param \Drupal\Core\Cache\CacheTagsInvalidatorInterface|null $invalidator
+   *   Optional cache-tag invalidator.
+   * @param bool $reuseStore
+   *   TRUE to keep the previous in-memory state bag (for clock-skew cases).
    */
-  private function registry(?string $secret, int $now = 1_700_000_000): McpPolicyBundleRegistry {
+  private function registry(?string $secret, int $now = 1_700_000_000, ?CacheTagsInvalidatorInterface $invalidator = NULL, bool $reuseStore = FALSE): McpPolicyBundleRegistry {
     $settings = $this->createMock(ImmutableConfig::class);
     $settings->method('get')->willReturn($secret === NULL ? '' : 'bundle_key');
     $factory = $this->createMock(ConfigFactoryInterface::class);
     $factory->method('get')->willReturn($settings);
 
-    /** @var array<string, mixed> $store */
-    $store = [];
+    if (!$reuseStore) {
+      $this->stateStore = [];
+    }
     $state = $this->createMock(StateInterface::class);
     $state->method('get')->willReturnCallback(
-      static function (string $key, mixed $default = NULL) use (&$store): mixed {
-        return array_key_exists($key, $store) ? $store[$key] : $default;
+      function (string $key, mixed $default = NULL): mixed {
+        return array_key_exists($key, $this->stateStore) ? $this->stateStore[$key] : $default;
       },
     );
     $state->method('set')->willReturnCallback(
-      static function (string $key, mixed $value) use (&$store): void {
-        $store[$key] = $value;
+      function (string $key, mixed $value): void {
+        $this->stateStore[$key] = $value;
       },
     );
 
@@ -185,7 +257,7 @@ final class McpPolicyBundleTest extends UnitTestCase {
       $keys->method('getKey')->willReturn($key);
     }
 
-    return new McpPolicyBundleRegistry($factory, $state, $time, $uuid, $keys);
+    return new McpPolicyBundleRegistry($factory, $state, $time, $uuid, $keys, $invalidator);
   }
 
 }

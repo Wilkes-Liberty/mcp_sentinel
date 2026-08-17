@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Live portable-policy deny (#150 / d.o. #3617702).** The attested
+  bundle floor is now consulted on the live access path. Simulate
+  already refused when the bundle named the operation, and a local
+  deny could not be widened; `McpAccessChecker` (entity, create,
+  config, JSON:API filter), the context schema document, GraphQL
+  query/mutation gates, and governed raw SQL now call that same
+  evaluation. Emergency deny and revoke of the active digest refuse
+  live access. The client-facing reason is the stable code
+  `policy_bundle_denied` (the digest stays on the audit row). Access
+  results that consulted the floor carry `mcp_sentinel.policy_bundle`,
+  invalidated on activate, revoke, rollback and emergency deny. An
+  attested digest whose document will not verify (expired, revoked,
+  tampered, or missing key) fails closed rather than allowing. Cached
+  allows do not outlive the attested document's remaining TTL.
+
 ## [2.11.0] - 2026-08-17
 
 ### Fixed

@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
+use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\node\Entity\NodeType;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -215,6 +216,21 @@ final class McpContextControllerTest extends KernelTestBase {
     \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
     $payload = json_decode((string) McpContextController::create($this->container)->context()->getContent(), TRUE);
     $this->assertArrayHasKey('memo', $payload['content_types']);
+  }
+
+  /**
+   * Emergency deny refuses the schema document (d.o #3617702).
+   *
+   * @covers ::context
+   */
+  public function testContextRefusedUnderEmergencyDeny(): void {
+    $this->switchToDevelopmentGovernedUser();
+    $this->container->get('mcp_sentinel.policy_bundle_registry')->emergencyDeny();
+    $response = McpContextController::create($this->container)->context();
+    $this->assertSame(403, $response->getStatusCode());
+    $payload = json_decode((string) $response->getContent(), TRUE);
+    $this->assertStringContainsString(McpAccessChecker::BUNDLE_DENIAL_CODE, (string) ($payload['error'] ?? ''));
+    $this->assertArrayNotHasKey('site', $payload);
   }
 
 }

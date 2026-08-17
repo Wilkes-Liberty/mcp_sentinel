@@ -203,7 +203,8 @@ the supported PHP entry points for other modules:
 | Service ID | Class | Use |
 |------------|-------|-----|
 | `mcp_sentinel.policy_resolver` | `McpPolicyResolver` | `isGoverned()` and `resolve(?AccountInterface)` → the active `McpPolicyProfile` or `NULL` |
-| `mcp_sentinel.access_checker` | `McpAccessChecker` | entity/create access decisions, JSON:API filter access, `isClientIpAllowed()`, `checkConfigAccess()` |
+| `mcp_sentinel.access_checker` | `McpAccessChecker` | entity/create access decisions, JSON:API filter access, `isClientIpAllowed()`, `checkConfigAccess()`, `checkBundleFloor()` (attested portable-policy deny, d.o #3617702) |
+| `mcp_sentinel.policy_bundle_registry` | `McpPolicyBundleRegistry` | mint / verify / activate / simulate / revoke / rollback / emergency deny for portable policy bundles. Live access consults `simulate()` through `McpAccessChecker` |
 | `mcp_sentinel.audit_logger` | `McpAuditLogger` | MCP policy in front of the shared chain: read-suppression, change diffs (`computeChangeDiff()` / `computeConfigDiff()`), redaction and DLP. Chain mechanics live in `audit_chain.logger`; write there directly if you want tamper-evident audit for something other than MCP traffic |
 | `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |

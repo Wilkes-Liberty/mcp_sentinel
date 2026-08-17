@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpRawSqlGuard;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -98,6 +99,19 @@ final class McpRawSqlGuardTest extends KernelTestBase {
       $this->profile(),
     );
     $this->assertSame([], $errors);
+  }
+
+  /**
+   * Emergency deny refuses raw SQL that would otherwise pass.
+   */
+  public function testEmergencyDenyRefusesAllowedStatement(): void {
+    $this->container->get('mcp_sentinel.policy_bundle_registry')->emergencyDeny();
+    $this->guard = $this->container->get('mcp_sentinel.raw_sql_guard');
+    $errors = $this->guard->check(
+      'SELECT nid, title FROM node_field_data WHERE status = 1',
+      $this->profile(),
+    );
+    $this->assertSame([McpAccessChecker::BUNDLE_DENIAL_CODE], $errors);
   }
 
   /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Controller;
 
+use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
@@ -94,6 +95,16 @@ class McpContextController extends ControllerBase {
     if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
       return new JsonResponse(
         ['error' => 'Source IP not permitted by MCP Sentinel policy.'],
+        403,
+        ['Cache-Control' => 'no-store', 'X-Content-Type-Options' => 'nosniff'],
+      );
+    }
+
+    // Attested bundle / emergency deny (d.o #3617702). The schema document
+    // does not go through entity access, so the floor is applied here.
+    if ($this->accessChecker->checkBundleFloor('view', AccessResult::neutral())->isForbidden()) {
+      return new JsonResponse(
+        ['error' => 'MCP access is denied (' . McpAccessChecker::BUNDLE_DENIAL_CODE . ').'],
         403,
         ['Cache-Control' => 'no-store', 'X-Content-Type-Options' => 'nosniff'],
       );

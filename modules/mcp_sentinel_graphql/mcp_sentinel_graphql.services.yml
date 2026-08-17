@@ -6,5 +6,6 @@ services:
       - '@config.factory'
       - '@mcp_sentinel.governance_readiness'
       - '@current_user'
+      - '@?mcp_sentinel.access_checker'
     tags:
       - { name: event_subscriber }
