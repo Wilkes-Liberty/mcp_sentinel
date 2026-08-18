@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-08-18
+
 ### Security
 - **Live portable-policy deny (#150 / d.o. #3617702).** The attested
   bundle floor is now consulted on the live access path. Simulate
