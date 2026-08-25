@@ -75,6 +75,20 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
     return;
   }
 
+  // A resolved field on a live entity is a governed collection member.
+  // Deduped entity_read rows feed the bulk-read anomaly signal (#3616612).
+  if ($entity instanceof EntityInterface) {
+    $readId = (string) ($entity->uuid() ?: $entity->id());
+    \Drupal::service('mcp_sentinel.audit_logger')->logEntityRead(
+      $entity->getEntityTypeId(),
+      $readId,
+      [
+        'surface' => McpGovernedSurface::Graphql->value,
+        'bundle' => $entity->bundle(),
+      ],
+    );
+  }
+
   // Pass 1: field-name redaction (existing behaviour), then the classification
   // egress ceiling (d.o #3616540 part 2) — an over-ceiling field takes the
   // same placeholder, so labels only ever deny more.

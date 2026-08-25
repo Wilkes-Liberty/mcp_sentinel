@@ -36,6 +36,8 @@ final class McpAlertDispatcher {
    *   The F9 webhook queue manager (for enqueuing webhook alerts).
    * @param \Drupal\Core\Language\LanguageManagerInterface $languageManager
    *   The language manager (for mail langcode).
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   Writes the bounded anomaly_alert evidence row.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -43,6 +45,7 @@ final class McpAlertDispatcher {
     private readonly MailManagerInterface $mailManager,
     private readonly McpWebhookQueueManager $webhookQueueManager,
     private readonly LanguageManagerInterface $languageManager,
+    private readonly McpAuditLogger $auditLogger,
   ) {}
 
   /**
@@ -70,8 +73,10 @@ final class McpAlertDispatcher {
       $count = (int) $item['count'];
       $ruleLabel = (string) ($rule['label'] ?? $rule['id'] ?? 'unknown');
       $ruleId = (string) ($rule['id'] ?? '');
-      $window = (int) ($rule['window_seconds'] ?? 0);
-      $threshold = (int) ($rule['threshold'] ?? 0);
+      $window = (int) ($item['window'] ?? $rule['window_seconds'] ?? 0);
+      $threshold = (int) ($item['threshold'] ?? $rule['threshold'] ?? 0);
+      $evidence = $this->boundedEvidence($item, $rule, $count, $window, $threshold);
+      $this->auditLogger->log('anomaly_alert', $evidence);
 
       $message = sprintf(
         'Rule "%s" triggered: %d operations in %d s (threshold %d).',
@@ -121,10 +126,48 @@ final class McpAlertDispatcher {
           'count'          => $count,
           'threshold'      => $threshold,
           'window_seconds' => $window,
+          'signal'         => $evidence['signal'],
+          'actor'          => $evidence['actor'],
+          'target_scope'   => $evidence['target_scope'],
+          'rule_version'   => $evidence['rule_version'],
+          'outcome'        => $evidence['outcome'],
           'timestamp'      => time(),
         ]);
       }
     }
+  }
+
+  /**
+   * Bounded, non-sensitive evidence for one fired rule.
+   *
+   * @param array<string, mixed> $item
+   *   The detector result.
+   * @param array<string, mixed> $rule
+   *   The rule map.
+   * @param int $count
+   *   Matching-row count that tripped the rule.
+   * @param int $window
+   *   Lookback window in seconds.
+   * @param int $threshold
+   *   Configured threshold.
+   *
+   * @return array{signal: string, actor: list<int>, target_scope: list<string>, rule_version: string, window: int, threshold: int, outcome: string, rule_id: string, count: int}
+   *   Audit metadata — no credentials or payload.
+   */
+  private function boundedEvidence(array $item, array $rule, int $count, int $window, int $threshold): array {
+    $actor = $item['actor'] ?? [];
+    $scope = $item['target_scope'] ?? [];
+    return [
+      'signal' => (string) ($item['signal'] ?? $rule['signal'] ?? 'count'),
+      'actor' => is_array($actor) ? array_values(array_map('intval', $actor)) : [],
+      'target_scope' => is_array($scope) ? array_values(array_map('strval', $scope)) : [],
+      'rule_version' => (string) ($item['rule_version'] ?? McpAnomalyDetector::ruleVersion($rule)),
+      'window' => $window,
+      'threshold' => $threshold,
+      'outcome' => (string) ($item['outcome'] ?? 'fired'),
+      'rule_id' => (string) ($rule['id'] ?? ''),
+      'count' => $count,
+    ];
   }
 
 }

@@ -110,6 +110,10 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
       if ($surface === McpGovernedSurface::JsonApi
         && $this->classificationRefuses($event->getResponse(), $content, $profile)) {
         $event->setResponse($this->classification->refusalResponse());
+        return;
+      }
+      if ($surface === McpGovernedSurface::JsonApi) {
+        $this->recordJsonApiReads($event, $content);
       }
       return;
     }
@@ -205,6 +209,86 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
       }
     }
     return FALSE;
+  }
+
+  /**
+   * Writes one entity_read row per distinct resource in a JSON:API document.
+   *
+   * GET/HEAD only: a write echo is not a collection read. audit_log_reads
+   * still gates the append inside the logger. No attributes or payload.
+   */
+  private function recordJsonApiReads(ResponseEvent $event, string $content): void {
+    $request = $event->getRequest();
+    if (!in_array($request->getMethod(), ['GET', 'HEAD'], TRUE)) {
+      return;
+    }
+    $response = $event->getResponse();
+    if (!$response->isSuccessful()
+      || !str_contains((string) $response->headers->get('Content-Type', ''), 'application/vnd.api+json')) {
+      return;
+    }
+    try {
+      $document = json_decode($content, TRUE, 64, JSON_THROW_ON_ERROR);
+    }
+    catch (\JsonException) {
+      return;
+    }
+    if (!is_array($document)) {
+      return;
+    }
+    foreach ($this->resourceObjects($document) as $object) {
+      $entityType = $object['type'];
+      $bundle = '';
+      if ($this->resourceTypes !== NULL) {
+        $resourceType = $this->resourceTypes->getByTypeName($object['type']);
+        if ($resourceType !== NULL) {
+          $entityType = $resourceType->getEntityTypeId();
+          $bundle = $resourceType->getBundle();
+        }
+      }
+      $this->auditLogger->logEntityRead($entityType, $object['id'], [
+        'surface' => McpGovernedSurface::JsonApi->value,
+        'bundle' => $bundle,
+      ]);
+    }
+  }
+
+  /**
+   * Resource objects in a JSON:API document's data + included.
+   *
+   * @param array<string, mixed> $document
+   *   The decoded document.
+   *
+   * @return list<array{type: string, id: string}>
+   *   Type/id pairs, in first-seen order.
+   */
+  private function resourceObjects(array $document): array {
+    $objects = [];
+    $seen = [];
+    foreach (['data', 'included'] as $member) {
+      $value = $document[$member] ?? NULL;
+      if (!is_array($value)) {
+        continue;
+      }
+      $items = isset($value['type']) ? [$value] : $value;
+      foreach ($items as $object) {
+        if (!is_array($object)) {
+          continue;
+        }
+        $type = $object['type'] ?? '';
+        $id = $object['id'] ?? '';
+        if (!is_string($type) || $type === '' || !is_string($id) || $id === '') {
+          continue;
+        }
+        $key = $type . ':' . $id;
+        if (isset($seen[$key])) {
+          continue;
+        }
+        $seen[$key] = TRUE;
+        $objects[] = ['type' => $type, 'id' => $id];
+      }
+    }
+    return $objects;
   }
 
   /**

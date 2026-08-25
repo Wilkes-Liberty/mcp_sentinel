@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Anomaly alert evidence and live bulk-read channels (d.o.
+  #3616612).** A fired rule now writes a bounded `anomaly_alert`
+  audit row (signal, actor uids, target entity types, rule version,
+  window, threshold, outcome, count) and the same fields travel on
+  the webhook payload. No credentials or payload. Governed JSON:API
+  GET/HEAD documents and GraphQL field resolutions emit one
+  `entity_read` per distinct entity when *Log reads* is on, so
+  `bulk_read` can see those channels. Near-complete ratio, debounce
+  and disabled bulk-read rules are covered. Hosted tenant
+  correlation remains out of scope. No shipped Tool enumerates an
+  entity collection.
+
 ## [2.12.0] - 2026-08-18
 
 ### Security

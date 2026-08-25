@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Service\McpAnomalyDetector;
+use Drupal\node\Entity\Node;
+use Drupal\node\Entity\NodeType;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -523,6 +526,84 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   }
 
   /**
+   * Near-complete ratio fires below the absolute threshold.
+   */
+  public function testBulkReadNearCompleteRatio(): void {
+    $this->installEntitySchema('user');
+    $this->installEntitySchema('node');
+    $this->installSchema('node', ['node_access']);
+    NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
+    $ids = [];
+    for ($i = 0; $i < 5; $i++) {
+      $node = Node::create(['type' => 'article', 'title' => 'Read ' . $i]);
+      $node->save();
+      $ids[] = (string) $node->id();
+    }
+    $now = \Drupal::time()->getRequestTime();
+    foreach (array_slice($ids, 0, 4) as $id) {
+      $this->insertOp('entity_read', $now - 10, $id);
+    }
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id' => 'near_complete',
+        'label' => 'Near complete',
+        'signal' => 'bulk_read',
+        'operation_pattern' => 'entity_read*',
+        'window_seconds' => 300,
+        'threshold' => 10,
+        'complete_ratio' => 0.8,
+        'debounce_seconds' => 0,
+        'enabled' => TRUE,
+      ],
+      ])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.near_complete');
+    $detector = $this->container->get('mcp_sentinel.anomaly_detector');
+    $this->assertCount(1, $detector->evaluate(), 'Four of five live nodes at ratio 0.8 must fire.');
+
+    \Drupal::database()->delete('audit_chain_log')->execute();
+    foreach (array_slice($ids, 0, 3) as $id) {
+      $this->insertOp('entity_read', $now - 10, $id);
+    }
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.near_complete');
+    $this->assertCount(0, $detector->evaluate(), 'Three of five is below ceil(5 * 0.8).');
+  }
+
+  /**
+   * Bulk-read debounce and a disabled rule stay deterministic.
+   */
+  public function testBulkReadDebounceAndDisabled(): void {
+    $now = \Drupal::time()->getRequestTime();
+    foreach (['1', '2', '3', '4', '5'] as $id) {
+      $this->insertOp('entity_read', $now - 10, $id);
+    }
+    $rule = [
+      'id' => 'mass_read_debounce',
+      'label' => 'Mass read debounce',
+      'signal' => 'bulk_read',
+      'operation_pattern' => 'entity_read*',
+      'window_seconds' => 300,
+      'threshold' => 5,
+      'debounce_seconds' => 3600,
+      'enabled' => TRUE,
+    ];
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [$rule])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.mass_read_debounce');
+    $detector = $this->container->get('mcp_sentinel.anomaly_detector');
+    $this->assertCount(1, $detector->evaluate());
+    $this->assertCount(0, $detector->evaluate(), 'The second evaluate must be debounced.');
+
+    $rule['enabled'] = FALSE;
+    $rule['debounce_seconds'] = 0;
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_rules', [$rule])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.mass_read_debounce');
+    $this->assertCount(0, $detector->evaluate(), 'A disabled bulk-read rule must not fire.');
+  }
+
+  /**
    * Denied-access storms still fire after the new signals land.
    */
   public function testDeniedAccessStormStillFires(): void {
@@ -545,6 +626,40 @@ class McpAnomalyDetectorTest extends KernelTestBase {
       ])->save();
     \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.storm');
     $this->assertCount(1, $this->container->get('mcp_sentinel.anomaly_detector')->evaluate());
+  }
+
+  /**
+   * A fired rule carries bounded actor, target, version, window and outcome.
+   */
+  public function testFiredRuleCarriesAuditEvidenceFields(): void {
+    $now = \Drupal::time()->getRequestTime();
+    $this->insertOp('entity_read', $now - 10, '7');
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id' => 'evidence_off',
+        'label' => 'Evidence',
+        'signal' => 'count',
+        'operation_pattern' => 'entity_read',
+        'window_seconds' => 300,
+        'threshold' => 1,
+        'debounce_seconds' => 0,
+        'enabled' => TRUE,
+      ],
+      ])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.evidence_off');
+    $fired = $this->container->get('mcp_sentinel.anomaly_detector')->evaluate();
+    $this->assertCount(1, $fired);
+    $this->assertSame('count', $fired[0]['signal']);
+    $this->assertSame([1], $fired[0]['actor']);
+    $this->assertSame(['node'], $fired[0]['target_scope']);
+    $this->assertSame(300, $fired[0]['window']);
+    $this->assertSame(1, $fired[0]['threshold']);
+    $this->assertSame('fired', $fired[0]['outcome']);
+    $this->assertSame(
+      McpAnomalyDetector::ruleVersion($fired[0]['rule']),
+      $fired[0]['rule_version'],
+    );
   }
 
   /**

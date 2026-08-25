@@ -343,6 +343,46 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
   }
 
   /**
+   * A GraphQL field on a live entity writes one entity_read, even twice.
+   */
+  public function testGovernedFieldWritesDedupedEntityRead(): void {
+    $this->makeGoverned([], 0);
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', TRUE)
+      ->set('audit_log_reads', TRUE)
+      ->save();
+
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('getEntityTypeId')->willReturn('node');
+    $entity->method('bundle')->willReturn('page');
+    $entity->method('id')->willReturn('44');
+    $entity->method('uuid')->willReturn('uuid-44');
+    $results = ['hello'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter(
+      $results,
+      $entity,
+      $this->makePlugin('title'),
+      $this->makeFieldContext(),
+    );
+    $again = ['world'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter(
+      $again,
+      $entity,
+      $this->makePlugin('body'),
+      $this->makeFieldContext(),
+    );
+
+    $ids = \Drupal::database()->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id', 'entity_type'])
+      ->condition('l.operation', 'entity_read')
+      ->execute()
+      ->fetchAll();
+    $this->assertCount(1, $ids);
+    $this->assertSame('uuid-44', $ids[0]->entity_id);
+    $this->assertSame('node', $ids[0]->entity_type);
+  }
+
+  /**
    * Labels node/page field_secret restricted and ceilings the graphql surface.
    */
   private function classifySecret(string $ceiling): void {
