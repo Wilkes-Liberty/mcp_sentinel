@@ -9,6 +9,7 @@ use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
+use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,6 +33,11 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 final class McpDlpPathBehaviourTest extends KernelTestBase {
 
   use UserCreationTrait;
+
+  /**
+   * Governed agent uid restored after container rebuilds.
+   */
+  private int $agentUid;
 
   /**
    * {@inheritdoc}
@@ -86,6 +92,7 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     ])->save();
     $this->createUser();
     $agent = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
+    $this->agentUid = (int) $agent->id();
     \Drupal::currentUser()->setAccount($agent);
   }
 
@@ -155,10 +162,6 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
    */
   public function testJsonapiBodyPassesThroughUnscanned(): void {
     $this->enableClassifiedDlp('restricted', 'redact');
-    $this->config('mcp_sentinel.mcp_policy_profile.agent_dlp_paths')
-      ->set('egress_ceilings', ['jsonapi' => 'public'])
-      ->save();
-    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
 
     $body = [
       'data' => [
@@ -170,7 +173,7 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
       ],
     ];
     $request = Request::create('/jsonapi/node/article', 'GET');
-    $this->container->get('request_stack')->push($request);
+    $this->pushRequestKeepingSession($request);
     $response = new Response(
       (string) json_encode($body),
       200,
@@ -206,9 +209,10 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
    */
   private function readSiteConfigViaTool(): array {
     $request = Request::create('/_mcp', 'POST');
-    $this->container->get('request_stack')->push($request);
+    $this->pushRequestKeepingSession($request);
+    $agent = $this->restoreGovernedAgent();
     $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_config_get');
-    $access = $tool->access(\Drupal::currentUser(), TRUE);
+    $access = $tool->access($agent, TRUE);
     $this->assertTrue($access->isAllowed(), 'Config-get access must be allowed for the governed agent.');
     $tool->setInputValue('name', 'system.site');
     $tool->execute();
@@ -244,6 +248,32 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     $this->container->get('kernel')->rebuildContainer();
     // @phpstan-ignore assign.propertyType
     $this->container = $this->container->get('kernel')->getContainer();
+    $this->restoreGovernedAgent();
+  }
+
+  /**
+   * Re-sets the governed agent after a container rebuild.
+   *
+   * rebuildContainer() replaces current_user; without this the Tool access
+   * check sees anonymous and fails the role-fallback gate.
+   */
+  private function restoreGovernedAgent(): UserInterface {
+    $agent = \Drupal::entityTypeManager()->getStorage('user')->load($this->agentUid);
+    $this->assertInstanceOf(UserInterface::class, $agent);
+    \Drupal::currentUser()->setAccount($agent);
+    return $agent;
+  }
+
+  /**
+   * Pushes a request without dropping the kernel master session.
+   */
+  private function pushRequestKeepingSession(Request $request): void {
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
   }
 
   /**
