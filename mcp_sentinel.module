@@ -380,6 +380,7 @@ function _mcp_sentinel_log_entity_save(EntityInterface $entity, string $operatio
   $evidence_guard = \Drupal::service('mcp_sentinel.evidence_guard');
   $correlation = $evidence_guard->takeCorrelation($entity);
   if ($correlation !== NULL) {
+    $metadata['postconditions'] = McpEvidenceGuard::observeEntity($entity, 'saved');
     $evidence_guard->receipt($correlation, 'entity_save', $metadata);
     return;
   }
@@ -534,6 +535,9 @@ function mcp_sentinel_entity_delete(EntityInterface $entity): void {
     $evidence_guard = \Drupal::service('mcp_sentinel.evidence_guard');
     $correlation = $evidence_guard->takeCorrelation($entity);
     if ($correlation !== NULL) {
+      $postconditions = McpEvidenceGuard::observeEntity($entity, 'deleted');
+      $postconditions['exists'] = FALSE;
+      $metadata['postconditions'] = $postconditions;
       $evidence_guard->receipt($correlation, 'entity_delete', $metadata);
     }
     else {

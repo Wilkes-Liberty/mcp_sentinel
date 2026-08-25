@@ -10,6 +10,7 @@ use Drupal\Component\Uuid\UuidInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\RevisionableInterface;
 use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\key\KeyRepositoryInterface;
@@ -53,6 +54,11 @@ class McpEvidenceGuard {
    * Veto reason: the chain has no resolvable signing key (unkeyed integrity).
    */
   public const REASON_UNKEYED = 'evidence_unkeyed';
+
+  /**
+   * Receipt reason: observed postconditions disagree with the sealed target.
+   */
+  public const REASON_POSTCONDITION_DISCREPANCY = 'postcondition_discrepancy';
 
   /**
    * Key-value collection of the uncertain-receipt reconciliation ledger.
@@ -135,6 +141,13 @@ class McpEvidenceGuard {
    * @var array<int, string>
    */
   private array $pending = [];
+
+  /**
+   * Sealed target identity stashed at precommit, keyed by correlation id.
+   *
+   * @var array<string, array<string, mixed>>
+   */
+  private array $expectedPostconditions = [];
 
   /**
    * Whether the resolved profile requires evidence for an action class.
@@ -259,6 +272,15 @@ class McpEvidenceGuard {
       throw new \RuntimeException($this->messageFor(self::REASON_UNKEYED, $actionClass));
     }
     $this->pending[spl_object_id($entity)] = $correlation;
+    $expected = [
+      'target' => [
+        'uuid' => $entity->uuid(),
+      ],
+    ];
+    if ($entity->id()) {
+      $expected['target']['id'] = (string) $entity->id();
+    }
+    $this->expectedPostconditions[$correlation] = $expected;
     return $correlation;
   }
 
@@ -299,18 +321,45 @@ class McpEvidenceGuard {
    *   an explicit evidence_uncertain refusal is thrown — the caller is never
    *   handed an unproven success.
    *
+   * When the caller supplies postconditions (what actually happened:
+   * target id/uuid/revision and outcome), they are stamped on the
+   * existing evidence object. An expected map — passed in or stashed
+   * at precommit — is compared; a discrepancy is written onto the
+   * receipt and then refused. This is the same receipt, not a second
+   * evidence subsystem (#3616538 slice 3/6).
+   *
    * @param string $correlation
    *   The correlation id the precommit minted.
    * @param string $rowOperation
    *   The receipt row's operation, e.g. 'entity_save' or 'entity_delete'.
    * @param array $metadata
    *   The receipt metadata; the evidence keys are stamped here.
+   *   Optional `postconditions` are copied onto evidence.postconditions.
+   * @param array<string, mixed>|null $expectedPostconditions
+   *   Sealed or intended postconditions to compare. NULL uses the
+   *   precommit stash when one exists.
    */
-  public function receipt(string $correlation, string $rowOperation, array $metadata): void {
+  public function receipt(string $correlation, string $rowOperation, array $metadata, ?array $expectedPostconditions = NULL): void {
+    $postconditions = is_array($metadata['postconditions'] ?? NULL)
+      ? $metadata['postconditions']
+      : NULL;
+    $expected = $expectedPostconditions ?? $this->expectedPostconditions[$correlation] ?? NULL;
+    unset($this->expectedPostconditions[$correlation]);
+    $discrepancy = is_array($expected) && is_array($postconditions)
+      ? self::postconditionDiscrepancy($expected, $postconditions)
+      : NULL;
+
     $metadata['evidence'] = [
       'correlation_id' => $correlation,
       'precommit' => TRUE,
     ];
+    if ($postconditions !== NULL) {
+      $metadata['evidence']['postconditions'] = $postconditions;
+    }
+    if ($discrepancy !== NULL) {
+      $metadata['evidence']['discrepancy'] = TRUE;
+      $metadata['reason'] = $discrepancy;
+    }
     try {
       // logAlways, not log(): the precommit was only written because auditing
       // was enabled, and a receipt silently dropped because the flag flipped
@@ -328,6 +377,96 @@ class McpEvidenceGuard {
         $correlation,
       ), 0, $e);
     }
+    if ($discrepancy !== NULL) {
+      throw new \RuntimeException(sprintf(
+        'MCP Sentinel postcondition discrepancy (%s): the execution receipt does not match the sealed target. Correlation %s.',
+        $discrepancy,
+        $correlation,
+      ));
+    }
+  }
+
+  /**
+   * Observed postconditions for a live entity, or a missing one.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The live entity, or NULL when it is gone.
+   * @param string $outcome
+   *   What the caller observed (saved, deleted, present, not_executed).
+   *
+   * @return array{target: array{id: string|null, uuid: string|null, revision: string|null}, outcome: string, exists: bool}
+   *   What actually happened.
+   */
+  public static function observeEntity(?EntityInterface $entity, string $outcome): array {
+    if ($entity === NULL) {
+      return [
+        'target' => [
+          'id' => NULL,
+          'uuid' => NULL,
+          'revision' => NULL,
+        ],
+        'outcome' => $outcome,
+        'exists' => FALSE,
+      ];
+    }
+    $revision = $entity instanceof RevisionableInterface
+      ? (string) $entity->getRevisionId()
+      : NULL;
+    $id = $entity->id();
+    $uuid = $entity->uuid();
+    return [
+      'target' => [
+        'id' => $id !== NULL && $id !== '' ? (string) $id : NULL,
+        'uuid' => $uuid !== NULL && $uuid !== '' ? (string) $uuid : NULL,
+        'revision' => $revision === '' ? NULL : $revision,
+      ],
+      'outcome' => $outcome,
+      'exists' => TRUE,
+    ];
+  }
+
+  /**
+   * Returns the discrepancy reason when expected and observed disagree.
+   *
+   * Only keys present in both maps are compared. The observer may
+   * record more than the seal required; extra observed fields are
+   * not a discrepancy. Unassigned identities (NULL, empty, "(new)")
+   * are not compared.
+   *
+   * @param array<string, mixed> $expected
+   *   Sealed or intended postconditions.
+   * @param array<string, mixed> $observed
+   *   What the live target actually is.
+   *
+   * @return string|null
+   *   REASON_POSTCONDITION_DISCREPANCY, or NULL when they agree.
+   */
+  public static function postconditionDiscrepancy(array $expected, array $observed): ?string {
+    foreach (['outcome', 'exists'] as $key) {
+      if (array_key_exists($key, $expected) && array_key_exists($key, $observed)
+        && $expected[$key] !== $observed[$key]) {
+        return self::REASON_POSTCONDITION_DISCREPANCY;
+      }
+    }
+    $expectedTarget = is_array($expected['target'] ?? NULL) ? $expected['target'] : [];
+    $observedTarget = is_array($observed['target'] ?? NULL) ? $observed['target'] : [];
+    foreach (['id', 'uuid', 'revision'] as $key) {
+      if (!array_key_exists($key, $expectedTarget) || !array_key_exists($key, $observedTarget)) {
+        continue;
+      }
+      $left = $expectedTarget[$key];
+      $right = $observedTarget[$key];
+      if ($left === NULL || $right === NULL || $left === '' || $right === '') {
+        continue;
+      }
+      if ($left === '(new)' || $right === '(new)') {
+        continue;
+      }
+      if ((string) $left !== (string) $right) {
+        return self::REASON_POSTCONDITION_DISCREPANCY;
+      }
+    }
+    return NULL;
   }
 
   /**

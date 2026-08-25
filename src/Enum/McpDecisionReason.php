@@ -49,4 +49,7 @@ enum McpDecisionReason: string {
   // The signing key will not resolve, so a seal cannot be minted.
   case ManifestUnsealed = 'manifest_unsealed';
 
+  // The execution receipt does not match the sealed target or outcome.
+  case PostconditionDiscrepancy = 'postcondition_discrepancy';
+
 }

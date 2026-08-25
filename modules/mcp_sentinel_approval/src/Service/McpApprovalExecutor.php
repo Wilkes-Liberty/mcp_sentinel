@@ -6,12 +6,15 @@ namespace Drupal\mcp_sentinel_approval\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Extension\ModuleInstallerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpDecisionReason;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
+use Drupal\mcp_sentinel\Value\McpActionManifest;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 
 /**
@@ -49,6 +52,8 @@ final class McpApprovalExecutor {
    *   The module handler, used to check module_disable targets.
    * @param \Drupal\mcp_sentinel_approval\Service\McpManifestBinder $binder
    *   Binds the decision to one sealed manifest.
+   * @param \Drupal\mcp_sentinel\Service\McpEvidenceGuard $evidenceGuard
+   *   The existing evidence receipt, extended with postconditions.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -60,6 +65,7 @@ final class McpApprovalExecutor {
     private readonly McpBreakGlassManager $breakGlass,
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly McpManifestBinder $binder,
+    private readonly McpEvidenceGuard $evidenceGuard,
   ) {}
 
   /**
@@ -232,7 +238,7 @@ final class McpApprovalExecutor {
       $metadata['reason'] = $reason;
       $metadata['note'] = $message;
     }
-    $this->auditLogger->log('approval_decision', $metadata);
+    $this->writeExecutionReceipt($request, $manifest, $executed, $metadata);
 
     return ['executed' => $executed, 'error' => FALSE, 'message' => $message];
   }
@@ -265,6 +271,143 @@ final class McpApprovalExecutor {
       'note' => $message,
     ]);
     return ['executed' => FALSE, 'error' => FALSE, 'message' => $message];
+  }
+
+  /**
+   * Emits the correlated execution receipt with postconditions.
+   *
+   * Uses the existing evidence guard. The approval_decision row is that
+   * receipt, extended with what actually happened after execution.
+   *
+   * @param \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request
+   *   The decided request.
+   * @param \Drupal\mcp_sentinel\Value\McpActionManifest $manifest
+   *   The sealed manifest that was executed or refused.
+   * @param bool $executed
+   *   Whether the stored operation ran.
+   * @param array<string, mixed> $metadata
+   *   Decision metadata already assembled for the row.
+   */
+  private function writeExecutionReceipt(
+    McpApprovalRequestInterface $request,
+    McpActionManifest $manifest,
+    bool $executed,
+    array $metadata,
+  ): void {
+    $observed = $this->observePostconditions($request, $manifest, $executed);
+    $metadata['postconditions'] = $observed;
+    $this->evidenceGuard->receipt(
+      $manifest->id(),
+      'approval_decision',
+      $metadata,
+      $this->expectedPostconditions($request, $manifest, $executed),
+    );
+  }
+
+  /**
+   * Intended postconditions from the sealed manifest and the attempt.
+   *
+   * @param \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request
+   *   The decided request.
+   * @param \Drupal\mcp_sentinel\Value\McpActionManifest $manifest
+   *   The sealed manifest.
+   * @param bool $executed
+   *   Whether the stored operation ran.
+   *
+   * @return array<string, mixed>
+   *   Expected postconditions.
+   */
+  private function expectedPostconditions(
+    McpApprovalRequestInterface $request,
+    McpActionManifest $manifest,
+    bool $executed,
+  ): array {
+    $target = $manifest->target();
+    $expected = [
+      'target' => [
+        'id' => $target['id'],
+        'uuid' => $target['uuid'] ?? NULL,
+      ],
+    ];
+    if ($executed && $request->getOperation() === 'delete') {
+      $expected['outcome'] = 'deleted';
+      $expected['exists'] = FALSE;
+      if ($target['revision'] !== NULL) {
+        $expected['target']['revision'] = $target['revision'];
+      }
+      return $expected;
+    }
+    if ($executed) {
+      $expected['outcome'] = 'saved';
+      return $expected;
+    }
+    $expected['outcome'] = 'not_executed';
+    return $expected;
+  }
+
+  /**
+   * Observed postconditions from live state after the attempt.
+   *
+   * @param \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $request
+   *   The decided request.
+   * @param \Drupal\mcp_sentinel\Value\McpActionManifest $manifest
+   *   The sealed manifest.
+   * @param bool $executed
+   *   Whether the stored operation ran.
+   *
+   * @return array<string, mixed>
+   *   Observed postconditions.
+   */
+  private function observePostconditions(
+    McpApprovalRequestInterface $request,
+    McpActionManifest $manifest,
+    bool $executed,
+  ): array {
+    $target = $manifest->target();
+    if ($request->getOperation() === 'delete') {
+      $live = $this->loadLiveTarget($target);
+      if ($live === NULL) {
+        return [
+          'target' => [
+            'id' => $target['id'],
+            'uuid' => $target['uuid'] ?? NULL,
+            'revision' => $target['revision'] ?? NULL,
+          ],
+          'outcome' => $executed ? 'deleted' : 'not_executed',
+          'exists' => FALSE,
+        ];
+      }
+      $observed = McpEvidenceGuard::observeEntity($live, $executed ? 'present' : 'not_executed');
+      $observed['target']['id'] = $target['id'];
+      return $observed;
+    }
+    $observed = [
+      'target' => [
+        'id' => $target['id'],
+        'uuid' => $target['uuid'] ?? NULL,
+        'revision' => $target['revision'] ?? NULL,
+      ],
+      'outcome' => $executed ? 'saved' : 'not_executed',
+      'exists' => TRUE,
+    ];
+    return $observed;
+  }
+
+  /**
+   * Loads the live target named by a sealed descriptor, if it still exists.
+   *
+   * @param array{type: string, id: string, uuid?: ?string, revision?: ?string} $target
+   *   Sealed target.
+   *
+   * @return \Drupal\Core\Entity\EntityInterface|null
+   *   The live entity, or NULL when it cannot be loaded.
+   */
+  private function loadLiveTarget(array $target): ?EntityInterface {
+    if (!$this->entityTypeManager->hasDefinition($target['type'])) {
+      return NULL;
+    }
+    $entity = $this->entityTypeManager->getStorage($target['type'])->load($target['id']);
+    return $entity instanceof EntityInterface ? $entity : NULL;
   }
 
   /**
