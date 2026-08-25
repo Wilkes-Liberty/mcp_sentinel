@@ -216,6 +216,9 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     $this->pushRequestKeepingSession($request);
     $agent = $this->restoreGovernedAgent();
     $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_config_get');
+    // Required inputs must be set; access() calls getExecutableValues() to
+    // validate before delegating to checkAccess().
+    $tool->setInputValue('name', 'system.site');
     $access = $tool->access($agent, TRUE);
     $reason = $access instanceof AccessResultReasonInterface
       ? (string) $access->getReason()
@@ -224,7 +227,6 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
       $access->isAllowed(),
       'Config-get access must be allowed for the governed agent: ' . $reason,
     );
-    $tool->setInputValue('name', 'system.site');
     $tool->execute();
     $this->assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
     $context = $tool->getResult()->getContextValues();
