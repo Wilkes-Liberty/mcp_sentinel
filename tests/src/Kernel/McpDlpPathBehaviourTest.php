@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
@@ -216,9 +217,12 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     $agent = $this->restoreGovernedAgent();
     $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_config_get');
     $access = $tool->access($agent, TRUE);
+    $reason = $access instanceof AccessResultReasonInterface
+      ? (string) $access->getReason()
+      : '(no reason)';
     $this->assertTrue(
       $access->isAllowed(),
-      'Config-get access must be allowed for the governed agent: ' . $access->getReason(),
+      'Config-get access must be allowed for the governed agent: ' . $reason,
     );
     $tool->setInputValue('name', 'system.site');
     $tool->execute();
