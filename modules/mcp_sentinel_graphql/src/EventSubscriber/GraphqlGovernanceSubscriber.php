@@ -17,6 +17,7 @@ use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use GraphQL\Error\Error;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Governs GraphQL operations originating from MCP clients.
@@ -35,6 +36,14 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
 
   /**
+   * Request attribute naming the GraphQL operation type (query/mutation).
+   *
+   * Field resolvers read this so a mutation write-echo is not logged as
+   * entity_read (#3616612).
+   */
+  public const OPERATION_TYPE_ATTRIBUTE = 'mcp_sentinel.graphql_operation_type';
+
+  /**
    * Constructs a GraphqlGovernanceSubscriber.
    *
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
@@ -51,6 +60,9 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    * @param \Drupal\Core\Cache\CacheBackendInterface|null $graphqlResultsCache
    *   GraphQL operation-result cache. Nullable for the deploy window in
    *   which the cached container still passes five arguments.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   The request stack. Nullable for the deploy window in which the
+   *   cached container still passes six arguments.
    */
   public function __construct(
     private readonly McpAuditLogger $auditLogger,
@@ -59,6 +71,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     private readonly AccountProxyInterface $currentUser,
     private readonly ?McpAccessChecker $accessChecker = NULL,
     private readonly ?CacheBackendInterface $graphqlResultsCache = NULL,
+    private readonly ?RequestStack $requestStack = NULL,
   ) {}
 
   /**
@@ -114,6 +127,11 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
   public function onOperation(OperationEvent $event): void {
     $context = $event->getContext();
     $type = $context->getType();
+    // Stamp before readiness returns so field resolvers can skip write echoes.
+    $this->requestStack?->getCurrentRequest()?->attributes->set(
+      self::OPERATION_TYPE_ATTRIBUTE,
+      $type,
+    );
     $operation_name = $context->getOperation()->operationName ?? NULL;
     $is_mutation = $type === 'mutation';
     $readiness = $this->readiness->evaluate(

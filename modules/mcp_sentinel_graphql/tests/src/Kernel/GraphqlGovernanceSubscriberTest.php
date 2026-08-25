@@ -17,6 +17,7 @@ use Drupal\user\Entity\Role;
 use GraphQL\Error\Error;
 use GraphQL\Server\OperationParams;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Kernel tests for GraphqlGovernanceSubscriber::onOperation().
@@ -284,6 +285,31 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   }
 
   /**
+   * Stamps the GraphQL operation type so field resolvers can skip write echoes.
+   *
+   * @covers ::onOperation
+   */
+  public function testOperationTypeStampedOnRequest(): void {
+    $this->setUpGovernedAgent([
+      'allow_write' => TRUE,
+      'allow_graphql_mutations' => TRUE,
+    ]);
+    $request = Request::create('/graphql', 'POST');
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+
+    $this->subscriber()->onOperation($this->makeEvent('mutation'));
+    $this->assertSame(
+      'mutation',
+      $request->attributes->get(GraphqlGovernanceSubscriber::OPERATION_TYPE_ATTRIBUTE),
+    );
+  }
+
+  /**
    * Turning on Log reads evicts cache.graphql.results so the next query misses.
    *
    * The mergeCacheMaxAge(0) call cannot un-cache a document already stored.
@@ -356,6 +382,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $this->container->get('current_user'),
       $this->container->get('mcp_sentinel.access_checker'),
       $graphqlResultsCache,
+      $this->container->get('request_stack'),
     );
   }
 

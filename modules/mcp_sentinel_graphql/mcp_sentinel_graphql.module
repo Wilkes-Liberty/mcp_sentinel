@@ -20,6 +20,7 @@ use Drupal\graphql_compose\Plugin\GraphQLCompose\GraphQLComposeFieldTypeInterfac
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber;
 
 /**
  * Implements hook_help().
@@ -75,9 +76,13 @@ function mcp_sentinel_graphql_graphql_compose_field_results_alter(array &$result
     return;
   }
 
-  // A resolved field on a live entity is a governed collection member.
+  // Queries only: a mutation write echo is not a collection read.
   // Deduped entity_read rows feed the bulk-read anomaly signal (#3616612).
-  if ($entity instanceof EntityInterface) {
+  $request = \Drupal::requestStack()->getCurrentRequest();
+  $operationType = $request?->attributes->get(
+    GraphqlGovernanceSubscriber::OPERATION_TYPE_ATTRIBUTE,
+  );
+  if ($entity instanceof EntityInterface && $operationType !== 'mutation') {
     $readId = (string) ($entity->uuid() ?: $entity->id());
     \Drupal::service('mcp_sentinel.audit_logger')->logEntityRead(
       $entity->getEntityTypeId(),

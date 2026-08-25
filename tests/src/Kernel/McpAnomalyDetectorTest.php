@@ -663,14 +663,59 @@ class McpAnomalyDetectorTest extends KernelTestBase {
   }
 
   /**
+   * Bulk-read evidence honours the rule entity_type filter.
+   */
+  public function testBulkReadEvidenceHonoursEntityTypeFilter(): void {
+    $now = \Drupal::time()->getRequestTime();
+    foreach (['1', '2', '3', '4', '5'] as $id) {
+      $this->insertOp('entity_read', $now - 10, $id);
+    }
+    $this->insertOp('entity_read', $now - 10, '9', 'user', 2);
+    $this->insertOp('entity_read', $now - 10, '10', 'user', 2);
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('anomaly_enabled', TRUE)
+      ->set('anomaly_rules', [[
+        'id' => 'node_mass_read',
+        'label' => 'Node mass read',
+        'signal' => 'bulk_read',
+        'operation_pattern' => 'entity_read*',
+        'entity_type' => 'node',
+        'window_seconds' => 300,
+        'threshold' => 5,
+        'debounce_seconds' => 0,
+        'enabled' => TRUE,
+      ],
+      ])->save();
+    \Drupal::state()->delete('mcp_sentinel.anomaly_last_alert.node_mass_read');
+    $fired = $this->container->get('mcp_sentinel.anomaly_detector')->evaluate();
+    $this->assertCount(1, $fired);
+    $this->assertSame(
+      [1],
+      $fired[0]['actor'],
+      'Actors from other entity types must not be attributed.',
+    );
+    $this->assertSame(
+      ['node'],
+      $fired[0]['target_scope'],
+      'Target scope must match the rule entity_type filter.',
+    );
+  }
+
+  /**
    * Inserts one audit row for the detector tests.
    */
-  private function insertOp(string $operation, int $timestamp, string $entityId): void {
+  private function insertOp(
+    string $operation,
+    int $timestamp,
+    string $entityId,
+    string $entityType = 'node',
+    int $uid = 1,
+  ): void {
     \Drupal::database()->insert('audit_chain_log')->fields([
       'timestamp' => $timestamp,
-      'uid' => 1,
+      'uid' => $uid,
       'operation' => $operation,
-      'entity_type' => 'node',
+      'entity_type' => $entityType,
       'bundle' => 'article',
       'entity_id' => $entityId,
       'channel' => 'mcp_sentinel',

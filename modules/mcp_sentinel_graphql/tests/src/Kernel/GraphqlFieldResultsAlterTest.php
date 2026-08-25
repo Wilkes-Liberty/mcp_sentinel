@@ -12,6 +12,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDlp;
+use Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use GraphQL\Type\Definition\ResolveInfo;
@@ -380,6 +381,49 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
     $this->assertCount(1, $ids);
     $this->assertSame('uuid-44', $ids[0]->entity_id);
     $this->assertSame('node', $ids[0]->entity_type);
+  }
+
+  /**
+   * A mutation write echo is not a collection read.
+   */
+  public function testMutationWriteEchoDoesNotCountAsRead(): void {
+    $this->makeGoverned([], 0);
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', TRUE)
+      ->set('audit_log_reads', TRUE)
+      ->save();
+
+    $request = Request::create('/graphql', 'POST');
+    $request->attributes->set(
+      GraphqlGovernanceSubscriber::OPERATION_TYPE_ATTRIBUTE,
+      'mutation',
+    );
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('getEntityTypeId')->willReturn('node');
+    $entity->method('bundle')->willReturn('page');
+    $entity->method('id')->willReturn('99');
+    $entity->method('uuid')->willReturn('uuid-99');
+    $results = ['created'];
+    mcp_sentinel_graphql_graphql_compose_field_results_alter(
+      $results,
+      $entity,
+      $this->makePlugin('title'),
+      $this->makeFieldContext(),
+    );
+
+    $count = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'entity_read')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $count, 'A mutation write echo must not emit entity_read.');
   }
 
   /**

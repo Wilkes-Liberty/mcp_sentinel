@@ -110,7 +110,7 @@ final class McpAnomalyDetector {
       };
 
       if ($count >= $threshold) {
-        $scope = $this->evidenceScope($pattern, $since, $signal, $config);
+        $scope = $this->evidenceScope($pattern, $since, $signal, $config, $rule);
         $fired[] = [
           'rule' => $rule,
           'count' => $count,
@@ -284,27 +284,53 @@ final class McpAnomalyDetector {
    *
    * Uids and entity types only — never credentials or payload. Off-hours
    * evidence is limited to rows that actually fell outside the schedule.
+   * Bulk-read evidence honours the rule's optional entity_type filter so
+   * the alert attributes only the collection that drove the fire.
+   *
+   * @param string $pattern
+   *   Operation pattern (same semantics as countOps()).
+   * @param int $since
+   *   Lookback start.
+   * @param string $signal
+   *   The rule signal (count, off_hours, or bulk_read).
+   * @param \Drupal\Core\Config\ImmutableConfig $config
+   *   Module settings.
+   * @param array $rule
+   *   The rule map (optional entity_type for bulk_read).
    *
    * @return array{actor: list<int>, target_scope: list<string>}
    *   Distinct principals and entity types, each capped at 16.
    */
-  private function evidenceScope(string $pattern, int $since, string $signal, ImmutableConfig $config): array {
+  private function evidenceScope(
+    string $pattern,
+    int $since,
+    string $signal,
+    ImmutableConfig $config,
+    array $rule = [],
+  ): array {
     $query = $this->opsQuery($pattern, $since)->fields('l', [
       'uid',
       'entity_type',
       'timestamp',
     ]);
+    $only = '';
+    if ($signal === 'bulk_read') {
+      $only = trim((string) ($rule['entity_type'] ?? ''));
+    }
     $uids = [];
     $types = [];
     foreach ($query->execute() as $row) {
       if ($signal === 'off_hours' && !$this->isOffHours((int) $row->timestamp, $config)) {
         continue;
       }
+      $type = (string) $row->entity_type;
+      if ($only !== '' && $type !== $only) {
+        continue;
+      }
       $uid = (int) $row->uid;
       if ($uid > 0) {
         $uids[$uid] = TRUE;
       }
-      $type = (string) $row->entity_type;
       if ($type !== '') {
         $types[$type] = TRUE;
       }
