@@ -70,6 +70,8 @@ phpcs
 phpstan
 phpunit
 PKCE
+postcondition
+postconditions
 precommit
 precommits
 precommitted

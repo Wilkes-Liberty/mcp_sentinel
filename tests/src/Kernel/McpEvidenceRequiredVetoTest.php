@@ -246,6 +246,12 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
     $this->assertCount(1, $saves);
     $evidence = $saves[0]['metadata']['evidence'];
     $this->assertSame($meta['correlation_id'], $evidence['correlation_id']);
+    $this->assertArrayHasKey('postconditions', $evidence);
+    $this->assertSame((string) $node->id(), $evidence['postconditions']['target']['id']);
+    $this->assertSame($node->uuid(), $evidence['postconditions']['target']['uuid']);
+    $this->assertSame((string) $node->getRevisionId(), $evidence['postconditions']['target']['revision']);
+    $this->assertSame('saved', $evidence['postconditions']['outcome']);
+    $this->assertTrue($evidence['postconditions']['exists']);
 
     // The chain verifies keyed end to end — the evidence is signed, not just
     // present.
@@ -515,6 +521,11 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
       $meta['correlation_id'],
       $deletes[0]['metadata']['evidence']['correlation_id'],
     );
+    $postconditions = $deletes[0]['metadata']['evidence']['postconditions'];
+    $this->assertSame((string) $node->id(), $postconditions['target']['id']);
+    $this->assertSame($node->uuid(), $postconditions['target']['uuid']);
+    $this->assertSame('deleted', $postconditions['outcome']);
+    $this->assertFalse($postconditions['exists']);
   }
 
   /**

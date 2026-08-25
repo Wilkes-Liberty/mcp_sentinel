@@ -130,6 +130,7 @@ final class McpDecisionTest extends UnitTestCase {
         'approver_unauthorized',
         'superuser_refused',
         'manifest_unsealed',
+        'postcondition_discrepancy',
       ],
       array_map(
         static fn (McpDecisionReason $case): string => $case->value,
