@@ -59,10 +59,15 @@ final class McpAnomalyDetector {
    *
    * Returns an array of fired-rule results; empty when no rules trigger or
    * anomaly detection is globally disabled. Each entry has the shape:
-   *   ['rule' => array, 'count' => int]
+   *   ['rule' => array, 'count' => int, 'signal' => string,
+   *    'actor' => int[], 'target_scope' => string[],
+   *    'rule_version' => string, 'window' => int, 'threshold' => int,
+   *    'outcome' => string]
    *
-   * @return array<array{rule: array, count: int}>
+   * @return array<int, array<string, mixed>>
    *   Fired rule results; empty when no rules trigger or detection is disabled.
+   *   Each entry includes rule, count, signal, actor, target_scope,
+   *   rule_version, window, threshold, and outcome.
    */
   public function evaluate(): array {
     $config = $this->configFactory->get('mcp_sentinel.settings');
@@ -105,7 +110,18 @@ final class McpAnomalyDetector {
       };
 
       if ($count >= $threshold) {
-        $fired[] = ['rule' => $rule, 'count' => $count];
+        $scope = $this->evidenceScope($pattern, $since, $signal, $config, $rule);
+        $fired[] = [
+          'rule' => $rule,
+          'count' => $count,
+          'signal' => $signal,
+          'actor' => $scope['actor'],
+          'target_scope' => $scope['target_scope'],
+          'rule_version' => self::ruleVersion($rule),
+          'window' => $window,
+          'threshold' => $threshold,
+          'outcome' => 'fired',
+        ];
         // Record debounce timestamp (only when debounce is enabled).
         if ($debounce > 0) {
           $this->state->set('mcp_sentinel.anomaly_last_alert.' . $ruleId, $now);
@@ -261,6 +277,88 @@ final class McpAnomalyDetector {
       }
     }
     return $best >= $threshold ? $best : 0;
+  }
+
+  /**
+   * Bounded actor and target-scope evidence from matching rows.
+   *
+   * Uids and entity types only — never credentials or payload. Off-hours
+   * evidence is limited to rows that actually fell outside the schedule.
+   * Bulk-read evidence honours the rule's optional entity_type filter so
+   * the alert attributes only the collection that drove the fire.
+   *
+   * @param string $pattern
+   *   Operation pattern (same semantics as countOps()).
+   * @param int $since
+   *   Lookback start.
+   * @param string $signal
+   *   The rule signal (count, off_hours, or bulk_read).
+   * @param \Drupal\Core\Config\ImmutableConfig $config
+   *   Module settings.
+   * @param array $rule
+   *   The rule map (optional entity_type for bulk_read).
+   *
+   * @return array{actor: list<int>, target_scope: list<string>}
+   *   Distinct principals and entity types, each capped at 16.
+   */
+  private function evidenceScope(
+    string $pattern,
+    int $since,
+    string $signal,
+    ImmutableConfig $config,
+    array $rule = [],
+  ): array {
+    $query = $this->opsQuery($pattern, $since)->fields('l', [
+      'uid',
+      'entity_type',
+      'timestamp',
+    ]);
+    $only = '';
+    if ($signal === 'bulk_read') {
+      $only = trim((string) ($rule['entity_type'] ?? ''));
+    }
+    $uids = [];
+    $types = [];
+    foreach ($query->execute() as $row) {
+      if ($signal === 'off_hours' && !$this->isOffHours((int) $row->timestamp, $config)) {
+        continue;
+      }
+      $type = (string) $row->entity_type;
+      if ($only !== '' && $type !== $only) {
+        continue;
+      }
+      $uid = (int) $row->uid;
+      if ($uid > 0) {
+        $uids[$uid] = TRUE;
+      }
+      if ($type !== '') {
+        $types[$type] = TRUE;
+      }
+    }
+    return [
+      'actor' => array_slice(array_map('intval', array_keys($uids)), 0, 16),
+      'target_scope' => array_slice(array_keys($types), 0, 16),
+    ];
+  }
+
+  /**
+   * Stable digest of the rule fields that change detection behaviour.
+   *
+   * @param array<string, mixed> $rule
+   *   The rule map.
+   */
+  public static function ruleVersion(array $rule): string {
+    $canonical = [
+      'complete_ratio' => $rule['complete_ratio'] ?? NULL,
+      'entity_type' => $rule['entity_type'] ?? NULL,
+      'id' => (string) ($rule['id'] ?? ''),
+      'operation_pattern' => (string) ($rule['operation_pattern'] ?? ''),
+      'signal' => (string) ($rule['signal'] ?? 'count'),
+      'threshold' => (int) ($rule['threshold'] ?? 0),
+      'window_seconds' => (int) ($rule['window_seconds'] ?? 0),
+    ];
+    ksort($canonical);
+    return 'sha256:' . hash('sha256', (string) json_encode($canonical, JSON_THROW_ON_ERROR));
   }
 
   /**

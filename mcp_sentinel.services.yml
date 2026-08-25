@@ -287,6 +287,7 @@ services:
       - '@plugin.manager.mail'
       - '@mcp_sentinel.webhook_queue_manager'
       - '@language_manager'
+      - '@mcp_sentinel.audit_logger'
 
   mcp_sentinel.content_lock:
     class: Drupal\mcp_sentinel\Service\McpContentLock
