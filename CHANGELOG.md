@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Adversarial manifest sweep and postcondition receipt (#111 /
+  d.o. #3616538, slice 6).** Proving tests cover action-manifest
+  expiry (`manifest_expired`), a changed live revision
+  (`target_stale`), overlapping approve attempts and a still-pending
+  second consume (`idempotency_replay`). The existing evidence
+  receipt now records postconditions (target id/uuid/revision,
+  outcome). A sealed-vs-observed discrepancy is written onto that
+  same receipt and refused (`postcondition_discrepancy`). Approval
+  execution emits that correlated receipt. Who is gated is unchanged.
+  Uncertain-execution reconciliation stays on #3616539.
+
 ## [2.12.0] - 2026-08-18
 
 ### Security
