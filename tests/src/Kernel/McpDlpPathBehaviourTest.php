@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
@@ -79,6 +80,8 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     $role->grantPermission('access mcp sentinel context');
     $role->save();
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('enabled', TRUE)
+      ->set('audit_enabled', TRUE)
       ->set('governed_role_fallback', TRUE)
       ->set('governed_roles', ['mcp_api'])
       ->save();
@@ -213,7 +216,10 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     $agent = $this->restoreGovernedAgent();
     $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_config_get');
     $access = $tool->access($agent, TRUE);
-    $this->assertTrue($access->isAllowed(), 'Config-get access must be allowed for the governed agent.');
+    $this->assertTrue(
+      $access->isAllowed(),
+      'Config-get access must be allowed for the governed agent: ' . $access->getReason(),
+    );
     $tool->setInputValue('name', 'system.site');
     $tool->execute();
     $this->assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
@@ -242,20 +248,26 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
   }
 
   /**
-   * Rebuilds the container so McpDlp rereads patterns.
+   * Replaces the DLP service so the next Tool execute sees the saved patterns.
+   *
+   * McpDlp is constructed from config at container compile. A full kernel
+   * rebuild would drop the governed current user and fail Tool access.
    */
   private function rebuildDlp(): void {
-    $this->container->get('kernel')->rebuildContainer();
-    // @phpstan-ignore assign.propertyType
-    $this->container = $this->container->get('kernel')->getContainer();
+    $this->container->set(
+      'mcp_sentinel.dlp',
+      McpDlp::createFromConfig(
+        $this->container->get('config.factory'),
+        $this->container->get('logger.channel.mcp_sentinel'),
+      ),
+    );
     $this->restoreGovernedAgent();
   }
 
   /**
-   * Re-sets the governed agent after a container rebuild.
+   * Re-sets the governed agent on current_user.
    *
-   * rebuildContainer() replaces current_user; without this the Tool access
-   * check sees anonymous and fails the role-fallback gate.
+   * Tool execute() resolves policy from current_user, not the access() account.
    */
   private function restoreGovernedAgent(): UserInterface {
     $agent = \Drupal::entityTypeManager()->getStorage('user')->load($this->agentUid);
