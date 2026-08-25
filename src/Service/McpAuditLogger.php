@@ -79,6 +79,13 @@ class McpAuditLogger {
   private const DIFF_MAX_VALUE_LENGTH = 255;
 
   /**
+   * Distinct entity reads already recorded in this request.
+   *
+   * @var array<string, true>
+   */
+  private array $loggedReads = [];
+
+  /**
    * Constructs an McpAuditLogger.
    *
    * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
@@ -183,6 +190,36 @@ class McpAuditLogger {
     }
 
     $this->writeToChain($operation, $metadata);
+  }
+
+  /**
+   * Records one governed entity read, once per type+id in this request.
+   *
+   * Honours audit_enabled and audit_log_reads through log(). The entity
+   * identity is written to the chain columns the bulk-read detector
+   * queries (entity_type + entity_id via metadata id).
+   *
+   * @param string $entityType
+   *   The entity type id.
+   * @param string $entityId
+   *   The entity id or uuid.
+   * @param array<string, mixed> $metadata
+   *   Extra non-sensitive metadata (surface, bundle). Never payload.
+   */
+  public function logEntityRead(string $entityType, string $entityId, array $metadata = []): void {
+    $entityType = trim($entityType);
+    $entityId = trim($entityId);
+    if ($entityType === '' || $entityId === '') {
+      return;
+    }
+    $key = $entityType . ':' . $entityId;
+    if (isset($this->loggedReads[$key])) {
+      return;
+    }
+    $this->loggedReads[$key] = TRUE;
+    $metadata['entity_type'] = $entityType;
+    $metadata['id'] = $entityId;
+    $this->log('entity_read', $metadata);
   }
 
   /**

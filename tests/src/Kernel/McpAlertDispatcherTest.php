@@ -247,4 +247,59 @@ class McpAlertDispatcherTest extends KernelTestBase {
     $this->assertSame('alert_ep', $row['endpoint_id']);
   }
 
+  /**
+   * A fired rule writes bounded audit evidence and no payload.
+   */
+  public function testDispatchWritesBoundedAuditEvidence(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('anomaly_alert_log', FALSE)
+      ->set('anomaly_alert_email', '')
+      ->set('anomaly_alert_webhook', FALSE)
+      ->set('audit_enabled', TRUE)
+      ->save();
+
+    $this->container->get('mcp_sentinel.anomaly_alert_dispatcher')->dispatch([[
+      'rule' => [
+        'id' => 'evidence_rule',
+        'label' => 'Evidence',
+        'signal' => 'bulk_read',
+        'operation_pattern' => 'entity_read*',
+        'window_seconds' => 300,
+        'threshold' => 5,
+      ],
+      'count' => 7,
+      'signal' => 'bulk_read',
+      'actor' => [4, 9],
+      'target_scope' => ['node'],
+      'rule_version' => 'sha256:fixture',
+      'window' => 300,
+      'threshold' => 5,
+      'outcome' => 'fired',
+    ],
+    ]);
+
+    $row = \Drupal::database()
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->condition('l.operation', 'anomaly_alert')
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row);
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame('bulk_read', $metadata['signal']);
+    $this->assertSame([4, 9], $metadata['actor']);
+    $this->assertSame(['node'], $metadata['target_scope']);
+    $this->assertSame('sha256:fixture', $metadata['rule_version']);
+    $this->assertSame(300, $metadata['window']);
+    $this->assertSame(5, $metadata['threshold']);
+    $this->assertSame('fired', $metadata['outcome']);
+    $this->assertSame('evidence_rule', $metadata['rule_id']);
+    $this->assertSame(7, $metadata['count']);
+    $this->assertArrayNotHasKey('payload', $metadata);
+    $this->assertArrayNotHasKey('password', $metadata);
+    $this->assertArrayNotHasKey('credentials', $metadata);
+    $this->assertStringNotContainsString('secret', (string) $row['metadata']);
+  }
+
 }

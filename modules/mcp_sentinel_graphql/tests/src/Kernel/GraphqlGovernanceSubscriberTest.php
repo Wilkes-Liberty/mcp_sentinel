@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_graphql\Kernel;
 
+use Drupal\Core\Cache\CacheBackendInterface;
+use Drupal\Core\Config\ConfigCrudEvent;
 use Drupal\graphql\Event\OperationEvent;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
 use Drupal\KernelTests\KernelTestBase;
@@ -15,6 +17,7 @@ use Drupal\user\Entity\Role;
 use GraphQL\Error\Error;
 use GraphQL\Server\OperationParams;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Kernel tests for GraphqlGovernanceSubscriber::onOperation().
@@ -253,6 +256,102 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   }
 
   /**
+   * Governed queries disable the operation cache when read audit is on.
+   *
+   * Field resolvers write entity_read; a cache hit never re-runs that hook.
+   * mergeCacheMaxAge(0) on the resolve context prevents the graphql module
+   * from storing the result, so repeat collection reads stay visible to
+   * bulk_read (#3616612).
+   *
+   * @covers ::onOperation
+   */
+  public function testGovernedQueryDisablesOperationCacheWhenReadAuditOn(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', TRUE)
+      ->set('audit_log_reads', TRUE)
+      ->save();
+    $this->setUpGovernedAgent(['allow_read' => TRUE]);
+
+    $params = OperationParams::create(['query' => '{ __typename }']);
+    $context = $this->createMock(ResolveContext::class);
+    $context->method('getType')->willReturn('query');
+    $context->method('getOperation')->willReturn($params);
+    $context->expects($this->atLeastOnce())
+      ->method('mergeCacheMaxAge')
+      ->with(0)
+      ->willReturnSelf();
+
+    $this->subscriber()->onOperation(new OperationEvent($context));
+  }
+
+  /**
+   * Stamps the GraphQL operation type so field resolvers can skip write echoes.
+   *
+   * @covers ::onOperation
+   */
+  public function testOperationTypeStampedOnRequest(): void {
+    $this->setUpGovernedAgent([
+      'allow_write' => TRUE,
+      'allow_graphql_mutations' => TRUE,
+    ]);
+    $request = Request::create('/graphql', 'POST');
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+
+    $this->subscriber()->onOperation($this->makeEvent('mutation'));
+    $this->assertSame(
+      'mutation',
+      $request->attributes->get(GraphqlGovernanceSubscriber::OPERATION_TYPE_ATTRIBUTE),
+    );
+  }
+
+  /**
+   * Turning on Log reads evicts cache.graphql.results so the next query misses.
+   *
+   * The mergeCacheMaxAge(0) call cannot un-cache a document already stored.
+   * Enabling audit_log_reads must delete that bin or a warm collection query
+   * never re-runs field resolvers and entity_read stays missing (#3616612).
+   *
+   * @covers ::onSettingsSave
+   */
+  public function testEnablingReadAuditEvictsGraphqlResultsCache(): void {
+    $cache = $this->createMock(CacheBackendInterface::class);
+    $cache->expects($this->once())->method('deleteAll');
+
+    $editable = $this->config('mcp_sentinel.settings');
+    $editable->set('audit_enabled', TRUE)->set('audit_log_reads', TRUE);
+
+    $this->subscriber($cache)->onSettingsSave(new ConfigCrudEvent($editable));
+  }
+
+  /**
+   * An unchanged or disabled read-audit save must not wipe GraphQL results.
+   *
+   * @covers ::onSettingsSave
+   */
+  public function testReadAuditSaveWithoutEnableDoesNotEvictGraphqlResults(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', TRUE)
+      ->set('audit_log_reads', TRUE)
+      ->save();
+
+    $cache = $this->createMock(CacheBackendInterface::class);
+    $cache->expects($this->never())->method('deleteAll');
+
+    $alreadyOn = $this->config('mcp_sentinel.settings');
+    $alreadyOn->set('audit_retention_days', 30);
+    $this->subscriber($cache)->onSettingsSave(new ConfigCrudEvent($alreadyOn));
+
+    $turningOff = $this->config('mcp_sentinel.settings');
+    $turningOff->set('audit_log_reads', FALSE);
+    $this->subscriber($cache)->onSettingsSave(new ConfigCrudEvent($turningOff));
+  }
+
+  /**
    * Emergency deny refuses a GraphQL query that the profile would allow.
    *
    * @covers ::onOperation
@@ -269,23 +368,30 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
 
   /**
    * Returns a fresh GraphqlGovernanceSubscriber from real container services.
+   *
+   * @param \Drupal\Core\Cache\CacheBackendInterface|null $graphqlResultsCache
+   *   Optional GraphQL results cache (tests that assert eviction).
    */
-  private function subscriber(): GraphqlGovernanceSubscriber {
+  private function subscriber(
+    ?CacheBackendInterface $graphqlResultsCache = NULL,
+  ): GraphqlGovernanceSubscriber {
     return new GraphqlGovernanceSubscriber(
       $this->container->get('mcp_sentinel.audit_logger'),
       $this->container->get('config.factory'),
       $this->container->get('mcp_sentinel.governance_readiness'),
       $this->container->get('current_user'),
       $this->container->get('mcp_sentinel.access_checker'),
+      $graphqlResultsCache,
+      $this->container->get('request_stack'),
     );
   }
 
   /**
    * Builds a minimal OperationEvent wrapping a mocked ResolveContext.
    *
-   * Only getType() and getOperation() are exercised by onOperation(), so a
-   * partial mock is sufficient and avoids the heavy graphql Server entity
-   * setup that a full ResolveContext would require.
+   * Only getType(), getOperation(), and mergeCacheMaxAge() are exercised by
+   * onOperation(), so a partial mock is sufficient and avoids the heavy
+   * graphql Server entity setup that a full ResolveContext would require.
    *
    * @param string $type
    *   The operation type ('query', 'mutation', etc.).
@@ -296,6 +402,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $context = $this->createMock(ResolveContext::class);
     $context->method('getType')->willReturn($type);
     $context->method('getOperation')->willReturn($params);
+    $context->method('mergeCacheMaxAge')->willReturnSelf();
 
     return new OperationEvent($context);
   }

@@ -802,9 +802,9 @@ An **operating-hours schedule** (timezone, weekdays, start/end) can be set on
 the same tab. Off-hours rules fire only when the schedule is enabled and a
 matching event falls outside it. Bulk-read rules fire when distinct
 `entity_read*` IDs in the window meet the threshold or a complete/near-complete
-ratio of the live collection (JSON:API, GraphQL and Tool reads that are
-audited as `entity_read*`; enable *Log reads* so those rows exist). Hosted
-tenant correlation is out of scope.
+ratio of the live collection. Governed JSON:API GET/HEAD documents and GraphQL
+field resolutions write those rows when *Log reads* is on. No shipped Tool
+enumerates an entity collection. Hosted tenant correlation is out of scope.
 
 Rules are evaluated on cron. All rules ship **disabled by default** to avoid
 false positives during content imports. Enable and tune rules per-site.
