@@ -326,7 +326,7 @@ final class McpApprovalExecutor {
     $expected = [
       'target' => [
         'id' => $target['id'],
-        'uuid' => $target['uuid'] ?? NULL,
+        'uuid' => $target['uuid'],
       ],
     ];
     if ($executed && $request->getOperation() === 'delete') {
@@ -370,8 +370,8 @@ final class McpApprovalExecutor {
         return [
           'target' => [
             'id' => $target['id'],
-            'uuid' => $target['uuid'] ?? NULL,
-            'revision' => $target['revision'] ?? NULL,
+            'uuid' => $target['uuid'],
+            'revision' => $target['revision'],
           ],
           'outcome' => $executed ? 'deleted' : 'not_executed',
           'exists' => FALSE,
@@ -384,8 +384,8 @@ final class McpApprovalExecutor {
     $observed = [
       'target' => [
         'id' => $target['id'],
-        'uuid' => $target['uuid'] ?? NULL,
-        'revision' => $target['revision'] ?? NULL,
+        'uuid' => $target['uuid'],
+        'revision' => $target['revision'],
       ],
       'outcome' => $executed ? 'saved' : 'not_executed',
       'exists' => TRUE,

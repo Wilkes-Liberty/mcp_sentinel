@@ -199,16 +199,14 @@ final class McpAdversarialManifestTest extends KernelTestBase {
     ]);
     $storage = $this->container->get('entity_type.manager')
       ->getStorage('mcp_approval_request');
-    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $first */
     $first = $storage->load($requestId);
-    $this->assertNotNull($first);
+    $this->assertInstanceOf(McpApprovalRequestInterface::class, $first);
     // Two load()s without a cache reset return the same instance, so the
     // second approve would see the first decision and throw instead of
     // hitting the consume unique key.
     $storage->resetCache([$requestId]);
-    /** @var \Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface $overlapping */
     $overlapping = $storage->load($requestId);
-    $this->assertNotNull($overlapping);
+    $this->assertInstanceOf(McpApprovalRequestInterface::class, $overlapping);
     $this->assertNotSame($first, $overlapping);
     $this->assertTrue($first->isPending());
     $this->assertTrue($overlapping->isPending());
