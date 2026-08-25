@@ -44,6 +44,7 @@ services:
       - '@mcp_sentinel_approval.break_glass'
       - '@module_handler'
       - '@mcp_sentinel_approval.manifest_binder'
+      - '@mcp_sentinel.evidence_guard'
 
   mcp_sentinel_approval.destructive_op_subscriber:
     class: Drupal\mcp_sentinel_approval\EventSubscriber\McpDestructiveOpSubscriber
