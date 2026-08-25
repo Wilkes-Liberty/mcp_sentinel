@@ -28,6 +28,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and disabled bulk-read rules are covered. Hosted tenant
   correlation remains out of scope. No shipped Tool enumerates an
   entity collection.
+- **DLP path-behaviour tests (d.o. #3617061).** Tool success context is
+  proven in both directions: a classified hit that exceeds the Tool
+  ceiling is refused, a hit at the ceiling is masked, and a public
+  hit cannot let a restricted sibling through. The named residuals
+  stay residuals: a JSON:API body is not DLP-scanned, and REST is
+  not a governed surface. GraphQL coverage was already on
+  `GraphqlFieldResultsAlterTest`.
 
 ## [2.12.0] - 2026-08-18
 
