@@ -129,6 +129,10 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
 
   /**
    * A public-labelled Tool hit cannot let a restricted sibling through.
+   *
+   * The Tool ceiling starts at restricted so the SSN is refused only after
+   * the earlier public hit tightens the request-scoped ceiling. Starting at
+   * public would refuse the SSN from the profile ceiling alone.
    */
   public function testToolHitCannotWidenRestrictedSibling(): void {
     $this->config('mcp_sentinel.settings')
@@ -150,15 +154,21 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
       ])
       ->save();
     $this->rebuildDlp();
-    $this->setToolCeiling('public');
+    $this->setToolCeiling('restricted');
     $this->config('system.site')
       ->set('name', 'EMP-123456')
       ->set('slogan', '123-45-6789')
       ->save();
 
     $data = $this->readSiteConfigViaTool();
-    $this->assertStringNotContainsString('EMP-123456', (string) ($data['name'] ?? ''));
-    $this->assertSame('[REDACTED]', $data['slogan'] ?? NULL);
+    // Name precedes slogan in system.site, so the public EMP hit lands first.
+    $this->assertStringEndsWith('3456', (string) ($data['name'] ?? ''));
+    $this->assertNotSame('[REDACTED]', $data['name']);
+    $this->assertSame(
+      '[REDACTED]',
+      $data['slogan'] ?? NULL,
+      'A later restricted hit must be refused after a public hit tightened the ceiling.',
+    );
   }
 
   /**
