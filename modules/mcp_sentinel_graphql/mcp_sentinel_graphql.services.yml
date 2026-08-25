@@ -7,5 +7,6 @@ services:
       - '@mcp_sentinel.governance_readiness'
       - '@current_user'
       - '@?mcp_sentinel.access_checker'
+      - '@?cache.graphql.results'
     tags:
       - { name: event_subscriber }

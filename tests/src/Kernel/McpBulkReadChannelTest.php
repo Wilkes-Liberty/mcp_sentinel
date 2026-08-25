@@ -145,7 +145,12 @@ final class McpBulkReadChannelTest extends KernelTestBase {
    */
   private function jsonApiEvent(string $path, array $body, string $method = 'GET', int $status = 200): ResponseEvent {
     $request = Request::create($path, $method);
-    $this->container->get('request_stack')->push($request);
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
     $response = new Response(
       (string) json_encode($body),
       $status,
