@@ -218,11 +218,6 @@ final class McpApprovalExecutor {
       $message = sprintf('Unsupported operation "%s"; request marked approved but not executed.', $request->getOperation());
     }
 
-    $request
-      ->setStatus(McpApprovalRequestInterface::STATUS_APPROVED)
-      ->setDecision($uid, $now)
-      ->save();
-
     $metadata = [
       'entity_type' => $entity_type,
       'id'          => $entity_id,
@@ -238,7 +233,15 @@ final class McpApprovalExecutor {
       $metadata['reason'] = $reason;
       $metadata['note'] = $message;
     }
+    // Persist approved only after the receipt returns. receipt() refuses the
+    // caller on postcondition_discrepancy or evidence_uncertain; saving first
+    // would leave a durable approved request that cannot be retried.
     $this->writeExecutionReceipt($request, $manifest, $executed, $metadata);
+
+    $request
+      ->setStatus(McpApprovalRequestInterface::STATUS_APPROVED)
+      ->setDecision($uid, $now)
+      ->save();
 
     return ['executed' => $executed, 'error' => FALSE, 'message' => $message];
   }
@@ -301,6 +304,7 @@ final class McpApprovalExecutor {
       'approval_decision',
       $metadata,
       $this->expectedPostconditions($request, $manifest, $executed),
+      always: FALSE,
     );
   }
 
@@ -341,8 +345,15 @@ final class McpApprovalExecutor {
       $expected['outcome'] = 'saved';
       return $expected;
     }
-    $expected['outcome'] = 'not_executed';
-    return $expected;
+    // A not-executed delete may still load a live row at the same id
+    // (target_stale / id reuse). Do not require the sealed uuid to match
+    // that replacement — that mismatch is why execution was skipped.
+    return [
+      'target' => [
+        'id' => $target['id'],
+      ],
+      'outcome' => 'not_executed',
+    ];
   }
 
   /**

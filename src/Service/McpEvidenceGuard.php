@@ -338,8 +338,22 @@ class McpEvidenceGuard {
    * @param array<string, mixed>|null $expectedPostconditions
    *   Sealed or intended postconditions to compare. NULL uses the
    *   precommit stash when one exists.
+   * @param bool $always
+   *   When TRUE (default) the row is written through logAlways(),
+   *   bypassing the audit_enabled gate. Evidence-required receipts
+   *   need that: a precommit was only written because auditing was
+   *   on, and dropping the receipt because the flag flipped mid-flight
+   *   would be best-effort logging. Approval decisions pass FALSE so
+   *   they share the same gate as deny() and other approval_decision
+   *   rows.
    */
-  public function receipt(string $correlation, string $rowOperation, array $metadata, ?array $expectedPostconditions = NULL): void {
+  public function receipt(
+    string $correlation,
+    string $rowOperation,
+    array $metadata,
+    ?array $expectedPostconditions = NULL,
+    bool $always = TRUE,
+  ): void {
     $postconditions = is_array($metadata['postconditions'] ?? NULL)
       ? $metadata['postconditions']
       : NULL;
@@ -359,12 +373,19 @@ class McpEvidenceGuard {
     if ($discrepancy !== NULL) {
       $metadata['evidence']['discrepancy'] = TRUE;
       $metadata['reason'] = $discrepancy;
+      // A refused receipt is not a completed decision. Callers such as
+      // approval approve() pre-stamp decision=approved before status is
+      // persisted; drop that claim so the durable row cannot be read as a
+      // finished approval while the request stays pending and retryable.
+      unset($metadata['decision']);
     }
     try {
-      // logAlways, not log(): the precommit was only written because auditing
-      // was enabled, and a receipt silently dropped because the flag flipped
-      // mid-flight would be best-effort logging by another name.
-      $this->auditLogger->logAlways($rowOperation, $metadata);
+      if ($always) {
+        $this->auditLogger->logAlways($rowOperation, $metadata);
+      }
+      else {
+        $this->auditLogger->log($rowOperation, $metadata);
+      }
     }
     catch (\Throwable $e) {
       if ($this->database !== NULL && $this->database->inTransaction()) {

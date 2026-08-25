@@ -328,6 +328,7 @@ final class McpAdversarialManifestTest extends KernelTestBase {
       $guard->receipt('corr-discrepancy', 'approval_decision', [
         'entity_type' => 'node',
         'id' => '4',
+        'decision' => 'approved',
         'postconditions' => $observed,
       ], $expected);
       $this->fail('A postcondition discrepancy must refuse explicitly.');
@@ -348,6 +349,11 @@ final class McpAdversarialManifestTest extends KernelTestBase {
     $this->assertSame(
       McpEvidenceGuard::REASON_POSTCONDITION_DISCREPANCY,
       $meta['reason'],
+    );
+    $this->assertArrayNotHasKey(
+      'decision',
+      $meta,
+      'A refused receipt must not claim an approved decision while the request can remain pending.',
     );
   }
 
