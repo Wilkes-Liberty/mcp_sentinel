@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **DEV-435: readiness anonymous deny is 403 JSON, not a login
+  bounce.** `GET /drupal-mcp/readiness` with `_user_is_logged_in`
+  never reached the controller: Drupal converted that deny into
+  `302 Location: /user/login`. Connector verify followed the
+  redirect; login HTML is 200; `principal_auth` still failed. The
+  route keeps `_permission: 'access mcp sentinel context'` (and
+  oauth2 / GET-only) and no longer requires a logged-in
+  principal. The controller still fail-closes uid 0 with the
+  existing 403 JSON (`MCP access is denied.`, reason
+  `unauthenticated`). An anonymous AccessDenied on this route is
+  rewritten to the same JSON so a 403-to-login converter cannot
+  bounce fetch. `/drupal-mcp/health` stays the public uptime
+  probe. This is not a service-readiness or hosted claim.
+
 ## [2.13.1] - 2026-08-26
 
 ### Security
