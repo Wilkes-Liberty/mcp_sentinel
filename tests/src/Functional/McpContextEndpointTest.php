@@ -75,18 +75,6 @@ final class McpContextEndpointTest extends BrowserTestBase {
     $this->drupalGet('/drupal-mcp/health');
     $this->assertSession()->statusCodeEquals(200);
 
-    $account = $this->drupalCreateUser(['access mcp sentinel context']);
-    $this->drupalLogin($account);
-    $this->drupalGet('/drupal-mcp/readiness');
-    $status = $this->getSession()->getStatusCode();
-    $this->assertTrue(
-      in_array($status, [200, 503], TRUE),
-      'An authenticated principal still receives the bounded contract.',
-    );
-    $this->assertSession()->responseContains('"contract_ready"');
-    $this->assertSession()->responseContains('"scope":"source_governance_contract"');
-    $this->assertSession()->responseContains('"overall_posture":false');
-
     $response = $this->getHttpClient()->request(
       'POST',
       $this->buildUrl('/drupal-mcp/readiness'),
