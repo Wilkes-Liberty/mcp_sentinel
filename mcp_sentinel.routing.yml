@@ -100,7 +100,10 @@ mcp_sentinel.readiness:
   defaults:
     _controller: '\Drupal\mcp_sentinel\Controller\McpContextController::readiness'
   requirements:
+    # Permission alone is not enough: a hostile grant to anonymous must
+    # still fail closed. The controller repeats this check.
     _permission: 'access mcp sentinel context'
+    _user_is_logged_in: 'TRUE'
   options:
     _auth:
       - oauth2

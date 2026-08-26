@@ -28,6 +28,7 @@ enum McpGovernanceReadinessReason: string {
   case ToolScopeMissing = 'tool_scope_missing';
   case RequestConsumerNotDesignated = 'request_consumer_not_designated';
   case RequiredScopeMissing = 'required_scope_missing';
+  case Unauthenticated = 'unauthenticated';
 
   /**
    * Whether this reason describes caller authorization, not system readiness.
@@ -36,6 +37,7 @@ enum McpGovernanceReadinessReason: string {
     return in_array($this, [
       self::RequestConsumerNotDesignated,
       self::RequiredScopeMissing,
+      self::Unauthenticated,
     ], TRUE);
   }
 

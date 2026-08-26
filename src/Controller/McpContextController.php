@@ -177,10 +177,21 @@ class McpContextController extends ControllerBase {
   /**
    * Reports source-governance contract availability to authenticated callers.
    *
-   * This endpoint deliberately does not claim effective policy enforcement,
-   * verified audit evidence, or an overall-green security posture.
+   * Anonymous callers are refused even when `access mcp sentinel context` has
+   * been granted to the anonymous role. A hostile grant must not open this
+   * governed path. This endpoint deliberately does not claim effective policy
+   * enforcement, verified audit evidence, or an overall-green security
+   * posture.
    */
   public function readiness(): JsonResponse {
+    // Product rule, stronger than the route permission: uid 0 never receives
+    // the readiness document. Route _permission can be granted to anonymous.
+    if (!$this->currentUser()->isAuthenticated()) {
+      return $this->notReadyResponse(
+        McpGovernanceReadinessReason::Unauthenticated,
+      );
+    }
+
     $result = $this->readiness->contractStatus();
     return new JsonResponse([
       'contract_ready' => $result->isReady(),
