@@ -52,25 +52,23 @@ final class McpContextEndpointTest extends BrowserTestBase {
   /**
    * The readiness contract is authenticated and GET-only at the live router.
    *
-   * DEV-435: a hostile grant of the context permission to anonymous must
-   * still refuse the governed path. Health stays the public uptime probe.
+   * DEV-435 residual: anonymous GET must be 403 JSON (reason
+   * unauthenticated), not 302 Location /user/login. A hostile grant of the
+   * context permission to anonymous must still refuse. Health stays the
+   * public uptime probe.
    */
   public function testReadinessEndpointBoundary(): void {
-    $this->drupalGet('/drupal-mcp/readiness');
-    $this->assertNotSuccessfulResponse(
-      'Anonymous GET /drupal-mcp/readiness must not be 2xx.',
+    $this->assertAnonymousReadinessDeniedJson(
+      'Anonymous GET readiness must be 403 JSON, not a login bounce.',
     );
-    $this->assertSession()->statusCodeEquals(403);
 
     user_role_grant_permissions(
       RoleInterface::ANONYMOUS_ID,
       ['access mcp sentinel context'],
     );
-    $this->drupalGet('/drupal-mcp/readiness');
-    $this->assertNotSuccessfulResponse(
-      'Granting the context permission to anonymous must not open readiness.',
+    $this->assertAnonymousReadinessDeniedJson(
+      'Hostile anonymous permission grant must still be 403 JSON.',
     );
-    $this->assertSession()->statusCodeEquals(403);
 
     $this->drupalGet('/drupal-mcp/health');
     $this->assertSession()->statusCodeEquals(200);
@@ -85,14 +83,32 @@ final class McpContextEndpointTest extends BrowserTestBase {
   }
 
   /**
-   * Asserts the last response is not a success (not 2xx).
+   * Asserts anonymous GET readiness is 403 JSON, not a login redirect.
    *
    * @param string $message
-   *   Failure message when the status is 2xx.
+   *   Failure message when the status, Location, or body is wrong.
    */
-  private function assertNotSuccessfulResponse(string $message): void {
-    $status = $this->getSession()->getStatusCode();
-    $this->assertFalse($status >= 200 && $status < 300, $message);
+  private function assertAnonymousReadinessDeniedJson(string $message): void {
+    $response = $this->getHttpClient()->request(
+      'GET',
+      $this->buildUrl('/drupal-mcp/readiness'),
+      [
+        'http_errors' => FALSE,
+        'allow_redirects' => FALSE,
+      ],
+    );
+    $this->assertSame(403, $response->getStatusCode(), $message);
+    $location = $response->getHeaderLine('Location');
+    $this->assertSame('', $location);
+    $this->assertStringNotContainsString('/user/login', $location);
+
+    $body = (string) $response->getBody();
+    $this->assertStringContainsString('MCP access is denied.', $body);
+    $payload = json_decode($body, TRUE);
+    $this->assertIsArray($payload, $message);
+    $this->assertSame('unauthenticated', $payload['reason'] ?? NULL);
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('contract_ready', $payload);
   }
 
 }

@@ -270,6 +270,13 @@ services:
     tags:
       - { name: event_subscriber }
 
+  mcp_sentinel.readiness_access_denied_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpReadinessAccessDeniedSubscriber
+    arguments:
+      - '@current_user'
+    tags:
+      - { name: event_subscriber }
+
   mcp_sentinel.anomaly_detector:
     class: Drupal\mcp_sentinel\Service\McpAnomalyDetector
     arguments:
