@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-08-26
+
 ### Security
 - **DEV-435: readiness refuses anonymous callers.** `GET
   /drupal-mcp/readiness` fail-closes in the controller when the caller
@@ -2016,7 +2018,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.1...1.x
+[2.13.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.0...2.13.1
 [2.13.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.12.0...2.13.0
 [2.12.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.11.0...2.12.0
 [2.11.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.10.0...2.11.0
