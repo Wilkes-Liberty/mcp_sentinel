@@ -11,6 +11,7 @@ use Drupal\node\Entity\NodeType;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
+use Drupal\user\RoleInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
@@ -97,6 +98,7 @@ final class McpContextControllerTest extends KernelTestBase {
    * @covers ::readiness
    */
   public function testReadinessIsContractSignalNotPostureClaim(): void {
+    $this->switchToAuthenticatedUser();
     $controller = McpContextController::create($this->container);
 
     $response = $controller->readiness();
@@ -109,6 +111,40 @@ final class McpContextControllerTest extends KernelTestBase {
     $this->assertFalse($payload['claims']['policy_effectiveness']);
     $this->assertFalse($payload['claims']['evidence_chain_verified']);
     $this->assertFalse($payload['claims']['overall_posture']);
+  }
+
+  /**
+   * Anonymous callers never receive the readiness document (DEV-435).
+   *
+   * Granting the context permission to anonymous is the hostile case the
+   * live hop found; the controller must still refuse.
+   *
+   * @covers ::readiness
+   */
+  public function testReadinessRefusesAnonymousEvenWhenContextPermissionGranted(): void {
+    $role = Role::load(RoleInterface::ANONYMOUS_ID);
+    if (!$role) {
+      $role = Role::create([
+        'id' => RoleInterface::ANONYMOUS_ID,
+        'label' => 'Anonymous',
+      ]);
+    }
+    $role->grantPermission('access mcp sentinel context');
+    $role->save();
+
+    $controller = McpContextController::create($this->container);
+    $response = $controller->readiness();
+    $payload = json_decode((string) $response->getContent(), TRUE);
+
+    $status = $response->getStatusCode();
+    $this->assertFalse(
+      $status >= 200 && $status < 300,
+      'Anonymous GET readiness must not be 2xx after a hostile permission grant.',
+    );
+    $this->assertSame(403, $response->getStatusCode());
+    $this->assertSame('unauthenticated', $payload['reason']);
+    $this->assertSame('MCP access is denied.', $payload['error']);
+    $this->assertArrayNotHasKey('contract_ready', $payload);
   }
 
   /**
@@ -138,6 +174,14 @@ final class McpContextControllerTest extends KernelTestBase {
     $second = $controller->context();
     $this->assertSame(429, $second->getStatusCode());
     $this->assertStringContainsString('read_budget_exceeded', (string) $second->getContent());
+  }
+
+  /**
+   * Switches the request account to a non-anonymous principal.
+   */
+  private function switchToAuthenticatedUser(): void {
+    $account = $this->createUser();
+    $this->container->get('current_user')->setAccount($account);
   }
 
   /**

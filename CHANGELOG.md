@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **DEV-435: readiness refuses anonymous callers.** `GET
+  /drupal-mcp/readiness` fail-closes in the controller when the caller
+  is not authenticated, and the route also requires a logged-in
+  principal. Granting `access mcp sentinel context` to anonymous cannot
+  open the governed path. The denial uses the existing authorization
+  refusal shape (403). `/drupal-mcp/health` remains the public uptime
+  probe. This is not a service-readiness or hosted claim.
+
 ## [2.13.0] - 2026-08-25
 
 ### Added
