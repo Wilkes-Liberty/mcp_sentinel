@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Site-issued access tokens carry client_id and azp (d.o #3619398).**
+  simple_oauth access tokens had no client identity claim, so an
+  external resource server that keys grants on `azp ?? client_id`
+  could never entitle them. `hook_simple_oauth_private_claims_alter`
+  now fills `client_id` and `azp` from the consumer identifier. aud
+  remains the consumer id: that is a registered claim simple_oauth
+  sets with `permittedFor()` and skips from this hook, so RFC 8707
+  resource audience support stays upstream. No matching simple_oauth
+  issue was in that queue. This does not by itself unlock
+  site-as-issuer entitlement at an audience-validating resource
+  server.
+
 ## [2.13.2] - 2026-08-26
 
 ### Security
