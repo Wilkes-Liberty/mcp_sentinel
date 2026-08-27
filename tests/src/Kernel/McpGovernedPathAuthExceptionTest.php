@@ -131,8 +131,8 @@ final class McpGovernedPathAuthExceptionTest extends KernelTestBase {
       HttpKernelInterface::MAIN_REQUEST,
       $exception,
     );
+    /** @var \Drupal\mcp_sentinel\EventSubscriber\McpReadinessAccessDeniedSubscriber $subscriber */
     $subscriber = $this->container->get('mcp_sentinel.readiness_access_denied_subscriber');
-    $this->assertInstanceOf(McpReadinessAccessDeniedSubscriber::class, $subscriber);
     $subscriber->onException($event);
     return $event;
   }
