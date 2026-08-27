@@ -81,19 +81,4 @@ final class McpOauthClientClaimsTest extends KernelTestBase {
     $this->assertSame('already-set-azp', $claims['azp']);
   }
 
-  /**
-   * An empty consumer identifier adds nothing.
-   */
-  public function testPrivateClaimsAlterSkipsEmptyClientId(): void {
-    $client = $this->createMock(ClientEntityInterface::class);
-    $client->method('getIdentifier')->willReturn('');
-    $token = $this->createMock(AccessTokenEntity::class);
-    $token->method('getClient')->willReturn($client);
-
-    $claims = [];
-    $this->container->get('module_handler')->alter('simple_oauth_private_claims', $claims, $token);
-
-    $this->assertSame([], $claims);
-  }
-
 }

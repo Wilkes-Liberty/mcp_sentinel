@@ -862,9 +862,6 @@ function mcp_sentinel_cron(): void {
  */
 function mcp_sentinel_simple_oauth_private_claims_alter(array &$private_claims, AccessTokenEntity $access_token_entity): void {
   $client_id = (string) $access_token_entity->getClient()->getIdentifier();
-  if ($client_id === '') {
-    return;
-  }
   // Fill, do not overwrite: another alter may already have set a value.
   $private_claims += [
     'client_id' => $client_id,
