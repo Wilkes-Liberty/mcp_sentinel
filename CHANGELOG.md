@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Invalid bearer on /drupal-mcp/* is JSON, not the HTML 401 page
+  (d.o #3619396).** Anonymous readiness was already 403 JSON. A
+  malformed or unknown bearer was refused earlier by the
+  authentication provider and rendered core's HTML Unauthorized
+  page. The same refusal body (`MCP access is denied.`, reason
+  `unauthenticated`) now covers HTTP 401 on `/drupal-mcp/*` except
+  the public health probe, and `WWW-Authenticate` is preserved.
+  Kernel tests prove both deny shapes. No security change: the deny
+  was already fail-closed.
+
 ## [2.13.2] - 2026-08-26
 
 ### Security
