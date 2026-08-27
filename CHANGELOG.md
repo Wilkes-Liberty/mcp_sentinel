@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.14.0] - 2026-08-27
+
 ### Added
 - **Site-issued access tokens carry client_id and azp (d.o #3619398).**
   simple_oauth access tokens had no client identity claim, so an
