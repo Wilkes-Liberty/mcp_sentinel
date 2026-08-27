@@ -22,6 +22,7 @@ use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
+use Drupal\simple_oauth\Entities\AccessTokenEntity;
 
 /**
  * Implements hook_help().
@@ -844,4 +845,26 @@ function mcp_sentinel_cron(): void {
       ['@message' => $e->getMessage()]
     );
   }
+}
+
+/**
+ * Implements hook_simple_oauth_private_claims_alter().
+ *
+ * Site-issued access tokens carry no client identity (d.o #3619398), so an
+ * external resource server that keys grants on azp / client_id entitles
+ * them to nothing. Emit both claims from the consumer identifier.
+ *
+ * aud cannot be changed here: simple_oauth sets it with permittedFor() to
+ * the client id and skips registered claims from this hook. RFC 8707
+ * resource / audience support stays an upstream simple_oauth change; no
+ * matching issue was in that queue when this shipped. Do not claim that
+ * this hook unlocks site-as-issuer entitlement on its own.
+ */
+function mcp_sentinel_simple_oauth_private_claims_alter(array &$private_claims, AccessTokenEntity $access_token_entity): void {
+  $client_id = (string) $access_token_entity->getClient()->getIdentifier();
+  // Fill, do not overwrite: another alter may already have set a value.
+  $private_claims += [
+    'client_id' => $client_id,
+    'azp' => $client_id,
+  ];
 }
