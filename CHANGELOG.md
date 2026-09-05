@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-09-05
+
+### Added
+- Governed node draft continuation with live/working revision preconditions
+  and a non-saving validation mode (d.o #3621022). Updates create a new
+  unpublished forward revision. Existing history and the live revision remain
+  intact. Publishing, alias changes, non-revisionable field changes, and
+  translated drafts are refused on this endpoint.
+
 ## [2.14.0] - 2026-08-27
 
 ### Added
@@ -2061,7 +2070,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.14.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.0...1.x
+[2.15.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.14.0...2.15.0
 [2.14.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.2...2.14.0
 [2.13.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.1...2.13.2
 [2.13.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.0...2.13.1

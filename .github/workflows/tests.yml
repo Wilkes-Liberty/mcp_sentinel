@@ -301,8 +301,24 @@ jobs:
   # documented minimal setup. Added by #58 after 1.12.0 shipped a fix the
   # kernel suite could not see fail.
   phpunit-functional:
-    name: PHPUnit — Functional (Drupal 11, PHP 8.4)
+    name: PHPUnit — Functional (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - drupal: '10.6'
+            constraint: '~10.6.0'
+            php: '8.3'
+            phpunit: '^9.6'
+          - drupal: '11.3'
+            constraint: '~11.3.0'
+            php: '8.3'
+            phpunit: '^11.5'
+          - drupal: '11'
+            constraint: '^11'
+            php: '8.4'
+            phpunit: '^11.5'
     steps:
       - name: Checkout the module
         uses: actions/checkout@v7
@@ -312,13 +328,15 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           # gd: image module. pdo_sqlite/sqlite3: the test database. curl/dom:
           # BrowserTestBase's Mink driver and response parsing.
           extensions: gd, pdo_sqlite, sqlite3, curl, dom
           coverage: none
 
       - name: Scaffold a Drupal site
+        env:
+          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
         run: |
           retry() {
             rc=0
@@ -334,7 +352,7 @@ jobs:
           }
           scaffold() {
             rm -rf drupal
-            composer create-project "drupal/recommended-project:^11" drupal \
+            composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
               --no-interaction --no-install --no-progress
           }
           retry scaffold
@@ -356,6 +374,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: drupal
+        env:
+          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
+          PHPUNIT_CONSTRAINT: ${{ matrix.phpunit }}
         run: |
           retry() {
             rc=0
@@ -372,8 +393,8 @@ jobs:
           retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev"
           retry composer require -W --dev --no-interaction --no-progress \
-            "drupal/core-dev:^11" \
-            "phpunit/phpunit:^11.5" \
+            "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
+            "phpunit/phpunit:${PHPUNIT_CONSTRAINT}" \
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
             "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11"
@@ -438,7 +459,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: functional-failure-evidence
+          name: functional-failure-evidence-${{ matrix.drupal }}
           path: |
             /tmp/php-server.log
             /tmp/*.html
