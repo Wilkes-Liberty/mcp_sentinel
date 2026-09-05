@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Controller;
 
 use Drupal\Component\Serialization\Json;
+use Drupal\content_moderation\ContentModerationState;
+use Drupal\content_moderation\ModerationInformationInterface;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\jsonapi\Controller\EntityResource;
 use Drupal\jsonapi\JsonApiResource\JsonApiDocumentTopLevel;
 use Drupal\jsonapi\JsonApiResource\ResourceObject;
 use Drupal\jsonapi\JsonApiResource\ResourceObjectData;
 use Drupal\jsonapi\ResourceType\ResourceType;
+use Drupal\jsonapi\ResourceResponse;
+use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\node\NodeInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -24,15 +29,44 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * Uses core's JSON:API deserialization, field access, validation and response
  * handling. Only the unsupported revision-write controller step is replaced.
  * This dependency on core's internal controller is covered by functional tests.
+ *
+ * @phpstan-ignore classExtendsInternalClass.classExtendsInternalClass (Core adapter verified across the supported Drupal matrix.)
  */
 final class McpDraftResource extends EntityResource {
 
   /**
-   * {@inheritdoc}
+   * The database connection.
    */
-  public function patchIndividual(ResourceType $resource_type, EntityInterface $entity, Request $request) {
+  protected Connection $draftDatabase;
+
+  /**
+   * The governance resolver.
+   */
+  protected McpPolicyResolver $draftPolicy;
+
+  /**
+   * Optional content moderation information.
+   */
+  protected ?ModerationInformationInterface $draftModeration;
+
+  /**
+   * Injects draft services without duplicating core's controller constructor.
+   */
+  public function setDraftServices(Connection $database, McpPolicyResolver $policy, ?ModerationInformationInterface $moderation): void {
+    $this->draftDatabase = $database;
+    $this->draftPolicy = $policy;
+    $this->draftModeration = $moderation;
+  }
+
+  /**
+   * Continues a draft or returns a no-save preflight response.
+   *
+   * @return \Drupal\jsonapi\ResourceResponse|\Symfony\Component\HttpFoundation\JsonResponse
+   *   The saved resource or preflight metadata.
+   */
+  public function patchIndividual(ResourceType $resource_type, EntityInterface $entity, Request $request): ResourceResponse|JsonResponse {
     if (!$entity instanceof NodeInterface
-      || !\Drupal::service('mcp_sentinel.policy_resolver')->isGoverned()) {
+      || !$this->draftPolicy->isGoverned()) {
       throw new AccessDeniedHttpException('Draft continuation requires a governed node update.');
     }
     $match = $request->headers->get('If-Match', '');
@@ -44,13 +78,16 @@ final class McpDraftResource extends EntityResource {
       throw new BadRequestHttpException('X-MCP-Draft-Preflight must be 0 or 1.');
     }
     $storage = $this->entityTypeManager->getStorage('node');
-    $database = \Drupal::database();
+    $database = $this->draftDatabase;
     $transaction = $database->startTransaction();
     try {
       // Serialize draft continuations on the node's base row, then re-read
       // both revision pointers. The preflight never calls entity save.
-      $database->select('node', 'n')->fields('n', ['nid'])
-        ->condition('nid', $entity->id())->forUpdate()->execute()->fetchField();
+      $lock_query = $database->select('node', 'n');
+      $lock_query->fields('n', ['nid']);
+      $lock_query->condition('nid', $entity->id());
+      $lock_query->forUpdate();
+      $lock_query->execute()->fetchField();
       $live = $storage->loadUnchanged($entity->id());
       $latest_id = $storage->getLatestRevisionId($entity->id());
       if ((string) $live->getRevisionId() !== $versions[1]
@@ -72,6 +109,9 @@ final class McpDraftResource extends EntityResource {
       if (!$draft->access('update', $this->user)) {
         throw new AccessDeniedHttpException('Draft update access denied.');
       }
+      // Core's deserialize() docblock says array, but this normalizer returns
+      // the content entity. Keep the actual contract explicit here.
+      /** @var \Drupal\node\NodeInterface $parsed */
       $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
       $data = Json::decode($request->getContent())['data'];
       if (($data['id'] ?? NULL) !== $draft->uuid()) {
@@ -94,15 +134,17 @@ final class McpDraftResource extends EntityResource {
         }
         $this->updateEntityField($resource_type, $parsed, $draft, $public_name);
       }
+      // Field updates above may have changed the previously checked status.
+      // @phpstan-ignore if.alwaysFalse (The entity is mutable through updateEntityField.)
       if ($draft->isPublished()) {
         throw new AccessDeniedHttpException('Draft continuation cannot publish content.');
       }
       if ($draft->hasField('moderation_state')) {
-        $moderation = \Drupal::service('content_moderation.moderation_information');
-        if ($moderation->isModeratedEntity($draft)) {
+        $moderation = $this->draftModeration;
+        if ($moderation && $moderation->isModeratedEntity($draft)) {
           $state = $moderation->getWorkflowForEntity($draft)->getTypePlugin()
             ->getState($draft->get('moderation_state')->value);
-          if ($state->isPublishedState() || $state->isDefaultRevisionState()) {
+          if (!$state instanceof ContentModerationState || $state->isPublishedState() || $state->isDefaultRevisionState()) {
             throw new AccessDeniedHttpException('Draft continuation requires a non-default unpublished moderation state.');
           }
         }
@@ -129,7 +171,9 @@ final class McpDraftResource extends EntityResource {
         throw new ConflictHttpException('Draft continuation changed the live revision; the save was rolled back.');
       }
       $primary_data = new ResourceObjectData([ResourceObject::createFromEntity($resource_type, $draft)], 1);
-      return $this->buildWrappedResponse($primary_data, $request, $this->getIncludes($request, $primary_data));
+      /** @var \Drupal\jsonapi\JsonApiResource\IncludedData $includes */
+      $includes = $this->getIncludes($request, $primary_data);
+      return $this->buildWrappedResponse($primary_data, $request, $includes);
     }
     catch (\Throwable $exception) {
       $transaction->rollBack();

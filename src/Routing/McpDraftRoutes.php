@@ -15,7 +15,7 @@ final class McpDraftRoutes extends RouteSubscriberBase {
   /**
    * {@inheritdoc}
    */
-  protected function alterRoutes(RouteCollection $collection) {
+  protected function alterRoutes(RouteCollection $collection): void {
     foreach ($collection->all() as $name => $route) {
       if (str_starts_with($name, 'jsonapi.node--')
         && str_ends_with($name, '.individual.patch')) {

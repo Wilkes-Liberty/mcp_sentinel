@@ -343,6 +343,20 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
       /**
        * {@inheritdoc}
        */
+      public function logKeyed(string $channel, string $operation, array $metadata = []): void {
+        $this->log($channel, $operation, $metadata);
+      }
+
+      /**
+       * {@inheritdoc}
+       */
+      public function signingStatus(): array {
+        return ['keyed' => TRUE, 'key_id' => 'test'];
+      }
+
+      /**
+       * {@inheritdoc}
+       */
       public function verify(): array {
         return [
           'ok' => TRUE,

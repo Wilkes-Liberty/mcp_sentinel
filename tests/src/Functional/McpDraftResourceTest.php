@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\node\NodeInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
 use Drupal\Tests\BrowserTestBase;
@@ -90,6 +91,7 @@ final class McpDraftResourceTest extends BrowserTestBase {
     $send = function (array $attributes, string $vid, bool $preflight = FALSE, array $relationships = []) use ($agent, $path, $live_vid, $node) {
       $response = $this->getHttpClient()->request('PATCH', $path, [
         'http_errors' => FALSE,
+        // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
         'auth' => [$agent->getAccountName(), $agent->passRaw],
         'headers' => [
           'Accept' => 'application/vnd.api+json',
@@ -130,7 +132,9 @@ final class McpDraftResourceTest extends BrowserTestBase {
     $this->assertNotSame($first_vid, $second_vid, (string) $response->getBody());
     $this->assertSame('First draft', $storage->loadRevision($first_vid)->label());
     $this->assertSame('Second draft', $storage->loadRevision($second_vid)->label());
-    $this->assertSame($new_card->uuid(), $storage->loadRevision($second_vid)->get('field_cards')->entity->uuid());
+    $second = $storage->loadRevision($second_vid);
+    $this->assertInstanceOf(NodeInterface::class, $second);
+    $this->assertSame($new_card->uuid(), $second->get('field_cards')->entity->uuid());
     $this->assertSame(409, $send(['title' => 'Stale edit'], $first_vid)->getStatusCode());
     $response = $send(['title' => 'Third draft'], $second_vid);
     $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
