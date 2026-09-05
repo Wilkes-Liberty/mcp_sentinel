@@ -32,7 +32,7 @@ final class McpDraftResourceTest extends BrowserTestBase {
   protected static $modules = [
     'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'workflows', 'content_moderation',
-    'paragraphs', 'entity_reference_revisions',
+    'paragraphs', 'entity_reference_revisions', 'path',
   ];
 
   /**
@@ -77,6 +77,7 @@ final class McpDraftResourceTest extends BrowserTestBase {
       'type' => 'page',
       'title' => 'Live',
       'moderation_state' => 'published',
+      'path' => ['alias' => '/stable-public-page'],
       'field_cards' => [['target_id' => $old_card->id(), 'target_revision_id' => $old_card->getRevisionId()]],
     ]);
     $live_vid = (string) $node->getRevisionId();
@@ -112,6 +113,16 @@ final class McpDraftResourceTest extends BrowserTestBase {
       return $response;
     };
     $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $anonymous = $this->getHttpClient()->request('PATCH', $path, [
+      'http_errors' => FALSE,
+      'headers' => ['Content-Type' => 'application/vnd.api+json'],
+      'json' => ['data' => ['type' => 'node--page', 'id' => $node->uuid()]],
+    ]);
+    $this->assertContains($anonymous->getStatusCode(), [401, 403]);
+    $this->assertSame(400, $send(['title' => 'Bad precondition'], 'invalid')->getStatusCode());
+    $this->assertContains($send(['path' => ['alias' => '/renamed']], $first_vid, TRUE)->getStatusCode(), [400, 403]);
+    $this->assertContains($send(['uid' => 1], $first_vid, TRUE)->getStatusCode(), [400, 403, 422]);
+    $this->assertSame($first_vid, (string) $storage->getLatestRevisionId($node->id()));
     $relationships = [
       'field_cards' => [
         'data' => [[
@@ -149,6 +160,7 @@ final class McpDraftResourceTest extends BrowserTestBase {
     $this->assertSame('Live', $live->label());
     $this->assertTrue($live->isPublished());
     $this->assertSame($live_card_vid, (string) $live->get('field_cards')->target_revision_id);
+    $this->assertSame('/stable-public-page', $live->get('path')->alias);
   }
 
 }
