@@ -218,4 +218,5 @@ issue queue.
 
 ## Maintainers
 
-Maintained by [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda), sponsored by [Wilkes & Liberty, LLC](https://www.wilkesliberty.com).
+Maintained by [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda),
+sponsored by [Wilkes & Liberty, LLC](https://www.wilkesliberty.com).
