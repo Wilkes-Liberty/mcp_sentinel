@@ -215,3 +215,8 @@ Not covered by Drupal's security advisory policy. Report vulnerabilities
 privately as described in `SECURITY.md` on the project repository; do not open
 a public issue for an exploitable flaw. General bugs go through the project
 issue queue.
+
+## Maintainers
+
+Maintained by [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda),
+sponsored by [Wilkes & Liberty, LLC](https://www.wilkesliberty.com).
