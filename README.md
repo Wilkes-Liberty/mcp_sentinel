@@ -1188,7 +1188,7 @@ role + scopes. Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 
 
 ## Maintainers
 
-- Jeremy Michael Cerda — <jmcerda@wilkesliberty.com>
+- [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda) — <jmcerda@wilkesliberty.com>
 - Wilkes & Liberty, LLC — [drupal.org/u/wilkes-liberty](https://www.drupal.org/u/wilkes-liberty)
 
 See `MAINTAINERS.txt`. Report issues and feature requests in the
