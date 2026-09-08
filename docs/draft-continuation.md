@@ -21,6 +21,16 @@ the normal JSON:API resource response. Save-time hooks still run only on the
 real write; preflight is not a reservation or a guarantee against later policy
 changes, concurrent edits, or save-hook failures.
 
+Validation, including node-reference access queries, runs before the exclusive
+write transaction. Preflight never opens a transaction. The write still
+row-locks the node, re-checks both revision pointers, and rolls back if the
+live revision would change. That transaction scope is required on PostgreSQL:
+holding a transaction across nested SELECTs hits core
+[#2920527](https://www.drupal.org/project/drupal/issues/2920527)
+(`mimic_implicit_commit` already in use). Sites may still want that core
+correction for other in-transaction nested SELECTs; this endpoint does not
+depend on it.
+
 This endpoint cannot publish, modify the public alias, change non-revisionable
 fields, or continue translated nodes. Those cases are refused, not silently
 converted. Referenced paragraph revisions must already exist; the endpoint
@@ -28,3 +38,5 @@ updates the host references, not child entities in place.
 
 The JSON:API controller extension uses internal core APIs. Functional coverage
 on supported core branches is required before releasing a change to this path.
+The draft-continuation functional test also runs on PostgreSQL 16 in GitHub
+Actions, including node grants and an existing node-reference field.

@@ -53,6 +53,7 @@ materialising
 mcps
 memoise
 memoises
+mimic_implicit_commit
 memorise
 mglaman
 msar
@@ -69,7 +70,10 @@ permissioned
 phpcs
 phpstan
 phpunit
+pgsql
 PKCE
+savepoint
+savepoints
 postcondition
 postconditions
 precommit

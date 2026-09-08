@@ -106,7 +106,9 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 
 For iterative JSON:API authoring of existing node drafts, see
 [Governed draft continuation](docs/draft-continuation.md). This endpoint requires
-MCP Sentinel 2.15.0 or later and keeps the live revision unchanged.
+MCP Sentinel 2.15.0 or later and keeps the live revision unchanged. On
+PostgreSQL, validation runs outside the exclusive write transaction so
+node-reference checks do not depend on core #2920527.
 
 ```bash
 composer require drupal/mcp_sentinel drupal/mcp_server drupal/simple_oauth
