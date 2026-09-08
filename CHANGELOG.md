@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.15.1] - 2026-09-08
+
 ### Fixed
 - Governed draft continuation no longer wraps validation in the exclusive
   write transaction (d.o #3621022). A no-save preflight and the subsequent
@@ -2078,7 +2080,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.1...1.x
+[2.15.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.0...2.15.1
 [2.15.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.14.0...2.15.0
 [2.14.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.2...2.14.0
 [2.13.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.1...2.13.2
