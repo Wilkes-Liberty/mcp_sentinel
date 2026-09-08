@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\node\NodeAccessRebuild;
 use Drupal\node\NodeInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
@@ -49,7 +50,15 @@ final class McpDraftResourceTest extends BrowserTestBase {
    */
   public function testDraftContinuation(): void {
     $this->drupalCreateContentType(['type' => 'page']);
-    node_access_rebuild();
+    // Drupal 11.4 deprecates node_access_rebuild(); 10.6 / 11.3 have no
+    // NodeAccessRebuild service.
+    if (class_exists(NodeAccessRebuild::class)) {
+      \Drupal::service(NodeAccessRebuild::class)->rebuild();
+    }
+    else {
+      $legacy_rebuild = 'node_access_rebuild';
+      $legacy_rebuild();
+    }
     FieldStorageConfig::create([
       'field_name' => 'field_related',
       'entity_type' => 'node',
