@@ -9,7 +9,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Governed draft continuation no longer wraps validation in the exclusive
   write transaction (d.o #3621022). A no-save preflight and the subsequent
-  write stay on unpatched PostgreSQL when node grants and node-reference
+  write succeed on unpatched PostgreSQL when node grants and node-reference
   fields cause nested SELECTs (core #2920527). Preconditions are re-checked
   under the row lock before save. Publishing, alias, and live-revision
   guarantees are unchanged.
