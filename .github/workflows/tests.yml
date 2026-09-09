@@ -101,7 +101,15 @@ jobs:
           # gd: image module. pdo_sqlite/sqlite3: the kernel-test database.
           extensions: gd, pdo_sqlite, sqlite3
           coverage: none
-          cache: true
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php${{ matrix.php }}-composer
+          restore-keys: |
+            ${{ runner.os }}-php${{ matrix.php }}-composer
+            ${{ runner.os }}-composer-
 
       - name: Scaffold a Drupal site
         env:
@@ -324,7 +332,15 @@ jobs:
           # BrowserTestBase's Mink driver and response parsing.
           extensions: gd, pdo_sqlite, sqlite3, curl, dom
           coverage: none
-          cache: true
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
 
       - name: Scaffold a Drupal site
         env:
@@ -491,7 +507,15 @@ jobs:
           php-version: '8.4'
           extensions: gd, pdo_pgsql, pgsql, curl, dom
           coverage: none
-          cache: true
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
 
       - name: Scaffold a Drupal site
         run: |
@@ -610,7 +634,15 @@ jobs:
         with:
           php-version: '8.4'
           coverage: none
-          cache: true
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
 
       - name: Install PHPCS + the Drupal standard
         run: |
@@ -654,7 +686,15 @@ jobs:
           php-version: '8.3'
           extensions: gd, pdo_sqlite, sqlite3
           coverage: none
-          cache: true
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.3-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.3-composer
+            ${{ runner.os }}-composer-
 
       # phpstan-drupal needs a real Drupal tree to resolve core classes, so
       # this scaffolds the same way the PHPUnit job does. Analysing the module
