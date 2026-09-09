@@ -8,11 +8,13 @@ name: Tests
 # is enforcing a security boundary, that is the wrong guarantee — see issue #32.
 #
 # Unit + Kernel run across the support matrix; Functional runs as its own
-# blocking job on the ceiling leg (#58). One functional leg is a deliberate
-# cost/coverage trade: the drupalcode GitLab pipeline still runs the full
-# suite per push to 1.x and per release commit, and 1.12.0 proved a
-# GitHub-only green is not a release gate — the JSON:API publish-gate fix
-# shipped inert because only the functional suite could see it.
+# blocking job on the ceiling leg (#58, restored in #169). One functional
+# leg is a deliberate cost/coverage trade: the drupalcode GitLab pipeline
+# still runs the full suite per push to 1.x and per release commit, and
+# 1.12.0 proved a GitHub-only green is not a release gate — the JSON:API
+# publish-gate fix shipped inert because only the functional suite could
+# see it. Expanding GitHub Functional to the 10.6/11.3/11 matrix made
+# PRs wait ~32 minutes on Drupal 10.6 BrowserTestBase.
 on:
   pull_request: { branches: ['**'] }
   push: { branches: ['1.x'] }
@@ -99,6 +101,15 @@ jobs:
           # gd: image module. pdo_sqlite/sqlite3: the kernel-test database.
           extensions: gd, pdo_sqlite, sqlite3
           coverage: none
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php${{ matrix.php }}-composer
+          restore-keys: |
+            ${{ runner.os }}-php${{ matrix.php }}-composer
+            ${{ runner.os }}-composer-
 
       - name: Scaffold a Drupal site
         env:
@@ -300,25 +311,13 @@ jobs:
   # not shared); PHP's built-in server with core's .ht.router.php is the
   # documented minimal setup. Added by #58 after 1.12.0 shipped a fix the
   # kernel suite could not see fail.
+  #
+  # Do not re-expand this to the Unit+Kernel Drupal matrix. d.o GitLab still
+  # runs Functional on every floor; GitHub 10.6 BrowserTestBase was 31 minutes
+  # on the 2.15.1 PR (#169).
   phpunit-functional:
-    name: PHPUnit — Functional (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
+    name: PHPUnit — Functional (Drupal 11, PHP 8.4)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - drupal: '10.6'
-            constraint: '~10.6.0'
-            php: '8.3'
-            phpunit: '^9.6'
-          - drupal: '11.3'
-            constraint: '~11.3.0'
-            php: '8.3'
-            phpunit: '^11.5'
-          - drupal: '11'
-            constraint: '^11'
-            php: '8.4'
-            phpunit: '^11.5'
     steps:
       - name: Checkout the module
         uses: actions/checkout@v7
@@ -328,15 +327,24 @@ jobs:
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ matrix.php }}
+          php-version: '8.4'
           # gd: image module. pdo_sqlite/sqlite3: the test database. curl/dom:
           # BrowserTestBase's Mink driver and response parsing.
           extensions: gd, pdo_sqlite, sqlite3, curl, dom
           coverage: none
 
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
+
       - name: Scaffold a Drupal site
         env:
-          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
+          DRUPAL_CONSTRAINT: '^11'
         run: |
           retry() {
             rc=0
@@ -375,8 +383,8 @@ jobs:
       - name: Install dependencies
         working-directory: drupal
         env:
-          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
-          PHPUNIT_CONSTRAINT: ${{ matrix.phpunit }}
+          DRUPAL_CONSTRAINT: '^11'
+          PHPUNIT_CONSTRAINT: '^11.5'
         run: |
           retry() {
             rc=0
@@ -459,7 +467,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: functional-failure-evidence-${{ matrix.drupal }}
+          name: functional-failure-evidence
           path: |
             /tmp/php-server.log
             /tmp/*.html
@@ -499,6 +507,15 @@ jobs:
           php-version: '8.4'
           extensions: gd, pdo_pgsql, pgsql, curl, dom
           coverage: none
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
 
       - name: Scaffold a Drupal site
         run: |
@@ -618,6 +635,15 @@ jobs:
           php-version: '8.4'
           coverage: none
 
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
+
       - name: Install PHPCS + the Drupal standard
         run: |
           composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
@@ -660,6 +686,15 @@ jobs:
           php-version: '8.3'
           extensions: gd, pdo_sqlite, sqlite3
           coverage: none
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.3-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.3-composer
+            ${{ runner.os }}-composer-
 
       # phpstan-drupal needs a real Drupal tree to resolve core classes, so
       # this scaffolds the same way the PHPUnit job does. Analysing the module
