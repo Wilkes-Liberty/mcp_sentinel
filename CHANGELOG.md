@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.15.2] - 2026-09-09
+
+### Changed
+- GitHub CI caches Composer downloads and runs `BrowserTestBase` on Drupal 11
+  only. Unit and Kernel still cover Drupal 10.6, 11.3 and 11. The drupal.org
+  GitLab pipeline still runs the full suite.
+
 ## [2.15.1] - 2026-09-08
 
 ### Fixed
@@ -2080,7 +2087,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.2...1.x
+[2.15.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.1...2.15.2
 [2.15.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.0...2.15.1
 [2.15.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.14.0...2.15.0
 [2.14.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.13.2...2.14.0
