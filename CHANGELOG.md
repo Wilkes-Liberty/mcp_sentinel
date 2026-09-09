@@ -9,7 +9,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [2.15.2] - 2026-09-09
 
 ### Changed
-- GitHub CI caches Composer downloads and runs BrowserTestBase on Drupal 11
+- GitHub CI caches Composer downloads and runs `BrowserTestBase` on Drupal 11
   only. Unit and Kernel still cover Drupal 10.6, 11.3 and 11. The drupal.org
   GitLab pipeline still runs the full suite.
 
