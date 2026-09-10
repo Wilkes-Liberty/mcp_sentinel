@@ -108,9 +108,10 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame($live_vid, (string) $live->getRevisionId());
     $this->assertSame('Articles', $live->label());
     $this->assertFalse($live->hasTranslation('es'));
-    $updated = $storage->loadRevision($second_vid)->getTranslation('es');
-    $this->assertSame('Artículos actualizados', $updated->label());
-    $this->assertSame('Articles', $storage->loadRevision($second_vid)->getUntranslated()->label());
+    $updated_revision = $storage->loadRevision($second_vid);
+    $this->assertInstanceOf(NodeInterface::class, $updated_revision);
+    $this->assertSame('Artículos actualizados', $updated_revision->getTranslation('es')->label());
+    $this->assertSame('Articles', $updated_revision->getUntranslated()->label());
 
     $inventory = $this->getHttpClient()->request('GET', $path_inventory, [
       'http_errors' => FALSE,
@@ -177,6 +178,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('Articles', $live->label());
     $this->assertFalse($live->hasTranslation('es'));
     $working = $storage->loadRevision($new_working);
+    $this->assertInstanceOf(NodeInterface::class, $working);
     $this->assertSame('English pending', $working->getUntranslated()->label());
     $this->assertSame('Artículos', $working->getTranslation('es')->label());
 

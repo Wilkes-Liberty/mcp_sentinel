@@ -9,7 +9,6 @@ use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityInterface;
-use Drupal\Core\Entity\RevisionLogInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\jsonapi\Controller\EntityResource;
 use Drupal\jsonapi\JsonApiResource\JsonApiDocumentTopLevel;
@@ -20,6 +19,7 @@ use Drupal\jsonapi\ResourceResponse;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\node\NodeInterface;
 use Drupal\node\NodeStorageInterface;
+use Drupal\user\UserInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -292,6 +292,8 @@ final class McpDraftResource extends EntityResource {
    *
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The route entity.
+   *
+   * @phpstan-assert NodeInterface $entity
    */
   private function assertGovernedNode(EntityInterface $entity): void {
     if (!$entity instanceof NodeInterface || !$this->draftPolicy->isGoverned()) {
@@ -483,10 +485,8 @@ final class McpDraftResource extends EntityResource {
       }
       $draft->setNewRevision(TRUE);
       $draft->isDefaultRevision(FALSE);
-      if ($draft instanceof RevisionLogInterface) {
-        $draft->setRevisionUserId((int) $this->user->id());
-        $draft->setRevisionCreationTime($this->time->getRequestTime());
-      }
+      $draft->setRevisionUserId($this->user->id());
+      $draft->setRevisionCreationTime($this->time->getRequestTime());
       $draft->save();
       $stored_live = $storage->loadUnchanged($entity->id());
       if (!$stored_live instanceof NodeInterface
@@ -672,8 +672,11 @@ final class McpDraftResource extends EntityResource {
       return;
     }
     $metadata = $this->translationManager->getTranslationMetadata($translation);
+    $account = $this->entityTypeManager->getStorage('user')->load($this->user->id());
+    if ($account instanceof UserInterface) {
+      $metadata->setAuthor($account);
+    }
     $metadata->setSource($source_langcode);
-    $metadata->setAuthor($this->user);
     $metadata->setCreatedTime($this->time->getRequestTime());
   }
 
