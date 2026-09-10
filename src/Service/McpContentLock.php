@@ -292,7 +292,24 @@ class McpContentLock {
     if (!is_object($service) || !method_exists($service, 'fetchLock') || $entity === NULL || $entity->isNew()) {
       return FALSE;
     }
-    $lock = $service->fetchLock($entity);
+    try {
+      $required = (new \ReflectionMethod($service, 'fetchLock'))->getNumberOfRequiredParameters();
+      // Content Lock 3.x: fetchLock(EntityInterface $entity, ...).
+      // Content Lock 8.x-2.x: fetchLock($entity_id, $langcode, ...) — two
+      // required args. Calling the 3.x form on 2.x is ArgumentCountError
+      // on every governed write, locked or not (d.o #3622402).
+      $lock = $required >= 2
+        ? $service->fetchLock(
+          $entity->id(),
+          $entity->language()->getId(),
+          NULL,
+          $entity->getEntityTypeId(),
+        )
+        : $service->fetchLock($entity);
+    }
+    catch (\TypeError) {
+      return FALSE;
+    }
     return is_object($lock) ? $lock : FALSE;
   }
 

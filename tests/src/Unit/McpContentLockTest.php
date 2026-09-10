@@ -10,6 +10,7 @@ use Drupal\Core\Database\Query\Merge;
 use Drupal\Core\Database\Query\Select;
 use Drupal\Core\Database\StatementInterface;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\Tests\UnitTestCase;
@@ -144,6 +145,69 @@ final class McpContentLockTest extends UnitTestCase {
     );
     $this->assertFalse($lock->conflictsForActor('node', '7', $entity));
     $this->assertTrue($lock->heldByActor('node', '7', $entity));
+  }
+
+  /**
+   * @covers ::conflictsForActor
+   */
+  public function testContentLockTwoRequiredArgsDoesNotFatal(): void {
+    $language = $this->createMock(LanguageInterface::class);
+    $language->method('getId')->willReturn('en');
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('isNew')->willReturn(FALSE);
+    $entity->method('id')->willReturn('7');
+    $entity->method('language')->willReturn($language);
+    $entity->method('getEntityTypeId')->willReturn('node');
+    $editorial = new class() {
+
+      /**
+       * Content Lock 8.x-2.x signature: id + langcode are required.
+       */
+      public function fetchLock(string|int $entity_id, string $langcode, ?string $form_op = NULL, string $entity_type = 'node'): object {
+        return (object) [
+          'uid' => 42,
+          'timestamp' => 1000,
+          'entity_id' => $entity_id,
+          'langcode' => $langcode,
+          'entity_type' => $entity_type,
+        ];
+      }
+
+    };
+
+    $lock = new McpContentLock(
+      $this->mockDatabaseNoSentinelLock(),
+      $this->mockUser(5),
+      $this->mockTime(1000),
+      $editorial,
+    );
+    $this->assertTrue($lock->conflictsForActor('node', '7', $entity));
+  }
+
+  /**
+   * @covers ::conflictsForActor
+   */
+  public function testEditorialFetchLockTypeErrorDoesNotFatal(): void {
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('isNew')->willReturn(FALSE);
+    $editorial = new class() {
+
+      /**
+       * Simulates a future incompatible fetchLock signature.
+       */
+      public function fetchLock(object $entity): object {
+        throw new \TypeError('incompatible fetchLock');
+      }
+
+    };
+
+    $lock = new McpContentLock(
+      $this->mockDatabaseNoSentinelLock(),
+      $this->mockUser(5),
+      $this->mockTime(1000),
+      $editorial,
+    );
+    $this->assertFalse($lock->conflictsForActor('node', '7', $entity));
   }
 
   /**

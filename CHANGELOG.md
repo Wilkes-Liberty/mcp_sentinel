@@ -18,6 +18,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   honoured on the governed path. Content Lock remains optional — no new
   hard dependency.
 
+### Fixed
+- **Content Lock 8.x-2.x no longer 500s every governed write (#3622402).**
+  The #3622400 consult called `fetchLock($entity)` (the 3.x API). 2.x
+  requires `($entity_id, $langcode, ...)`. Drupal 10.6 can still install
+  2.x; `method_exists` is true on both, so the first PATCH threw
+  ArgumentCountError even when nothing was locked. The consult now
+  dispatches on the number of required parameters and treats a TypeError
+  as "no editorial lock" rather than taking down the write plane.
+
 ## [2.17.0] - 2026-09-10
 
 ### Fixed

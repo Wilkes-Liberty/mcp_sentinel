@@ -255,8 +255,9 @@ MCP policy profiles → Configuration governance**.
   would replace the stored default revision from a copy of it that is no
   longer current is refused instead of overwriting the concurrent change
   (continuing a forward — non-default — draft is not affected). When contrib
-  [Content Lock](https://www.drupal.org/project/content_lock) is installed, a
-  form lock held by a different uid is the same conflict — that is the lock
+  [Content Lock](https://www.drupal.org/project/content_lock) 2.x or 3.x is
+  installed, a form lock held by a different uid is the same conflict — that
+  is the lock
   a human acquires by opening `/node/N/edit`, and it is not stored in
   Sentinel's own lock table. The "break content lock" permission is not
   honoured on the governed path. Validated
