@@ -78,8 +78,9 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $paragraph_vid, 'Hero');
     $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$paragraph->id()]);
+    /** @var \Drupal\paragraphs\Entity\Paragraph $addressed */
     $addressed = $para_storage->loadRevision($paragraph_vid);
-    $this->assertInstanceOf(Paragraph::class, $addressed);
+    $this->assertSame('paragraph', $addressed->getEntityTypeId());
     $this->assertSame($paragraph_vid, (string) $addressed->getRevisionId());
     $this->assertSame('Hero', $addressed->getUntranslated()->get('field_text')->value);
     $this->assertTrue($addressed->hasTranslation('es'));
@@ -202,13 +203,14 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
 
     $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$paragraph->id()]);
+    /** @var \Drupal\paragraphs\Entity\Paragraph $default */
     $default = $para_storage->loadUnchanged($paragraph->id());
-    $this->assertInstanceOf(Paragraph::class, $default);
+    $this->assertSame('paragraph', $default->getEntityTypeId());
     $this->assertSame($default_vid, (string) $default->getRevisionId());
     $this->assertSame('Default later', $default->getUntranslated()->get('field_text')->value);
     $this->assertFalse($default->hasTranslation('es'));
+    /** @var \Drupal\paragraphs\Entity\Paragraph $pinned */
     $pinned = $para_storage->loadRevision($pinned_vid);
-    $this->assertInstanceOf(Paragraph::class, $pinned);
     $this->assertSame('Hero', $pinned->getUntranslated()->get('field_text')->value);
     $this->assertSame('Hola hero', $pinned->getTranslation('es')->get('field_text')->value);
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $pinned_vid, 'Hero');
@@ -242,12 +244,12 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
 
     $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$group->id(), $item->id()]);
+    /** @var \Drupal\paragraphs\Entity\Paragraph $group_revision */
     $group_revision = $para_storage->loadRevision($group_vid);
-    $this->assertInstanceOf(Paragraph::class, $group_revision);
     $this->assertSame((string) $item->id(), (string) $group_revision->get('field_items')->target_id);
     $this->assertSame($item_vid, (string) $group_revision->get('field_items')->target_revision_id);
+    /** @var \Drupal\paragraphs\Entity\Paragraph $item_revision */
     $item_revision = $para_storage->loadRevision($item_vid);
-    $this->assertInstanceOf(Paragraph::class, $item_revision);
     $this->assertSame('Answer', $item_revision->getUntranslated()->get('field_text')->value);
     $this->assertSame('Respuesta', $item_revision->getTranslation('es')->get('field_text')->value);
     $this->assertEnglishHostUnchanged($node, $live_vid, $group->id(), $group_vid, NULL);
@@ -417,6 +419,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     ])->save();
     $this->container->get('content_translation.manager')->setEnabled('paragraph', $id, TRUE);
     $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+    $this->container->get('entity_type.bundle.info')->clearCachedBundles();
   }
 
   /**
@@ -511,8 +514,8 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       return;
     }
     $para_storage = $this->paragraphStorage();
+    /** @var \Drupal\paragraphs\Entity\Paragraph $pinned */
     $pinned = $para_storage->loadRevision($paragraph_vid);
-    $this->assertInstanceOf(Paragraph::class, $pinned);
     $this->assertSame($english_text, $pinned->getUntranslated()->get('field_text')->value);
   }
 

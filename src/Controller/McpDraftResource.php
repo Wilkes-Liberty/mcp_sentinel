@@ -703,6 +703,14 @@ final class McpDraftResource extends EntityResource {
       || !method_exists($this->translationManager, 'getTranslationMetadata')) {
       return;
     }
+    // Paragraphs (and other types) may lack content_translation_* fields
+    // until bundle info is rebuilt. The wrapper calls isTranslatable() on
+    // getFieldDefinition() without a null check.
+    if (!$translation->hasField('content_translation_source')
+      || !$translation->hasField('content_translation_uid')
+      || !$translation->hasField('content_translation_created')) {
+      return;
+    }
     $metadata = $this->translationManager->getTranslationMetadata($translation);
     $account = $this->entityTypeManager->getStorage('user')->load($this->user->id());
     if ($account instanceof UserInterface) {
@@ -780,6 +788,9 @@ final class McpDraftResource extends EntityResource {
         continue;
       }
       $definition = $draft->getFieldDefinition($name);
+      if ($definition === NULL) {
+        continue;
+      }
       if ($translation_write) {
         $type = $definition->getType();
         if ($type === 'entity_reference_revisions') {
@@ -1177,7 +1188,7 @@ final class McpDraftResource extends EntityResource {
     $values = [];
     foreach ($entity->getFields() as $name => $field) {
       $definition = $field->getFieldDefinition();
-      if (!$definition->isTranslatable()) {
+      if ($definition === NULL || !$definition->isTranslatable()) {
         continue;
       }
       $type = $definition->getType();
