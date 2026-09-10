@@ -37,9 +37,38 @@ working revision to the live default. English on the live revision — title,
 summary, body, status, alias, and default revision ID — is left unchanged.
 Anonymous requests do not receive working-revision languages or the draft
 body. Shared aliases, file targets, and paragraph structure cannot be changed
-on a translation write. Paragraph *field value* translation remains out of
-scope: the host may keep the same paragraph set; translating those entities is
-a separate operation.
+on a translation write.
+
+Paragraph *field values* use the same surface on the paragraph resource:
+`POST /jsonapi/paragraph/{bundle}/{uuid}/mcp-draft/translations` with
+`If-Match: "<paragraph revision ID>"` and `X-MCP-Draft-Langcode`. That
+revision is the one the host already pins. The translation is unpublished.
+English default-language paragraph text and live ERR UUID+vid pins stay
+unchanged. Nested children are translated the same way; the parent ERR field
+is not retargeted. Canonical JSON:API PATCH of a paragraph pinned by a
+published host is still redirected or refused (GitHub #46).
+
+Create the node translation first, then read its working revision and follow
+that revision's paragraph references. ERR can create new child revisions when
+the node creates a forward revision. Do not reuse paragraph revision IDs from
+the published node inventory. For nested paragraphs, follow the working
+group's child references too; UUIDs stay shared, but revision IDs can differ.
+
+If storage cannot add a translation without a new paragraph revision, that
+revision may be pinned only on the unpublished host translation of the same
+language. A save that would retarget a live English pin is rolled back.
+
+When paragraph `status` is not translatable (shared across languages on one
+revision, as on typical hero/FAQ/CTA bundles), Sentinel does not unpublish
+that revision in place. It creates a non-default unpublished revision and
+pins it only on the current unpublished host working copy. Live default ERR
+UUID+vid pins stay bit-identical. Re-pinning never replays historical host
+revision rows.
+
+Image alt is a translatable field on the host when the file target is
+unchanged (`translation_sync.file: file`, alt not synced). Replacing the
+file on a translation write is refused. Media entity translation is not
+enabled by this path.
 
 Creating a translation copies untranslated structure from the source, then
 applies only the submitted translatable fields. A published or default-revision
@@ -65,9 +94,11 @@ depend on it.
 
 This endpoint cannot publish, modify the public alias, or change
 non-revisionable fields. Those cases are refused, not silently converted.
-Referenced paragraph revisions must already exist; the endpoint updates the
-host references, not child entities in place. Translation writes additionally
-refuse shared-structure changes (paragraph retargeting, file replacement).
+Referenced paragraph revisions must already exist; the node endpoint updates
+the host references, not child entities in place. Paragraph field values are
+translated on the paragraph `/mcp-draft` routes. Translation writes
+additionally refuse shared-structure changes (paragraph retargeting, file
+replacement). Alt-only image writes are not file replacement.
 
 The JSON:API controller extension uses internal core APIs. Functional coverage
 on supported core branches is required before releasing a change to this path.

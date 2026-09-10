@@ -598,14 +598,15 @@ jobs:
           SIMPLETEST_BASE_URL: 'http://127.0.0.1:8888'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '3'
+          MIN_TESTS: '7'
         run: |
           set -euo pipefail
           config="${PWD}/web/core/phpunit.xml.dist"
           vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-Functional-pgsql-draft.xml" \
             "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Functional/McpDraftResourceTest.php" \
-            "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Functional/McpDraftTranslationTest.php"
+            "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Functional/McpDraftTranslationTest.php" \
+            "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Functional/McpDraftParagraphTranslationTest.php"
           total="$( (grep -ho '<testcase ' junit-Functional-pgsql-draft.xml || true) | wc -l | tr -d ' ')"
           echo "Collected ${total} PostgreSQL draft tests (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then

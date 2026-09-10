@@ -46,8 +46,15 @@ idempotently
 jmcerda
 langcode
 Artículos
+Foto
+Inicio
+Otro
+Preguntas
+Respuesta
 Sobreescrito
+Texto
 actualizados
+alternativo
 retarget
 revisioned
 lcobucci
