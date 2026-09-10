@@ -316,10 +316,13 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       ],
     ]);
     $this->container->get('router.builder')->rebuild();
+    $pinned_vid = (string) $node->get('field_components')->target_revision_id;
+    /** @var \Drupal\paragraphs\Entity\Paragraph $pinned */
+    $pinned = $this->paragraphStorage()->loadRevision($pinned_vid);
     return [
       'agent' => $agent,
       'node' => $node,
-      'paragraph' => $paragraph,
+      'paragraph' => $pinned,
       'live_vid' => (string) $node->getRevisionId(),
     ];
   }
@@ -364,11 +367,18 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       ],
     ]);
     $this->container->get('router.builder')->rebuild();
+    $storage = $this->paragraphStorage();
+    $group_vid = (string) $node->get('field_components')->target_revision_id;
+    /** @var \Drupal\paragraphs\Entity\Paragraph $group_revision */
+    $group_revision = $storage->loadRevision($group_vid);
+    $item_vid = (string) $group_revision->get('field_items')->target_revision_id;
+    /** @var \Drupal\paragraphs\Entity\Paragraph $item_revision */
+    $item_revision = $storage->loadRevision($item_vid);
     return [
       'agent' => $agent,
       'node' => $node,
-      'group' => $group,
-      'item' => $item,
+      'group' => $group_revision,
+      'item' => $item_revision,
       'live_vid' => (string) $node->getRevisionId(),
     ];
   }

@@ -1138,8 +1138,13 @@ final class McpDraftResource extends EntityResource {
       $lock_query->condition('id', $entity->id());
       $lock_query->forUpdate();
       $lock_query->execute()->fetchField();
+      $storage->resetCache([$entity->id()]);
       $stored = $this->loadParagraphRevision($storage, $entity, $expected_vid);
-      if ($creating && $stored->hasTranslation($langcode)) {
+      // addTranslation() on the in-memory revision is a new translation, not a
+      // saved one. isNewTranslation() distinguishes this request from a
+      // persisted language that should 409.
+      if ($creating && $stored->hasTranslation($langcode)
+        && !$stored->getTranslation($langcode)->isNewTranslation()) {
         throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
       }
       if (!$creating && !$stored->hasTranslation($langcode)) {
@@ -1188,7 +1193,7 @@ final class McpDraftResource extends EntityResource {
     $values = [];
     foreach ($entity->getFields() as $name => $field) {
       $definition = $field->getFieldDefinition();
-      if ($definition === NULL || !$definition->isTranslatable()) {
+      if (!$definition->isTranslatable()) {
         continue;
       }
       $type = $definition->getType();
