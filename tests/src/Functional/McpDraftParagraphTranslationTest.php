@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\language\Entity\ConfigurableLanguage;
@@ -57,6 +58,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
 
     $created_node = $this->nodeTranslationRequest($agent, $node, ['title' => 'Inicio'], '"' . $live_vid . '"');
     $this->assertSame(200, $created_node->getStatusCode(), (string) $created_node->getBody());
+    /** @var \Drupal\node\NodeStorageInterface $node_storage */
     $node_storage = $this->container->get('entity_type.manager')->getStorage('node');
     $working_vid = (string) $node_storage->getLatestRevisionId($node->id());
 
@@ -74,7 +76,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertSame('Hola hero', $created_body['data']['attributes']['field_text']);
 
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $paragraph_vid, 'Hero');
-    $para_storage = $this->container->get('entity_type.manager')->getStorage('paragraph');
+    $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$paragraph->id()]);
     $addressed = $para_storage->loadRevision($paragraph_vid);
     $this->assertInstanceOf(Paragraph::class, $addressed);
@@ -145,11 +147,13 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
           'id' => $node->uuid(),
           'relationships' => [
             'field_components' => [
-              'data' => [[
-                'type' => 'paragraph--text_block',
-                'id' => $other->uuid(),
-                'meta' => ['target_revision_id' => $other->getRevisionId()],
-              ]],
+              'data' => [
+                [
+                  'type' => 'paragraph--text_block',
+                  'id' => $other->uuid(),
+                  'meta' => ['target_revision_id' => $other->getRevisionId()],
+                ],
+              ],
             ],
           ],
         ],
@@ -196,7 +200,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     );
     $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
 
-    $para_storage = $this->container->get('entity_type.manager')->getStorage('paragraph');
+    $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$paragraph->id()]);
     $default = $para_storage->loadUnchanged($paragraph->id());
     $this->assertInstanceOf(Paragraph::class, $default);
@@ -236,7 +240,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     );
     $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
 
-    $para_storage = $this->container->get('entity_type.manager')->getStorage('paragraph');
+    $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$group->id(), $item->id()]);
     $group_revision = $para_storage->loadRevision($group_vid);
     $this->assertInstanceOf(Paragraph::class, $group_revision);
@@ -302,10 +306,12 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       'title' => 'Home',
       'moderation_state' => 'published',
       'path' => ['alias' => '/home'],
-      'field_components' => [[
-        'target_id' => $paragraph->id(),
-        'target_revision_id' => $paragraph->getRevisionId(),
-      ]],
+      'field_components' => [
+        [
+          'target_id' => $paragraph->id(),
+          'target_revision_id' => $paragraph->getRevisionId(),
+        ],
+      ],
     ]);
     $this->container->get('router.builder')->rebuild();
     return [
@@ -336,20 +342,24 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $item->save();
     $group = Paragraph::create([
       'type' => 'faq_group',
-      'field_items' => [[
-        'target_id' => $item->id(),
-        'target_revision_id' => $item->getRevisionId(),
-      ]],
+      'field_items' => [
+        [
+          'target_id' => $item->id(),
+          'target_revision_id' => $item->getRevisionId(),
+        ],
+      ],
     ]);
     $group->save();
     $node = $this->drupalCreateNode([
       'type' => 'page',
       'title' => 'FAQ',
       'moderation_state' => 'published',
-      'field_components' => [[
-        'target_id' => $group->id(),
-        'target_revision_id' => $group->getRevisionId(),
-      ]],
+      'field_components' => [
+        [
+          'target_id' => $group->id(),
+          'target_revision_id' => $group->getRevisionId(),
+        ],
+      ],
     ]);
     $this->container->get('router.builder')->rebuild();
     return [
@@ -446,6 +456,18 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * Returns revisionable paragraph storage.
+   *
+   * @return \Drupal\Core\Entity\RevisionableStorageInterface
+   *   Paragraph storage.
+   */
+  private function paragraphStorage(): RevisionableStorageInterface {
+    $storage = $this->container->get('entity_type.manager')->getStorage('paragraph');
+    $this->assertInstanceOf(RevisionableStorageInterface::class, $storage);
+    return $storage;
+  }
+
+  /**
    * Creates the governed agent used by these tests.
    *
    * @return \Drupal\user\UserInterface
@@ -488,7 +510,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     if ($english_text === NULL) {
       return;
     }
-    $para_storage = $this->container->get('entity_type.manager')->getStorage('paragraph');
+    $para_storage = $this->paragraphStorage();
     $pinned = $para_storage->loadRevision($paragraph_vid);
     $this->assertInstanceOf(Paragraph::class, $pinned);
     $this->assertSame($english_text, $pinned->getUntranslated()->get('field_text')->value);

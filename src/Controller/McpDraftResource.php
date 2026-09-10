@@ -960,7 +960,7 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Returns translation inventory for a paragraph default and addressed revision.
+   * Lists languages on a paragraph default and addressed revision.
    *
    * @return \Symfony\Component\HttpFoundation\JsonResponse
    *   Live (default) languages, and the If-Match revision when it differs.

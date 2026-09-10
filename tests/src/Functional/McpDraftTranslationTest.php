@@ -199,7 +199,10 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   public function testImageAltOnlyTranslation(): void {
     [$agent, $node, $live_vid, $path_create, $path_draft] = $this->setUpTranslatedPage();
     $this->installPhotoField();
-    $image = current($this->getTestFiles('image'));
+    $images = $this->getTestFiles('image');
+    $this->assertNotEmpty($images);
+    $image = reset($images);
+    $this->assertIsObject($image);
     $file = File::create([
       'uri' => $image->uri,
       'filename' => $image->filename,
