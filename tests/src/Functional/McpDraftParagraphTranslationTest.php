@@ -279,6 +279,9 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $live_group = $para_storage->loadRevision($group_vid);
     $this->assertInstanceOf(Paragraph::class, $live_group);
     $this->assertSame($item_vid, (string) $live_group->get('field_items')->target_revision_id);
+    $live_item = $para_storage->loadRevision($item_vid);
+    $this->assertInstanceOf(Paragraph::class, $live_item);
+    $this->assertSame('Answer', $live_item->getUntranslated()->get('field_text')->value);
   }
 
   /**
