@@ -302,6 +302,8 @@ services:
       - '@database'
       - '@current_user'
       - '@datetime.time'
+      - '@?content_lock'
+      - '@entity_type.manager'
 
   mcp_sentinel.metrics:
     class: Drupal\mcp_sentinel\Service\McpMetrics

@@ -254,7 +254,12 @@ MCP policy profiles → Configuration governance**.
   delete (the acting principal's own lock never blocks it), and a save that
   would replace the stored default revision from a copy of it that is no
   longer current is refused instead of overwriting the concurrent change
-  (continuing a forward — non-default — draft is not affected). Validated
+  (continuing a forward — non-default — draft is not affected). When contrib
+  [Content Lock](https://www.drupal.org/project/content_lock) is installed, a
+  form lock held by a different uid is the same conflict — that is the lock
+  a human acquires by opening `/node/N/edit`, and it is not stored in
+  Sentinel's own lock table. The "break content lock" permission is not
+  honoured on the governed path. Validated
   seams (JSON:API, REST, forms)
   report a 422; unvalidated saves abort with a rollback-surviving evidence
   row, and passing updates record the checked precondition and final target

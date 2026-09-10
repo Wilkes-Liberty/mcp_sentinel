@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- **Governed writes honour contrib Content Lock (#3622400).** A human
+  opening the entity edit form writes contrib `content_lock`, not
+  `mcp_sentinel_content_locks`. The shared write-precondition contract
+  now consults that module when it is installed: an active contrib lock
+  held by a different uid is the same `content_lock_conflict` as a
+  Sentinel lock held by another actor (JSON:API 422 / unvalidated abort).
+  The acting principal's own contrib lock does not block it. Ungoverned
+  traffic stays ungated. The "break content lock" permission is not
+  honoured on the governed path. Content Lock remains optional — no new
+  hard dependency.
+
 ## [2.17.0] - 2026-09-10
 
 ### Fixed

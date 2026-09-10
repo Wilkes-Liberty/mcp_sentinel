@@ -142,7 +142,8 @@ them rather than replacing entity or field access.
   or used to arm emergency deny. Every audit row cites the attested digest
   when a bundle is active. Local deny cannot be widened by an upstream allow.
 - **Content locks** — prevent agents from overwriting content a human is
-  editing, with TTL-based expiry.
+  editing, with TTL-based expiry. When contrib Content Lock is installed, a
+  human's entity-form lock is honoured as the same governed write conflict.
 - **Reliable webhooks** — queue-backed, HTTPS-only, HMAC-SHA256-signed delivery
   to multiple endpoints with per-event filtering, retry with exponential backoff,
   a two-layer SSRF guard, and a delivery log with one-click replay.

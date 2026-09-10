@@ -19,5 +19,11 @@ dependencies:
 # drupal/mcp_server: strongly recommended (exposes Tool plugins to MCP clients)
 # but NOT required — security, audit, content locks, and webhooks all work without it.
 # drupal/ai: NOT a dependency. Different problem space.
+# drupal/content_lock: optional. When present, a human's entity-form lock is a
+# governed write conflict. Listed as a test dependency so that consult is
+# covered on the d.o pipeline.
+
+test_dependencies:
+  - content_lock:content_lock
 
 configure: mcp_sentinel.settings

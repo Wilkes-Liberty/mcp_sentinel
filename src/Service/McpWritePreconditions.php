@@ -19,7 +19,9 @@ use Drupal\Core\Entity\RevisionableInterface;
  * - **Lock conflict** — an active lock held by a different server-resolved
  *   principal denies the write (and the delete). The acting principal's own
  *   lock never blocks it: ownership is bound to the authenticated actor,
- *   never to anything a caller sends.
+ *   never to anything a caller sends. When contrib Content Lock is
+ *   installed, a form lock held by a different uid is the same conflict
+ *   (d.o #3622400).
  * - **Stale version** — a save whose loaded copy claims to be the default
  *   revision, when the stored default has moved on, would overwrite the
  *   concurrent change; it is denied. Continuing a forward (non-default) draft
@@ -75,7 +77,7 @@ final class McpWritePreconditions {
     if ($entity->isNew() || !$this->policyResolver->isGoverned()) {
       return NULL;
     }
-    if ($this->contentLock->conflictsForActor($entity->getEntityTypeId(), (string) $entity->id())) {
+    if ($this->contentLock->conflictsForActor($entity->getEntityTypeId(), (string) $entity->id(), $entity)) {
       return self::CONFLICT_LOCK;
     }
     // Stale default: the loaded copy claims to be the default revision, but
@@ -106,7 +108,7 @@ final class McpWritePreconditions {
     if ($entity->isNew() || !$this->policyResolver->isGoverned()) {
       return NULL;
     }
-    return $this->contentLock->conflictsForActor($entity->getEntityTypeId(), (string) $entity->id())
+    return $this->contentLock->conflictsForActor($entity->getEntityTypeId(), (string) $entity->id(), $entity)
       ? self::CONFLICT_LOCK
       : NULL;
   }
@@ -145,7 +147,7 @@ final class McpWritePreconditions {
       return;
     }
     $this->receipts[$uuid] = [
-      'lock' => $this->contentLock->heldByActor($entity->getEntityTypeId(), (string) $entity->id())
+      'lock' => $this->contentLock->heldByActor($entity->getEntityTypeId(), (string) $entity->id(), $entity)
         ? 'held_by_actor'
         : 'none',
       'loaded_revision_id' => $entity->getLoadedRevisionId(),

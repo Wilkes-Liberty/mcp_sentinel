@@ -32,6 +32,7 @@
     "drupal/encrypt": "^3.2"
   },
   "require-dev": {
+    "drupal/content_lock": "^3.0",
     "drupal/entity_reference_revisions": "^1.11",
     "drupal/graphql_compose": "^2.4",
     "drupal/mcp_server": "^2.0@dev",
@@ -42,7 +43,8 @@
     "drupal/mcp_server":     "Exposes MCP Sentinel Tool plugins to MCP clients (via the mcp_sentinel_server submodule). Strongly recommended.",
     "drupal/graphql_compose": "Enables the mcp_sentinel_graphql submodule: mutation gating, field redaction, and audit for the GraphQL endpoint.",
     "drupal/mcp_tools":      "Adds 222 site-building tools (across 34 optional submodules, per the drupal/mcp_tools project) via the Tool API; MCP Sentinel governs them.",
-    "drupal/charts":         "Optional: upgrades the governance-dashboard inline-SVG charts to interactive, exportable charts (install a library submodule such as charts_chartjs). The dashboard keeps the SVG fallback when Charts is absent or has no library."
+    "drupal/charts":         "Optional: upgrades the governance-dashboard inline-SVG charts to interactive, exportable charts (install a library submodule such as charts_chartjs). The dashboard keeps the SVG fallback when Charts is absent or has no library.",
+    "drupal/content_lock":   "When installed, a human's entity-form lock is honoured as a governed write conflict (same refusal as a Sentinel lock held by another actor)."
   },
   "minimum-stability": "dev",
   "prefer-stable": true
