@@ -139,7 +139,8 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame(200, $read->getStatusCode(), (string) $read->getBody());
     $this->assertSame('Artículos actualizados', json_decode((string) $read->getBody(), TRUE)['data']['attributes']['title']);
 
-    $this->drupalLogout();
+    // Guzzle requests use basic auth, not the Mink session, so there is no
+    // logout confirm form. The anonymous client call omits auth.
     $anonymous_json = $this->getHttpClient()->request('GET', $this->buildUrl('/jsonapi/node/page/' . $node->uuid()), [
       'http_errors' => FALSE,
       'headers' => ['Accept' => 'application/vnd.api+json'],
