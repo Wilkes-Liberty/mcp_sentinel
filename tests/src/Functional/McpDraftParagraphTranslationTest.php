@@ -132,6 +132,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertSame($paragraph_vid, (string) $host_working->get('field_components')->target_revision_id);
     $this->assertSame((string) $paragraph->id(), (string) $host_working->get('field_components')->target_id);
     $component = $para_storage->loadRevision($host_working->getTranslation('es')->get('field_components')->target_revision_id);
+    $this->assertInstanceOf(Paragraph::class, $component);
     $this->assertSame('Hola hero', $component->getTranslation('es')->get('field_text')->value);
     $this->assertFalse($component->getTranslation('es')->isPublished());
 
