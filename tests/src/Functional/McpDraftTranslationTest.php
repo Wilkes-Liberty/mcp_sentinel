@@ -11,6 +11,7 @@ use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
 use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * Verifies governed draft translation against real JSON:API storage.
@@ -252,7 +253,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
    * @return \Psr\Http\Message\ResponseInterface
    *   The HTTP response.
    */
-  private function translationRequest(string $method, string $path, UserInterface $agent, NodeInterface $node, array $attributes, string $if_match, bool $preflight, ?string $langcode) {
+  private function translationRequest(string $method, string $path, UserInterface $agent, NodeInterface $node, array $attributes, string $if_match, bool $preflight, ?string $langcode): ResponseInterface {
     $headers = [
       'Accept' => 'application/vnd.api+json',
       'Content-Type' => 'application/vnd.api+json',

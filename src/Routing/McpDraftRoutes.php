@@ -30,8 +30,9 @@ final class McpDraftRoutes extends RouteSubscriberBase {
         $create->setDefault('_controller', 'jsonapi.entity_resource.mcp_draft:postTranslation');
         $collection->add($name . '.mcp_draft_translations', $create);
       }
+      // GET individual is jsonapi.node--{bundle}.individual (no ".get" suffix).
       if (str_starts_with($name, 'jsonapi.node--')
-        && str_ends_with($name, '.individual.get')) {
+        && str_ends_with($name, '.individual')) {
         $inventory = clone $route;
         $inventory->setPath($route->getPath() . '/mcp-translations');
         $inventory->setMethods(['GET']);

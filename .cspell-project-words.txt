@@ -45,6 +45,11 @@ hostnames
 idempotently
 jmcerda
 langcode
+Artículos
+Sobreescrito
+actualizados
+retarget
+revisioned
 lcobucci
 libsodium
 lookback

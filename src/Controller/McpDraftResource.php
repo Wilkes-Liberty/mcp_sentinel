@@ -9,6 +9,7 @@ use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\RevisionLogInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\jsonapi\Controller\EntityResource;
 use Drupal\jsonapi\JsonApiResource\JsonApiDocumentTopLevel;
@@ -143,7 +144,7 @@ final class McpDraftResource extends EntityResource {
     // the content entity. Keep the actual contract explicit here.
     /** @var \Drupal\node\NodeInterface $parsed */
     $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
-    $data = Json::decode($request->getContent())['data'];
+    $data = $this->requestData($request);
     if (($data['id'] ?? NULL) !== $draft->uuid()) {
       throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
     }
@@ -205,7 +206,7 @@ final class McpDraftResource extends EntityResource {
     // the content entity. Keep the actual contract explicit here.
     /** @var \Drupal\node\NodeInterface $parsed */
     $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
-    $data = Json::decode($request->getContent())['data'] ?? [];
+    $data = $this->requestData($request);
     if (($data['id'] ?? NULL) !== $base->uuid()) {
       throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
     }
@@ -319,6 +320,23 @@ final class McpDraftResource extends EntityResource {
       return $versions;
     }
     throw new BadRequestHttpException('If-Match must identify the live and working revision IDs as "live:working".');
+  }
+
+  /**
+   * Returns the JSON:API `data` object from the request body.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The request.
+   *
+   * @return array<string, mixed>
+   *   The `data` member.
+   */
+  private function requestData(Request $request): array {
+    $document = Json::decode($request->getContent());
+    if (!is_array($document) || !isset($document['data']) || !is_array($document['data'])) {
+      throw new BadRequestHttpException('The request document is invalid.');
+    }
+    return $document['data'];
   }
 
   /**
@@ -465,8 +483,10 @@ final class McpDraftResource extends EntityResource {
       }
       $draft->setNewRevision(TRUE);
       $draft->isDefaultRevision(FALSE);
-      $draft->setRevisionUserId($this->user->id());
-      $draft->setRevisionCreationTime($this->time->getRequestTime());
+      if ($draft instanceof RevisionLogInterface) {
+        $draft->setRevisionUserId((int) $this->user->id());
+        $draft->setRevisionCreationTime($this->time->getRequestTime());
+      }
       $draft->save();
       $stored_live = $storage->loadUnchanged($entity->id());
       if (!$stored_live instanceof NodeInterface
