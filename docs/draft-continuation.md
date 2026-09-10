@@ -14,6 +14,38 @@ Both must match the stored pointers. The working revision must be an unpublished
 non-default node revision. A mismatch returns 409; missing or malformed revision
 IDs return 400. No automatic retry or revision deletion takes place.
 
+## Translations
+
+Core JSON:API PATCH of `langcode` does not call `addTranslation()` and is not
+used here. Translation writes are explicit:
+
+- `POST .../mcp-draft/translations` creates a target-language translation as a
+  new unpublished forward revision. `If-Match` is `"<live>"` when there is no
+  working revision, or `"<live>:<working>"` when adding the language onto an
+  existing unpublished forward revision. An existing translation on live or
+  working is 409, not an overwrite.
+- `PATCH .../mcp-draft` with `X-MCP-Draft-Langcode` continues that translation
+  only. Omitting the header on a multilingual working revision is 409.
+- `GET .../mcp-translations` reports live and (when the principal can view the
+  unpublished revision) working languages, titles, publication, and moderation
+  state. `GET .../mcp-draft` with the same `If-Match` and language header
+  returns that working translation.
+
+The selected translation is the entity that is validated and saved, so
+content_moderation sees its unpublished draft state and does not promote the
+working revision to the live default. English on the live revision — title,
+summary, body, status, alias, and default revision ID — is left unchanged.
+Anonymous requests do not receive working-revision languages or the draft
+body. Shared aliases, file targets, and paragraph structure cannot be changed
+on a translation write. Paragraph *field value* translation remains out of
+scope: the host may keep the same paragraph set; translating those entities is
+a separate operation.
+
+Creating a translation copies untranslated structure from the source, then
+applies only the submitted translatable fields. A published or default-revision
+moderation state in the payload is refused. An existing English working copy
+keeps its pending English values.
+
 `X-MCP-Draft-Preflight: 1` performs access, field, validation and revision checks
 without calling save. Success returns `meta.draft_preflight: true` and the two
 checked IDs. The default (`0`) saves a new unpublished continuation and returns
@@ -31,10 +63,11 @@ holding a transaction across nested SELECTs hits core
 correction for other in-transaction nested SELECTs; this endpoint does not
 depend on it.
 
-This endpoint cannot publish, modify the public alias, change non-revisionable
-fields, or continue translated nodes. Those cases are refused, not silently
-converted. Referenced paragraph revisions must already exist; the endpoint
-updates the host references, not child entities in place.
+This endpoint cannot publish, modify the public alias, or change
+non-revisionable fields. Those cases are refused, not silently converted.
+Referenced paragraph revisions must already exist; the endpoint updates the
+host references, not child entities in place. Translation writes additionally
+refuse shared-structure changes (paragraph retargeting, file replacement).
 
 The JSON:API controller extension uses internal core APIs. Functional coverage
 on supported core branches is required before releasing a change to this path.

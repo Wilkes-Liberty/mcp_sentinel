@@ -23,6 +23,26 @@ final class McpDraftRoutes extends RouteSubscriberBase {
         $draft->setPath($route->getPath() . '/mcp-draft');
         $draft->setDefault('_controller', 'jsonapi.entity_resource.mcp_draft:patchIndividual');
         $collection->add($name . '.mcp_draft', $draft);
+
+        $create = clone $route;
+        $create->setPath($route->getPath() . '/mcp-draft/translations');
+        $create->setMethods(['POST']);
+        $create->setDefault('_controller', 'jsonapi.entity_resource.mcp_draft:postTranslation');
+        $collection->add($name . '.mcp_draft_translations', $create);
+      }
+      if (str_starts_with($name, 'jsonapi.node--')
+        && str_ends_with($name, '.individual.get')) {
+        $inventory = clone $route;
+        $inventory->setPath($route->getPath() . '/mcp-translations');
+        $inventory->setMethods(['GET']);
+        $inventory->setDefault('_controller', 'jsonapi.entity_resource.mcp_draft:getTranslationInventory');
+        $collection->add($name . '.mcp_translations', $inventory);
+
+        $draft_get = clone $route;
+        $draft_get->setPath($route->getPath() . '/mcp-draft');
+        $draft_get->setMethods(['GET']);
+        $draft_get->setDefault('_controller', 'jsonapi.entity_resource.mcp_draft:getDraftTranslation');
+        $collection->add($name . '.mcp_draft_get', $draft_get);
       }
     }
   }
