@@ -201,12 +201,17 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $pinned_vid, 'Hero');
 
     $this->assertSame(200, $this->nodeTranslationRequest($agent, $node, ['title' => 'Inicio'], '"' . $live_vid . '"')->getStatusCode());
+    /** @var \Drupal\node\NodeStorageInterface $node_storage */
+    $node_storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $working = $node_storage->loadRevision($node_storage->getLatestRevisionId($node->id()));
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $working_pin = (string) $working->getTranslation('es')->get('field_components')->target_revision_id;
     $created = $this->paragraphTranslationRequest(
       'POST',
       $agent,
       $paragraph,
       ['field_text' => 'Hola hero'],
-      '"' . $pinned_vid . '"',
+      '"' . $working_pin . '"',
     );
     $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
 
@@ -219,7 +224,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertSame('Default later', $default->getUntranslated()->get('field_text')->value);
     $this->assertFalse($default->hasTranslation('es'));
     /** @var \Drupal\paragraphs\Entity\Paragraph $pinned */
-    $pinned = $para_storage->loadRevision($pinned_vid);
+    $pinned = $para_storage->loadRevision($working_pin);
     $this->assertSame('Hero', $pinned->getUntranslated()->get('field_text')->value);
     $this->assertSame('Hola hero', $pinned->getTranslation('es')->get('field_text')->value);
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $pinned_vid, 'Hero');
@@ -239,12 +244,20 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $item_vid = (string) $item->getRevisionId();
 
     $this->assertSame(200, $this->nodeTranslationRequest($agent, $node, ['title' => 'Preguntas'], '"' . $live_vid . '"')->getStatusCode());
+    /** @var \Drupal\node\NodeStorageInterface $node_storage */
+    $node_storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $working = $node_storage->loadRevision($node_storage->getLatestRevisionId($node->id()));
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $working_group_vid = (string) $working->getTranslation('es')->get('field_components')->target_revision_id;
+    $working_group = $this->paragraphStorage()->loadRevision($working_group_vid);
+    $this->assertInstanceOf(Paragraph::class, $working_group);
+    $working_item_vid = (string) $working_group->get('field_items')->target_revision_id;
     $created = $this->paragraphTranslationRequest(
       'POST',
       $agent,
       $item,
       ['field_text' => 'Respuesta'],
-      '"' . $item_vid . '"',
+      '"' . $working_item_vid . '"',
       FALSE,
       'es',
       'faq_item',
@@ -254,14 +267,17 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$group->id(), $item->id()]);
     /** @var \Drupal\paragraphs\Entity\Paragraph $group_revision */
-    $group_revision = $para_storage->loadRevision($group_vid);
+    $group_revision = $para_storage->loadRevision($working_group_vid);
     $this->assertSame((string) $item->id(), (string) $group_revision->get('field_items')->target_id);
-    $this->assertSame($item_vid, (string) $group_revision->get('field_items')->target_revision_id);
+    $this->assertSame($working_item_vid, (string) $group_revision->get('field_items')->target_revision_id);
     /** @var \Drupal\paragraphs\Entity\Paragraph $item_revision */
-    $item_revision = $para_storage->loadRevision($item_vid);
+    $item_revision = $para_storage->loadRevision($working_item_vid);
     $this->assertSame('Answer', $item_revision->getUntranslated()->get('field_text')->value);
     $this->assertSame('Respuesta', $item_revision->getTranslation('es')->get('field_text')->value);
     $this->assertEnglishHostUnchanged($node, $live_vid, $group->id(), $group_vid, NULL);
+    $live_group = $para_storage->loadRevision($group_vid);
+    $this->assertInstanceOf(Paragraph::class, $live_group);
+    $this->assertSame($item_vid, (string) $live_group->get('field_items')->target_revision_id);
   }
 
   /**

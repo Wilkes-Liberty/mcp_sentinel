@@ -48,6 +48,12 @@ unchanged. Nested children are translated the same way; the parent ERR field
 is not retargeted. Canonical JSON:API PATCH of a paragraph pinned by a
 published host is still redirected or refused (GitHub #46).
 
+Create the node translation first, then read its working revision and follow
+that revision's paragraph references. ERR can create new child revisions when
+the node creates a forward revision. Do not reuse paragraph revision IDs from
+the published node inventory. For nested paragraphs, follow the working
+group's child references too; UUIDs stay shared, but revision IDs can differ.
+
 If storage cannot add a translation without a new paragraph revision, that
 revision may be pinned only on the unpublished host translation of the same
 language. A save that would retarget a live English pin is rolled back.
