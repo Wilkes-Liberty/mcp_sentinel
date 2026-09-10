@@ -174,6 +174,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
 
     $this->drupalGet('/node/' . $node->id());
+    $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('Hero');
     $this->assertSession()->pageTextNotContains('Hola hero');
     $this->drupalGet('/es/node/' . $node->id());
@@ -453,6 +454,9 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       'translatable' => TRUE,
     ])->save();
     $this->container->get('content_translation.manager')->setEnabled('paragraph', $id, TRUE);
+    $this->container->get('entity_display.repository')->getViewDisplay('paragraph', $id)
+      ->setComponent('field_text', ['type' => 'string', 'label' => 'hidden'])
+      ->save();
     $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
     $this->container->get('entity_type.bundle.info')->clearCachedBundles();
   }
@@ -491,6 +495,13 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
         'handler_settings' => ['target_bundles' => $bundles],
       ],
     ])->save();
+    $this->container->get('entity_display.repository')->getViewDisplay($entity_type, $bundle)
+      ->setComponent($field_name, [
+        'type' => 'entity_reference_revisions_entity_view',
+        'label' => 'hidden',
+        'settings' => ['view_mode' => 'default'],
+      ])
+      ->save();
   }
 
   /**
