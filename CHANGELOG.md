@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Governed draft **translation** create, read, and continuation (#176).
+  `POST .../mcp-draft/translations` adds a target language as an unpublished
+  forward revision. `PATCH` / `GET .../mcp-draft` take `X-MCP-Draft-Langcode`
+  to continue or read that translation. `GET .../mcp-translations` reports
+  live and working languages. Live English revision id, title, body, status,
+  and alias stay unchanged. Repeated create, stale `If-Match`, publish
+  attempts, and shared-structure changes are conflicts or refusals, not
+  overwrites. Single-language draft continuation is unchanged. Paragraph
+  field-value translation remains out of scope.
+
 ### Changed
 - Library definitions use a module version string (`2.x`) instead of Drupal
   core's `VERSION` token.
