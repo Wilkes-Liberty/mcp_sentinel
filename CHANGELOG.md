@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.15.3] - 2026-09-10
+
 ### Fixed
 - Governance dashboard charts no longer disappear when `charts` is
   enabled without a library plugin. `McpChartRenderer` keeps the
@@ -2100,7 +2102,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.2...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.3...1.x
+[2.15.3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.2...2.15.3
 [2.15.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.1...2.15.2
 [2.15.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.0...2.15.1
 [2.15.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.14.0...2.15.0
