@@ -159,7 +159,7 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
       }
       // Owner-aware, and applied to delete too (d.o #3616541): a bulk delete
       // must not remove content another principal has locked.
-      if ($this->contentLock->conflictsForActor($entity_type, $id)) {
+      if ($this->contentLock->conflictsForActor($entity_type, $id, $entity)) {
         $results['failed'][$id] = (string) $this->t('content locked');
         continue;
       }

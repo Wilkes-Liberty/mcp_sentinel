@@ -6,6 +6,8 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 
 /**
@@ -22,6 +24,15 @@ use Drupal\Core\Session\AccountProxyInterface;
  * lock). Expiry is enforced on read (isLocked() excludes lapsed rows) and the
  * lapsed rows are reaped by hook_cron via releaseExpired(); permanent locks
  * (expires_at = 0) are deliberately never auto-reaped.
+ *
+ * When contrib Content Lock is installed, owner-aware conflict / isLocked
+ * checks also consult that module's service (d.o #3622400). A human opening
+ * /node/N/edit writes the contrib table, not mcp_sentinel_content_locks;
+ * without this consult a governed JSON:API PATCH would succeed while the
+ * editor still has the form open. Content Lock remains optional: the
+ * editorial service is injected with '@?content_lock' and is a no-op when
+ * absent. The "break content lock" permission is not honoured on the
+ * governed path — that permission is for humans in the UI.
  */
 class McpContentLock {
 
@@ -39,11 +50,23 @@ class McpContentLock {
    *   The current user proxy (recorded as the lock owner in locked_by).
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service (provides the request time used for lock timestamps).
+   * @param object|null $editorialLock
+   *   The contrib content_lock service, or NULL when that module is not
+   *   installed (injected with the optional-service '@?content_lock' syntax).
+   *   Duck-typed so phpstan does not require the optional package.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface|null $entityTypeManager
+   *   Used to load the entity when a caller has only type+id and contrib
+   *   Content Lock must be consulted. NULL is accepted so existing unit
+   *   tests that construct this service with three arguments keep working;
+   *   without it, the contrib consult is skipped unless the caller passes
+   *   the entity.
    */
   public function __construct(
     private readonly Connection $database,
     private readonly AccountProxyInterface $currentUser,
     private readonly TimeInterface $time,
+    private readonly mixed $editorialLock = NULL,
+    private readonly ?EntityTypeManagerInterface $entityTypeManager = NULL,
   ) {}
 
   /**
@@ -105,17 +128,17 @@ class McpContentLock {
    *   The entity type ID to check.
    * @param string $entityId
    *   The entity ID to check.
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The entity, when the caller already has it.
    *
    * @return bool
-   *   TRUE if an active (non-expired) lock exists for the entity.
+   *   TRUE if an active (non-expired) Sentinel or contrib lock exists.
    */
-  public function isLocked(string $entityType, string $entityId): bool {
-    $now = $this->time->getRequestTime();
-    return (bool) $this->database->select('mcp_sentinel_content_locks', 'l')
-      ->condition('l.entity_type', $entityType)
-      ->condition('l.entity_id', $entityId)
-      ->where('l.expires_at = 0 OR l.expires_at > :now', [':now' => $now])
-      ->countQuery()->execute()->fetchField();
+  public function isLocked(string $entityType, string $entityId, ?EntityInterface $entity = NULL): bool {
+    if ($this->sentinelIsLocked($entityType, $entityId)) {
+      return TRUE;
+    }
+    return $this->fetchEditorialLock($entity ?? $this->loadEntity($entityType, $entityId)) !== FALSE;
   }
 
   /**
@@ -128,39 +151,66 @@ class McpContentLock {
    *   The entity type ID to look up.
    * @param string $entityId
    *   The entity ID to look up.
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The entity, when the caller already has it. Avoids a load when falling
+   *   through to contrib Content Lock.
    *
    * @return array|null
    *   The lock row (entity_type, entity_id, locked_by, locked_at, expires_at,
-   *   reason), or NULL if the entity has no lock row.
+   *   reason), or NULL if the entity has no lock row. A contrib-only lock
+   *   is returned with source = content_lock.
    */
-  public function getLockInfo(string $entityType, string $entityId): ?array {
+  public function getLockInfo(string $entityType, string $entityId, ?EntityInterface $entity = NULL): ?array {
     $row = $this->database->select('mcp_sentinel_content_locks', 'l')
       ->fields('l')
       ->condition('l.entity_type', $entityType)
       ->condition('l.entity_id', $entityId)
       ->execute()->fetchAssoc();
-    return $row ?: NULL;
+    if ($row) {
+      return $row;
+    }
+    $editorial = $this->fetchEditorialLock($entity ?? $this->loadEntity($entityType, $entityId));
+    if ($editorial === FALSE) {
+      return NULL;
+    }
+    return [
+      'entity_type' => $entityType,
+      'entity_id' => $entityId,
+      'locked_by' => (int) $editorial->uid,
+      'locked_at' => (int) ($editorial->timestamp ?? 0),
+      'expires_at' => 0,
+      'reason' => 'content_lock',
+      'source' => 'content_lock',
+    ];
   }
 
   /**
    * Whether an active lock held by a DIFFERENT principal blocks the actor.
    *
    * The owner-aware conflict check every governed write channel shares
-   * (d.o #3616541): the acting principal's own lock never blocks its write,
-   * and ownership is resolved from the server-side current user — never from
-   * anything a caller sends.
+   * (d.o #3616541 / #3622400): the acting principal's own lock never
+   * blocks its write, and ownership is resolved from the server-side
+   * current user — never from anything a caller sends. A contrib Content
+   * Lock row held by a different uid is the same conflict as a Sentinel
+   * row held by a different uid.
    *
    * @param string $entityType
    *   The entity type ID to check.
    * @param string $entityId
    *   The entity ID to check.
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The entity, when the caller already has it.
    *
    * @return bool
    *   TRUE when an active lock exists and is held by another principal.
    */
-  public function conflictsForActor(string $entityType, string $entityId): bool {
+  public function conflictsForActor(string $entityType, string $entityId, ?EntityInterface $entity = NULL): bool {
     $row = $this->activeLockRow($entityType, $entityId);
-    return $row !== NULL && (int) $row['locked_by'] !== (int) $this->currentUser->id();
+    if ($row !== NULL && (int) $row['locked_by'] !== (int) $this->currentUser->id()) {
+      return TRUE;
+    }
+    $editorial = $this->fetchEditorialLock($entity ?? $this->loadEntity($entityType, $entityId));
+    return $editorial !== FALSE && (int) $editorial->uid !== (int) $this->currentUser->id();
   }
 
   /**
@@ -170,13 +220,19 @@ class McpContentLock {
    *   The entity type ID to check.
    * @param string $entityId
    *   The entity ID to check.
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The entity, when the caller already has it.
    *
    * @return bool
    *   TRUE when an active lock exists and the current user holds it.
    */
-  public function heldByActor(string $entityType, string $entityId): bool {
+  public function heldByActor(string $entityType, string $entityId, ?EntityInterface $entity = NULL): bool {
     $row = $this->activeLockRow($entityType, $entityId);
-    return $row !== NULL && (int) $row['locked_by'] === (int) $this->currentUser->id();
+    if ($row !== NULL && (int) $row['locked_by'] === (int) $this->currentUser->id()) {
+      return TRUE;
+    }
+    $editorial = $this->fetchEditorialLock($entity ?? $this->loadEntity($entityType, $entityId));
+    return $editorial !== FALSE && (int) $editorial->uid === (int) $this->currentUser->id();
   }
 
   /**
@@ -199,6 +255,73 @@ class McpContentLock {
       ->where('l.expires_at = 0 OR l.expires_at > :now', [':now' => $now])
       ->execute()->fetchAssoc();
     return $row ?: NULL;
+  }
+
+  /**
+   * Whether the Sentinel table has an active lock for this entity.
+   *
+   * @param string $entityType
+   *   The entity type ID to check.
+   * @param string $entityId
+   *   The entity ID to check.
+   *
+   * @return bool
+   *   TRUE if an active (non-expired) Sentinel lock row exists.
+   */
+  private function sentinelIsLocked(string $entityType, string $entityId): bool {
+    $now = $this->time->getRequestTime();
+    return (bool) $this->database->select('mcp_sentinel_content_locks', 'l')
+      ->condition('l.entity_type', $entityType)
+      ->condition('l.entity_id', $entityId)
+      ->where('l.expires_at = 0 OR l.expires_at > :now', [':now' => $now])
+      ->countQuery()->execute()->fetchField();
+  }
+
+  /**
+   * The contrib Content Lock row, if that module holds an active lock.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The entity to check, or NULL when it cannot be loaded.
+   *
+   * @return object{uid: int|string, timestamp?: int}|false
+   *   The contrib lock object or FALSE when the module is absent, the
+   *   entity is missing, or no active lock exists.
+   */
+  private function fetchEditorialLock(?EntityInterface $entity): object|false {
+    $service = $this->editorialLock;
+    if (!is_object($service) || !method_exists($service, 'fetchLock') || $entity === NULL || $entity->isNew()) {
+      return FALSE;
+    }
+    $lock = $service->fetchLock($entity);
+    return is_object($lock) ? $lock : FALSE;
+  }
+
+  /**
+   * Loads an entity by id, falling back to UUID when the id does not match.
+   *
+   * @param string $entityType
+   *   The entity type ID.
+   * @param string $entityId
+   *   The entity ID or UUID.
+   *
+   * @return \Drupal\Core\Entity\EntityInterface|null
+   *   The entity, or NULL when it cannot be loaded.
+   */
+  private function loadEntity(string $entityType, string $entityId): ?EntityInterface {
+    if ($this->entityTypeManager === NULL || $entityId === '' || !$this->entityTypeManager->hasDefinition($entityType)) {
+      return NULL;
+    }
+    $storage = $this->entityTypeManager->getStorage($entityType);
+    $entity = $storage->load($entityId);
+    if ($entity instanceof EntityInterface) {
+      return $entity;
+    }
+    if (!$storage->getEntityType()->hasKey('uuid')) {
+      return NULL;
+    }
+    $matches = $storage->loadByProperties(['uuid' => $entityId]);
+    $match = reset($matches);
+    return $match instanceof EntityInterface ? $match : NULL;
   }
 
   /**

@@ -9,6 +9,7 @@ use Drupal\Core\Database\Connection;
 use Drupal\Core\Database\Query\Merge;
 use Drupal\Core\Database\Query\Select;
 use Drupal\Core\Database\StatementInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\Tests\UnitTestCase;
@@ -88,6 +89,98 @@ final class McpContentLockTest extends UnitTestCase {
 
     $lock = new McpContentLock($database, $this->mockUser(1), $this->mockTime(1000));
     $this->assertTrue($lock->isLocked('node', '7'));
+  }
+
+  /**
+   * @covers ::conflictsForActor
+   */
+  public function testEditorialLockByOtherConflicts(): void {
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('isNew')->willReturn(FALSE);
+    $editorial = new class() {
+
+      /**
+       * Returns a contrib lock held by another uid.
+       */
+      public function fetchLock(object $entity): object {
+        return (object) ['uid' => 42, 'timestamp' => 1000];
+      }
+
+    };
+
+    $lock = new McpContentLock(
+      $this->mockDatabaseNoSentinelLock(),
+      $this->mockUser(5),
+      $this->mockTime(1000),
+      $editorial,
+    );
+    $this->assertTrue($lock->conflictsForActor('node', '7', $entity));
+    $this->assertTrue($lock->isLocked('node', '7', $entity));
+    $this->assertFalse($lock->heldByActor('node', '7', $entity));
+  }
+
+  /**
+   * @covers ::conflictsForActor
+   */
+  public function testEditorialLockHeldByActorDoesNotConflict(): void {
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('isNew')->willReturn(FALSE);
+    $editorial = new class() {
+
+      /**
+       * Returns a contrib lock held by the acting uid.
+       */
+      public function fetchLock(object $entity): object {
+        return (object) ['uid' => 5, 'timestamp' => 1000];
+      }
+
+    };
+
+    $lock = new McpContentLock(
+      $this->mockDatabaseNoSentinelLock(),
+      $this->mockUser(5),
+      $this->mockTime(1000),
+      $editorial,
+    );
+    $this->assertFalse($lock->conflictsForActor('node', '7', $entity));
+    $this->assertTrue($lock->heldByActor('node', '7', $entity));
+  }
+
+  /**
+   * @covers ::conflictsForActor
+   */
+  public function testAbsentEditorialServiceDoesNothing(): void {
+    $entity = $this->createMock(EntityInterface::class);
+    $entity->method('isNew')->willReturn(FALSE);
+
+    $lock = new McpContentLock(
+      $this->mockDatabaseNoSentinelLock(),
+      $this->mockUser(5),
+      $this->mockTime(1000),
+    );
+    $this->assertFalse($lock->conflictsForActor('node', '7', $entity));
+    $this->assertFalse($lock->isLocked('node', '7', $entity));
+  }
+
+  /**
+   * A database whose Sentinel lock table is empty.
+   */
+  private function mockDatabaseNoSentinelLock(): Connection {
+    $statement = $this->createMock(StatementInterface::class);
+    $statement->method('fetchAssoc')->willReturn(FALSE);
+    $statement->method('fetchField')->willReturn('0');
+    $count = $this->createMock(Select::class);
+    $count->method('execute')->willReturn($statement);
+    $select = $this->createMock(Select::class);
+    $select->method('fields')->willReturnSelf();
+    $select->method('condition')->willReturnSelf();
+    $select->method('where')->willReturnSelf();
+    $select->method('countQuery')->willReturn($count);
+    $select->method('execute')->willReturn($statement);
+    $database = $this->createMock(Connection::class);
+    $database->method('select')->willReturn($select);
+    $database->expects($this->never())->method('delete');
+    return $database;
   }
 
   /**
