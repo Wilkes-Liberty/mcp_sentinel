@@ -1134,6 +1134,10 @@ final class McpDraftResource extends EntityResource {
       if (!$creating && !$stored->hasTranslation($langcode)) {
         throw new ConflictHttpException('The requested translation does not exist. Create it first.');
       }
+      $default_before = $storage->loadUnchanged($entity->id());
+      $default_snapshot = $default_before instanceof ContentEntityInterface
+        ? $this->translatableTextSnapshot($default_before->getUntranslated())
+        : [];
       $translation->setNewRevision(FALSE);
       $translation->isDefaultRevision($was_default);
       $translation->save();
@@ -1143,7 +1147,7 @@ final class McpDraftResource extends EntityResource {
       if (!$default instanceof ContentEntityInterface) {
         throw new ConflictHttpException('The paragraph default revision is no longer available.');
       }
-      $this->assertEnglishTextUnchanged($default->getUntranslated(), $english_snapshot);
+      $this->assertEnglishTextUnchanged($default->getUntranslated(), $default_snapshot);
       $addressed = $this->loadParagraphRevision($storage, $entity, $saved_vid === $expected_vid ? $expected_vid : $saved_vid);
       $this->assertEnglishTextUnchanged($addressed->getUntranslated(), $english_snapshot);
       if ($saved_vid !== $expected_vid) {
