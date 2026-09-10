@@ -109,6 +109,8 @@ final class McpDashboardTest extends BrowserTestBase {
     $this->drupalGet('/admin/reports/mcp-sentinel');
     // Six chart cells (SVG fallback — the charts module is absent in CI).
     $this->assertSession()->elementsCount('css', '.mcp-chart-cell', 6);
+    $this->assertSession()->elementExists('css', 'svg.mcp-chart__svg');
+    $this->assertSession()->pageTextNotContains('No charting library found');
     // At least one chart links into the filtered audit log.
     $this->assertSession()->elementExists('css', '.mcp-chart-cell a[href*="/admin/reports/mcp-sentinel/audit"]');
   }

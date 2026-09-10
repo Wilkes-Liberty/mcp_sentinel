@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Governance dashboard charts no longer disappear when `charts` is
+  enabled without a library plugin. `McpChartRenderer` keeps the
+  inline-SVG fallback unless a Charts library (for example
+  `charts_chartjs`) is actually available, so the six dashboard
+  widgets render instead of "No charting library found".
+
 ## [2.15.2] - 2026-09-09
 
 ### Changed

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\Component\Plugin\PluginManagerInterface;
 use Drupal\Component\Render\FormattableMarkup;
 use Drupal\Component\Utility\Html;
 use Drupal\Core\Extension\ModuleHandlerInterface;
@@ -13,10 +14,13 @@ use Drupal\Core\Render\Markup;
  * Renders a metric series as a chart render array.
  *
  * Isolates the optional drupal/charts contrib dependency to a single place:
- * when the 'charts' module is enabled a `#type => 'chart'` element is returned;
- * otherwise a self-contained inline-SVG/CSS fallback (no JavaScript) is built.
- * An empty series always returns an empty-state build. When a 'drill_url'
- * option is supplied the chart is wrapped in a link to the filtered report.
+ * when Charts is enabled AND a library plugin is available (for example
+ * charts_chartjs), a `#type => 'chart'` element is returned; otherwise a
+ * self-contained inline-SVG/CSS fallback (no JavaScript) is built. Enabling
+ * Charts without a library must not replace the SVG with the Charts
+ * "No charting library found" markup. An empty series always returns an
+ * empty-state build. When a 'drill_url' option is supplied the chart is
+ * wrapped in a link to the filtered report.
  *
  * Chart styling is supplied by the dashboard library (attached by the
  * dashboard controller), so this helper returns markup only.
@@ -43,9 +47,12 @@ final class McpChartRenderer {
    *
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
    *   The module handler (gates the optional drupal/charts upgrade).
+   * @param \Drupal\Component\Plugin\PluginManagerInterface|null $chartsManager
+   *   The Charts library plugin manager, or NULL when Charts is not installed.
    */
   public function __construct(
     private readonly ModuleHandlerInterface $moduleHandler,
+    private readonly ?PluginManagerInterface $chartsManager = NULL,
   ) {}
 
   /**
@@ -70,7 +77,7 @@ final class McpChartRenderer {
       return $this->emptyState($title);
     }
 
-    $build = $this->moduleHandler->moduleExists('charts')
+    $build = $this->chartsLibraryAvailable()
       ? $this->buildChartsElement($type, $series, $title)
       : $this->buildSvgFallback($type, $series, $title);
 
@@ -102,6 +109,22 @@ final class McpChartRenderer {
         '#attributes' => ['class' => ['mcp-chart__empty']],
       ],
     ];
+  }
+
+  /**
+   * Whether the optional Charts API can actually draw a chart.
+   *
+   * `charts` being enabled is not enough. Without a library plugin
+   * (charts_chartjs, charts_google, charts_highcharts, …) the Charts
+   * element prints "No charting library found" instead of a chart.
+   *
+   * @return bool
+   *   TRUE when a Charts library plugin is available.
+   */
+  private function chartsLibraryAvailable(): bool {
+    return $this->moduleHandler->moduleExists('charts')
+      && $this->chartsManager instanceof PluginManagerInterface
+      && $this->chartsManager->getDefinitions() !== [];
   }
 
   /**
