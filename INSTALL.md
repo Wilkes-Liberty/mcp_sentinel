@@ -39,7 +39,8 @@ These are required because the module calls their PHP APIs directly:
   charts library submodule (for example `charts_chartjs`) and enable both:
   `composer require drupal/charts` then `drush en charts charts_chartjs -y`. The
   dashboard renders correctly without it — `McpChartRenderer` falls back to
-  self-contained inline SVG when the `charts` module is absent.
+  self-contained inline SVG when the `charts` module is absent or when it is
+  enabled without a library plugin.
 
 ## 1. Install with Composer
 

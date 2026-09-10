@@ -104,9 +104,15 @@ class McpChartRendererTest extends KernelTestBase {
   /**
    * @covers ::render
    */
-  public function testChartsElementWhenModulePresent(): void {
+  public function testChartsElementWhenLibraryPresent(): void {
     if (!\Drupal::moduleHandler()->moduleExists('charts')) {
       $this->markTestSkipped('drupal/charts not installed.');
+    }
+    $definitions = \Drupal::hasService('plugin.manager.charts')
+      ? \Drupal::service('plugin.manager.charts')->getDefinitions()
+      : [];
+    if ($definitions === []) {
+      $this->markTestSkipped('Charts is installed without a library plugin.');
     }
     /** @var \Drupal\mcp_sentinel\Service\McpChartRenderer $r */
     $r = \Drupal::service('mcp_sentinel.chart_renderer');
@@ -114,6 +120,31 @@ class McpChartRendererTest extends KernelTestBase {
     // Find the chart element (it may be wrapped in a link).
     $chart = $build['#type'] ?? ($build['content']['#type'] ?? NULL);
     $this->assertSame('chart', $chart);
+  }
+
+  /**
+   * Charts without a library plugin must keep the inline-SVG fallback.
+   *
+   * @covers ::render
+   */
+  public function testFallbackWhenChartsHasNoLibrary(): void {
+    if (!\Drupal::moduleHandler()->moduleExists('charts')) {
+      $this->markTestSkipped('drupal/charts not installed.');
+    }
+    $definitions = \Drupal::hasService('plugin.manager.charts')
+      ? \Drupal::service('plugin.manager.charts')->getDefinitions()
+      : [];
+    if ($definitions !== []) {
+      $this->markTestSkipped('A Charts library plugin is available.');
+    }
+    /** @var \Drupal\mcp_sentinel\Service\McpChartRenderer $r */
+    $r = \Drupal::service('mcp_sentinel.chart_renderer');
+    $build = $r->render('bar', ['Mon' => 3, 'Tue' => 5], ['title' => 'Volume']);
+    $this->assertArrayNotHasKey('#type', $build);
+    $rendered = (string) \Drupal::service('renderer')->renderRoot($build);
+    $this->assertStringContainsString('<svg', $rendered);
+    $this->assertStringContainsString('Volume', $rendered);
+    $this->assertStringNotContainsString('No charting library found', $rendered);
   }
 
 }
