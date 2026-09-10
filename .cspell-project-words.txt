@@ -39,6 +39,7 @@ filebeat
 footgun
 gatechange
 gethostbynamel
+highcharts
 hmac
 hostnames
 idempotently
