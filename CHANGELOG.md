@@ -6,6 +6,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Require a paragraph draft state token to reject stale in-place updates. Refuse shared-status translations and unexpected new paragraph revisions instead of repinning hosts without concurrency preconditions.
+
 ### Added
 - Governed unpublished **paragraph field-value** translation and **image alt**
   on the draft-translation surface (#181).

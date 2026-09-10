@@ -289,9 +289,41 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * A successful same-revision write invalidates another client's old token.
+   */
+  public function testParagraphDraftRejectsStaleState(): void {
+    $fixture = $this->setUpComposedPage();
+    $agent = $fixture['agent'];
+    $paragraph = $fixture['paragraph'];
+    $match = '"' . $paragraph->getRevisionId() . '"';
+    $created = $this->paragraphTranslationRequest('POST', $agent, $paragraph, ['field_text' => 'Uno'], $match);
+    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
+    $state = json_decode((string) $created->getBody(), TRUE)['meta']['draft_state'];
+    $read = $this->paragraphTranslationRequest('GET', $agent, $paragraph, [], $match);
+    $this->assertSame($state, json_decode((string) $read->getBody(), TRUE)['meta']['draft_state']);
+    $missing = $this->paragraphTranslationRequest('PATCH', $agent, $paragraph, ['field_text' => 'Missing'], $match);
+    $this->assertSame(400, $missing->getStatusCode());
+    $preview = $this->paragraphTranslationRequest('PATCH', $agent, $paragraph, ['field_text' => 'Dos'], $match, TRUE, state: $state);
+    $this->assertSame(200, $preview->getStatusCode(), (string) $preview->getBody());
+    $updated = $this->paragraphTranslationRequest('PATCH', $agent, $paragraph, ['field_text' => 'Dos'], $match, state: $state);
+    $this->assertSame(200, $updated->getStatusCode(), (string) $updated->getBody());
+    $this->assertNotSame($state, json_decode((string) $updated->getBody(), TRUE)['meta']['draft_state']);
+    foreach ([TRUE, FALSE] as $preflight) {
+      $stale = $this->paragraphTranslationRequest('PATCH', $agent, $paragraph, ['field_text' => 'Lost update'], $match, $preflight, state: $state);
+      $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
+    }
+    $stored = $this->paragraphStorage()->loadRevisionUnchanged($paragraph->getRevisionId());
+    $this->assertInstanceOf(Paragraph::class, $stored);
+    $this->assertSame('Dos', $stored->getTranslation('es')->get('field_text')->value);
+    $this->assertSame('Hero', $stored->getUntranslated()->get('field_text')->value);
+    $this->assertTrue($stored->getUntranslated()->isPublished());
+    $this->assertFalse($stored->getTranslation('es')->isPublished());
+  }
+
+  /**
    * Shared status cannot unpublish the live English paragraph pin.
    */
-  public function testUntranslatableStatusPinsNewRevisionOnSpanishHostOnly(): void {
+  public function testUntranslatableStatusRefusesWithoutChangingHost(): void {
     $fixture = $this->setUpComposedPage(TRUE);
     $agent = $fixture['agent'];
     $node = $fixture['node'];
@@ -314,40 +346,22 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertInstanceOf(NodeInterface::class, $host_working);
     $working_pin = (string) $host_working->getTranslation('es')
       ->get('field_components')->target_revision_id;
-    $created = $this->paragraphTranslationRequest(
-      'POST',
-      $agent,
-      $paragraph,
-      ['field_text' => 'Hola hero'],
-      '"' . $working_pin . '"',
-    );
-    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
-    $created_body = json_decode((string) $created->getBody(), TRUE);
-    $saved_vid = (string) $created_body['data']['attributes']['drupal_internal__revision_id'];
-    $this->assertNotSame($working_pin, $saved_vid);
-    $this->assertFalse($created_body['data']['attributes']['status']);
-
+    foreach ([TRUE, FALSE] as $preflight) {
+      $created = $this->paragraphTranslationRequest(
+        'POST', $agent, $paragraph, ['field_text' => 'Hola hero'],
+        '"' . $working_pin . '"', $preflight,
+      );
+      $this->assertSame(409, $created->getStatusCode(), (string) $created->getBody());
+    }
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
-    $para_storage = $this->paragraphStorage();
-    $para_storage->resetCache([$paragraph->id()]);
-    /** @var \Drupal\paragraphs\Entity\Paragraph $live_pin */
-    $live_pin = $para_storage->loadRevision($live_paragraph_vid);
-    $this->assertTrue($live_pin->getUntranslated()->isPublished());
-    $this->assertFalse($live_pin->hasTranslation('es'));
-    $this->assertSame('Hero', $live_pin->getUntranslated()->get('field_text')->value);
-    /** @var \Drupal\paragraphs\Entity\Paragraph $spanish_revision */
-    $spanish_revision = $para_storage->loadRevision($saved_vid);
-    $this->assertTrue($spanish_revision->hasTranslation('es'));
-    $this->assertSame('Hola hero', $spanish_revision->getTranslation('es')->get('field_text')->value);
-    $this->assertFalse($spanish_revision->getTranslation('es')->isPublished());
-
-    $latest_id = $node_storage->getLatestRevisionId($node->id());
-    $host_working = $node_storage->loadRevision($latest_id);
+    $this->assertSame($working_vid, (string) $node_storage->getLatestRevisionId($node->id()));
+    $host_working = $node_storage->loadRevisionUnchanged($working_vid);
     $this->assertInstanceOf(NodeInterface::class, $host_working);
-    $spanish_pin = (string) $host_working->getTranslation('es')
-      ->get('field_components')->target_revision_id;
-    $this->assertSame($saved_vid, $spanish_pin);
-    $this->assertSame((string) $paragraph->id(), (string) $host_working->get('field_components')->target_id);
+    $this->assertSame($working_pin, (string) $host_working->getTranslation('es')->get('field_components')->target_revision_id);
+    $original = $this->paragraphStorage()->loadRevisionUnchanged($working_pin);
+    $this->assertInstanceOf(Paragraph::class, $original);
+    $this->assertTrue($original->getUntranslated()->isPublished());
+    $this->assertFalse($original->hasTranslation('es'));
 
     $this->drupalGet('/node/' . $node->id());
     $this->assertSession()->statusCodeEquals(200);
@@ -721,11 +735,13 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
    *   Target language header, or NULL to omit it.
    * @param string $bundle
    *   Paragraph bundle.
+   * @param string|null $state
+   *   State token from the previous draft read.
    *
    * @return \Psr\Http\Message\ResponseInterface
    *   The response.
    */
-  private function paragraphTranslationRequest(string $method, UserInterface $agent, Paragraph $paragraph, array $attributes, string $if_match, bool $preflight = FALSE, ?string $langcode = 'es', string $bundle = 'text_block'): ResponseInterface {
+  private function paragraphTranslationRequest(string $method, UserInterface $agent, Paragraph $paragraph, array $attributes, string $if_match, bool $preflight = FALSE, ?string $langcode = 'es', string $bundle = 'text_block', ?string $state = NULL): ResponseInterface {
     $path = $this->buildUrl('/jsonapi/paragraph/' . $bundle . '/' . $paragraph->uuid() . '/mcp-draft');
     if ($method === 'POST') {
       $path .= '/translations';
@@ -736,6 +752,9 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       'If-Match' => $if_match,
       'X-MCP-Draft-Preflight' => $preflight ? '1' : '0',
     ];
+    if ($state !== NULL) {
+      $headers['X-MCP-Draft-State'] = $state;
+    }
     if ($langcode !== NULL) {
       $headers['X-MCP-Draft-Langcode'] = $langcode;
     }
