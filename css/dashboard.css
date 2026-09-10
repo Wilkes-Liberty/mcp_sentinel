@@ -2,11 +2,21 @@
  * @file
  * Governance dashboard styling.
  *
- * Theme-neutral: uses only generic selectors and plain colors so it renders
- * correctly under both Claro and Gin. No theme-specific overrides.
+ * Theme-neutral: generic selectors and fallback colors so Claro still
+ * renders. When Gin is the admin theme the --gin-* tokens restyle the
+ * dashboard (primary, layer, border, status) without a module-specific
+ * theme override.
  */
 
 .mcp-dashboard {
+  --mcp-color-primary: var(--gin-color-primary, #0d6efd);
+  --mcp-color-danger: var(--gin-color-danger, #dc3545);
+  --mcp-color-warning: var(--gin-color-warning, #ffc107);
+  --mcp-color-ok: var(--gin-color-green, #28a745);
+  --mcp-color-muted: var(--gin-color-text-light, #6c757d);
+  --mcp-color-on-primary: var(--gin-color-button-text, #fff);
+  --mcp-bg: var(--gin-bg-layer, #fff);
+  --mcp-border: var(--gin-border-color, #dee2e6);
   margin: 1em 0;
 }
 
@@ -104,14 +114,14 @@
   margin-inline-end: 0.25em;
   padding: 0.2em 0.7em;
   text-decoration: none;
-  border: 1px solid #ccc;
+  border: 1px solid var(--mcp-border);
   border-radius: 3px;
 }
 
 .mcp-window-toggle__link.is-active {
-  color: #fff;
-  border-color: #0d6efd;
-  background: #0d6efd;
+  color: var(--mcp-color-on-primary);
+  border-color: var(--mcp-color-primary);
+  background: var(--mcp-color-primary);
 }
 
 /* Status tiles. */
@@ -124,22 +134,22 @@
 
 .mcp-tile {
   padding: 0.75em 1em;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--mcp-border);
   border-top: 4px solid #adb5bd;
   border-radius: 4px;
-  background: #fff;
+  background: var(--mcp-bg);
 }
 
 .mcp-tile--ok {
-  border-top-color: #28a745;
+  border-top-color: var(--mcp-color-ok);
 }
 
 .mcp-tile--warn {
-  border-top-color: #ffc107;
+  border-top-color: var(--mcp-color-warning);
 }
 
 .mcp-tile--crit {
-  border-top-color: #dc3545;
+  border-top-color: var(--mcp-color-danger);
 }
 
 .mcp-tile__link {
@@ -152,7 +162,7 @@
   display: block;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  color: #6c757d;
+  color: var(--mcp-color-muted);
   font-size: 0.85em;
 }
 
@@ -165,7 +175,7 @@
 
 .mcp-tile__sub {
   display: block;
-  color: #6c757d;
+  color: var(--mcp-color-muted);
   font-size: 0.85em;
 }
 
@@ -175,22 +185,22 @@
   flex-direction: column;
   margin: 0 0 1em;
   padding: 0.75em 1em;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--mcp-border);
   border-left: 4px solid #adb5bd;
   border-radius: 4px;
   gap: 0.25em;
 }
 
 .mcp-chain-card--ok {
-  border-left-color: #28a745;
+  border-left-color: var(--mcp-color-ok);
 }
 
 .mcp-chain-card--warn {
-  border-left-color: #ffc107;
+  border-left-color: var(--mcp-color-warning);
 }
 
 .mcp-chain-card--crit {
-  border-left-color: #dc3545;
+  border-left-color: var(--mcp-color-danger);
 }
 
 .mcp-chain-card__label {
@@ -198,7 +208,7 @@
 }
 
 .mcp-chain-card__detail {
-  color: #6c757d;
+  color: var(--mcp-color-muted);
   font-size: 0.9em;
 }
 
@@ -214,8 +224,8 @@
   display: inline-block;
   padding: 0.4em 0.9em;
   text-decoration: none;
-  color: #0d6efd;
-  border: 1px solid #0d6efd;
+  color: var(--mcp-color-primary);
+  border: 1px solid var(--mcp-color-primary);
   border-radius: 3px;
 }
 
@@ -229,9 +239,9 @@
 
 .mcp-chart-cell {
   padding: 0.75em;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--mcp-border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--mcp-bg);
 }
 
 .mcp-chart__title {
@@ -251,40 +261,40 @@
 }
 
 .mcp-chart__bar {
-  fill: #0d6efd;
+  fill: var(--mcp-color-primary);
 }
 
 .mcp-chart__line {
-  stroke: #0d6efd;
+  stroke: var(--mcp-color-primary);
   stroke-width: 2;
 }
 
 .mcp-chart__slice--0 {
-  stroke: #0d6efd;
+  stroke: var(--mcp-color-primary);
 }
 
 .mcp-chart__slice--1 {
-  stroke: #dc3545;
+  stroke: var(--mcp-color-danger);
 }
 
 .mcp-chart__slice--2 {
-  stroke: #ffc107;
+  stroke: var(--mcp-color-warning);
 }
 
 .mcp-chart__slice--3 {
-  stroke: #28a745;
+  stroke: var(--mcp-color-ok);
 }
 
 .mcp-chart__slice--4 {
-  stroke: #6f42c1;
+  stroke: var(--gin-color-info, #6f42c1);
 }
 
 .mcp-chart__slice--5 {
-  stroke: #20c997;
+  stroke: var(--gin-color-info-light, #20c997);
 }
 
 .mcp-chart--empty .mcp-chart__empty {
-  color: #6c757d;
+  color: var(--mcp-color-muted);
   font-style: italic;
 }
 
@@ -298,9 +308,9 @@
 
 .mcp-panel {
   padding: 0.75em 1em;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--mcp-border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--mcp-bg);
 }
 
 .mcp-panel__title {
@@ -325,9 +335,9 @@
   align-items: center;
   gap: 0.4em;
   padding: 0.75em 1em;
-  border: 1px solid #dee2e6;
+  border: 1px solid var(--mcp-border);
   border-radius: 4px;
-  background: #f8f9fa;
+  background: var(--gin-bg-layer2, #f8f9fa);
 }
 
 .mcp-active-controls__label {
@@ -343,11 +353,11 @@
 }
 
 .mcp-control--on {
-  color: #155724;
-  background: #d4edda;
+  color: var(--mcp-color-ok);
+  background: var(--gin-bg-layer2, #d4edda);
 }
 
 .mcp-control--off {
-  color: #6c757d;
-  background: #e9ecef;
+  color: var(--mcp-color-muted);
+  background: var(--gin-bg-layer3, #e9ecef);
 }

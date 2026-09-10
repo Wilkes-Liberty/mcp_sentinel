@@ -13,6 +13,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `charts_chartjs`) is actually available, so the six dashboard
   widgets render instead of "No charting library found".
 
+### Changed
+- Governance dashboard CSS consumes Gin color tokens when present
+  (`--gin-color-primary` and related) so a branded admin theme can
+  restyle the six charts without a module override. Claro keeps the
+  previous generic fallbacks.
+
 ## [2.15.2] - 2026-09-09
 
 ### Changed
