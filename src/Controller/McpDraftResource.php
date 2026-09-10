@@ -215,7 +215,8 @@ final class McpDraftResource extends EntityResource {
     static::validate($translation);
     $save_versions = [
       1 => (string) $live->getRevisionId(),
-      2 => (string) $base->getRevisionId(),
+      // Empty when If-Match was live-only; otherwise the working revision.
+      2 => $versions[2],
     ];
     if ($preflight === '1') {
       return $this->preflightResponse($save_versions, $langcode);
