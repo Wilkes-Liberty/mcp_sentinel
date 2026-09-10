@@ -54,13 +54,18 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $node = $fixture['node'];
     $paragraph = $fixture['paragraph'];
     $live_vid = $fixture['live_vid'];
-    $paragraph_vid = (string) $paragraph->getRevisionId();
+    $live_paragraph_vid = (string) $paragraph->getRevisionId();
 
     $created_node = $this->nodeTranslationRequest($agent, $node, ['title' => 'Inicio'], '"' . $live_vid . '"');
     $this->assertSame(200, $created_node->getStatusCode(), (string) $created_node->getBody());
     /** @var \Drupal\node\NodeStorageInterface $node_storage */
     $node_storage = $this->container->get('entity_type.manager')->getStorage('node');
     $working_vid = (string) $node_storage->getLatestRevisionId($node->id());
+    // ERR creates child revisions when the host creates a forward revision.
+    // Translate the pin returned by the Spanish draft, not the live node.
+    $host_working = $node_storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $host_working);
+    $paragraph_vid = (string) $host_working->getTranslation('es')->get('field_components')->target_revision_id;
 
     $created = $this->paragraphTranslationRequest(
       'POST',
@@ -75,7 +80,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertFalse($created_body['data']['attributes']['status']);
     $this->assertSame('Hola hero', $created_body['data']['attributes']['field_text']);
 
-    $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $paragraph_vid, 'Hero');
+    $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
     $para_storage = $this->paragraphStorage();
     $para_storage->resetCache([$paragraph->id()]);
     /** @var \Drupal\paragraphs\Entity\Paragraph $addressed */
@@ -126,6 +131,9 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertInstanceOf(NodeInterface::class, $host_working);
     $this->assertSame($paragraph_vid, (string) $host_working->get('field_components')->target_revision_id);
     $this->assertSame((string) $paragraph->id(), (string) $host_working->get('field_components')->target_id);
+    $component = $para_storage->loadRevision($host_working->getTranslation('es')->get('field_components')->target_revision_id);
+    $this->assertSame('Hola hero', $component->getTranslation('es')->get('field_text')->value);
+    $this->assertFalse($component->getTranslation('es')->isPublished());
 
     $other = Paragraph::create([
       'type' => 'text_block',
@@ -162,7 +170,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     ]);
     $this->assertSame(400, $retarget->getStatusCode(), (string) $retarget->getBody());
     $this->assertStringContainsString('Paragraph structure', (string) $retarget->getBody());
-    $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $paragraph_vid, 'Hero');
+    $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
 
     $this->drupalGet('/node/' . $node->id());
     $this->assertSession()->pageTextContains('Hero');
