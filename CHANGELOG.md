@@ -14,10 +14,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PATCH` / `GET …/mcp-draft` take `If-Match: "<paragraph revision ID>"` and
   `X-MCP-Draft-Langcode`. English live ERR UUID+vid pins and default-language
   paragraph text stay unchanged. Nested children translate without retargeting
-  the parent ERR field. Canonical paragraph PATCH of a published-host child is
-  still redirected or refused. A translatable image field may change alt/title
-  when the file target is unchanged; replacing the file is still refused.
-  Node-only translation create/update is unchanged.
+  the parent ERR field. When paragraph status is shared across languages,
+  the unpublished translation is a new revision pinned only on the unpublished
+  Spanish host; live English pins stay bit-identical. Canonical paragraph
+  PATCH of a published-host child is still redirected or refused. A
+  translatable image field may change alt/title when the file target is
+  unchanged; replacing the file is still refused. Node-only translation
+  create/update is unchanged.
 
 ## [2.16.0] - 2026-09-10
 

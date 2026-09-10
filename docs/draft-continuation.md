@@ -58,6 +58,13 @@ If storage cannot add a translation without a new paragraph revision, that
 revision may be pinned only on the unpublished host translation of the same
 language. A save that would retarget a live English pin is rolled back.
 
+When paragraph `status` is not translatable (shared across languages on one
+revision, as on typical hero/FAQ/CTA bundles), Sentinel does not unpublish
+that revision in place. It creates a non-default unpublished revision and
+pins it only on the current unpublished host working copy. Live default ERR
+UUID+vid pins stay bit-identical. Re-pinning never replays historical host
+revision rows.
+
 Image alt is a translatable field on the host when the file target is
 unchanged (`translation_sync.file: file`, alt not synced). Replacing the
 file on a translation write is refused. Media entity translation is not

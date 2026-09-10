@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Field\Entity\BaseFieldOverride;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\language\Entity\ConfigurableLanguage;
@@ -88,6 +89,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertSame('paragraph', $addressed->getEntityTypeId());
     $this->assertSame($paragraph_vid, (string) $addressed->getRevisionId());
     $this->assertSame('Hero', $addressed->getUntranslated()->get('field_text')->value);
+    $this->assertTrue($addressed->getUntranslated()->isPublished());
     $this->assertTrue($addressed->hasTranslation('es'));
     $spanish = $addressed->getTranslation('es');
     $this->assertSame('Hola hero', $spanish->get('field_text')->value);
@@ -282,6 +284,76 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $live_item = $para_storage->loadRevision($item_vid);
     $this->assertInstanceOf(Paragraph::class, $live_item);
     $this->assertSame('Answer', $live_item->getUntranslated()->get('field_text')->value);
+    $this->assertTrue($live_item->getUntranslated()->isPublished());
+  }
+
+  /**
+   * Shared status cannot unpublish the live English paragraph pin.
+   */
+  public function testUntranslatableStatusPinsNewRevisionOnSpanishHostOnly(): void {
+    $fixture = $this->setUpComposedPage(TRUE);
+    $agent = $fixture['agent'];
+    $node = $fixture['node'];
+    $paragraph = $fixture['paragraph'];
+    $live_vid = $fixture['live_vid'];
+    $live_paragraph_vid = (string) $paragraph->getRevisionId();
+    $this->assertFalse($paragraph->getFieldDefinition('status')->isTranslatable());
+
+    $node_created = $this->nodeTranslationRequest(
+      $agent,
+      $node,
+      ['title' => 'Inicio'],
+      '"' . $live_vid . '"',
+    );
+    $this->assertSame(200, $node_created->getStatusCode(), (string) $node_created->getBody());
+    /** @var \Drupal\node\NodeStorageInterface $node_storage */
+    $node_storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $working_vid = (string) $node_storage->getLatestRevisionId($node->id());
+    $host_working = $node_storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $host_working);
+    $working_pin = (string) $host_working->getTranslation('es')
+      ->get('field_components')->target_revision_id;
+    $created = $this->paragraphTranslationRequest(
+      'POST',
+      $agent,
+      $paragraph,
+      ['field_text' => 'Hola hero'],
+      '"' . $working_pin . '"',
+    );
+    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
+    $created_body = json_decode((string) $created->getBody(), TRUE);
+    $saved_vid = (string) $created_body['data']['attributes']['drupal_internal__revision_id'];
+    $this->assertNotSame($working_pin, $saved_vid);
+    $this->assertFalse($created_body['data']['attributes']['status']);
+
+    $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
+    $para_storage = $this->paragraphStorage();
+    $para_storage->resetCache([$paragraph->id()]);
+    /** @var \Drupal\paragraphs\Entity\Paragraph $live_pin */
+    $live_pin = $para_storage->loadRevision($live_paragraph_vid);
+    $this->assertTrue($live_pin->getUntranslated()->isPublished());
+    $this->assertFalse($live_pin->hasTranslation('es'));
+    $this->assertSame('Hero', $live_pin->getUntranslated()->get('field_text')->value);
+    /** @var \Drupal\paragraphs\Entity\Paragraph $spanish_revision */
+    $spanish_revision = $para_storage->loadRevision($saved_vid);
+    $this->assertTrue($spanish_revision->hasTranslation('es'));
+    $this->assertSame('Hola hero', $spanish_revision->getTranslation('es')->get('field_text')->value);
+    $this->assertFalse($spanish_revision->getTranslation('es')->isPublished());
+
+    $latest_id = $node_storage->getLatestRevisionId($node->id());
+    $host_working = $node_storage->loadRevision($latest_id);
+    $this->assertInstanceOf(NodeInterface::class, $host_working);
+    $spanish_pin = (string) $host_working->getTranslation('es')
+      ->get('field_components')->target_revision_id;
+    $this->assertSame($saved_vid, $spanish_pin);
+    $this->assertSame((string) $paragraph->id(), (string) $host_working->get('field_components')->target_id);
+
+    $this->drupalGet('/node/' . $node->id());
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('Hero');
+    $this->assertSession()->pageTextNotContains('Hola hero');
+    $this->drupalGet('/es/node/' . $node->id());
+    $this->assertSession()->pageTextNotContains('Hola hero');
   }
 
   /**
@@ -319,12 +391,18 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
   /**
    * Builds a translatable page that pins one text paragraph.
    *
+   * @param bool $untranslatable_status
+   *   When TRUE, share one published flag across languages on a revision.
+   *
    * @return array<string, mixed>
    *   Agent, node, paragraph, and live node vid.
    */
-  private function setUpComposedPage(): array {
+  private function setUpComposedPage(bool $untranslatable_status = FALSE): array {
     $this->installTranslationStack();
     $this->createParagraphType('text_block');
+    if ($untranslatable_status) {
+      $this->overrideParagraphStatusUntranslatable('text_block');
+    }
     $this->addErrField('node', 'page', 'field_components', ['text_block' => 'text_block']);
     $agent = $this->createAgent();
     $paragraph = Paragraph::create([
@@ -465,6 +543,23 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * Makes paragraph status shared across languages on one revision.
+   *
+   * @param string $bundle
+   *   The paragraph type id.
+   */
+  private function overrideParagraphStatusUntranslatable(string $bundle): void {
+    $definitions = $this->container->get('entity_field.manager')
+      ->getBaseFieldDefinitions('paragraph');
+    $this->assertArrayHasKey('status', $definitions);
+    $status = $definitions['status'];
+    $override = BaseFieldOverride::createFromBaseFieldDefinition($status, $bundle);
+    $override->setTranslatable(FALSE);
+    $override->save();
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+  }
+
+  /**
    * Adds an untranslatable ERR field.
    *
    * @param string $entity_type
@@ -559,12 +654,13 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     $this->assertFalse($live->hasTranslation('es'));
     $this->assertSame((string) $paragraph_id, (string) $live->get('field_components')->target_id);
     $this->assertSame($paragraph_vid, (string) $live->get('field_components')->target_revision_id);
-    if ($english_text === NULL) {
-      return;
-    }
     $para_storage = $this->paragraphStorage();
     /** @var \Drupal\paragraphs\Entity\Paragraph $pinned */
     $pinned = $para_storage->loadRevision($paragraph_vid);
+    $this->assertTrue($pinned->getUntranslated()->isPublished());
+    if ($english_text === NULL) {
+      return;
+    }
     $this->assertSame($english_text, $pinned->getUntranslated()->get('field_text')->value);
   }
 

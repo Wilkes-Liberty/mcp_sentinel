@@ -9,6 +9,7 @@ use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\ContentEntityStorageInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
@@ -1150,12 +1151,24 @@ final class McpDraftResource extends EntityResource {
       if (!$creating && !$stored->hasTranslation($langcode)) {
         throw new ConflictHttpException('The requested translation does not exist. Create it first.');
       }
+      $english_was_published = $stored->getUntranslated() instanceof EntityPublishedInterface
+        && $stored->getUntranslated()->isPublished();
+      $live_pins = $this->snapshotDefaultErrPins($entity->id());
       $default_before = $storage->loadUnchanged($entity->id());
       $default_snapshot = $default_before instanceof ContentEntityInterface
         ? $this->translatableTextSnapshot($default_before->getUntranslated())
         : [];
-      $translation->setNewRevision(FALSE);
-      $translation->isDefaultRevision($was_default);
+      // Shared (untranslatable) status unpublishes every language on this
+      // revision. A new non-default revision keeps the live English pin
+      // published; only unpublished hosts may retarget to it.
+      if (!$this->paragraphStatusIsTranslatable($translation)) {
+        $translation->setNewRevision(TRUE);
+        $translation->isDefaultRevision(FALSE);
+      }
+      else {
+        $translation->setNewRevision(FALSE);
+        $translation->isDefaultRevision($was_default);
+      }
       $translation->save();
       $saved_vid = (string) $translation->getRevisionId();
       $storage->resetCache([$entity->id()]);
@@ -1164,10 +1177,18 @@ final class McpDraftResource extends EntityResource {
         throw new ConflictHttpException('The paragraph default revision is no longer available.');
       }
       $this->assertEnglishTextUnchanged($default->getUntranslated(), $default_snapshot);
+      $original = $this->loadParagraphRevision($storage, $entity, $expected_vid);
+      if ($english_was_published
+        && $original->getUntranslated() instanceof EntityPublishedInterface
+        && !$original->getUntranslated()->isPublished()) {
+        throw new ConflictHttpException('Paragraph translation unpublished the default-language revision; the save was rolled back.');
+      }
+      $this->assertDefaultErrPinsUnchanged($entity->id(), $live_pins);
       $addressed = $this->loadParagraphRevision($storage, $entity, $saved_vid === $expected_vid ? $expected_vid : $saved_vid);
       $this->assertEnglishTextUnchanged($addressed->getUntranslated(), $english_snapshot);
       if ($saved_vid !== $expected_vid) {
         $this->rePinUnpublishedHosts($entity->id(), $expected_vid, $saved_vid, $langcode);
+        $this->assertDefaultErrPinsUnchanged($entity->id(), $live_pins);
       }
       $primary_data = new ResourceObjectData([ResourceObject::createFromEntity($resource_type, $translation)], 1);
       /** @var \Drupal\jsonapi\JsonApiResource\IncludedData $includes */
@@ -1222,9 +1243,107 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Pins a new paragraph revision only on unpublished host translations.
+   * Whether paragraph status can be unpublished per language.
    *
-   * Published default-revision ERR pins must remain on the original vid.
+   * Bundle overrides (hero, FAQ, CTA on typical sites) often share one
+   * published flag across languages on the same revision.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The paragraph revision.
+   *
+   * @return bool
+   *   TRUE when status is a per-language field.
+   */
+  private function paragraphStatusIsTranslatable(ContentEntityInterface $entity): bool {
+    if (!$entity->hasField('status')) {
+      return TRUE;
+    }
+    return $entity->getFieldDefinition('status')->isTranslatable();
+  }
+
+  /**
+   * Default-revision ERR pins that currently target a paragraph.
+   *
+   * @param string|int $paragraph_id
+   *   The paragraph entity id.
+   *
+   * @return array<int, array<string, string>>
+   *   Sorted live pins.
+   */
+  private function snapshotDefaultErrPins(string|int $paragraph_id): array {
+    if ($this->entityFieldManager === NULL) {
+      return [];
+    }
+    $map = $this->entityFieldManager->getFieldMapByFieldType('entity_reference_revisions');
+    $pins = [];
+    foreach ($map as $entity_type_id => $fields) {
+      foreach (array_keys($fields) as $field_name) {
+        $table = $entity_type_id . '__' . $field_name;
+        if (!$this->draftDatabase->schema()->tableExists($table)) {
+          continue;
+        }
+        $target_column = $field_name . '_target_id';
+        $revision_column = $field_name . '_target_revision_id';
+        $rows = $this->draftDatabase->select($table, 'f')
+          ->fields('f', [
+            'entity_id',
+            'delta',
+            $target_column,
+            $revision_column,
+          ])
+          ->condition($target_column, $paragraph_id)
+          ->execute()
+          ->fetchAll();
+        foreach ($rows as $row) {
+          $pins[] = [
+            'entity_type' => $entity_type_id,
+            'entity_id' => (string) $row->entity_id,
+            'field' => $field_name,
+            'delta' => (string) $row->delta,
+            'target_id' => (string) $row->{$target_column},
+            'target_revision_id' => (string) $row->{$revision_column},
+          ];
+        }
+      }
+    }
+    usort($pins, static function (array $a, array $b): int {
+      $left = [
+        $a['entity_type'],
+        $a['entity_id'],
+        $a['field'],
+        $a['delta'],
+      ];
+      $right = [
+        $b['entity_type'],
+        $b['entity_id'],
+        $b['field'],
+        $b['delta'],
+      ];
+      return $left <=> $right;
+    });
+    return $pins;
+  }
+
+  /**
+   * Refuses a save that rewrote a live default ERR pin.
+   *
+   * @param string|int $paragraph_id
+   *   The paragraph entity id.
+   * @param array<int, array<string, string>> $snapshot
+   *   Pins captured before save.
+   */
+  private function assertDefaultErrPinsUnchanged(string|int $paragraph_id, array $snapshot): void {
+    if ($this->snapshotDefaultErrPins($paragraph_id) !== $snapshot) {
+      throw new ConflictHttpException('Paragraph translation changed a live English paragraph pin; the save was rolled back.');
+    }
+  }
+
+  /**
+   * Pins a new paragraph revision only on current unpublished hosts.
+   *
+   * Only the latest non-default working revision is updated. Historical
+   * revision rows are not replayed. Published default-revision ERR pins
+   * must remain on the original vid.
    *
    * @param string|int $paragraph_id
    *   The paragraph entity id.
@@ -1247,7 +1366,7 @@ final class McpDraftResource extends EntityResource {
         continue;
       }
       $storage = $this->entityTypeManager->getStorage($entity_type_id);
-      if (!$storage instanceof RevisionableStorageInterface) {
+      if (!$storage instanceof ContentEntityStorageInterface) {
         continue;
       }
       foreach (array_keys($fields) as $field_name) {
@@ -1257,40 +1376,52 @@ final class McpDraftResource extends EntityResource {
         }
         $target_column = $field_name . '_target_id';
         $revision_column = $field_name . '_target_revision_id';
-        $rows = $this->draftDatabase->select($table, 'f')
-          ->fields('f', ['entity_id', 'revision_id', 'langcode', 'delta'])
+        $ids = $this->draftDatabase->select($table, 'f')
+          ->distinct()
+          ->fields('f', ['entity_id'])
           ->condition($target_column, $paragraph_id)
           ->condition($revision_column, $old_vid)
           ->execute()
-          ->fetchAll();
-        foreach ($rows as $row) {
-          $host = $storage->loadRevision($row->revision_id);
-          if (!$host instanceof ContentEntityInterface || !$host->hasField($field_name)) {
+          ->fetchCol();
+        foreach ($ids as $entity_id) {
+          $default = $storage->loadUnchanged($entity_id);
+          if (!$default instanceof ContentEntityInterface || !$default->hasField($field_name)) {
             continue;
           }
-          $default = $storage->loadUnchanged($host->id());
-          $is_live_default = $default instanceof ContentEntityInterface
-            && (string) $default->getRevisionId() === (string) $host->getRevisionId()
-            && $host->isDefaultRevision();
-          if ($is_live_default) {
-            throw new ConflictHttpException('Translating this paragraph revision would retarget a live English paragraph pin; the save was rolled back.');
+          foreach ($default->get($field_name) as $item) {
+            if ((string) $item->target_id === (string) $paragraph_id
+              && (string) $item->target_revision_id === (string) $new_vid) {
+              throw new ConflictHttpException('Translating this paragraph revision would retarget a live English paragraph pin; the save was rolled back.');
+            }
           }
-          if ((string) $row->langcode !== $langcode) {
+          $latest_id = $storage->getLatestRevisionId($entity_id);
+          if ($latest_id === NULL
+            || (string) $latest_id === (string) $default->getRevisionId()) {
             continue;
           }
-          if (!$host->hasTranslation($langcode)) {
+          $working = $storage->loadRevision($latest_id);
+          if (!$working instanceof ContentEntityInterface
+            || !$working->hasTranslation($langcode)) {
             continue;
           }
-          $host_translation = $host->getTranslation($langcode);
-          if ($host_translation instanceof EntityPublishedInterface && $host_translation->isPublished()) {
+          $host_translation = $working->getTranslation($langcode);
+          if ($working instanceof NodeInterface
+            && $host_translation instanceof EntityPublishedInterface
+            && $host_translation->isPublished()) {
             throw new ConflictHttpException('Translating this paragraph revision would retarget a published host; the save was rolled back.');
           }
-          $item = $host_translation->get($field_name)->get((int) $row->delta);
-          if ($item === NULL) {
+          $changed = FALSE;
+          foreach ($host_translation->get($field_name) as $item) {
+            if ((string) $item->target_id === (string) $paragraph_id
+              && (string) $item->target_revision_id === (string) $old_vid) {
+              $item->set('target_revision_id', $new_vid);
+              $changed = TRUE;
+            }
+          }
+          if (!$changed) {
             continue;
           }
-          $item->set('target_revision_id', $new_vid);
-          $host_translation->setNewRevision(TRUE);
+          $host_translation->setNewRevision(FALSE);
           $host_translation->isDefaultRevision(FALSE);
           $host_translation->save();
           $moved = TRUE;
