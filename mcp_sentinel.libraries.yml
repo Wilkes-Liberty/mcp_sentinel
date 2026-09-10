@@ -1,11 +1,11 @@
 admin:
-  version: VERSION
+  version: 2.x
   css:
     theme:
       css/admin.css: {}
 
 dashboard:
-  version: VERSION
+  version: 2.x
   css:
     theme:
       css/dashboard.css: {}

@@ -6,6 +6,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Library definitions use a module version string (`2.x`) instead of Drupal
+  core's `VERSION` token.
+
 ## [2.15.3] - 2026-09-10
 
 ### Fixed
