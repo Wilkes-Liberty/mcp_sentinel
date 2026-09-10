@@ -355,10 +355,10 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     }
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
     $this->assertSame($working_vid, (string) $node_storage->getLatestRevisionId($node->id()));
-    $host_working = $node_storage->loadRevisionUnchanged($working_vid);
+    $host_working = $node_storage->loadRevisionUnchanged((int) $working_vid);
     $this->assertInstanceOf(NodeInterface::class, $host_working);
     $this->assertSame($working_pin, (string) $host_working->getTranslation('es')->get('field_components')->target_revision_id);
-    $original = $this->paragraphStorage()->loadRevisionUnchanged($working_pin);
+    $original = $this->paragraphStorage()->loadRevisionUnchanged((int) $working_pin);
     $this->assertInstanceOf(Paragraph::class, $original);
     $this->assertTrue($original->getUntranslated()->isPublished());
     $this->assertFalse($original->hasTranslation('es'));

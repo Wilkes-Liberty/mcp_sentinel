@@ -13,7 +13,6 @@ use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
-use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\jsonapi\Controller\EntityResource;
@@ -1103,7 +1102,7 @@ final class McpDraftResource extends EntityResource {
    *   The addressed revision.
    */
   private function loadParagraphRevision(RevisionableStorageInterface $storage, EntityInterface $entity, string $revision_id): ContentEntityInterface {
-    $revision = $storage->loadRevisionUnchanged($revision_id);
+    $revision = $storage->loadRevisionUnchanged((int) $revision_id);
     if (!$revision instanceof ContentEntityInterface || $revision->uuid() !== $entity->uuid()) {
       throw new ConflictHttpException('The paragraph revision is no longer available.');
     }
@@ -1340,7 +1339,7 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Fingerprints persistent fields across all languages of a paragraph revision.
+   * Fingerprints persistent fields across paragraph revision languages.
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $revision
    *   The addressed revision.
