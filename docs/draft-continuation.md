@@ -54,16 +54,8 @@ the node creates a forward revision. Do not reuse paragraph revision IDs from
 the published node inventory. For nested paragraphs, follow the working
 group's child references too; UUIDs stay shared, but revision IDs can differ.
 
-If storage cannot add a translation without a new paragraph revision, that
-revision may be pinned only on the unpublished host translation of the same
-language. A save that would retarget a live English pin is rolled back.
-
-When paragraph `status` is not translatable (shared across languages on one
-revision, as on typical hero/FAQ/CTA bundles), Sentinel does not unpublish
-that revision in place. It creates a non-default unpublished revision and
-pins it only on the current unpublished host working copy. Live default ERR
-UUID+vid pins stay bit-identical. Re-pinning never replays historical host
-revision rows.
+Shared-status paragraphs and saves requiring a new paragraph revision are
+refused. This endpoint never repins a host revision.
 
 Image alt is a translatable field on the host when the file target is
 unchanged (`translation_sync.file: file`, alt not synced). Replacing the
@@ -104,3 +96,16 @@ The JSON:API controller extension uses internal core APIs. Functional coverage
 on supported core branches is required before releasing a change to this path.
 The draft-continuation functional test also runs on PostgreSQL 16 in GitHub
 Actions, including node grants and an existing node-reference field.
+
+### Paragraph state and refusal contract
+
+Paragraph draft GET, POST and PATCH responses return `meta.draft_state`. PATCH
+requires that value in `X-MCP-Draft-State`, including validation-only preflights.
+Re-read after a conflict; never refresh the token silently to retry old copy.
+The server compares all persistent revision fields under its paragraph lock.
+
+Paragraph status must be translatable. Shared-status bundles return 409 before
+mutation, including preflight. If storage unexpectedly creates a new revision,
+the transaction rolls back. Host repinning is unsupported: no historical or
+current host revision is changed by this endpoint. Leave these paragraphs for
+human editing until a host-aware concurrency contract is available.

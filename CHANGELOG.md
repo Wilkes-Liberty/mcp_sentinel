@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-09-10
+
+### Fixed
+
+- Require a paragraph draft state token to reject stale in-place updates. Refuse shared-status translations and unexpected new paragraph revisions instead of repinning hosts without concurrency preconditions.
+
 ### Added
 - Governed unpublished **paragraph field-value** translation and **image alt**
   on the draft-translation surface (#181).
@@ -14,9 +20,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PATCH` / `GET …/mcp-draft` take `If-Match: "<paragraph revision ID>"` and
   `X-MCP-Draft-Langcode`. English live ERR UUID+vid pins and default-language
   paragraph text stay unchanged. Nested children translate without retargeting
-  the parent ERR field. When paragraph status is shared across languages,
-  the unpublished translation is a new revision pinned only on the unpublished
-  Spanish host; live English pins stay bit-identical. Canonical paragraph
+  the parent ERR field. Shared-status paragraphs are refused without changing
+  host references. Paragraph PATCH requires the previous draft state token.
+  Canonical paragraph
   PATCH of a published-host child is still redirected or refused. A
   translatable image field may change alt/title when the file target is
   unchanged; replacing the file is still refused. Node-only translation
@@ -2135,7 +2141,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.16.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.17.0...1.x
+[2.17.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.16.0...2.17.0
 [2.16.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.3...2.16.0
 [2.15.3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.2...2.15.3
 [2.15.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.1...2.15.2

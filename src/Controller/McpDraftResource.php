@@ -9,13 +9,12 @@ use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
-use Drupal\Core\Entity\ContentEntityStorageInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
-use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
+use Drupal\Core\Site\Settings;
 use Drupal\jsonapi\Controller\EntityResource;
 use Drupal\jsonapi\JsonApiResource\JsonApiDocumentTopLevel;
 use Drupal\jsonapi\JsonApiResource\ResourceObject;
@@ -900,6 +899,10 @@ final class McpDraftResource extends EntityResource {
     $preflight = $this->parsePreflight($request);
     $storage = $this->paragraphStorage();
     $revision = $this->loadParagraphRevision($storage, $entity, $revision_id);
+    $expected_state = $this->paragraphDraftState($revision);
+    if (!$this->paragraphStatusIsTranslatable($revision)) {
+      throw new ConflictHttpException('Paragraph draft translation requires translatable status; host repinning is not supported.');
+    }
     $this->assertBundleTranslatable($revision);
     if ($revision->language()->getId() === $langcode) {
       throw new BadRequestHttpException('The target language is already the default language.');
@@ -930,7 +933,7 @@ final class McpDraftResource extends EntityResource {
     if ($preflight === '1') {
       return $this->preflightResponse([1 => $revision_id, 2 => $revision_id], $langcode);
     }
-    return $this->saveParagraphTranslation($storage, $entity, $translation, $resource_type, $request, $revision_id, $english_snapshot, TRUE);
+    return $this->saveParagraphTranslation($storage, $entity, $translation, $resource_type, $request, $revision_id, $english_snapshot, TRUE, $expected_state);
   }
 
   /**
@@ -946,6 +949,10 @@ final class McpDraftResource extends EntityResource {
     $preflight = $this->parsePreflight($request);
     $storage = $this->paragraphStorage();
     $revision = $this->loadParagraphRevision($storage, $entity, $revision_id);
+    $expected_state = $this->paragraphDraftState($revision);
+    if (!$this->paragraphStatusIsTranslatable($revision)) {
+      throw new ConflictHttpException('Paragraph draft translation requires translatable status; host repinning is not supported.');
+    }
     if (!$revision->hasTranslation($langcode)) {
       throw new ConflictHttpException('The requested translation does not exist. Create it first.');
     }
@@ -956,6 +963,7 @@ final class McpDraftResource extends EntityResource {
     if (!$translation->access('update', $this->user)) {
       throw new AccessDeniedHttpException('Draft update access denied.');
     }
+    $this->assertParagraphDraftState($request, $expected_state);
     $english_snapshot = $this->translatableTextSnapshot($revision->getUntranslated());
     /** @var \Drupal\Core\Entity\ContentEntityInterface $parsed */
     $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
@@ -969,7 +977,7 @@ final class McpDraftResource extends EntityResource {
     if ($preflight === '1') {
       return $this->preflightResponse([1 => $revision_id, 2 => $revision_id], $langcode);
     }
-    return $this->saveParagraphTranslation($storage, $entity, $translation, $resource_type, $request, $revision_id, $english_snapshot, FALSE);
+    return $this->saveParagraphTranslation($storage, $entity, $translation, $resource_type, $request, $revision_id, $english_snapshot, FALSE, $expected_state);
   }
 
   /**
@@ -1029,7 +1037,7 @@ final class McpDraftResource extends EntityResource {
     $primary_data = new ResourceObjectData([ResourceObject::createFromEntity($resource_type, $translation)], 1);
     /** @var \Drupal\jsonapi\JsonApiResource\IncludedData $includes */
     $includes = $this->getIncludes($request, $primary_data);
-    $response = $this->buildWrappedResponse($primary_data, $request, $includes);
+    $response = $this->buildWrappedResponse($primary_data, $request, $includes, meta: ['draft_state' => $this->paragraphDraftState($revision)]);
     $response->headers->set('Cache-Control', 'no-store');
     return $response;
   }
@@ -1094,7 +1102,7 @@ final class McpDraftResource extends EntityResource {
    *   The addressed revision.
    */
   private function loadParagraphRevision(RevisionableStorageInterface $storage, EntityInterface $entity, string $revision_id): ContentEntityInterface {
-    $revision = $storage->loadRevision($revision_id);
+    $revision = $storage->loadRevisionUnchanged((int) $revision_id);
     if (!$revision instanceof ContentEntityInterface || $revision->uuid() !== $entity->uuid()) {
       throw new ConflictHttpException('The paragraph revision is no longer available.');
     }
@@ -1104,10 +1112,8 @@ final class McpDraftResource extends EntityResource {
   /**
    * Saves a paragraph translation without rewriting English live pins.
    *
-   * Prefers the addressed revision. If storage creates a new revision, that
-   * revision is pinned only on unpublished host translations of the same
-   * language. English default ERR pins must stay bit-identical or the save
-   * rolls back.
+   * Saves only the addressed revision. Unexpected revision creation rolls back
+   * rather than changing host pins without host concurrency preconditions.
    *
    * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
    *   Paragraph storage.
@@ -1125,11 +1131,13 @@ final class McpDraftResource extends EntityResource {
    *   Default-language translatable field values before save.
    * @param bool $creating
    *   TRUE when this save adds the language.
+   * @param string $expected_state
+   *   Revision state before applying the submitted changes.
    *
    * @return \Drupal\jsonapi\ResourceResponse
    *   The saved resource.
    */
-  private function saveParagraphTranslation(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface $translation, ResourceType $resource_type, Request $request, string $expected_vid, array $english_snapshot, bool $creating): ResourceResponse {
+  private function saveParagraphTranslation(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface $translation, ResourceType $resource_type, Request $request, string $expected_vid, array $english_snapshot, bool $creating, string $expected_state): ResourceResponse {
     $database = $this->draftDatabase;
     $transaction = $database->startTransaction();
     $langcode = $translation->language()->getId();
@@ -1142,11 +1150,10 @@ final class McpDraftResource extends EntityResource {
       $lock_query->execute()->fetchField();
       $storage->resetCache([$entity->id()]);
       $stored = $this->loadParagraphRevision($storage, $entity, $expected_vid);
-      // addTranslation() on the in-memory revision is a new translation, not a
-      // saved one. isNewTranslation() distinguishes this request from a
-      // persisted language that should 409.
-      if ($creating && $stored->hasTranslation($langcode)
-        && !$stored->getTranslation($langcode)->isNewTranslation()) {
+      if (!hash_equals($expected_state, $this->paragraphDraftState($stored))) {
+        throw new ConflictHttpException('The paragraph draft changed. Re-read it before retrying.');
+      }
+      if ($creating && $stored->hasTranslation($langcode)) {
         throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
       }
       if (!$creating && !$stored->hasTranslation($langcode)) {
@@ -1160,17 +1167,8 @@ final class McpDraftResource extends EntityResource {
       $default_snapshot = $default_before instanceof ContentEntityInterface
         ? $this->translatableTextSnapshot($default_before->getUntranslated())
         : [];
-      // Shared (untranslatable) status unpublishes every language on this
-      // revision. A new non-default revision keeps the live English pin
-      // published; only unpublished hosts may retarget to it.
-      if (!$this->paragraphStatusIsTranslatable($translation)) {
-        $translation->setNewRevision(TRUE);
-        $translation->isDefaultRevision(FALSE);
-      }
-      else {
-        $translation->setNewRevision(FALSE);
-        $translation->isDefaultRevision($was_default);
-      }
+      $translation->setNewRevision(FALSE);
+      $translation->isDefaultRevision($was_default);
       $translation->save();
       $saved_vid = (string) $translation->getRevisionId();
       $storage->resetCache([$entity->id()]);
@@ -1190,13 +1188,12 @@ final class McpDraftResource extends EntityResource {
       $addressed = $this->loadParagraphRevision($storage, $entity, $saved_vid === $expected_vid ? $expected_vid : $saved_vid);
       $this->assertEnglishTextUnchanged($addressed->getUntranslated(), $english_snapshot);
       if ($saved_vid !== $expected_vid) {
-        $this->rePinUnpublishedHosts($entity->id(), $expected_vid, $saved_vid, $langcode);
-        $this->assertDefaultErrPinsUnchanged($entity->id(), $live_pins);
+        throw new ConflictHttpException('Paragraph storage created a new revision; host repinning is not supported and the save was rolled back.');
       }
       $primary_data = new ResourceObjectData([ResourceObject::createFromEntity($resource_type, $translation)], 1);
       /** @var \Drupal\jsonapi\JsonApiResource\IncludedData $includes */
       $includes = $this->getIncludes($request, $primary_data);
-      return $this->buildWrappedResponse($primary_data, $request, $includes);
+      return $this->buildWrappedResponse($primary_data, $request, $includes, meta: ['draft_state' => $this->paragraphDraftState($addressed)]);
     }
     catch (\Throwable $exception) {
       $transaction->rollBack();
@@ -1342,117 +1339,42 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Pins a new paragraph revision only on current unpublished hosts.
+   * Fingerprints persistent fields across paragraph revision languages.
    *
-   * Only the latest non-default working revision is updated. Historical
-   * revision rows are not replayed. Published default-revision ERR pins
-   * must remain on the original vid.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $revision
+   *   The addressed revision.
    *
-   * @param string|int $paragraph_id
-   *   The paragraph entity id.
-   * @param string $old_vid
-   *   The previously addressed revision.
-   * @param string $new_vid
-   *   The revision that carries the translation.
-   * @param string $langcode
-   *   The translation language.
+   * @return string
+   *   Opaque state token, including fields hidden from the requesting account.
    */
-  private function rePinUnpublishedHosts(string|int $paragraph_id, string $old_vid, string $new_vid, string $langcode): void {
-    if ($this->entityFieldManager === NULL) {
-      throw new ConflictHttpException('Translating this paragraph revision required a new revision that cannot be pinned only on an unpublished host translation.');
-    }
-    $moved = FALSE;
-    $map = $this->entityFieldManager->getFieldMapByFieldType('entity_reference_revisions');
-    foreach ($map as $entity_type_id => $fields) {
-      $definition = $this->entityTypeManager->getDefinition($entity_type_id, FALSE);
-      if ($definition === NULL || !$definition->isRevisionable()) {
-        continue;
+  private function paragraphDraftState(ContentEntityInterface $revision): string {
+    $values = [];
+    foreach ($revision->getTranslationLanguages() as $langcode => $language) {
+      foreach ($revision->getTranslation($langcode)->getFields(FALSE) as $name => $field) {
+        $values[$langcode][$name] = $field->getValue();
       }
-      $storage = $this->entityTypeManager->getStorage($entity_type_id);
-      if (!$storage instanceof ContentEntityStorageInterface) {
-        continue;
-      }
-      foreach (array_keys($fields) as $field_name) {
-        $table = $entity_type_id . '_revision__' . $field_name;
-        if (!$this->draftDatabase->schema()->tableExists($table)) {
-          continue;
-        }
-        $target_column = $field_name . '_target_id';
-        $revision_column = $field_name . '_target_revision_id';
-        $ids = $this->draftDatabase->select($table, 'f')
-          ->distinct()
-          ->fields('f', ['entity_id'])
-          ->condition($target_column, $paragraph_id)
-          ->condition($revision_column, $old_vid)
-          ->execute()
-          ->fetchCol();
-        foreach ($ids as $entity_id) {
-          $default = $storage->loadUnchanged($entity_id);
-          if (!$default instanceof ContentEntityInterface || !$default->hasField($field_name)) {
-            continue;
-          }
-          foreach ($default->get($field_name) as $item) {
-            [$target_id, $revision_id] = $this->errItemPin($item);
-            if ($target_id === (string) $paragraph_id
-              && $revision_id === (string) $new_vid) {
-              throw new ConflictHttpException('Translating this paragraph revision would retarget a live English paragraph pin; the save was rolled back.');
-            }
-          }
-          $latest_id = $storage->getLatestRevisionId($entity_id);
-          if ($latest_id === NULL
-            || (string) $latest_id === (string) $default->getRevisionId()) {
-            continue;
-          }
-          $working = $storage->loadRevision($latest_id);
-          if (!$working instanceof ContentEntityInterface
-            || !$working->hasTranslation($langcode)) {
-            continue;
-          }
-          $host_translation = $working->getTranslation($langcode);
-          if ($working instanceof NodeInterface
-            && $host_translation instanceof EntityPublishedInterface
-            && $host_translation->isPublished()) {
-            throw new ConflictHttpException('Translating this paragraph revision would retarget a published host; the save was rolled back.');
-          }
-          $changed = FALSE;
-          foreach ($host_translation->get($field_name) as $item) {
-            [$target_id, $revision_id] = $this->errItemPin($item);
-            if ($target_id === (string) $paragraph_id
-              && $revision_id === (string) $old_vid) {
-              $item->set('target_revision_id', $new_vid);
-              $changed = TRUE;
-            }
-          }
-          if (!$changed) {
-            continue;
-          }
-          $host_translation->setNewRevision(FALSE);
-          $host_translation->isDefaultRevision(FALSE);
-          $host_translation->save();
-          $moved = TRUE;
-        }
-      }
+      ksort($values[$langcode]);
     }
-    if (!$moved) {
-      throw new ConflictHttpException('Translating this paragraph revision required a new revision that cannot be pinned only on an unpublished host translation.');
-    }
+    ksort($values);
+    return hash_hmac('sha256', serialize($values), Settings::getHashSalt());
   }
 
   /**
-   * Reads an ERR item's target id and revision id.
+   * Requires the state token returned by the previous paragraph draft read.
    *
-   * @param \Drupal\Core\Field\FieldItemInterface $item
-   *   The field item.
-   *
-   * @return array{0: string, 1: string}
-   *   Target id and target revision id.
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The update request.
+   * @param string $expected_state
+   *   Current persistent revision state.
    */
-  private function errItemPin(FieldItemInterface $item): array {
-    $values = $item->getValue();
-    return [
-      (string) ($values['target_id'] ?? ''),
-      (string) ($values['target_revision_id'] ?? ''),
-    ];
+  private function assertParagraphDraftState(Request $request, string $expected_state): void {
+    $state = $request->headers->get('X-MCP-Draft-State', '');
+    if (!preg_match('/^[a-f0-9]{64}$/D', $state)) {
+      throw new BadRequestHttpException('X-MCP-Draft-State must contain the token from the previous paragraph draft read.');
+    }
+    if (!hash_equals($expected_state, $state)) {
+      throw new ConflictHttpException('The paragraph draft changed. Re-read it before retrying.');
+    }
   }
 
 }
