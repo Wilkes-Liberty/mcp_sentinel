@@ -22,6 +22,23 @@ frontend and your own cookie-session admin work are unaffected. The acting
 agent's **role selects the policy profile**, and every governed action is
 attributed to the authenticated account.
 
+## How it differs from similar projects
+
+[MCP Server](https://www.drupal.org/project/mcp_server) (`mcp_server`) exposes
+Drupal tools to MCP clients; it is the transport/tooling layer. MCP Sentinel
+does not replace it — it governs what those tools (and JSON:API/GraphQL
+requests from the same agents) are allowed to do, and records evidence of what
+they did. MCP Server is a recommended companion.
+
+[Drupal AI](https://www.drupal.org/project/ai) (`ai`) integrates LLM providers
+*inside* Drupal (automators, assistants, guardrails for site-initiated AI). MCP
+Sentinel addresses the opposite direction: *external* agents acting on the
+site. The two are complementary.
+
+Core permissions and JSON:API access checks are respected and never bypassed.
+MCP Sentinel layers policy, redaction, budgets, and audit evidence on top of
+them rather than replacing entity or field access.
+
 ## What it does
 
 - **Per-role policy profiles** — every gate, redaction rule, rate limit, quota
