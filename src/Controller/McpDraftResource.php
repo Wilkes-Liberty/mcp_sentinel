@@ -14,6 +14,7 @@ use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\jsonapi\Controller\EntityResource;
 use Drupal\jsonapi\JsonApiResource\JsonApiDocumentTopLevel;
@@ -1151,8 +1152,9 @@ final class McpDraftResource extends EntityResource {
       if (!$creating && !$stored->hasTranslation($langcode)) {
         throw new ConflictHttpException('The requested translation does not exist. Create it first.');
       }
-      $english_was_published = $stored->getUntranslated() instanceof EntityPublishedInterface
-        && $stored->getUntranslated()->isPublished();
+      $stored_english = $stored->getUntranslated();
+      $english_was_published = $stored_english instanceof EntityPublishedInterface
+        && $stored_english->isPublished();
       $live_pins = $this->snapshotDefaultErrPins($entity->id());
       $default_before = $storage->loadUnchanged($entity->id());
       $default_snapshot = $default_before instanceof ContentEntityInterface
@@ -1178,9 +1180,10 @@ final class McpDraftResource extends EntityResource {
       }
       $this->assertEnglishTextUnchanged($default->getUntranslated(), $default_snapshot);
       $original = $this->loadParagraphRevision($storage, $entity, $expected_vid);
+      $original_english = $original->getUntranslated();
       if ($english_was_published
-        && $original->getUntranslated() instanceof EntityPublishedInterface
-        && !$original->getUntranslated()->isPublished()) {
+        && $original_english instanceof EntityPublishedInterface
+        && !$original_english->isPublished()) {
         throw new ConflictHttpException('Paragraph translation unpublished the default-language revision; the save was rolled back.');
       }
       $this->assertDefaultErrPinsUnchanged($entity->id(), $live_pins);
@@ -1389,8 +1392,9 @@ final class McpDraftResource extends EntityResource {
             continue;
           }
           foreach ($default->get($field_name) as $item) {
-            if ((string) $item->target_id === (string) $paragraph_id
-              && (string) $item->target_revision_id === (string) $new_vid) {
+            [$target_id, $revision_id] = $this->errItemPin($item);
+            if ($target_id === (string) $paragraph_id
+              && $revision_id === (string) $new_vid) {
               throw new ConflictHttpException('Translating this paragraph revision would retarget a live English paragraph pin; the save was rolled back.');
             }
           }
@@ -1412,8 +1416,9 @@ final class McpDraftResource extends EntityResource {
           }
           $changed = FALSE;
           foreach ($host_translation->get($field_name) as $item) {
-            if ((string) $item->target_id === (string) $paragraph_id
-              && (string) $item->target_revision_id === (string) $old_vid) {
+            [$target_id, $revision_id] = $this->errItemPin($item);
+            if ($target_id === (string) $paragraph_id
+              && $revision_id === (string) $old_vid) {
               $item->set('target_revision_id', $new_vid);
               $changed = TRUE;
             }
@@ -1431,6 +1436,23 @@ final class McpDraftResource extends EntityResource {
     if (!$moved) {
       throw new ConflictHttpException('Translating this paragraph revision required a new revision that cannot be pinned only on an unpublished host translation.');
     }
+  }
+
+  /**
+   * Reads an ERR item's target id and revision id.
+   *
+   * @param \Drupal\Core\Field\FieldItemInterface $item
+   *   The field item.
+   *
+   * @return array{0: string, 1: string}
+   *   Target id and target revision id.
+   */
+  private function errItemPin(FieldItemInterface $item): array {
+    $values = $item->getValue();
+    return [
+      (string) ($values['target_id'] ?? ''),
+      (string) ($values['target_revision_id'] ?? ''),
+    ];
   }
 
 }

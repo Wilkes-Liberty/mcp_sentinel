@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Field\Entity\BaseFieldOverride;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
@@ -553,6 +554,7 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       ->getBaseFieldDefinitions('paragraph');
     $this->assertArrayHasKey('status', $definitions);
     $status = $definitions['status'];
+    $this->assertInstanceOf(BaseFieldDefinition::class, $status);
     $override = BaseFieldOverride::createFromBaseFieldDefinition($status, $bundle);
     $override->setTranslatable(FALSE);
     $override->save();
