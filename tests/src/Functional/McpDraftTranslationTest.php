@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\file\Entity\File;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\NodeInterface;
 use Drupal\Tests\BrowserTestBase;
 use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
+use Drupal\Tests\TestFileCreationTrait;
 use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Psr\Http\Message\ResponseInterface;
@@ -24,6 +28,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
 
   use ContentModerationTestTrait;
   use McpGovernedRequestTrait;
+  use TestFileCreationTrait;
 
   /**
    * {@inheritdoc}
@@ -31,7 +36,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   protected static $modules = [
     'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'workflows', 'content_moderation', 'path',
-    'language', 'content_translation',
+    'language', 'content_translation', 'file', 'image',
   ];
 
   /**
@@ -189,6 +194,96 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * Alt-only image writes change the translation; the file target stays shared.
+   */
+  public function testImageAltOnlyTranslation(): void {
+    [$agent, $node, $live_vid, $path_create, $path_draft] = $this->setUpTranslatedPage();
+    $this->installPhotoField();
+    $image = current($this->getTestFiles('image'));
+    $file = File::create([
+      'uri' => $image->uri,
+      'filename' => $image->filename,
+      'status' => 1,
+    ]);
+    $file->save();
+    $replacement = File::create([
+      'uri' => $image->uri,
+      'filename' => 'other-' . $image->filename,
+      'status' => 1,
+    ]);
+    $replacement->save();
+    $node->set('field_photo', [
+      'target_id' => $file->id(),
+      'alt' => 'English alt',
+    ]);
+    $node->save();
+    $live_vid = (string) $node->getRevisionId();
+    $this->container->get('router.builder')->rebuild();
+
+    $created = $this->translationRequest(
+      'POST',
+      $path_create,
+      $agent,
+      $node,
+      ['title' => 'Foto'],
+      '"' . $live_vid . '"',
+      FALSE,
+      'es',
+      [
+        'field_photo' => [
+          'data' => [
+            'type' => 'file--file',
+            'id' => $file->uuid(),
+            'meta' => ['alt' => 'Texto alternativo'],
+          ],
+        ],
+      ],
+    );
+    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
+
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertSame((string) $file->id(), (string) $live->get('field_photo')->target_id);
+    $this->assertSame('English alt', $live->get('field_photo')->alt);
+    $working = $storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $spanish = $working->getTranslation('es');
+    $this->assertSame((string) $file->id(), (string) $spanish->get('field_photo')->target_id);
+    $this->assertSame('Texto alternativo', $spanish->get('field_photo')->alt);
+    $this->assertSame('English alt', $working->getUntranslated()->get('field_photo')->alt);
+
+    $replaced = $this->translationRequest(
+      'PATCH',
+      $path_draft,
+      $agent,
+      $node,
+      [],
+      '"' . $live_vid . ':' . $working_vid . '"',
+      FALSE,
+      'es',
+      [
+        'field_photo' => [
+          'data' => [
+            'type' => 'file--file',
+            'id' => $replacement->uuid(),
+            'meta' => ['alt' => 'Otro archivo'],
+          ],
+        ],
+      ],
+    );
+    $this->assertSame(400, $replaced->getStatusCode(), (string) $replaced->getBody());
+    $this->assertStringContainsString('file or image', (string) $replaced->getBody());
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertSame((string) $file->id(), (string) $live->get('field_photo')->target_id);
+    $this->assertSame('English alt', $live->get('field_photo')->alt);
+  }
+
+  /**
    * Builds a translatable published page and a governed agent.
    *
    * @return array{0: \Drupal\user\UserInterface, 1: \Drupal\node\NodeInterface, 2: string, 3: string, 4: string, 5: string}
@@ -252,11 +347,13 @@ final class McpDraftTranslationTest extends BrowserTestBase {
    *   Whether this is a no-save preflight.
    * @param string|null $langcode
    *   Target language header, or NULL to omit it.
+   * @param array<string, mixed> $relationships
+   *   Optional JSON:API relationships (image alt, etc.).
    *
    * @return \Psr\Http\Message\ResponseInterface
    *   The HTTP response.
    */
-  private function translationRequest(string $method, string $path, UserInterface $agent, NodeInterface $node, array $attributes, string $if_match, bool $preflight, ?string $langcode): ResponseInterface {
+  private function translationRequest(string $method, string $path, UserInterface $agent, NodeInterface $node, array $attributes, string $if_match, bool $preflight, ?string $langcode, array $relationships = []): ResponseInterface {
     $headers = [
       'Accept' => 'application/vnd.api+json',
       'Content-Type' => 'application/vnd.api+json',
@@ -266,21 +363,59 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     if ($langcode !== NULL) {
       $headers['X-MCP-Draft-Langcode'] = $langcode;
     }
+    $data = [
+      'type' => 'node--page',
+      'id' => $node->uuid(),
+      'attributes' => $attributes,
+    ];
+    if ($relationships !== []) {
+      $data['relationships'] = $relationships;
+    }
     $response = $this->getHttpClient()->request($method, $path, [
       'http_errors' => FALSE,
       // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
       'auth' => [$agent->getAccountName(), $agent->passRaw],
       'headers' => $headers,
-      'json' => [
-        'data' => [
-          'type' => 'node--page',
-          'id' => $node->uuid(),
-          'attributes' => $attributes,
-        ],
-      ],
+      'json' => ['data' => $data],
     ]);
     $this->container->get('entity_type.manager')->getStorage('node')->resetCache([$node->id()]);
     return $response;
+  }
+
+  /**
+   * Adds a translatable image field with a shared file and per-language alt.
+   */
+  private function installPhotoField(): void {
+    FieldStorageConfig::create([
+      'field_name' => 'field_photo',
+      'entity_type' => 'node',
+      'type' => 'image',
+      'cardinality' => 1,
+      'translatable' => TRUE,
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_photo',
+      'entity_type' => 'node',
+      'bundle' => 'page',
+      'label' => 'Photo',
+      'translatable' => TRUE,
+      'settings' => [
+        'file_extensions' => 'png gif jpg jpeg webp',
+        'alt_field' => TRUE,
+        'alt_field_required' => FALSE,
+        'title_field' => FALSE,
+      ],
+      'third_party_settings' => [
+        'content_translation' => [
+          'translation_sync' => [
+            'file' => 'file',
+            'alt' => '0',
+            'title' => '0',
+          ],
+        ],
+      ],
+    ])->save();
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
   }
 
 }

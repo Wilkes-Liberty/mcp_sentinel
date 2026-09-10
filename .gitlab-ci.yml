@@ -52,9 +52,10 @@ variables:
   # obligation is still met.
   #
   # PostgreSQL draft-continuation coverage is the same pattern: GitHub Actions
-  # runs McpDraftResourceTest against Postgres 16 (node grants + node
-  # reference). This GitLab default lane stays on the template database. Do
-  # not treat a green GitLab phpunit job as PostgreSQL acceptance.
+  # runs McpDraftResourceTest, McpDraftTranslationTest, and
+  # McpDraftParagraphTranslationTest against Postgres 16. This GitLab default
+  # lane stays on the template database. Do not treat a green GitLab phpunit
+  # job as PostgreSQL acceptance.
   #
   # Missing ext-sodium is filed upstream against project/gitlab_templates. Turn
   # this lane back on once the image carries it.

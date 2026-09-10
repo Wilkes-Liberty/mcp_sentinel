@@ -365,6 +365,17 @@ final class McpCompositeRedirect {
    *   TRUE when the routed resource is this paragraph's type and bundle.
    */
   private function isDirectWriteTarget(ContentEntityInterface $entity): bool {
+    $route_name = $this->routeMatch->getRouteName();
+    // Governed /mcp-draft translation routes are not a canonical paragraph
+    // PATCH. They add unpublished translations on a pinned revision and must
+    // not create an English host draft (GitHub #46 still applies to the
+    // canonical JSON:API paragraph resource).
+    if (is_string($route_name) && (str_ends_with($route_name, '.mcp_draft')
+      || str_ends_with($route_name, '.mcp_draft_translations')
+      || str_ends_with($route_name, '.mcp_draft_get')
+      || str_ends_with($route_name, '.mcp_translations'))) {
+      return FALSE;
+    }
     $route = $this->routeMatch->getRouteObject();
     if ($route === NULL) {
       return FALSE;
