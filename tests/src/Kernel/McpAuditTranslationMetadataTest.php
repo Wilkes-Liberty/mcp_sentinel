@@ -112,7 +112,7 @@ final class McpAuditTranslationMetadataTest extends KernelTestBase {
     $node = $this->createEnglishArticle();
     $this->truncateLog();
 
-    $es = $node->addTranslation('es', ['title' => 'Título']);
+    $es = $node->addTranslation('es', ['title' => 'Texto']);
     $es->save();
 
     $meta = $this->lastEntitySaveMetadata();
@@ -131,7 +131,7 @@ final class McpAuditTranslationMetadataTest extends KernelTestBase {
   public function testTranslationContinueOmitsCreate(): void {
     $this->setGovernedCurrentUser();
     $node = $this->createEnglishArticle();
-    $es = $node->addTranslation('es', ['title' => 'Título']);
+    $es = $node->addTranslation('es', ['title' => 'Texto']);
     $es->save();
     $this->truncateLog();
 
@@ -140,7 +140,7 @@ final class McpAuditTranslationMetadataTest extends KernelTestBase {
     /** @var \Drupal\node\NodeInterface $reloaded */
     $reloaded = $storage->load($node->id());
     $again = $reloaded->getTranslation('es');
-    $again->setTitle('Título actualizado');
+    $again->setTitle('Sobreescrito');
     $again->save();
 
     $meta = $this->lastEntitySaveMetadata();
@@ -156,7 +156,7 @@ final class McpAuditTranslationMetadataTest extends KernelTestBase {
   public function testOutdatedFlipAppearsInChanges(): void {
     $this->setGovernedCurrentUser();
     $node = $this->createEnglishArticle();
-    $es = $node->addTranslation('es', ['title' => 'Título']);
+    $es = $node->addTranslation('es', ['title' => 'Texto']);
     $es->save();
 
     $storage = $this->container->get('entity_type.manager')->getStorage('node');
