@@ -28,8 +28,12 @@ used here. Translation writes are explicit:
   only. Omitting the header on a multilingual working revision is 409.
 - `GET .../mcp-translations` reports live and (when the principal can view the
   unpublished revision) working languages, titles, publication, and moderation
-  state. `GET .../mcp-draft` with the same `If-Match` and language header
-  returns that working translation.
+  state, plus core `content_translation_outdated` / `content_translation_source`
+  when those fields exist. `GET .../mcp-draft` with the same `If-Match` and
+  language header returns that working translation.
+- `moderation_state` on a langcode write is allowed only when that field is
+  translatable on the bundle. A shared workflow state is changed by omitting
+  `X-MCP-Draft-Langcode`.
 
 The selected translation is the entity that is validated and saved, so
 content_moderation sees its unpublished draft state and does not promote the

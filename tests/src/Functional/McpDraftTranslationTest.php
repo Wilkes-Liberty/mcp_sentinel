@@ -130,6 +130,15 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame(['en'], array_column($meta['live']['translations'], 'langcode'));
     $this->assertSame($second_vid, $meta['working']['vid']);
     $this->assertEqualsCanonicalizing(['en', 'es'], array_column($meta['working']['translations'], 'langcode'));
+    $working_by_lang = [];
+    foreach ($meta['working']['translations'] as $row) {
+      $working_by_lang[$row['langcode']] = $row;
+    }
+    $this->assertArrayHasKey('outdated', $working_by_lang['es']);
+    $this->assertFalse($working_by_lang['es']['outdated']);
+    if (isset($working_by_lang['es']['source'])) {
+      $this->assertNotSame('', $working_by_lang['es']['source']);
+    }
 
     $read = $this->getHttpClient()->request('GET', $path_draft, [
       'http_errors' => FALSE,

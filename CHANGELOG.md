@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Translation inventory includes core outdated/source (#187).**
+  `GET .../mcp-translations` passes through `content_translation_outdated`
+  and `content_translation_source` when those fields exist on the
+  translation. They are omitted when absent — the payload does not invent
+  `outdated: false`.
+
+### Changed
+- **Untranslatable `moderation_state` cannot be changed on a langcode
+  write (#187).** Translation drafts no longer exempt `moderation_state`
+  from the untranslatable-field guard. When the field is not translatable
+  on the bundle, the write is refused so a Spanish draft cannot move the
+  shared workflow state. Omit `X-MCP-Draft-Langcode` to change a shared
+  state. Per-language moderation still works when the field is
+  translatable.
+
 ## [2.18.0] - 2026-09-11
 
 ### Security
