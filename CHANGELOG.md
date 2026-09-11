@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-09-11
+
 ### Added
 - **Governed audit rows stamp translation identity (#189).**
   `entity_save` and `evidence_precommit` metadata include `langcode` for
