@@ -305,6 +305,10 @@ in.
 > personnel-record reads, permission grants, break-glass logins — depend on
 > Audit Chain directly rather than on this module.
 
+Governed `entity_save` and `evidence_precommit` rows stamp the saved
+translation's `langcode`. Creating a language also sets `translation: create`
+and, when present, `source`. A flip of `content_translation_outdated` appears
+in `changes`.
 
 Every audit row stores a `prev_hash` and a `row_hash` (a hash of the prior row's
 hash concatenated with a canonical JSON of this row's content). The hash is

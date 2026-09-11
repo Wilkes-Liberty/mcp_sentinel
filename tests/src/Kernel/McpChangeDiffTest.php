@@ -164,6 +164,8 @@ final class McpChangeDiffTest extends KernelTestBase {
     $this->assertSame('entity_save', $last['operation']);
 
     $meta = $this->decodeMetadata($last);
+    $this->assertSame($node->language()->getId(), $meta['langcode'] ?? NULL);
+    $this->assertArrayNotHasKey('translation', $meta);
     $this->assertArrayHasKey('changes', $meta, "'changes' key must be present in metadata for an update.");
 
     $changes = $meta['changes'];
