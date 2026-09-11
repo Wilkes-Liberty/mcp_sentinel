@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.18.0] - 2026-09-11
+
 ### Security
 - **Governed writes honour contrib Content Lock (#3622400).** A human
   opening the entity edit form writes contrib `content_lock`, not
