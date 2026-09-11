@@ -347,7 +347,7 @@ function _mcp_sentinel_log_entity_save(EntityInterface $entity, string $operatio
     'id'          => $entity->id(),
     'label'       => $entity->label(),
     'operation'   => $operation,
-  ];
+  ] + $logger->translationMetadata($entity);
 
   // For updates on fieldable entities, compute a redaction-aware change diff
   // and attach it to the metadata under a 'changes' key so the audit row

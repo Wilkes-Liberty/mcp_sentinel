@@ -261,7 +261,7 @@ class McpEvidenceGuard {
         'uuid' => $entity->uuid(),
         'id' => $entity->id(),
       ],
-    ]);
+    ] + $this->auditLogger->translationMetadata($entity));
     // Narrow the check-then-append race: the chain deliberately writes
     // unkeyed rather than dropping a row when its key stops resolving, so a
     // key deleted between vetoReason() and the append would leave an unsigned

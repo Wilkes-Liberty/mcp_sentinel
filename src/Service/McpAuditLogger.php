@@ -7,8 +7,11 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\Core\Entity\TranslatableInterface;
+use Drupal\Core\Language\LanguageInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -395,6 +398,45 @@ class McpAuditLogger {
   }
 
   /**
+   * Translation identity for a governed entity mutation.
+   *
+   * Stamped onto entity_save and evidence_precommit metadata. Keys are
+   * omitted when they do not apply so existing rows keep their shape.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity being saved or precommitted.
+   *
+   * @return array{langcode?: string, translation?: string, source?: string}
+   *   langcode when the entity is a content entity; translation=create when
+   *   this save adds a language the original did not have; source when
+   *   content_translation_source is a real language (not empty or und).
+   */
+  public function translationMetadata(EntityInterface $entity): array {
+    if (!$entity instanceof ContentEntityInterface) {
+      return [];
+    }
+    $langcode = $entity->language()->getId();
+    $metadata = ['langcode' => $langcode];
+
+    $original = $this->originalOf($entity);
+    if ($original instanceof TranslatableInterface
+      && !$entity->isNew()
+      && !$original->hasTranslation($langcode)
+      && $entity->hasTranslation($langcode)) {
+      $metadata['translation'] = 'create';
+    }
+
+    if ($entity->hasField('content_translation_source')) {
+      $source = $entity->get('content_translation_source')->value;
+      if (is_string($source) && $source !== ''
+        && $source !== LanguageInterface::LANGCODE_NOT_SPECIFIED) {
+        $metadata['source'] = $source;
+      }
+    }
+    return $metadata;
+  }
+
+  /**
    * Computes a redaction-aware change diff for an entity update.
    *
    * Compares each field on $entity against the same field on its original,
@@ -433,6 +475,8 @@ class McpAuditLogger {
 
     // Fields that should never appear in the diff because they carry
     // Drupal-internal state rather than content authored by a governed agent.
+    // content_translation_outdated is editorial (stale vs fresh) and is
+    // recorded when it flips. Source is stamped on the row instead.
     $skip_fields = [
       'vid',
       'revision_timestamp',
@@ -441,7 +485,6 @@ class McpAuditLogger {
       'revision_translation_affected',
       'default_langcode',
       'content_translation_source',
-      'content_translation_outdated',
       'content_translation_uid',
     ];
 

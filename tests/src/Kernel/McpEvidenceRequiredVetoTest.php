@@ -240,12 +240,14 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
     $this->assertSame('req-kernel-1', $meta['request_id']);
     $this->assertSame($node->uuid(), $meta['target']['uuid']);
     $this->assertSame('node', $meta['target']['entity_type']);
+    $this->assertSame($node->language()->getId(), $meta['langcode'] ?? NULL);
 
     // The receipt is the entity_save row, completed with the correlation id.
     $saves = $this->chainRows('entity_save');
     $this->assertCount(1, $saves);
     $evidence = $saves[0]['metadata']['evidence'];
     $this->assertSame($meta['correlation_id'], $evidence['correlation_id']);
+    $this->assertSame($node->language()->getId(), $saves[0]['metadata']['langcode'] ?? NULL);
     $this->assertArrayHasKey('postconditions', $evidence);
     $this->assertSame((string) $node->id(), $evidence['postconditions']['target']['id']);
     $this->assertSame($node->uuid(), $evidence['postconditions']['target']['uuid']);

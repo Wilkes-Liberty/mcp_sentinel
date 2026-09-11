@@ -7,6 +7,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Governed audit rows stamp translation identity (#189).**
+  `entity_save` and `evidence_precommit` metadata include `langcode` for
+  content entities. Adding a language also sets `translation: create` and,
+  when the field exists and is non-empty, `source`.
+  `content_translation_outdated` is recorded in `changes` when it flips
+  instead of being skipped as bookkeeping. Omit-new-keys matches previous
+  rows; sites without `content_translation` keep the prior shape.
+
 - **Translation inventory includes core outdated/source (#187).**
   `GET .../mcp-translations` passes through `content_translation_outdated`
   and `content_translation_source` when those fields exist on the
