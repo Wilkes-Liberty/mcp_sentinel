@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\Core\Field\Entity\BaseFieldOverride;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\file\Entity\File;
@@ -130,6 +131,13 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame(['en'], array_column($meta['live']['translations'], 'langcode'));
     $this->assertSame($second_vid, $meta['working']['vid']);
     $this->assertEqualsCanonicalizing(['en', 'es'], array_column($meta['working']['translations'], 'langcode'));
+    $working_by_lang = [];
+    foreach ($meta['working']['translations'] as $row) {
+      $working_by_lang[$row['langcode']] = $row;
+    }
+    $this->assertArrayHasKey('outdated', $working_by_lang['es']);
+    $this->assertFalse($working_by_lang['es']['outdated']);
+    $this->assertSame('en', $working_by_lang['es']['source']);
 
     $read = $this->getHttpClient()->request('GET', $path_draft, [
       'http_errors' => FALSE,
@@ -160,6 +168,70 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSession()->pageTextNotContains('Artículos actualizados');
     $this->drupalGet('/es/node/' . $node->id());
     $this->assertSession()->pageTextNotContains('Artículos actualizados');
+  }
+
+  /**
+   * Inventory outdated follows the core content_translation flag.
+   */
+  public function testInventoryOutdatedFollowsCoreFlag(): void {
+    [$agent, $node, $live_vid, $path_create, , $path_inventory] = $this->setUpTranslatedPage();
+    $created = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Artículos'], '"' . $live_vid . '"', FALSE, 'es');
+    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $working = $storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $working->getTranslation('es')->set('content_translation_outdated', TRUE);
+    $working->save();
+
+    $inventory = $this->getHttpClient()->request('GET', $path_inventory, [
+      'http_errors' => FALSE,
+      // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
+      'auth' => [$agent->getAccountName(), $agent->passRaw],
+      'headers' => ['Accept' => 'application/vnd.api+json'],
+    ]);
+    $this->assertSame(200, $inventory->getStatusCode(), (string) $inventory->getBody());
+    $es = NULL;
+    foreach (json_decode((string) $inventory->getBody(), TRUE)['meta']['working']['translations'] as $row) {
+      if ($row['langcode'] === 'es') {
+        $es = $row;
+      }
+    }
+    $this->assertNotNull($es);
+    $this->assertTrue($es['outdated']);
+  }
+
+  /**
+   * Shared (untranslatable) moderation_state cannot be moved on a langcode write.
+   */
+  public function testUntranslatableModerationStateRejectedOnLangcodeWrite(): void {
+    [$agent, $node, $live_vid, $path_create, $path_draft] = $this->setUpTranslatedPage();
+    $created = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Artículos'], '"' . $live_vid . '"', FALSE, 'es');
+    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
+    $definition = $this->container->get('entity_field.manager')
+      ->getFieldDefinitions('node', 'page')['moderation_state'];
+    $override = BaseFieldOverride::loadByName('node', 'page', 'moderation_state');
+    if ($override === NULL) {
+      $override = BaseFieldOverride::createFromBaseFieldDefinition($definition, 'page');
+    }
+    $override->setTranslatable(FALSE);
+    $override->save();
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $denied = $this->translationRequest(
+      'PATCH',
+      $path_draft,
+      $agent,
+      $node,
+      ['moderation_state' => 'archived'],
+      '"' . $live_vid . ':' . $working_vid . '"',
+      FALSE,
+      'es',
+    );
+    $this->assertSame(400, $denied->getStatusCode(), (string) $denied->getBody());
+    $this->assertStringContainsString('not translatable', (string) $denied->getBody());
   }
 
   /**

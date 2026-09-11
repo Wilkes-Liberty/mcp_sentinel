@@ -811,8 +811,11 @@ final class McpDraftResource extends EntityResource {
           && !$draft->get($name)->equals($parsed->get($name))) {
           throw new BadRequestHttpException('Shared references cannot be changed on a translation draft.');
         }
-        if (!$definition->isTranslatable() && $name !== 'moderation_state'
+        if (!$definition->isTranslatable()
           && !$draft->get($name)->equals($parsed->get($name))) {
+          if ($name === 'moderation_state') {
+            throw new BadRequestHttpException('moderation_state is not translatable on this bundle; omit langcode to change the shared workflow state.');
+          }
           throw new BadRequestHttpException('Untranslatable fields cannot be changed on a translation draft.');
         }
       }
@@ -847,6 +850,17 @@ final class McpDraftResource extends EntityResource {
       ];
       if ($translation->hasField('moderation_state')) {
         $row['moderation_state'] = $translation->get('moderation_state')->value;
+      }
+      // Core content_translation fields — omit the keys when the field
+      // definition is absent, not when the value is false.
+      if ($translation->hasField('content_translation_outdated')) {
+        $row['outdated'] = (bool) $translation->get('content_translation_outdated')->value;
+      }
+      if ($translation->hasField('content_translation_source')) {
+        $source = $translation->get('content_translation_source')->value;
+        if (is_string($source) && $source !== '') {
+          $row['source'] = $source;
+        }
       }
       $translations[] = $row;
     }
