@@ -814,7 +814,8 @@ final class McpDraftResource extends EntityResource {
         if (!$definition->isTranslatable()
           && !$draft->get($name)->equals($parsed->get($name))) {
           if ($name === 'moderation_state') {
-            throw new BadRequestHttpException('moderation_state is not translatable on this bundle; omit langcode to change the shared workflow state.');
+            throw new BadRequestHttpException('moderation_state is not translatable on this bundle; '
+              . 'omit langcode to change the shared workflow state.');
           }
           throw new BadRequestHttpException('Untranslatable fields cannot be changed on a translation draft.');
         }

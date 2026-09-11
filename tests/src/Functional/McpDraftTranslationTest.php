@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Field\Entity\BaseFieldOverride;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
@@ -181,6 +182,8 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $working_vid = (string) $storage->getLatestRevisionId($node->id());
     $working = $storage->loadRevision($working_vid);
     $this->assertInstanceOf(NodeInterface::class, $working);
+    $working->setNewRevision(FALSE);
+    $working->isDefaultRevision(FALSE);
     $working->getTranslation('es')->set('content_translation_outdated', TRUE);
     $working->save();
 
@@ -202,14 +205,16 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   }
 
   /**
-   * Shared (untranslatable) moderation_state cannot be moved on a langcode write.
+   * Shared (untranslatable) moderation_state cannot move on a langcode write.
    */
   public function testUntranslatableModerationStateRejectedOnLangcodeWrite(): void {
     [$agent, $node, $live_vid, $path_create, $path_draft] = $this->setUpTranslatedPage();
     $created = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Artículos'], '"' . $live_vid . '"', FALSE, 'es');
     $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
-    $definition = $this->container->get('entity_field.manager')
-      ->getFieldDefinitions('node', 'page')['moderation_state'];
+    $definitions = $this->container->get('entity_field.manager')->getBaseFieldDefinitions('node');
+    $this->assertArrayHasKey('moderation_state', $definitions);
+    $definition = $definitions['moderation_state'];
+    $this->assertInstanceOf(BaseFieldDefinition::class, $definition);
     $override = BaseFieldOverride::loadByName('node', 'page', 'moderation_state');
     if ($override === NULL) {
       $override = BaseFieldOverride::createFromBaseFieldDefinition($definition, 'page');
