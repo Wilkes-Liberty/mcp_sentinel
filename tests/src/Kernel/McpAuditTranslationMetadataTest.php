@@ -113,14 +113,15 @@ final class McpAuditTranslationMetadataTest extends KernelTestBase {
     $this->truncateLog();
 
     $es = $node->addTranslation('es', ['title' => 'Texto']);
+    $this->container->get('content_translation.manager')
+      ->getTranslationMetadata($es)
+      ->setSource('en');
     $es->save();
 
     $meta = $this->lastEntitySaveMetadata();
     $this->assertSame('es', $meta['langcode'] ?? NULL);
     $this->assertSame('create', $meta['translation'] ?? NULL);
-    if (isset($meta['source'])) {
-      $this->assertSame('en', $meta['source']);
-    }
+    $this->assertSame('en', $meta['source'] ?? NULL);
   }
 
   /**

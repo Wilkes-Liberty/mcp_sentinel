@@ -11,6 +11,7 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Entity\TranslatableInterface;
+use Drupal\Core\Language\LanguageInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -408,7 +409,7 @@ class McpAuditLogger {
    * @return array{langcode?: string, translation?: string, source?: string}
    *   langcode when the entity is a content entity; translation=create when
    *   this save adds a language the original did not have; source when
-   *   content_translation_source is present and non-empty.
+   *   content_translation_source is a real language (not empty or und).
    */
   public function translationMetadata(EntityInterface $entity): array {
     if (!$entity instanceof ContentEntityInterface) {
@@ -427,7 +428,8 @@ class McpAuditLogger {
 
     if ($entity->hasField('content_translation_source')) {
       $source = $entity->get('content_translation_source')->value;
-      if (is_string($source) && $source !== '') {
+      if (is_string($source) && $source !== ''
+        && $source !== LanguageInterface::LANGCODE_NOT_SPECIFIED) {
         $metadata['source'] = $source;
       }
     }
