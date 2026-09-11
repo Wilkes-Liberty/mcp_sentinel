@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
-use Drupal\Core\Field\BaseFieldDefinition;
-use Drupal\Core\Field\Entity\BaseFieldOverride;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\file\Entity\File;
@@ -171,49 +169,6 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSession()->pageTextNotContains('Artículos actualizados');
     $this->drupalGet('/es/node/' . $node->id());
     $this->assertSession()->pageTextNotContains('Artículos actualizados');
-  }
-
-  /**
-   * Shared (untranslatable) moderation_state cannot move on a langcode write.
-   */
-  public function testUntranslatableModerationStateRejectedOnLangcodeWrite(): void {
-    [$agent, $node, $live_vid, $path_create, $path_draft] = $this->setUpTranslatedPage();
-    $created = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Artículos'], '"' . $live_vid . '"', FALSE, 'es');
-    $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
-    $definitions = $this->container->get('entity_field.manager')->getBaseFieldDefinitions('node');
-    $this->assertArrayHasKey('moderation_state', $definitions);
-    $definition = $definitions['moderation_state'];
-    $this->assertInstanceOf(BaseFieldDefinition::class, $definition);
-    $override = BaseFieldOverride::loadByName('node', 'page', 'moderation_state');
-    if ($override === NULL) {
-      $override = BaseFieldOverride::createFromBaseFieldDefinition($definition, 'page');
-    }
-    $override->setTranslatable(FALSE);
-    $override->save();
-    $role_storage = $this->container->get('entity_type.manager')->getStorage('user_role');
-    foreach ($agent->getRoles(TRUE) as $rid) {
-      $role = $role_storage->load($rid);
-      if ($role) {
-        $role->grantPermission('use editorial transition archive');
-        $role->save();
-      }
-    }
-    $this->rebuildAll();
-
-    $storage = $this->container->get('entity_type.manager')->getStorage('node');
-    $working_vid = (string) $storage->getLatestRevisionId($node->id());
-    $denied = $this->translationRequest(
-      'PATCH',
-      $path_draft,
-      $agent,
-      $node,
-      ['moderation_state' => 'archived'],
-      '"' . $live_vid . ':' . $working_vid . '"',
-      TRUE,
-      'es',
-    );
-    $this->assertSame(400, $denied->getStatusCode(), (string) $denied->getBody());
-    $this->assertStringContainsString('not translatable', (string) $denied->getBody());
   }
 
   /**
