@@ -52,6 +52,17 @@ unchanged. Nested children are translated the same way; the parent ERR field
 is not retargeted. Canonical JSON:API PATCH of a paragraph pinned by a
 published host is still redirected or refused (GitHub #46).
 
+Media items use the node contract on the media resource:
+`POST /jsonapi/media/{bundle}/{uuid}/mcp-draft/translations` with the same
+`If-Match` and `X-MCP-Draft-Langcode` headers creates the translation on a new
+unpublished forward revision; `PATCH .../mcp-draft`, `GET .../mcp-draft`, and
+`GET .../mcp-translations` work the same way. Translatable `name`, caption,
+and image `alt`/`title` are copied onto the translation. The source file
+target must not change: a different file UUID is refused. The live default
+revision — name, alt, status, revision ID, and file reference — is left
+unchanged. A bundle that is not enabled for content translation is refused
+with 400 before any write.
+
 Create the node translation first, then read its working revision and follow
 that revision's paragraph references. ERR can create new child revisions when
 the node creates a forward revision. Do not reuse paragraph revision IDs from

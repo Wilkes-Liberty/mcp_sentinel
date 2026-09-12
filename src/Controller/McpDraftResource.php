@@ -13,6 +13,7 @@ use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Entity\RevisionLogInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\jsonapi\Controller\EntityResource;
@@ -22,8 +23,6 @@ use Drupal\jsonapi\JsonApiResource\ResourceObjectData;
 use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\jsonapi\ResourceResponse;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
-use Drupal\node\NodeInterface;
-use Drupal\node\NodeStorageInterface;
 use Drupal\user\UserInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,7 +31,7 @@ use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
- * Continues an unpublished node draft without replacing its live revision.
+ * Continues an unpublished draft without replacing its live revision.
  *
  * Uses core's JSON:API deserialization, field access, validation and response
  * handling. Only the unsupported revision-write controller step is replaced.
@@ -40,13 +39,23 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  *
  * Translation create/update uses the same revision pointers plus
  * X-MCP-Draft-Langcode so a Spanish draft can sit beside published English.
- * Paragraph field values use the same surface on the pinned paragraph
- * revision; image alt is a translatable node field when the file target is
- * unchanged.
+ * Media items get the node contract: the translation lives on an unpublished
+ * forward revision and the source file target must not change. Paragraph
+ * field values use the same surface on the pinned paragraph revision; image
+ * alt is a translatable field when the file target is unchanged.
  *
  * @phpstan-ignore classExtendsInternalClass.classExtendsInternalClass (Core adapter verified across the supported Drupal matrix.)
  */
 final class McpDraftResource extends EntityResource {
+
+  /**
+   * Entity types whose drafts are unpublished forward revisions.
+   *
+   * Paragraphs are handled separately on the revision their host pins.
+   *
+   * @var list<string>
+   */
+  private const FORWARD_REVISION_ENTITY_TYPES = ['node', 'media'];
 
   /**
    * Header that selects the translation to create, read, or continue.
@@ -147,12 +156,11 @@ final class McpDraftResource extends EntityResource {
     if ($entity->getEntityTypeId() === 'paragraph') {
       return $this->patchParagraphTranslation($resource_type, $entity, $request);
     }
-    $this->assertGovernedNode($entity);
+    $this->assertGovernedForwardRevisionEntity($entity);
     $versions = $this->parseRevisionMatch($request, FALSE);
     $langcode = $this->requestLangcode($request, FALSE);
     $preflight = $this->parsePreflight($request);
-    /** @var \Drupal\node\NodeStorageInterface $storage */
-    $storage = $this->entityTypeManager->getStorage('node');
+    $storage = $this->forwardRevisionStorage($entity);
     $live = $this->assertRevisionPointers(
       $storage->loadUnchanged($entity->id()),
       $storage->getLatestRevisionId($entity->id()),
@@ -165,7 +173,7 @@ final class McpDraftResource extends EntityResource {
     $this->assertTranslationNotDefaultRevisionState($draft);
     // Core's deserialize() docblock says array, but this normalizer returns
     // the content entity. Keep the actual contract explicit here.
-    /** @var \Drupal\node\NodeInterface $parsed */
+    /** @var \Drupal\Core\Entity\ContentEntityInterface $parsed */
     $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
     $data = $this->requestData($request);
     if (($data['id'] ?? NULL) !== $draft->uuid()) {
@@ -195,16 +203,15 @@ final class McpDraftResource extends EntityResource {
     if ($entity->getEntityTypeId() === 'paragraph') {
       return $this->postParagraphTranslation($resource_type, $entity, $request);
     }
-    $this->assertGovernedNode($entity);
+    $this->assertGovernedForwardRevisionEntity($entity);
     $versions = $this->parseRevisionMatch($request, TRUE);
     $langcode = $this->requestLangcode($request, TRUE);
     $this->assertEnabledLanguage($langcode);
     $preflight = $this->parsePreflight($request);
-    /** @var \Drupal\node\NodeStorageInterface $storage */
-    $storage = $this->entityTypeManager->getStorage('node');
+    $storage = $this->forwardRevisionStorage($entity);
     $latest_id = $storage->getLatestRevisionId($entity->id());
     $live = $storage->loadUnchanged($entity->id());
-    if (!$live instanceof NodeInterface) {
+    if (!self::isPublishableContent($live)) {
       throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
     }
     $this->assertCreateRevisionPointers($live, $latest_id, $versions);
@@ -230,7 +237,7 @@ final class McpDraftResource extends EntityResource {
     $this->applyTranslationMetadata($translation, $source->language()->getId());
     // Core's deserialize() docblock says array, but this normalizer returns
     // the content entity. Keep the actual contract explicit here.
-    /** @var \Drupal\node\NodeInterface $parsed */
+    /** @var \Drupal\Core\Entity\ContentEntityInterface $parsed */
     $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
     $data = $this->requestData($request);
     if (($data['id'] ?? NULL) !== $base->uuid()) {
@@ -263,11 +270,10 @@ final class McpDraftResource extends EntityResource {
     if ($entity->getEntityTypeId() === 'paragraph') {
       return $this->getParagraphTranslationInventory($entity, $request);
     }
-    $this->assertGovernedNode($entity);
-    /** @var \Drupal\node\NodeStorageInterface $storage */
-    $storage = $this->entityTypeManager->getStorage('node');
+    $this->assertGovernedForwardRevisionEntity($entity);
+    $storage = $this->forwardRevisionStorage($entity);
     $live = $storage->loadUnchanged($entity->id());
-    if (!$live instanceof NodeInterface) {
+    if (!self::isPublishableContent($live)) {
       throw new ConflictHttpException('The live revision is no longer available.');
     }
     if (!$live->access('view', $this->user)) {
@@ -281,7 +287,7 @@ final class McpDraftResource extends EntityResource {
     ];
     if ((string) $latest_id !== (string) $live->getRevisionId()) {
       $working = $storage->loadRevision($latest_id);
-      if ($working instanceof NodeInterface && $working->access('view', $this->user)) {
+      if ($working instanceof ContentEntityInterface && $working->access('view', $this->user)) {
         $payload['working'] = $this->summarizeRevisionTranslations($working);
       }
     }
@@ -298,11 +304,10 @@ final class McpDraftResource extends EntityResource {
     if ($entity->getEntityTypeId() === 'paragraph') {
       return $this->getParagraphDraftTranslation($resource_type, $entity, $request);
     }
-    $this->assertGovernedNode($entity);
+    $this->assertGovernedForwardRevisionEntity($entity);
     $versions = $this->parseRevisionMatch($request, FALSE);
     $langcode = $this->requestLangcode($request, TRUE);
-    /** @var \Drupal\node\NodeStorageInterface $storage */
-    $storage = $this->entityTypeManager->getStorage('node');
+    $storage = $this->forwardRevisionStorage($entity);
     $this->assertRevisionPointers(
       $storage->loadUnchanged($entity->id()),
       $storage->getLatestRevisionId($entity->id()),
@@ -321,17 +326,51 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Refuses traffic that is not a governed node update.
+   * Refuses traffic that is not a governed node or media update.
    *
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The route entity.
    *
-   * @phpstan-assert NodeInterface $entity
+   * @phpstan-assert ContentEntityInterface&EntityPublishedInterface $entity
    */
-  private function assertGovernedNode(EntityInterface $entity): void {
-    if (!$entity instanceof NodeInterface || !$this->draftPolicy->isGoverned()) {
-      throw new AccessDeniedHttpException('Draft continuation requires a governed node update.');
+  private function assertGovernedForwardRevisionEntity(EntityInterface $entity): void {
+    if (!self::isPublishableContent($entity)
+      || !in_array($entity->getEntityTypeId(), self::FORWARD_REVISION_ENTITY_TYPES, TRUE)
+      || !$this->draftPolicy->isGoverned()) {
+      throw new AccessDeniedHttpException('Draft continuation requires a governed node or media update.');
     }
+  }
+
+  /**
+   * Whether a value is a publishable content entity.
+   *
+   * @param mixed $entity
+   *   The value to check.
+   *
+   * @return bool
+   *   TRUE for a content entity that exposes a published flag.
+   *
+   * @phpstan-assert-if-true ContentEntityInterface&EntityPublishedInterface $entity
+   */
+  private static function isPublishableContent(mixed $entity): bool {
+    return $entity instanceof ContentEntityInterface && $entity instanceof EntityPublishedInterface;
+  }
+
+  /**
+   * Returns revisionable storage for a forward-revision entity type.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The route entity.
+   *
+   * @return \Drupal\Core\Entity\RevisionableStorageInterface
+   *   The entity type's storage.
+   */
+  private function forwardRevisionStorage(EntityInterface $entity): RevisionableStorageInterface {
+    $storage = $this->entityTypeManager->getStorage($entity->getEntityTypeId());
+    if (!$storage instanceof RevisionableStorageInterface) {
+      throw new ConflictHttpException('Draft continuation requires revisionable storage.');
+    }
+    return $storage;
   }
 
   /**
@@ -471,11 +510,11 @@ final class McpDraftResource extends EntityResource {
   /**
    * Saves a new unpublished forward revision and returns the JSON:API resource.
    *
-   * @param \Drupal\node\NodeStorageInterface $storage
-   *   Node storage.
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The route entity, used for the row lock.
-   * @param \Drupal\node\NodeInterface $draft
+   * @param \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface $draft
    *   The translation being saved.
    * @param \Drupal\jsonapi\ResourceType\ResourceType $resource_type
    *   The resource type.
@@ -490,16 +529,22 @@ final class McpDraftResource extends EntityResource {
    * @return \Drupal\jsonapi\ResourceResponse
    *   The saved resource.
    */
-  private function saveForwardRevision(NodeStorageInterface $storage, EntityInterface $entity, NodeInterface $draft, ResourceType $resource_type, Request $request, array $versions, bool $creating_translation = FALSE): ResourceResponse {
+  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, bool $creating_translation = FALSE): ResourceResponse {
     $database = $this->draftDatabase;
     $transaction = $database->startTransaction();
     $langcode = $draft->language()->getId();
     try {
-      // Serialize the save on the node's base row, then re-read both
+      // Serialize the save on the entity's base row, then re-read both
       // revision pointers. Validation already ran outside this lock.
-      $lock_query = $database->select('node', 'n');
-      $lock_query->fields('n', ['nid']);
-      $lock_query->condition('nid', $entity->id());
+      $entity_type = $entity->getEntityType();
+      $base_table = $entity_type->getBaseTable();
+      $id_key = $entity_type->getKey('id');
+      if (!is_string($base_table) || !is_string($id_key)) {
+        throw new ConflictHttpException('Draft continuation requires a base table to lock.');
+      }
+      $lock_query = $database->select($base_table, 'b');
+      $lock_query->fields('b', [$id_key]);
+      $lock_query->condition($id_key, $entity->id());
       $lock_query->forUpdate();
       $lock_query->execute()->fetchField();
       $stored_live = $storage->loadUnchanged($entity->id());
@@ -512,17 +557,19 @@ final class McpDraftResource extends EntityResource {
       }
       if ($creating_translation) {
         $current = $versions[2] === '' ? $stored_live : $storage->loadRevision($latest_id);
-        if ($current instanceof NodeInterface && $current->hasTranslation($langcode)) {
+        if ($current instanceof ContentEntityInterface && $current->hasTranslation($langcode)) {
           throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
         }
       }
       $draft->setNewRevision(TRUE);
       $draft->isDefaultRevision(FALSE);
-      $draft->setRevisionUserId($this->user->id());
-      $draft->setRevisionCreationTime($this->time->getRequestTime());
+      if ($draft instanceof RevisionLogInterface) {
+        $draft->setRevisionUserId($this->user->id());
+        $draft->setRevisionCreationTime($this->time->getRequestTime());
+      }
       $draft->save();
       $stored_live = $storage->loadUnchanged($entity->id());
-      if (!$stored_live instanceof NodeInterface
+      if (!self::isPublishableContent($stored_live)
         || (string) $stored_live->getRevisionId() !== $versions[1]
         || $draft->isPublished() || $draft->isDefaultRevision()) {
         throw new ConflictHttpException('Draft continuation changed the live revision; the save was rolled back.');
@@ -551,14 +598,14 @@ final class McpDraftResource extends EntityResource {
    * @param array<int, string> $versions
    *   Preg-match captures: [1] live id, [2] working id.
    *
-   * @return \Drupal\node\NodeInterface
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
    *   The stored default revision.
    *
    * @throws \Symfony\Component\HttpKernel\Exception\ConflictHttpException
    *   When the stored pointers no longer match the request.
    */
-  private function assertRevisionPointers(?EntityInterface $live, int|string|null $latest_id, array $versions): NodeInterface {
-    if (!$live instanceof NodeInterface
+  private function assertRevisionPointers(?EntityInterface $live, int|string|null $latest_id, array $versions): ContentEntityInterface&EntityPublishedInterface {
+    if (!self::isPublishableContent($live)
       || (string) $live->getRevisionId() !== $versions[1]
       || (string) $latest_id !== $versions[2]
       || $versions[1] === $versions[2]) {
@@ -578,7 +625,7 @@ final class McpDraftResource extends EntityResource {
    *   Live and optional working ids.
    */
   private function assertCreateRevisionPointers(?EntityInterface $live, int|string|null $latest_id, array $versions): void {
-    if (!$live instanceof NodeInterface || (string) $live->getRevisionId() !== $versions[1]) {
+    if (!self::isPublishableContent($live) || (string) $live->getRevisionId() !== $versions[1]) {
       throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
     }
     if ($versions[2] === '') {
@@ -595,24 +642,24 @@ final class McpDraftResource extends EntityResource {
   /**
    * Loads the unpublished forward revision named by the working pointer.
    *
-   * @param \Drupal\node\NodeStorageInterface $storage
-   *   Node storage.
-   * @param \Drupal\node\NodeInterface $entity
-   *   The canonical node from the route.
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The canonical entity from the route.
    * @param string $latest_id
    *   The working revision id already checked against If-Match.
    * @param string|null $langcode
    *   The translation to return, or NULL for single-language drafts.
    *
-   * @return \Drupal\node\NodeInterface
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
    *   The unpublished non-default revision, in the requested language.
    *
    * @throws \Symfony\Component\HttpKernel\Exception\ConflictHttpException
    *   When the named revision is not an unpublished forward draft.
    */
-  private function loadWorkingDraft(NodeStorageInterface $storage, NodeInterface $entity, string $latest_id, ?string $langcode): NodeInterface {
+  private function loadWorkingDraft(RevisionableStorageInterface $storage, ContentEntityInterface $entity, string $latest_id, ?string $langcode): ContentEntityInterface&EntityPublishedInterface {
     $draft = $storage->loadRevision($latest_id);
-    if (!$draft instanceof NodeInterface || $draft->isDefaultRevision()
+    if (!self::isPublishableContent($draft) || $draft->isDefaultRevision()
       || $draft->bundle() !== $entity->bundle()
       || $draft->uuid() !== $entity->uuid()) {
       throw new ConflictHttpException('The target is not an unpublished forward revision.');
@@ -640,24 +687,24 @@ final class McpDraftResource extends EntityResource {
   /**
    * Loads the revision a create-translation write will extend.
    *
-   * @param \Drupal\node\NodeStorageInterface $storage
-   *   Node storage.
-   * @param \Drupal\node\NodeInterface $live
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
+   * @param \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface $live
    *   The live default revision.
    * @param array<int, string> $versions
    *   Live and optional working ids.
    * @param int|string|null $latest_id
    *   The stored latest revision id.
    *
-   * @return \Drupal\node\NodeInterface
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
    *   The live revision or the unpublished working revision.
    */
-  private function loadCreateBase(NodeStorageInterface $storage, NodeInterface $live, array $versions, int|string|null $latest_id): NodeInterface {
+  private function loadCreateBase(RevisionableStorageInterface $storage, ContentEntityInterface&EntityPublishedInterface $live, array $versions, int|string|null $latest_id): ContentEntityInterface&EntityPublishedInterface {
     if ($versions[2] === '') {
       return $live;
     }
     $working = $storage->loadRevision($versions[2]);
-    if (!$working instanceof NodeInterface || $working->isPublished()
+    if (!self::isPublishableContent($working) || $working->isPublished()
       || $working->isDefaultRevision() || $working->uuid() !== $live->uuid()
       || (string) $latest_id !== $versions[2]) {
       throw new ConflictHttpException('The target is not an unpublished forward revision.');
@@ -671,14 +718,14 @@ final class McpDraftResource extends EntityResource {
    * Prevents a save from dropping translations that exist only on the
    * default revision.
    *
-   * @param \Drupal\node\NodeInterface $draft
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
    *   The revision being extended.
-   * @param \Drupal\node\NodeInterface $live
+   * @param \Drupal\Core\Entity\ContentEntityInterface $live
    *   The live default revision.
    *
    * @see https://www.drupal.org/project/drupal/issues/3329066
    */
-  private function mergeDefaultTranslations(NodeInterface $draft, NodeInterface $live): void {
+  private function mergeDefaultTranslations(ContentEntityInterface $draft, ContentEntityInterface $live): void {
     foreach ($live->getTranslationLanguages() as $language) {
       $langcode = $language->getId();
       if ($draft->hasTranslation($langcode)) {
@@ -727,10 +774,10 @@ final class McpDraftResource extends EntityResource {
    * Saving through a published translation would let content_moderation promote
    * the working revision to the live default.
    *
-   * @param \Drupal\node\NodeInterface $draft
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
    *   The translation about to be saved.
    */
-  private function assertTranslationNotDefaultRevisionState(NodeInterface $draft): void {
+  private function assertTranslationNotDefaultRevisionState(ContentEntityInterface $draft): void {
     if (!$draft->hasField('moderation_state')) {
       return;
     }

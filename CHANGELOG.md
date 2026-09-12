@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Governed draft translation for media entities (#3622412).** The
+  draft-translation surface now serves media bundles: `POST
+  .../mcp-draft/translations`, `PATCH`/`GET .../mcp-draft`, and `GET
+  .../mcp-translations` on `/jsonapi/media/{bundle}/{uuid}`. The translation
+  lives on an unpublished forward revision, same as nodes; translatable
+  `name`, caption, and image `alt`/`title` are copied onto it. The live
+  default revision and its file reference stay unchanged, a different file
+  target is refused, and a bundle not enabled for content translation is
+  refused with 400 before any write. The node-only guard, storage lookup, and
+  row lock in the draft controller now derive from the entity type, so the
+  node contract is unchanged.
+
 ## [2.19.0] - 2026-09-11
 
 ### Added

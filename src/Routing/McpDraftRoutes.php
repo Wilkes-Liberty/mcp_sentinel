@@ -8,7 +8,7 @@ use Drupal\Core\Routing\RouteSubscriberBase;
 use Symfony\Component\Routing\RouteCollection;
 
 /**
- * Adds node and paragraph draft routes with canonical JSON:API access.
+ * Adds node, media and paragraph draft routes with canonical JSON:API access.
  */
 final class McpDraftRoutes extends RouteSubscriberBase {
 
@@ -17,7 +17,7 @@ final class McpDraftRoutes extends RouteSubscriberBase {
    *
    * @var list<string>
    */
-  private const DRAFT_ENTITY_TYPES = ['node', 'paragraph'];
+  private const DRAFT_ENTITY_TYPES = ['node', 'media', 'paragraph'];
 
   /**
    * {@inheritdoc}

@@ -1,8 +1,10 @@
 Acquia
+actualizado
 analysable
 analysed
 analysing
 autowires
+Barcos
 behaviour
 behavioural
 bodyless
