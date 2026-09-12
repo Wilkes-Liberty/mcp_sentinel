@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.20.0] - 2026-09-11
+
 ### Added
 - **Governed draft translation for media entities (#3622412).** The
   draft-translation surface now serves media bundles: `POST
