@@ -108,9 +108,10 @@ For iterative JSON:API authoring of existing node drafts, see
 [Governed draft continuation](docs/draft-continuation.md). This endpoint requires
 MCP Sentinel 2.15.0 or later and keeps the live revision unchanged. Translation
 create/read/update (a Spanish unpublished draft beside published English) uses
-the same surface with `X-MCP-Draft-Langcode`. On PostgreSQL, validation runs
-outside the exclusive write transaction so node-reference checks do not depend
-on core #2920527.
+the same surface with `X-MCP-Draft-Langcode`; media items (name, caption,
+image alt) get the same surface on the media resource. On PostgreSQL,
+validation runs outside the exclusive write transaction so node-reference
+checks do not depend on core #2920527.
 
 ```bash
 composer require drupal/mcp_sentinel drupal/mcp_server drupal/simple_oauth
