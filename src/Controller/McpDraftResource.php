@@ -77,6 +77,7 @@ final class McpDraftResource extends EntityResource {
     'content_translation_created',
     'vid',
     'nid',
+    'mid',
     'id',
     'revision_id',
     'uuid',
