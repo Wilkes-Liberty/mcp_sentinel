@@ -103,7 +103,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-php${{ matrix.php }}-composer
@@ -335,7 +335,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-php8.4-composer
@@ -511,7 +511,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-php8.4-composer
@@ -641,7 +641,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-php8.4-composer
@@ -693,7 +693,7 @@ jobs:
           coverage: none
 
       - name: Cache Composer downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.composer/cache
           key: ${{ runner.os }}-php8.3-composer
