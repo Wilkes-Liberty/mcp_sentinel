@@ -4,13 +4,8 @@ governed_roles:
 audit_enabled: true
 audit_log_reads: false
 audit_retention_days: 90
-webhook_enabled: false
-webhook_url: ''
-webhook_secret: ''
-webhook_secret_key: ''
 webhook_endpoints: {  }
 webhook_delivery_retention_days: 30
-allow_internal_webhook_urls: false
 agent_oauth_clients: {  }
 agent_provision_tiers: {  }
 agent_scopes:

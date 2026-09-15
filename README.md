@@ -361,11 +361,13 @@ column is encrypted; the canonical used for hashing is always plaintext.
 ## SIEM streaming
 
 When the *Enable SIEM streaming* checkbox is checked in the Audit Logging
-settings, every successful audit write emits an `info`-level record to the
-dedicated `mcp_sentinel_audit` logger channel. The structured context array
-contains: `operation`, `uid`, `entity_type`, `bundle`, `entity_id`,
-`timestamp`, and `row_hash` (which ties the SIEM record back to the hash-chain
-entry in the database).
+settings, each audit write is also emitted to the `audit_chain` logger channel
+as a structured JSON record (`audit_chain_event`). Route this channel to syslog
+or Monolog to stream events to a SIEM without DB polling. Stored in
+`audit_chain.settings:stream_enabled` — not a local copy. The structured
+context array contains: `operation`, `uid`, `entity_type`, `bundle`,
+`entity_id`, `timestamp`, and `row_hash` (which ties the SIEM record back to
+the hash-chain entry in the database).
 
 To route this channel to a SIEM, enable syslog output via the **core Syslog
 module** (no additional composer packages required):
@@ -375,14 +377,14 @@ module** (no additional composer packages required):
 drush en syslog -y
 ```
 
-With Syslog enabled, all Drupal log channels (including `mcp_sentinel_audit`)
+With Syslog enabled, all Drupal log channels (including `audit_chain`)
 are written to the system log; your log-shipping agent (Filebeat, Fluentd,
 etc.) can then forward them to your SIEM.
 
 For finer-grained control — e.g. writing only the audit channel to a dedicated
 file or sending it to a remote aggregator — use
 [`drupal/monolog`](https://www.drupal.org/project/monolog). Define a handler
-for the `mcp_sentinel_audit` channel in your `monolog.services.yml` and route
+for the `audit_chain` channel in your `monolog.services.yml` and route
 it to syslog, Logstash, or any other Monolog handler.
 
 ## DLP value-pattern redaction (opt-in)
@@ -929,8 +931,7 @@ range (RFC1918 `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `127/8`, `::1`,
 `fc00::/7`, …); such deliveries are marked `failed_ssrf`. For a legitimate
 internal-network or VPN target, check that endpoint's **Allow internal/private
 IP** toggle — this disables the resolved-IP check for that endpoint only; HTTPS
-is still enforced. (The legacy global `allow_internal_webhook_urls` setting is
-deprecated in favour of the per-endpoint toggle.)
+is still enforced.
 
 ### Retention / prune
 
@@ -941,9 +942,9 @@ The delivery log is bounded by `webhook_delivery_retention_days` (default 30,
 ### Migrating from the legacy single webhook
 
 Sites that used the old single `webhook_url`/`webhook_secret_key` settings are
-migrated automatically (`update_10008`) into one `webhook_endpoints` entry. The
-legacy fields remain visible in the form with a deprecation notice for review;
-clear them once the migrated endpoint is verified.
+migrated automatically (`update_10008`) into one `webhook_endpoints` entry.
+Delivery reads `webhook_endpoints` only; leftover legacy keys stay in existing
+site config for review and are not shipped on new installs.
 
 ## Configuration
 

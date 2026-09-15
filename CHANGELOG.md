@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Operator identity for SIEM and webhooks.** Docs and
+  `drush mcp-sentinel:status` now name the live `audit_chain` logger
+  (`audit_chain_event`) and enabled `webhook_endpoints`. The unused
+  `logger.channel.mcp_sentinel_audit` service is removed. The settings form
+  no longer edits leftover `webhook_enabled` / `webhook_url` /
+  `webhook_secret_key` / `allow_internal_webhook_urls`; those keys stay in
+  schema and update hooks `10001`/`10008` for existing sites, and are
+  omitted from new install YAML.
+
 ## [2.20.0] - 2026-09-11
 
 ### Added

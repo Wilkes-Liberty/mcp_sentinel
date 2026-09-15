@@ -164,13 +164,30 @@ final class McpSentinelCommands extends DrushCommands {
       ->countQuery()->execute()->fetchField();
     $lock_count = (int) $this->database->select('mcp_sentinel_content_locks')->countQuery()->execute()->fetchField();
 
+    $enabled_webhook_ids = [];
+    foreach ((array) ($config->get('webhook_endpoints') ?? []) as $endpoint) {
+      if (!empty($endpoint['enabled'])) {
+        $id = trim((string) ($endpoint['id'] ?? ''));
+        $enabled_webhook_ids[] = $id !== '' ? $id : '(unnamed)';
+      }
+    }
+
     $rows = [
       ['MCP access enabled', $bool($config->get('enabled'))],
       ['Audit logging', $bool($config->get('audit_enabled'))],
       ['Log reads', $bool($config->get('audit_log_reads'))],
       ['Audit retention (days)', (string) ((int) $config->get('audit_retention_days'))],
       ['Audit log entries', (string) $audit_count],
-      ['Webhooks enabled', $bool($config->get('webhook_enabled'))],
+      [
+        'Webhook endpoints',
+        $enabled_webhook_ids === []
+          ? '0 enabled'
+          : sprintf(
+            '%d enabled (%s)',
+            count($enabled_webhook_ids),
+            implode(', ', $enabled_webhook_ids),
+          ),
+      ],
       ['Active content locks', (string) $lock_count],
     ];
     $rows[] = ['Governed roles', $list($config->get('governed_roles'))];

@@ -225,52 +225,41 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
-   * Legacy webhook config keys survive a no-edit settings save (#tree fix).
+   * Leftover webhook keys survive a settings save and are not edited.
    *
-   * Regression: when webhooks_legacy lacked #tree => TRUE the nested
-   * getValue(['webhooks_legacy', 'webhook_*']) paths returned NULL and silently
-   * overwrote stored config with FALSE/NULL on every save.
+   * The form no longer ships webhooks_legacy or the global
+   * allow_internal_webhook_urls checkbox, and submit no longer set()s those
+   * keys. Existing-site leftovers must stay put; they are not wiped.
    */
-  public function testLegacyWebhookFieldsRoundTripUnchanged(): void {
-    // Seed the three legacy keys into config directly.
+  public function testLeftoverWebhookKeysSurviveSettingsSave(): void {
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
       ->set('webhook_enabled', TRUE)
       ->set('webhook_url', 'https://legacy.example/hook')
       ->set('webhook_secret_key', '')
+      ->set('allow_internal_webhook_urls', TRUE)
       ->save();
 
     $admin = $this->drupalCreateUser(['administer mcp sentinel']);
     $this->drupalLogin($admin);
     $this->drupalGet('/admin/config/services/mcp-sentinel');
     $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->fieldNotExists('webhooks_legacy[webhook_enabled]');
+    $this->assertSession()->fieldNotExists('webhooks_legacy[webhook_url]');
+    $this->assertSession()->fieldNotExists('webhooks_legacy[webhook_secret_key]');
+    $this->assertSession()->fieldNotExists('webhooks[allow_internal_webhook_urls]');
 
-    // Submit with no edits; legacy config must be preserved byte-for-byte.
     $this->submitForm([], 'Save configuration');
     $this->assertSession()->pageTextContains('The configuration options have been saved.');
 
     $config = \Drupal::config('mcp_sentinel.settings');
     $this->assertTrue((bool) $config->get('webhook_enabled'),
-      'webhook_enabled must remain TRUE after a no-edit save.');
+      'webhook_enabled leftover must remain TRUE after a settings save.');
     $this->assertSame('https://legacy.example/hook', $config->get('webhook_url'),
-      'webhook_url must remain unchanged after a no-edit save.');
+      'webhook_url leftover must remain unchanged after a settings save.');
     $this->assertSame('', (string) ($config->get('webhook_secret_key') ?? ''),
-      'webhook_secret_key must remain unchanged after a no-edit save.');
-  }
-
-  /**
-   * Legacy webhook URL is rejected when it uses http:// instead of https://.
-   */
-  public function testLegacyWebhookUrlMustBeHttps(): void {
-    $admin = $this->drupalCreateUser(['administer mcp sentinel']);
-    $this->drupalLogin($admin);
-    $this->drupalGet('/admin/config/services/mcp-sentinel');
-
-    $this->submitForm([
-      'webhooks_legacy[webhook_enabled]' => 1,
-      'webhooks_legacy[webhook_url]' => 'http://legacy.example/hook',
-    ], 'Save configuration');
-
-    $this->assertSession()->pageTextContains('Webhook URL must use HTTPS.');
+      'webhook_secret_key leftover must remain unchanged after a settings save.');
+    $this->assertTrue((bool) $config->get('allow_internal_webhook_urls'),
+      'allow_internal_webhook_urls leftover must remain unchanged after a settings save.');
   }
 
   /**

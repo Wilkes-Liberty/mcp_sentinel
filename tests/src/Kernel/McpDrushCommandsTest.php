@@ -347,7 +347,6 @@ final class McpDrushCommandsTest extends KernelTestBase {
   public function testWebhookReplaySucceedsForValidDelivery(): void {
     // Configure a webhook endpoint so the replay can find its config.
     $this->config('mcp_sentinel.settings')
-      ->set('webhook_enabled', TRUE)
       ->set('webhook_endpoints', [
         [
           'id' => 'ep1',
@@ -502,6 +501,32 @@ final class McpDrushCommandsTest extends KernelTestBase {
       'status data: mcp_sentinel.settings:enabled must be readable.');
     $this->assertNotNull($config->get('audit_enabled'),
       'status data: mcp_sentinel.settings:audit_enabled must be readable.');
+
+    // Status reports enabled webhook_endpoints, not leftover webhook_enabled.
+    $this->config('mcp_sentinel.settings')
+      ->set('webhook_enabled', FALSE)
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'siem',
+          'enabled' => TRUE,
+        ],
+        [
+          'id' => 'disabled',
+          'enabled' => FALSE,
+        ],
+      ])
+      ->save();
+    $endpoints = (array) $this->container->get('config.factory')
+      ->get('mcp_sentinel.settings')
+      ->get('webhook_endpoints');
+    $enabled_ids = [];
+    foreach ($endpoints as $endpoint) {
+      if (!empty($endpoint['enabled'])) {
+        $enabled_ids[] = (string) ($endpoint['id'] ?? '');
+      }
+    }
+    $this->assertSame(['siem'], $enabled_ids,
+      'status data: enabled webhook_endpoints ids ignore leftover webhook_enabled.');
 
     // The base-only kernel fixture is intentionally not production-ready:
     // status must consume this same typed result rather than inventing a
