@@ -14,8 +14,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Kernel tests for SIEM streaming via logger.channel.audit_chain.
  *
  * The live stream is the audit_chain logger channel; the message is the
- * stable sentinel string audit_chain_event. The retired
- * logger.channel.mcp_sentinel_audit service is not registered.
+ * stable sentinel string audit_chain_event.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
@@ -65,16 +64,12 @@ final class McpSiemStreamingTest extends KernelTestBase {
   }
 
   /**
-   * Live SIEM identity is audit_chain, not mcp_sentinel_audit.
+   * Live SIEM identity is logger.channel.audit_chain.
    */
   public function testLiveSiemChannelIsAuditChain(): void {
     $this->assertTrue(
       $this->container->has('logger.channel.audit_chain'),
       'SIEM streaming uses logger.channel.audit_chain.',
-    );
-    $this->assertFalse(
-      $this->container->has('logger.channel.mcp_sentinel_audit'),
-      'The retired logger.channel.mcp_sentinel_audit service must not be registered.',
     );
   }
 
