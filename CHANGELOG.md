@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.21.0] - 2026-09-15
+
 ### Changed
 - **Operator identity for SIEM and webhooks.** Docs and
   `drush mcp-sentinel:status` now name the live `audit_chain` logger
@@ -2215,7 +2217,11 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.17.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.0...1.x
+[2.21.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.20.0...2.21.0
+[2.20.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.19.0...2.20.0
+[2.19.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.18.0...2.19.0
+[2.18.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.17.0...2.18.0
 [2.17.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.16.0...2.17.0
 [2.16.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.3...2.16.0
 [2.15.3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.15.2...2.15.3
