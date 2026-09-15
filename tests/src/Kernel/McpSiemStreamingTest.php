@@ -11,7 +11,10 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * Kernel tests for SIEM streaming via the mcp_sentinel_audit logger channel.
+ * Kernel tests for SIEM streaming via logger.channel.audit_chain.
+ *
+ * The live stream is the audit_chain logger channel; the message is the
+ * stable sentinel string audit_chain_event.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
@@ -61,6 +64,16 @@ final class McpSiemStreamingTest extends KernelTestBase {
   }
 
   /**
+   * Live SIEM identity is logger.channel.audit_chain.
+   */
+  public function testLiveSiemChannelIsAuditChain(): void {
+    $this->assertTrue(
+      $this->container->has('logger.channel.audit_chain'),
+      'SIEM streaming uses logger.channel.audit_chain.',
+    );
+  }
+
+  /**
    * Asserts that no SIEM record is emitted when siem_enabled is FALSE.
    *
    * @covers ::log
@@ -87,7 +100,7 @@ final class McpSiemStreamingTest extends KernelTestBase {
    *
    * Verifies:
    * - Exactly one info-level record.
-   * - Message is the stable sentinel string 'mcp_sentinel_audit_event'.
+   * - Message is the stable sentinel string 'audit_chain_event'.
    * - Context contains operation, uid, entity_type, bundle, entity_id,
    *   timestamp, and row_hash.
    * - row_hash is a non-empty string (populated by the hash chain).

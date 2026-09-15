@@ -80,8 +80,12 @@ final class McpInstallVerifierShippedConfigTest extends UnitTestCase {
     ));
     $this->assertTrue((bool) $settings['require_finite_read_budgets']);
     $this->assertFalse((bool) $settings['governed_role_fallback']);
-    $this->assertSame('', (string) $settings['webhook_secret']);
-    $this->assertSame('', (string) $settings['webhook_url']);
+    $this->assertArrayNotHasKey('webhook_secret', $settings);
+    $this->assertArrayNotHasKey('webhook_url', $settings);
+    $this->assertArrayNotHasKey('webhook_enabled', $settings);
+    $this->assertArrayNotHasKey('webhook_secret_key', $settings);
+    $this->assertArrayNotHasKey('allow_internal_webhook_urls', $settings);
+    $this->assertSame([], $settings['webhook_endpoints'] ?? []);
     $this->assertNotEmpty($settings['classification_labels']);
   }
 

@@ -714,12 +714,6 @@ class McpSettingsForm extends ConfigFormBase {
       '#min'           => 0,
       '#max'           => 3650,
     ];
-    $form['webhooks']['allow_internal_webhook_urls'] = [
-      '#type'          => 'checkbox',
-      '#title'         => $this->t('Allow internal/private endpoint URLs — global (deprecated)'),
-      '#description'   => $this->t('Deprecated. Use the per-endpoint <em>Allow internal/VPN destination</em> checkbox instead, which scopes the opt-out to a single endpoint. This global flag is no longer read by the worker.'),
-      '#default_value' => $config->get('allow_internal_webhook_urls') ?? FALSE,
-    ];
 
     // Key options for the per-endpoint signing-secret select.
     /** @var \Drupal\key\KeyInterface[] $keys */
@@ -819,36 +813,6 @@ class McpSettingsForm extends ConfigFormBase {
         'callback' => '::listEditorAjax',
         'wrapper' => 'mcp-webhook-endpoints-wrapper',
       ],
-    ];
-
-    // Legacy single-endpoint fields (D4.5: kept visible with a migration
-    // notice; webhook_endpoints above is the going-forward mechanism).
-    $form['webhooks_legacy'] = [
-      '#type' => 'details',
-      '#title' => $this->t('Legacy single webhook (deprecated)'),
-      '#open' => (bool) $config->get('webhook_url'),
-      '#description' => $this->t('These legacy settings are superseded by the endpoints above and are no longer used for delivery. They are retained for review; configure delivery via <em>Reliable webhooks</em> instead, then clear these.'),
-      '#tree' => TRUE,
-      '#group' => 'tabs',
-    ];
-    $form['webhooks_legacy']['webhook_enabled'] = [
-      '#type'          => 'checkbox',
-      '#title'         => $this->t('Enable legacy webhook notifications'),
-      '#default_value' => $config->get('webhook_enabled') ?? FALSE,
-    ];
-    $form['webhooks_legacy']['webhook_url'] = [
-      '#type'          => 'url',
-      '#title'         => $this->t('Legacy webhook URL (HTTPS required)'),
-      '#default_value' => $config->get('webhook_url') ?? '',
-    ];
-    $form['webhooks_legacy']['webhook_secret_key'] = [
-      '#type'          => 'key_select',
-      '#title'         => $this->t('Legacy webhook signing secret (HMAC-SHA256)'),
-      '#description'   => $this->t('Select a <a href=":url">Key</a> holding the signing secret.', [
-        ':url' => '/admin/config/system/keys',
-      ]),
-      '#default_value' => $config->get('webhook_secret_key') ?? '',
-      '#empty_option'  => $this->t('- None -'),
     ];
 
     $form['broadcast'] = [
@@ -1085,11 +1049,6 @@ class McpSettingsForm extends ConfigFormBase {
           ['@n' => $i + 1, '@key' => $secret],
         ));
       }
-    }
-
-    $legacy_url = $form_state->getValue(['webhooks_legacy', 'webhook_url']);
-    if ($form_state->getValue(['webhooks_legacy', 'webhook_enabled']) && $legacy_url && !str_starts_with($legacy_url, 'https://')) {
-      $form_state->setErrorByName('webhooks_legacy][webhook_url', $this->t('Webhook URL must use HTTPS.'));
     }
   }
 
@@ -1333,10 +1292,6 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('webhook_delivery_retention_days', (int) $form_state->getValue([
         'webhooks', 'webhook_delivery_retention_days',
       ]))
-      ->set('allow_internal_webhook_urls', (bool) $form_state->getValue(['webhooks', 'allow_internal_webhook_urls']))
-      ->set('webhook_enabled', (bool) $form_state->getValue(['webhooks_legacy', 'webhook_enabled']))
-      ->set('webhook_url', $form_state->getValue(['webhooks_legacy', 'webhook_url']))
-      ->set('webhook_secret_key', $form_state->getValue(['webhooks_legacy', 'webhook_secret_key']))
       ->set('dashboard_broadcast', [
         'message' => trim((string) $form_state->getValue('dashboard_broadcast_message')),
         'severity' => (string) $form_state->getValue('dashboard_broadcast_severity'),
