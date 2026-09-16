@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\user\Entity\Role;
@@ -25,6 +26,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -60,7 +63,7 @@ final class McpRoleAssertionsSurfacingTest extends KernelTestBase {
     // The runtime requirements hook renders a settings route; route URL
     // generation consults the alias repository in this isolated kernel.
     $this->installEntitySchema('path_alias');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installConfig(['audit_chain', 'mcp_sentinel', 'user']);
   }
 

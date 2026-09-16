@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Core\Form\FormState;
 use Drupal\Core\Render\Element;
@@ -29,6 +30,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[RunTestsInSeparateProcesses]
 final class McpClassificationFormsTest extends KernelTestBase {
 
+  use McpAuditSchemaTestTrait;
+
   /**
    * {@inheritdoc}
    */
@@ -47,7 +50,7 @@ final class McpClassificationFormsTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installEntitySchema('path_alias');
     $this->installSchema('system', ['sequences']);
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks', 'mcp_sentinel_webhook_delivery']);
     $this->installConfig(['mcp_sentinel', 'user']);
     // The shipped governed_roles default names mcp_api; the checkboxes element

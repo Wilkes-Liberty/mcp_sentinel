@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Access\AccessResultForbidden;
@@ -47,6 +48,8 @@ use Symfony\Component\HttpFoundation\Request;
 #[RunTestsInSeparateProcesses]
 final class McpFieldAccessRedactionTest extends KernelTestBase {
 
+  use McpAuditSchemaTestTrait;
+
   use UserCreationTrait;
 
   /**
@@ -87,7 +90,7 @@ final class McpFieldAccessRedactionTest extends KernelTestBase {
 
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', [
       'mcp_sentinel_content_locks',
     ]);

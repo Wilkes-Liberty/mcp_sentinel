@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigCrudEvent;
 use Drupal\Core\Config\ConfigException;
@@ -29,6 +30,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpBreakGlassConductTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -66,7 +69,7 @@ final class McpBreakGlassConductTest extends KernelTestBase {
     $this->installEntitySchema('oauth2_token');
     $this->installEntitySchema('mcp_approval_request');
     $this->installEntitySchema('mcp_admin_grant');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installSchema('mcp_sentinel_approval', ['mcp_sentinel_manifest_used']);
     $this->installConfig(['mcp_sentinel', 'mcp_sentinel_approval']);

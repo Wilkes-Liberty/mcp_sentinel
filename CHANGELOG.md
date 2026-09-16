@@ -8,6 +8,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Install and seed the Audit Chain 1.7.2 mutex in shared kernel fixtures,
+  including audit-store recovery tests (#201).
+
 - Keep request and page flood-event names within Drupal's 64-byte limit for
   long policy, principal and tool identifiers. Existing valid names stay
   unchanged; database-backed legacy counters retain their timestamps and

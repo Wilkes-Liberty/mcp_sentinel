@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
@@ -32,6 +33,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpRoleAssertionsTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -71,7 +74,7 @@ final class McpRoleAssertionsTest extends KernelTestBase {
     $this->installEntitySchema('user');
     // Role saves are watched by McpConfigSaveSubscriber::onRoleSave(), which
     // records a violation in the audit log — so these tests need the table.
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installConfig(['audit_chain', 'mcp_sentinel', 'user']);
     $this->assertions = $this->container->get('mcp_sentinel.role_assertions');
   }
