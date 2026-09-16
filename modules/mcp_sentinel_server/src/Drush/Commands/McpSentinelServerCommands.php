@@ -54,6 +54,8 @@ final class McpSentinelServerCommands extends DrushCommands {
     'mcp_sentinel_media_create',
     'mcp_sentinel_workflow_transition',
     'mcp_sentinel_bulk_operations',
+    // Calls still require the resolved policy's explicit raw SQL opt-in.
+    'mcp_sentinel_sql_query',
     // Config tools derive to the config scope family (config_get/list =>
     // mcp_config_read, config_set => mcp_config), so a content-tier token
     // (mcp_read/mcp_write only) can never read or write configuration.

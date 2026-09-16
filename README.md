@@ -1227,3 +1227,27 @@ window in maintenance before switching code. Do not clear counters during an
 active traffic window. This does not affect the standard database backend.
 
 Upstream: [bounded flood event names](https://www.drupal.org/project/mcp_sentinel/issues/3623827).
+
+### Governed SELECT through Tool API
+
+`mcp_sentinel_sql_query` accepts one `query` string: a single SELECT statement,
+at most 8192 bytes. Register it with `mcp-sentinel:tools-register` (the server
+integration submodule) or site configuration, require authentication and
+`mcp_read`, and grant the machine account `access mcp sentinel context`.
+The account's active Sentinel profile must explicitly enable `allow_raw_sql`.
+The shipped default keeps this capability off.
+
+The action and `mcp-sentinel:sql-query` use the same SELECT guard, table and field
+policy, classification, DLP, budgets and audit path. Results contain `rows`,
+`row_count`, `truncated` and the resolved `profile` ID. Row limits also constrain
+the database result; byte-budget overflow fails without returning partial rows.
+A failed query or audit append remains a failure. Tool errors do not echo SQL,
+record values or driver messages.
+
+Raw SQL requires positive, finite request, result and response budgets even if
+an operator has enabled the general non-production unlimited-budget override.
+The CLI retains `--profile` for local operators; the Tool API action has no
+profile input and cannot select a more permissive policy. There is no fallback
+to `drush sql:query` or an ungoverned database connection.
+
+Upstream: [module-owned governed SELECT](https://www.drupal.org/project/mcp_sentinel/issues/3623815).

@@ -73,6 +73,7 @@ final class McpServerRegistrationTest extends KernelTestBase {
     'mcp_sentinel_media_create',
     'mcp_sentinel_workflow_transition',
     'mcp_sentinel_bulk_operations',
+    'mcp_sentinel_sql_query',
   ];
 
   /**

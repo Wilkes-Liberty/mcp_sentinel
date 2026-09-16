@@ -5,8 +5,13 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\user\Entity\Role;
+use Drupal\user\Entity\User;
+use Drupal\tool\Tool\ToolInterface;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelSqlCommands;
+use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drush\Log\DrushLoggerManager;
@@ -88,14 +93,18 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     Node::create(['type' => 'page', 'title' => 'First'])->save();
     Node::create(['type' => 'page', 'title' => 'Second'])->save();
 
+    $this->config('mcp_sentinel.settings')->set('dlp_enabled', TRUE)->save();
+    // Kernel bootstrap can instantiate DLP before module config is installed.
+    $this->container->set('mcp_sentinel.dlp', McpDlp::createFromConfig(
+      $this->container->get('config.factory'),
+      $this->container->get('logger.factory')->get('mcp_sentinel'),
+    ));
+
     $this->commands = new McpSentinelSqlCommands(
       $this->container->get('config.factory'),
       $this->container->get('entity_type.manager'),
       $this->container->get('mcp_sentinel.policy_resolver'),
-      $this->container->get('mcp_sentinel.raw_sql_guard'),
-      $this->container->get('mcp_sentinel.exfiltration_guard'),
-      $this->container->get('mcp_sentinel.audit_logger'),
-      $this->container->get('database'),
+      $this->container->get('mcp_sentinel.governed_sql'),
     );
 
     $logger = new DrushLoggerManager();
@@ -116,6 +125,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $this->config('mcp_sentinel.mcp_policy_profile.default')
       ->set('allow_raw_sql', $allowed)
       ->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
   }
 
   /**
@@ -305,6 +315,154 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $result = $this->container->get('mcp_sentinel.audit_logger')->verifyChain();
     $this->assertTrue($result['ok']);
     $this->assertNull($result['broken_at']);
+  }
+
+  /**
+   * Direct Tool execution requires the account policy and fails for anonymous.
+   */
+  public function testToolUsesAccountPolicyAndRefusesAnonymous(): void {
+    $this->setRawSqlCapability(TRUE);
+    $tool = $this->governedTool('SELECT nid, title FROM node_field_data ORDER BY nid');
+    self::assertSame(['query'], array_keys($tool->getInputDefinitions()));
+    self::assertTrue($tool->access());
+    $tool->execute();
+    self::assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
+    $data = $tool->getResult()->getContextValues();
+    self::assertSame('default', $data['profile']);
+    self::assertCount(2, $data['rows']);
+    $this->container->get('current_user')->setAccount(new AnonymousUserSession());
+    self::assertFalse($tool->access());
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    self::assertEmpty($tool->getResult()->getContextValues());
+  }
+
+  /**
+   * The raw SQL opt-in and audit readiness also guard direct PHP calls.
+   */
+  public function testToolRequiresCapabilityAndAuditing(): void {
+    $tool = $this->governedTool('SELECT nid FROM node_field_data');
+    self::assertFalse($tool->access());
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    $this->setRawSqlCapability(TRUE);
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    self::assertFalse($tool->access());
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    self::assertEmpty($tool->getResult()->getContextValues());
+  }
+
+  /**
+   * Byte-budget failures never return rows through either adapter.
+   */
+  public function testResponseBudgetAppliesToBothAdapters(): void {
+    $this->setRawSqlCapability(TRUE);
+    $this->config('mcp_sentinel.mcp_policy_profile.default')->set('response_size_cap', 1)->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery('SELECT title FROM node_field_data'));
+    self::assertSame('', $this->output->fetch());
+    $tool = $this->governedTool('SELECT title FROM node_field_data');
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    self::assertEmpty($tool->getResult()->getContextValues());
+  }
+
+  /**
+   * Guard refusal has no SQL or data in the tool's error message.
+   */
+  public function testToolFailureDoesNotEchoTheStatement(): void {
+    $this->setRawSqlCapability(TRUE);
+    $tool = $this->governedTool('SELECT unknown_private_field FROM node_field_data');
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    self::assertStringNotContainsString('unknown_private_field', (string) $tool->getResultMessage());
+    self::assertEmpty($tool->getResult()->getContextValues());
+  }
+
+  /**
+   * Missing audit storage cannot turn a completed SELECT into a success.
+   */
+  public function testAuditPersistenceFailureReturnsNoRows(): void {
+    $this->setRawSqlCapability(TRUE);
+    $tool = $this->governedTool('SELECT nid FROM node_field_data');
+    $this->container->get('database')->schema()->dropTable('audit_chain_log');
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    self::assertEmpty($tool->getResult()->getContextValues());
+    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery('SELECT nid FROM node_field_data'));
+    self::assertSame('', $this->output->fetch());
+  }
+
+  /**
+   * Both adapters apply the same DLP projection to SQL rows.
+   */
+  public function testDlpAppliesToBothAdapters(): void {
+    $this->setRawSqlCapability(TRUE);
+    Node::create(['type' => 'page', 'title' => 'fixture@example.invalid'])->save();
+    $query = 'SELECT title FROM node_field_data ORDER BY nid';
+    self::assertSame(McpSentinelSqlCommands::EXIT_SUCCESS, $this->commands->sqlQuery($query));
+    $commandResult = json_decode($this->output->fetch(), TRUE, 512, JSON_THROW_ON_ERROR);
+    self::assertSame('[REDACTED]', $commandResult['rows'][2]['title']);
+    $tool = $this->governedTool($query);
+    $tool->execute();
+    self::assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
+    self::assertSame($commandResult, $tool->getResult()->getContextValues());
+  }
+
+  /**
+   * A real driver error stays a failure without exposing SQL or record values.
+   */
+  public function testDatabaseFailureReturnsNoRows(): void {
+    $this->setRawSqlCapability(TRUE);
+    $tool = $this->governedTool('SELECT nid FROM node_field_data');
+    $this->container->get('database')->schema()->dropTable('node_field_data');
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus());
+    self::assertStringNotContainsString('node_field_data', (string) $tool->getResultMessage());
+    self::assertEmpty($tool->getResult()->getContextValues());
+    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery('SELECT nid FROM node_field_data'));
+    self::assertSame('', $this->output->fetch());
+  }
+
+  /**
+   * Oversized SQL is refused without retaining its body in audit metadata.
+   */
+  public function testOversizedStatementIsNotRetained(): void {
+    $this->setRawSqlCapability(TRUE);
+    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery(str_repeat('x', 8193)));
+    self::assertSame('', $this->output->fetch());
+    $rows = $this->auditRows();
+    self::assertSame('raw_sql_denied', $rows[0]['operation']);
+    self::assertSame('', $rows[0]['metadata']['statement']);
+  }
+
+  /**
+   * Raw SQL never inherits an unlimited non-production request budget.
+   */
+  public function testRawSqlRequiresFiniteRequestBudget(): void {
+    $this->setRawSqlCapability(TRUE);
+    $this->config('mcp_sentinel.settings')->set('require_finite_read_budgets', FALSE)->save();
+    $this->config('mcp_sentinel.mcp_policy_profile.default')->set('rate_limit_requests', 0)->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery('SELECT nid FROM node_field_data'));
+    self::assertSame('', $this->output->fetch());
+    self::assertSame('raw_sql_denied', $this->auditRows()[0]['operation']);
+  }
+
+  /**
+   * Creates a governed machine account and a direct Tool API invocation.
+   */
+  private function governedTool(string $query): ToolInterface {
+    $role = Role::load('mcp_api') ?? Role::create(['id' => 'mcp_api', 'label' => 'MCP API']);
+    $role->grantPermission('access mcp sentinel context')->save();
+    $user = User::create(['uid' => 2, 'name' => 'sql_test', 'status' => 1, 'roles' => ['mcp_api']]);
+    $user->save();
+    $this->config('mcp_sentinel.settings')->set('governed_role_fallback', TRUE)->save();
+    $this->container->get('current_user')->setAccount($user);
+    $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_sql_query');
+    $tool->setInputValue('query', $query);
+    return $tool;
   }
 
 }
