@@ -22,6 +22,16 @@ final class McpWebhookQueueTest extends KernelTestBase {
 
   /**
    * {@inheritdoc}
+   *
+   * Update 10008 still writes leftover webhook keys so 10022 can clear them.
+   * Those keys are off the schema on purpose.
+   */
+  protected static $configSchemaCheckerExclusions = [
+    'mcp_sentinel.settings',
+  ];
+
+  /**
+   * {@inheritdoc}
    */
   protected static $modules = [
     'system',
@@ -361,6 +371,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
     require_once \Drupal::root() . '/' . \Drupal::service('extension.list.module')
       ->getPath('mcp_sentinel') . '/mcp_sentinel.install';
     mcp_sentinel_update_10008();
+    mcp_sentinel_update_10022();
 
     $reloaded = \Drupal::configFactory()->get('mcp_sentinel.settings');
     $endpoints = $reloaded->get('webhook_endpoints');
@@ -374,8 +385,10 @@ final class McpWebhookQueueTest extends KernelTestBase {
     // Fix 5: migrated endpoint must have allow_internal=FALSE by default.
     $this->assertFalse($endpoints[0]['allow_internal'],
       'Migrated endpoint must default allow_internal to FALSE.');
-    // Legacy keys are retained.
-    $this->assertSame('https://legacy.example.com/hook', $reloaded->get('webhook_url'));
+    // Legacy keys are gone after 10022.
+    $this->assertNull($reloaded->get('webhook_url'));
+    $this->assertNull($reloaded->get('webhook_enabled'));
+    $this->assertNull($reloaded->get('webhook_secret_key'));
   }
 
   /**

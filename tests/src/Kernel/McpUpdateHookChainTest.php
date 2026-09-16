@@ -33,6 +33,16 @@ final class McpUpdateHookChainTest extends KernelTestBase {
 
   /**
    * {@inheritdoc}
+   *
+   * Historical hooks 10001/10008 still write leftover webhook keys so 10022
+   * can clear them. Those keys are off the schema on purpose.
+   */
+  protected static $configSchemaCheckerExclusions = [
+    'mcp_sentinel.settings',
+  ];
+
+  /**
+   * {@inheritdoc}
    */
   protected static $modules = [
     'system',
@@ -708,6 +718,79 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $this->assertSame(['open', 'secret'], $this->config('mcp_sentinel.settings')->get('classification_labels'));
     $this->assertSame([], $this->config('mcp_sentinel.settings')->get('classification_map'),
       'An operator-emptied map is a decision, not a gap to re-seed.');
+  }
+
+  /**
+   * Update 10022 clears leftover single-URL webhook keys after 10008.
+   *
+   * The config API rejects them now that they are off the schema — that is
+   * the point of removing them — so the only way to simulate a site that
+   * already ran 10008 is to put the raw data back the way active config
+   * still holds it.
+   */
+  public function testUpdate10022ClearsLeftoverWebhookKeys(): void {
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.settings') ?: [];
+    $data['webhook_enabled'] = TRUE;
+    $data['webhook_url'] = 'https://legacy.example.com/hook';
+    $data['webhook_secret'] = 'stale';
+    $data['webhook_secret_key'] = 'stale_key';
+    $data['allow_internal_webhook_urls'] = TRUE;
+    $data['webhook_endpoints'] = [
+      [
+        'id' => 'default',
+        'label' => 'Default',
+        'url' => 'https://legacy.example.com/hook',
+        'secret_key' => 'stale_key',
+        'events' => [],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+    ];
+    $storage->write('mcp_sentinel.settings', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+
+    $message = mcp_sentinel_update_10022();
+    $this->assertStringContainsString('webhook_enabled', $message);
+    $this->assertStringContainsString('webhook_url', $message);
+    $this->assertStringContainsString('webhook_secret', $message);
+    $this->assertStringContainsString('webhook_secret_key', $message);
+    $this->assertStringContainsString('allow_internal_webhook_urls', $message);
+
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $settings = $this->config('mcp_sentinel.settings');
+    $this->assertNull($settings->get('webhook_enabled'));
+    $this->assertNull($settings->get('webhook_url'));
+    $this->assertNull($settings->get('webhook_secret'));
+    $this->assertNull($settings->get('webhook_secret_key'));
+    $this->assertNull($settings->get('allow_internal_webhook_urls'));
+    $this->assertSame('https://legacy.example.com/hook', $settings->get('webhook_endpoints')[0]['url']);
+
+    $again = mcp_sentinel_update_10022();
+    $this->assertStringContainsString('No leftover', $again);
+  }
+
+  /**
+   * Update 10022 does not wipe webhook_url when it is the only copy.
+   */
+  public function testUpdate10022DoesNotClearSoleLegacyUrl(): void {
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.settings') ?: [];
+    $data['webhook_enabled'] = TRUE;
+    $data['webhook_url'] = 'https://legacy.example.com/hook';
+    $data['webhook_secret_key'] = 'stale_key';
+    $data['webhook_endpoints'] = [];
+    $storage->write('mcp_sentinel.settings', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+
+    $message = mcp_sentinel_update_10022();
+    $this->assertStringContainsString('10008', $message);
+
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $settings = $this->config('mcp_sentinel.settings');
+    $this->assertSame('https://legacy.example.com/hook', $settings->get('webhook_url'));
+    $this->assertTrue((bool) $settings->get('webhook_enabled'));
+    $this->assertSame('stale_key', $settings->get('webhook_secret_key'));
   }
 
   /**

@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+- **Leftover single-URL webhook keys.** Update `10022` clears
+  `webhook_enabled`, `webhook_url`, `webhook_secret`, `webhook_secret_key`,
+  and `allow_internal_webhook_urls` from `mcp_sentinel.settings` after
+  `webhook_endpoints` is populated or the legacy URL is empty. Those keys
+  are gone from the config schema. Delivery still reads only
+  `webhook_endpoints`. Update hooks `10001` and `10008` stay as the
+  upgrade path for sites that have not reached them yet.
+
 ## [2.21.0] - 2026-09-15
 
 ### Changed

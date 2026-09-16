@@ -1168,3 +1168,43 @@ function mcp_sentinel_update_10021(): string {
   return $settingsPart . " Added egress_ceilings (empty - no ceiling) to {$count} policy profile(s). "
     . 'Set per-surface ceilings on a profile to enforce classification-aware egress (#3616540).';
 }
+
+/**
+ * Clear leftover single-URL webhook keys after webhook_endpoints took over.
+ *
+ * Update 10008 copied webhook_url / webhook_secret_key / webhook_enabled into
+ * webhook_endpoints and left the originals for review. Delivery has not read
+ * them since. Sites that already ran 10008 (or never had a legacy URL) still
+ * export the silent no-ops. Clear them once endpoints are populated or the
+ * legacy URL is empty so a leftover copy cannot look live. Do not clear when
+ * webhook_url is the only copy — 10008 copies it into webhook_endpoints.
+ */
+function mcp_sentinel_update_10022(): string {
+  $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $endpoints = $settings->get('webhook_endpoints');
+  $legacy_url = (string) ($settings->get('webhook_url') ?? '');
+  $endpoints_populated = is_array($endpoints) && $endpoints !== [];
+
+  if (!$endpoints_populated && $legacy_url !== '') {
+    return 'Legacy webhook_url is still the only copy; run update 10008 before clearing leftover webhook keys.';
+  }
+
+  $cleared = [];
+  foreach ([
+    'webhook_enabled',
+    'webhook_url',
+    'webhook_secret',
+    'webhook_secret_key',
+    'allow_internal_webhook_urls',
+  ] as $key) {
+    if ($settings->get($key) !== NULL) {
+      $settings->clear($key);
+      $cleared[] = $key;
+    }
+  }
+  if ($cleared === []) {
+    return 'No leftover webhook settings to clear from mcp_sentinel.settings.';
+  }
+  $settings->save();
+  return 'Cleared leftover webhook keys from mcp_sentinel.settings: ' . implode(', ', $cleared) . '. Delivery reads webhook_endpoints only.';
+}

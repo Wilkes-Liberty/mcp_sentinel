@@ -504,7 +504,6 @@ final class McpDrushCommandsTest extends KernelTestBase {
 
     // Status reports enabled webhook_endpoints, not leftover webhook_enabled.
     $this->config('mcp_sentinel.settings')
-      ->set('webhook_enabled', FALSE)
       ->set('webhook_endpoints', [
         [
           'id' => 'siem',
