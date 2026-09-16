@@ -225,19 +225,39 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
-   * Leftover webhook keys survive a settings save and are not edited.
+   * Leftover webhook keys are gone after 10022 and stay gone on save.
    *
    * The form no longer ships webhooks_legacy or the global
    * allow_internal_webhook_urls checkbox, and submit no longer set()s those
-   * keys. Existing-site leftovers must stay put; they are not wiped.
+   * keys. After 10022 clears existing-site leftovers, a settings save must
+   * not recreate them.
    */
-  public function testLeftoverWebhookKeysSurviveSettingsSave(): void {
-    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
-      ->set('webhook_enabled', TRUE)
-      ->set('webhook_url', 'https://legacy.example/hook')
-      ->set('webhook_secret_key', '')
-      ->set('allow_internal_webhook_urls', TRUE)
-      ->save();
+  public function testLeftoverWebhookKeysGoneAfterSettingsSave(): void {
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.settings') ?: [];
+    $data['webhook_enabled'] = TRUE;
+    $data['webhook_url'] = 'https://legacy.example/hook';
+    $data['webhook_secret'] = 'stale';
+    $data['webhook_secret_key'] = '';
+    $data['allow_internal_webhook_urls'] = TRUE;
+    $data['webhook_endpoints'] = [
+      [
+        'id' => 'default',
+        'label' => 'Default',
+        'url' => 'https://legacy.example/hook',
+        'secret_key' => '',
+        'events' => [],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+    ];
+    $storage->write('mcp_sentinel.settings', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+
+    require_once $this->root . '/' . $this->container->get('extension.list.module')
+      ->getPath('mcp_sentinel') . '/mcp_sentinel.install';
+    mcp_sentinel_update_10022();
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
 
     $admin = $this->drupalCreateUser(['administer mcp sentinel']);
     $this->drupalLogin($admin);
@@ -252,14 +272,16 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->assertSession()->pageTextContains('The configuration options have been saved.');
 
     $config = \Drupal::config('mcp_sentinel.settings');
-    $this->assertTrue((bool) $config->get('webhook_enabled'),
-      'webhook_enabled leftover must remain TRUE after a settings save.');
-    $this->assertSame('https://legacy.example/hook', $config->get('webhook_url'),
-      'webhook_url leftover must remain unchanged after a settings save.');
-    $this->assertSame('', (string) ($config->get('webhook_secret_key') ?? ''),
-      'webhook_secret_key leftover must remain unchanged after a settings save.');
-    $this->assertTrue((bool) $config->get('allow_internal_webhook_urls'),
-      'allow_internal_webhook_urls leftover must remain unchanged after a settings save.');
+    $this->assertNull($config->get('webhook_enabled'),
+      'webhook_enabled leftover must stay gone after a settings save.');
+    $this->assertNull($config->get('webhook_url'),
+      'webhook_url leftover must stay gone after a settings save.');
+    $this->assertNull($config->get('webhook_secret'),
+      'webhook_secret leftover must stay gone after a settings save.');
+    $this->assertNull($config->get('webhook_secret_key'),
+      'webhook_secret_key leftover must stay gone after a settings save.');
+    $this->assertNull($config->get('allow_internal_webhook_urls'),
+      'allow_internal_webhook_urls leftover must stay gone after a settings save.');
   }
 
   /**

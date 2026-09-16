@@ -19,24 +19,15 @@ mcp_sentinel.settings:
     audit_retention_days:
       type: integer
       label: 'Audit log retention in days'
-    webhook_enabled:
-      type: boolean
-      label: 'Webhooks enabled'
-    webhook_url:
-      type: string
-      label: 'Webhook URL'
-    webhook_secret:
-      type: string
-      label: 'Webhook signing secret (deprecated; migrated to webhook_secret_key)'
-    webhook_secret_key:
-      type: string
-      label: 'Webhook signing secret — Key entity ID'
+    # webhook_enabled, webhook_url, webhook_secret, webhook_secret_key and
+    # allow_internal_webhook_urls lived here until webhook_endpoints replaced
+    # the single-URL settings. They are intentionally absent from this schema
+    # so a leftover copy cannot pass config validation as if it were still
+    # live. Update 10022 clears them after 10008 has populated endpoints (or
+    # the legacy URL is empty).
     webhook_delivery_retention_days:
       type: integer
       label: 'Webhook delivery log retention in days (0 = forever)'
-    allow_internal_webhook_urls:
-      type: boolean
-      label: 'Allow webhook URLs resolving to internal IP ranges (deprecated — use per-endpoint allow_internal)'
     webhook_endpoints:
       type: sequence
       label: 'Webhook endpoints'
