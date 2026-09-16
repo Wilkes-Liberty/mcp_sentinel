@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.21.1] - 2026-09-16
+
 ### Removed
 - **Leftover single-URL webhook keys.** Update `10022` clears
   `webhook_enabled`, `webhook_url`, `webhook_secret`, `webhook_secret_key`,
@@ -2226,7 +2228,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.1...1.x
+[2.21.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.0...2.21.1
 [2.21.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.20.0...2.21.0
 [2.20.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.19.0...2.20.0
 [2.19.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.18.0...2.19.0
