@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_graphql\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\graphql\GraphQL\Execution\FieldContext;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
@@ -44,6 +45,8 @@ use Symfony\Component\HttpFoundation\Request;
 #[RunTestsInSeparateProcesses]
 final class GraphqlFieldResultsAlterTest extends KernelTestBase {
 
+  use McpAuditSchemaTestTrait;
+
   use UserCreationTrait;
 
   /**
@@ -83,7 +86,7 @@ final class GraphqlFieldResultsAlterTest extends KernelTestBase {
     $this->installConfig(['mcp_sentinel']);
     // Saving mcp_sentinel.settings in these tests fires the ConfigEvents::SAVE
     // audit subscriber, which reads/writes the audit log; install its schema.
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
   }
 
   /**

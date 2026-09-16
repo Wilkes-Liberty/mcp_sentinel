@@ -186,7 +186,7 @@ final class McpSentinelCommands extends DrushCommands {
             '%d enabled (%s)',
             count($enabled_webhook_ids),
             implode(', ', $enabled_webhook_ids),
-          ),
+        ),
       ],
       ['Active content locks', (string) $lock_count],
     ];

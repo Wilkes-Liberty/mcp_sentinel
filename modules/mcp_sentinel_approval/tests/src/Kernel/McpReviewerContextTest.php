@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
@@ -24,6 +25,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpReviewerContextTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   use UserCreationTrait;
 
@@ -62,7 +65,7 @@ final class McpReviewerContextTest extends KernelTestBase {
     $this->installEntitySchema('node');
     $this->installEntitySchema('path_alias');
     $this->installEntitySchema('mcp_approval_request');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installSchema('node', ['node_access']);
     $this->installConfig(['filter', 'node', 'mcp_sentinel', 'mcp_sentinel_approval']);

@@ -143,7 +143,8 @@ final class McpSettingsAnomalyEditorTest extends BrowserTestBase {
         'threshold' => 1,
         'debounce_seconds' => 3600,
         'enabled' => TRUE,
-      ]])->save();
+      ],
+      ])->save();
     $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
     $this->drupalGet('/admin/config/services/mcp-sentinel');
     $this->assertSession()->fieldValueEquals('anomaly_rules_rows[0][signal]', 'off_hours');

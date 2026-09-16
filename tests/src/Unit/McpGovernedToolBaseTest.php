@@ -14,6 +14,7 @@ use Drupal\mcp_sentinel\Plugin\tool\Tool\McpMediaUploadTool;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpNodeOperationsTool;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpSecurityPolicyTool;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpSiteContextTool;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpSqlQueryTool;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpWorkflowTransitionTool;
 use Drupal\mcp_sentinel_graphql\Plugin\tool\Tool\McpGraphqlSchemaTool;
 use Drupal\Tests\UnitTestCase;
@@ -35,6 +36,7 @@ final class McpGovernedToolBaseTest extends UnitTestCase {
   public function testEverySentinelToolUsesFinalGovernedAccessGate(): void {
     $tools = [
       McpSiteContextTool::class,
+      McpSqlQueryTool::class,
       McpSecurityPolicyTool::class,
       McpContentLockTool::class,
       McpNodeOperationsTool::class,

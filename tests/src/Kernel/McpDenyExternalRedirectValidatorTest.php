@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\redirect\Entity\Redirect;
@@ -34,6 +35,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpDenyExternalRedirectValidatorTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   use UserCreationTrait;
 
@@ -68,7 +71,7 @@ final class McpDenyExternalRedirectValidatorTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', [
       'mcp_sentinel_content_locks',
     ]);

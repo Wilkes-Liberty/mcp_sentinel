@@ -336,3 +336,17 @@ services:
     arguments:
       - '@module_handler'
       - '@?plugin.manager.charts'
+
+  mcp_sentinel.governed_sql:
+    class: Drupal\mcp_sentinel\Service\McpGovernedSql
+    arguments:
+      - '@config.factory'
+      - '@mcp_sentinel.raw_sql_guard'
+      - '@mcp_sentinel.exfiltration_guard'
+      - '@mcp_sentinel.audit_logger'
+      - '@database'
+      - '@mcp_sentinel.classification'
+      - '@mcp_sentinel.dlp'
+      - '@mcp_sentinel.rate_limiter'
+      - '@current_user'
+      - '@mcp_sentinel.read_budgets'

@@ -5,15 +5,12 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
-use Drupal\mcp_sentinel\Service\McpAuditLogger;
-use Drupal\mcp_sentinel\Service\McpClassificationResolver;
-use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
+use Drupal\mcp_sentinel\Exception\McpSqlRefusal;
+use Drupal\mcp_sentinel\Service\McpGovernedSql;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
-use Drupal\mcp_sentinel\Service\McpRawSqlGuard;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -46,9 +43,10 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  *   2. The resolved profile must set `allow_raw_sql`. It ships FALSE.
  *   3. McpRawSqlGuard must accept the statement against that same profile.
  *
- * Every invocation is written to the tamper-evident chain with the statement
- * text — the refused ones too, because a refusal is the more interesting
- * forensic record.
+ * When auditing is enabled, accepted and refused bounded statements are
+ * recorded. Oversized inputs are recorded without their body. No result is
+ * returned if auditing fails. The shared service also applies finite request,
+ * row and byte budgets, classification and DLP.
  *
  * @see \Drupal\mcp_sentinel\Service\McpRawSqlGuard
  */
@@ -66,16 +64,8 @@ final class McpSentinelSqlCommands extends DrushCommands {
     private readonly EntityTypeManagerInterface $entityTypeManager,
     #[Autowire(service: 'mcp_sentinel.policy_resolver')]
     private readonly McpPolicyResolver $policyResolver,
-    #[Autowire(service: 'mcp_sentinel.raw_sql_guard')]
-    private readonly McpRawSqlGuard $rawSqlGuard,
-    #[Autowire(service: 'mcp_sentinel.exfiltration_guard')]
-    private readonly McpExfiltrationGuard $exfiltrationGuard,
-    #[Autowire(service: 'mcp_sentinel.audit_logger')]
-    private readonly McpAuditLogger $auditLogger,
-    #[Autowire(service: 'database')]
-    private readonly Connection $database,
-    #[Autowire(service: 'mcp_sentinel.classification')]
-    private readonly ?McpClassificationResolver $classification = NULL,
+    #[Autowire(service: 'mcp_sentinel.governed_sql')]
+    private readonly McpGovernedSql $governedSql,
   ) {
     parent::__construct();
   }
@@ -89,143 +79,20 @@ final class McpSentinelSqlCommands extends DrushCommands {
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'", description: 'Run a governed query under the default profile.')]
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query --profile=readonly 'SELECT COUNT(*) FROM node_field_data'", description: 'Run a governed query under a named profile.')]
   public function sqlQuery(string $query = '', array $options = ['profile' => NULL]): int {
-    // Name the surface for anything downstream that resolves it from context
-    // (d.o #3616540 part 2): the CLI has no request to read it from.
-    $this->classification?->setSurface(McpGovernedSurface::Drush);
-    $config = $this->configFactory->get('mcp_sentinel.settings');
-
-    if (!$config->get('enabled')) {
-      return $this->refuse($query, NULL, ['MCP Sentinel governance is disabled; raw SQL is refused.']);
-    }
-    // Refusing when auditing is off is not belt-and-braces, it is the point:
-    // the capability's whole justification is that every use is recorded, so
-    // with recording off there is nothing left to justify it.
-    if (!$config->get('audit_enabled')) {
-      return $this->refuse($query, NULL, ['Audit logging is disabled; raw SQL is refused because it could not be recorded.']);
-    }
-
     $profile = $this->resolveProfile((string) ($options['profile'] ?? ''));
-    if ($profile === NULL) {
-      return $this->refuse($query, NULL, [
-        (string) ($options['profile'] ?? '') !== ''
-          ? sprintf("Policy profile '%s' does not exist.", (string) $options['profile'])
-          : 'No policy profile resolved for the configured governed roles.',
-      ]);
-    }
-
-    if (!$profile->allowsRawSql()) {
-      return $this->refuse($query, $profile, [
-        sprintf(
-          "Policy profile '%s' does not permit raw SQL. Enable 'allow_raw_sql' on the profile if this is a deliberate, reviewed decision.",
-          $profile->id(),
-        ),
-      ]);
-    }
-
-    $errors = $this->rawSqlGuard->check($query, $profile);
-    if ($errors !== []) {
-      return $this->refuse($query, $profile, $errors);
-    }
-
-    // Hand the approved statement to Drupal with its entity tables in {table}
-    // form. The guard's allowlist is built from logical, unprefixed table
-    // names, and Drupal applies the site's table prefix to {table} and to
-    // nothing else — so on a prefixed site an unbraced statement passes
-    // governance and then cannot execute, while a hand-prefixed one is refused
-    // as an unknown table. Bracing is what lets the same operator input work on
-    // prefixed and unprefixed installs alike.
-    $executable = $this->rawSqlGuard->braceKnownTables($query);
-    if ($executable === NULL) {
-      return $this->refuse($query, $profile, [
-        'The statement could not be resolved to prefixed table names. Name each table plainly, without backticks or quotes.',
-      ]);
-    }
-
-    $cap = $this->exfiltrationGuard->effectiveResultCap($profile);
-    $limit = ($cap > 0) ? $cap + 1 : 0;
-
     try {
-      $statement = $this->database->query($executable);
-      $rows = [];
-      while (($row = $statement->fetchAssoc()) !== FALSE) {
-        $rows[] = $row;
-        if ($limit > 0 && count($rows) >= $limit) {
-          break;
-        }
+      $result = $this->governedSql->run($query, $profile, McpGovernedSurface::Drush);
+      $this->output()->writeln(json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpSqlRefusal $exception) {
+      foreach ($exception->reasons as $reason) {
+        $this->logger()->error($reason);
       }
     }
-    catch (\Throwable $e) {
-      // The driver's message can echo the statement and, with it, whatever the
-      // caller put in a literal; it is recorded in the audit row but not
-      // returned verbatim to the caller.
-      $this->refuse($query, $profile, ['The statement failed to execute.'], $e->getMessage());
-      return self::EXIT_FAILURE;
+    catch (\Throwable $exception) {
+      $this->logger()->error('Governed SQL failed; no result was returned. Check source governance and audit availability.');
     }
-
-    // The exfiltration guard's result cap applies here exactly as it does to a
-    // governed tool response — a policy that caps result size should not be
-    // silently wider on this path. Effective (finite-by-default) caps apply.
-    $cap = $this->exfiltrationGuard->effectiveResultCap($profile);
-    $total = count($rows);
-    $truncated = $cap > 0 && $total > $cap;
-    if ($truncated) {
-      $rows = array_slice($rows, 0, $cap);
-    }
-
-    $this->auditLogger->log('raw_sql_query', [
-      'channel' => McpGovernedSurface::Drush->value,
-      'profile' => $profile->id(),
-      'statement' => $query,
-      'row_count' => count($rows),
-      'truncated' => $truncated,
-    ]);
-
-    $this->output()->writeln((string) json_encode([
-      'rows' => $rows,
-      'row_count' => count($rows),
-      'truncated' => $truncated,
-      'profile' => $profile->id(),
-    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-
-    return self::EXIT_SUCCESS;
-  }
-
-  /**
-   * Records a refusal in the audit chain and reports it to the caller.
-   *
-   * @param string $query
-   *   The statement as submitted.
-   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface|null $profile
-   *   The resolved profile, or NULL when refusal happened before resolution.
-   * @param string[] $reasons
-   *   Why the statement was refused.
-   * @param string $detail
-   *   Optional extra detail recorded in the audit row but not printed.
-   *
-   * @return int
-   *   Always EXIT_FAILURE.
-   */
-  private function refuse(string $query, ?McpPolicyProfileInterface $profile, array $reasons, string $detail = ''): int {
-    // Logged regardless of the audit_log_reads suppression path (when
-    // auditing is enabled): 'raw_sql_denied' is not an entity_read or
-    // config_read operation, so audit_log_reads does not gate it. A refused
-    // raw-SQL attempt is a security event and is recorded even when read
-    // logging is off.
-    $metadata = [
-      'channel' => McpGovernedSurface::Drush->value,
-      'profile' => $profile?->id() ?? '(unresolved)',
-      'statement' => $query,
-      'reasons' => $reasons,
-    ];
-    if ($detail !== '') {
-      $metadata['detail'] = $detail;
-    }
-    $this->auditLogger->log('raw_sql_denied', $metadata);
-
-    foreach ($reasons as $reason) {
-      $this->logger()->error($reason);
-    }
-
     return self::EXIT_FAILURE;
   }
 

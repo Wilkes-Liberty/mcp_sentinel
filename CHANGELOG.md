@@ -6,6 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Install and seed the Audit Chain 1.7.2 mutex in shared kernel fixtures,
+  including audit-store recovery tests (#201).
+
+- Keep request and page flood-event names within Drupal's 64-byte limit for
+  long policy, principal and tool identifiers. Existing valid names stay
+  unchanged; database-backed legacy counters retain their timestamps and
+  expiration during update 10023.
+  ([#3623827](https://www.drupal.org/project/mcp_sentinel/issues/3623827))
+
+### Added
+
+- A module-owned `mcp_sentinel_sql_query` Tool API action shares governed SELECT
+  execution with `mcp-sentinel:sql-query`. The action resolves the authenticated
+  account's policy and repeats source access checks on direct execution.
+  ([#3623815](https://www.drupal.org/project/mcp_sentinel/issues/3623815))
+
+### Changed
+
+- Governed SELECT requires finite request, row and response-byte budgets, bounds
+  statements to 4096 bytes, and applies DLP to returned rows on both adapters.
+  Failures and audit outages return no records. Existing CLI profile selection
+  remains available; Tool API callers cannot select a policy.
+
+
 ## [2.21.1] - 2026-09-16
 
 ### Removed

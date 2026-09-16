@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
@@ -16,6 +17,8 @@ use PHPUnit\Framework\Attributes\Group;
  */
 #[Group('mcp_sentinel')]
 class McpUrgentConditionsTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -48,7 +51,7 @@ class McpUrgentConditionsTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installConfig(['audit_chain', 'mcp_sentinel']);
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
   }
 
   /**

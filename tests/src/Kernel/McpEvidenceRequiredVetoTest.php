@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
@@ -33,6 +34,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpEvidenceRequiredVetoTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   use UserCreationTrait;
 
@@ -72,7 +75,7 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installSchema('node', ['node_access']);
     $this->installEntitySchema('user');
@@ -597,7 +600,7 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
     $this->assertSame(1, $result['remaining']);
 
     // Recovery: the store returns, reconciliation appends the late receipt.
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $result = $guard->reconcile();
     $this->assertSame(1, $result['reconciled']);
     $this->assertSame(0, $result['remaining']);

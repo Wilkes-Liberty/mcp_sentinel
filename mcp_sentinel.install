@@ -5,6 +5,7 @@
  * Install, update, and uninstall functions for MCP Sentinel.
  */
 
+use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\Core\Utility\UpdateException;
 use Drupal\Core\Url;
 use Drupal\key\Entity\Key;
@@ -1207,4 +1208,32 @@ function mcp_sentinel_update_10022(): string {
   }
   $settings->save();
   return 'Cleared leftover webhook keys from mcp_sentinel.settings: ' . implode(', ', $cleared) . '. Delivery reads webhook_endpoints only.';
+}
+
+/**
+ * Preserve existing long flood keys on databases that accepted oversized names.
+ */
+function mcp_sentinel_update_10023(array &$sandbox): void {
+  $database = \Drupal::database();
+  if (!$database->schema()->tableExists('flood')) {
+    $sandbox['#finished'] = 1;
+    return;
+  }
+  $last = $sandbox['last_fid'] ?? 0;
+  $query = $database->select('flood', 'f')->fields('f', ['fid', 'event']);
+  $prefixes = $query->orConditionGroup()
+    ->condition('event', $database->escapeLike('mcp_sentinel.profile.') . '%', 'LIKE')
+    ->condition('event', $database->escapeLike('mcp_sentinel.pages.') . '%', 'LIKE');
+  $rows = $query->condition($prefixes)->condition('fid', $last, '>')
+    ->orderBy('fid')->range(0, 500)->execute()->fetchAll();
+  foreach ($rows as $row) {
+    $key = McpFloodKey::normalize($row->event);
+    if ($key !== $row->event) {
+      // Keep identifiers, timestamps and expiration intact: quota survives.
+      $database->update('flood')->fields(['event' => $key])
+        ->condition('fid', $row->fid)->condition('event', $row->event)->execute();
+    }
+    $sandbox['last_fid'] = (int) $row->fid;
+  }
+  $sandbox['#finished'] = count($rows) < 500 ? 1 : 0;
 }

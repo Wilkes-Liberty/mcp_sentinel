@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\comment\Entity\Comment;
 use Drupal\comment\Tests\CommentTestTrait;
 use Drupal\Core\Entity\ContentEntityInterface;
@@ -35,6 +36,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpUnmoderatedForwardRevisionTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   use UserCreationTrait;
   use CommentTestTrait;
@@ -85,7 +88,7 @@ final class McpUnmoderatedForwardRevisionTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
 
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installSchema('node', ['node_access']);
     $this->installSchema('comment', ['comment_entity_statistics']);

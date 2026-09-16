@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
@@ -22,6 +23,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  */
 #[RunTestsInSeparateProcesses]
 final class McpContextControllerTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   use UserCreationTrait;
 
@@ -151,7 +154,7 @@ final class McpContextControllerTest extends KernelTestBase {
    * The schema document consumes the per-principal request budget (#3616540).
    */
   public function testContextConsumesRequestBudget(): void {
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->switchToDevelopmentGovernedUser();
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
       ->set('require_finite_read_budgets', TRUE)
@@ -209,7 +212,7 @@ final class McpContextControllerTest extends KernelTestBase {
    * above the label receives it unchanged.
    */
   public function testContextRefusedWhenSchemaLabelExceedsCeiling(): void {
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->switchToDevelopmentGovernedUser();
 
     \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
@@ -235,7 +238,7 @@ final class McpContextControllerTest extends KernelTestBase {
    * Bundles classified above the ceiling are omitted from the schema document.
    */
   public function testContextOmitsOverCeilingBundles(): void {
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installConfig(['filter', 'node']);
     NodeType::create(['type' => 'memo', 'name' => 'Memo'])->save();
     NodeType::create(['type' => 'article', 'name' => 'Article'])->save();

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
@@ -33,6 +34,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpClassificationEgressAccessTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   use UserCreationTrait;
   use McpClassificationTestTrait;
@@ -75,7 +78,7 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
     $this->installSchema('system', ['sequences']);
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['filter', 'node', 'mcp_sentinel', 'user']);
 

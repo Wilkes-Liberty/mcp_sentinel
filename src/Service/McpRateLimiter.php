@@ -142,7 +142,7 @@ final class McpRateLimiter {
    *   The flood identifier string.
    */
   private function pageKey(string $profileId, int $uid): string {
-    return "mcp_sentinel.pages.{$profileId}.{$uid}";
+    return McpFloodKey::normalize("mcp_sentinel.pages.{$profileId}.{$uid}");
   }
 
   /**
@@ -160,7 +160,7 @@ final class McpRateLimiter {
    */
   private function key(string $profileId, int $uid, ?string $toolId): string {
     $base = "mcp_sentinel.profile.{$profileId}.{$uid}";
-    return $toolId !== NULL ? "{$base}.{$toolId}" : $base;
+    return McpFloodKey::normalize($toolId !== NULL ? "{$base}.{$toolId}" : $base);
   }
 
 }

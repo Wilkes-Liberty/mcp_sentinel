@@ -1210,3 +1210,44 @@ role + scopes. Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 
 See `MAINTAINERS.txt`. Report issues and feature requests in the
 [project issue queue](https://www.drupal.org/project/issues/mcp_sentinel); report
 sensitive security issues to the Drupal security team at security@drupal.org.
+
+### Upgrading flood event keys
+
+Update 10023 keeps request and page event names within Drupal's 64-byte flood
+column. Existing names that fit remain unchanged. Longer names use a stable
+hash of the complete old name, keeping profile, user and tool budgets separate.
+The update migrates database-backed counters in batches without changing their
+identifiers, timestamps or expiration. Run database updates before reopening
+traffic after the deployment.
+
+The update cannot enumerate a custom non-database flood store. For such a
+backend, preserve active long-name counters under the normalized key using
+`McpFloodKey::normalize()`, or drain the longest active request/page budget
+window in maintenance before switching code. Do not clear counters during an
+active traffic window. This does not affect the standard database backend.
+
+Upstream: [bounded flood event names](https://www.drupal.org/project/mcp_sentinel/issues/3623827).
+
+### Governed SELECT through Tool API
+
+`mcp_sentinel_sql_query` accepts one `query` string: a single SELECT statement,
+at most 4096 bytes. Register it with `mcp-sentinel:tools-register` (the server
+integration submodule) or site configuration, require authentication and
+`mcp_read`, and grant the machine account `access mcp sentinel context`.
+The account's active Sentinel profile must explicitly enable `allow_raw_sql`.
+The shipped default keeps this capability off.
+
+The action and `mcp-sentinel:sql-query` use the same SELECT guard, table and field
+policy, classification, DLP, budgets and audit path. Results contain `rows`,
+`row_count`, `truncated` and the resolved `profile` ID. Row limits also constrain
+the database result; byte-budget overflow fails without returning partial rows.
+A failed query or audit append remains a failure. Tool errors do not echo SQL,
+record values or driver messages.
+
+Raw SQL requires positive, finite request, result and response budgets even if
+an operator has enabled the general non-production unlimited-budget override.
+The CLI retains `--profile` for local operators; the Tool API action has no
+profile input and cannot select a more permissive policy. There is no fallback
+to `drush sql:query` or an ungoverned database connection.
+
+Upstream: [module-owned governed SELECT](https://www.drupal.org/project/mcp_sentinel/issues/3623815).

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequest;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
@@ -20,6 +21,8 @@ use PHPUnit\Framework\Attributes\Group;
  */
 #[Group('mcp_sentinel')]
 class McpMetricsApprovalPresentTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -53,7 +56,7 @@ class McpMetricsApprovalPresentTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installConfig(['mcp_sentinel']);
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', [
       'mcp_sentinel_webhook_delivery',
     ]);

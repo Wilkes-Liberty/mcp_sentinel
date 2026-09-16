@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
@@ -23,6 +24,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('mcp_sentinel')]
 #[RunTestsInSeparateProcesses]
 final class McpAuditHashChainTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -54,7 +57,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', [
       'mcp_sentinel_content_locks',
     ]);
