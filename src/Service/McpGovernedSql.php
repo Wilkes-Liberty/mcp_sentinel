@@ -20,8 +20,6 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  */
 final class McpGovernedSql {
 
-  private const MAX_QUERY_BYTES = 8192;
-
   /**
    * Constructs the governed SELECT service.
    */
@@ -69,9 +67,9 @@ final class McpGovernedSql {
     if ($profile === NULL || !$profile->status() || !$profile->allowsRawSql()) {
       $this->refuse($query, $profile, $surface, ['An active policy with explicit raw SQL permission is required.']);
     }
-    if ($query === '' || strlen($query) > self::MAX_QUERY_BYTES) {
+    if ($query === '' || strlen($query) > McpRawSqlGuard::MAX_LENGTH) {
       // Do not retain an unbounded submitted statement in an audit event.
-      $this->refuse('', $profile, $surface, ['The statement must contain between 1 and 8192 bytes.']);
+      $this->refuse('', $profile, $surface, ['The statement must contain between 1 and 4096 bytes.']);
     }
     $cap = $this->egress->effectiveResultCap($profile);
     $bytes = $this->egress->effectiveResponseSizeCap($profile);
@@ -84,7 +82,7 @@ final class McpGovernedSql {
       $this->refuse($query, $profile, $surface, ['The raw SQL request budget is exhausted.']);
     }
     $this->rateLimiter->register($profile, $uid, 'raw_sql');
-    $errors = $this->guard->check($query, $profile);
+    $errors = $this->guard->check($query, $profile, $surface);
     if ($errors !== []) {
       $this->refuse($query, $profile, $surface, $errors);
     }
@@ -159,7 +157,7 @@ final class McpGovernedSql {
     $this->audit->log('raw_sql_denied', [
       'channel' => $surface->value,
       'profile' => $profile?->id() ?? '(unresolved)',
-      'statement' => strlen($query) <= self::MAX_QUERY_BYTES ? $query : '(oversized)',
+      'statement' => strlen($query) <= McpRawSqlGuard::MAX_LENGTH ? $query : '(oversized)',
       'reasons' => $reasons,
     ]);
     throw new McpSqlRefusal($reasons);

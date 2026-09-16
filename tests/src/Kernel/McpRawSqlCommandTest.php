@@ -430,7 +430,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
    */
   public function testOversizedStatementIsNotRetained(): void {
     $this->setRawSqlCapability(TRUE);
-    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery(str_repeat('x', 8193)));
+    self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery(str_repeat('x', 4097)));
     self::assertSame('', $this->output->fetch());
     $rows = $this->auditRows();
     self::assertSame('raw_sql_denied', $rows[0]['operation']);
@@ -448,6 +448,26 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     self::assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $this->commands->sqlQuery('SELECT nid FROM node_field_data'));
     self::assertSame('', $this->output->fetch());
     self::assertSame('raw_sql_denied', $this->auditRows()[0]['operation']);
+  }
+
+  /**
+   * Tool SQL uses its own ceiling even when Drush may read the same table.
+   */
+  public function testClassificationUsesTheActualSurface(): void {
+    $this->setRawSqlCapability(TRUE);
+    $this->config('mcp_sentinel.settings')->set('classification_map', [
+      ['entity_type' => 'node', 'bundle' => '', 'field' => '', 'label' => 'internal'],
+    ])->save();
+    $this->config('mcp_sentinel.mcp_policy_profile.default')->set('egress_ceilings', [
+      'tool' => 'public',
+      'drush' => 'restricted',
+    ])->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+    $tool = $this->governedTool('SELECT nid FROM node_field_data');
+    $tool->execute();
+    self::assertFalse($tool->getResult()->isSuccess());
+    self::assertSame(McpSentinelSqlCommands::EXIT_SUCCESS, $this->commands->sqlQuery('SELECT nid FROM node_field_data'));
+    self::assertSame(2, json_decode($this->output->fetch(), TRUE)['row_count']);
   }
 
   /**

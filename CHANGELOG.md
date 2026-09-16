@@ -27,7 +27,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Governed SELECT requires finite request, row and response-byte budgets, bounds
-  statements to 8192 bytes, and applies DLP to returned rows on both adapters.
+  statements to 4096 bytes, and applies DLP to returned rows on both adapters.
   Failures and audit outages return no records. Existing CLI profile selection
   remains available; Tool API callers cannot select a policy.
 

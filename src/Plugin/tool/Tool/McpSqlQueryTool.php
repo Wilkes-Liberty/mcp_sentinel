@@ -28,7 +28,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
     'query' => new InputDefinition(
       data_type: 'string',
       label: new TranslatableMarkup('SELECT statement'),
-      description: new TranslatableMarkup('A single SELECT statement, at most 8192 bytes.'),
+      description: new TranslatableMarkup('A single SELECT statement, at most 4096 bytes.'),
       required: TRUE,
     ),
   ],

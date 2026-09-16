@@ -1231,7 +1231,7 @@ Upstream: [bounded flood event names](https://www.drupal.org/project/mcp_sentine
 ### Governed SELECT through Tool API
 
 `mcp_sentinel_sql_query` accepts one `query` string: a single SELECT statement,
-at most 8192 bytes. Register it with `mcp-sentinel:tools-register` (the server
+at most 4096 bytes. Register it with `mcp-sentinel:tools-register` (the server
 integration submodule) or site configuration, require authentication and
 `mcp_read`, and grant the machine account `access mcp sentinel context`.
 The account's active Sentinel profile must explicitly enable `allow_raw_sql`.
