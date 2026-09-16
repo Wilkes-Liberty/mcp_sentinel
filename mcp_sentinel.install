@@ -5,6 +5,7 @@
  * Install, update, and uninstall functions for MCP Sentinel.
  */
 
+use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\Core\Utility\UpdateException;
 use Drupal\Core\Url;
 use Drupal\key\Entity\Key;
@@ -1226,7 +1227,7 @@ function mcp_sentinel_update_10023(array &$sandbox): void {
   $rows = $query->condition($prefixes)->condition('fid', $last, '>')
     ->orderBy('fid')->range(0, 500)->execute()->fetchAll();
   foreach ($rows as $row) {
-    $key = \Drupal\mcp_sentinel\Service\McpFloodKey::normalize($row->event);
+    $key = McpFloodKey::normalize($row->event);
     if ($key !== $row->event) {
       // Keep identifiers, timestamps and expiration intact: quota survives.
       $database->update('flood')->fields(['event' => $key])
