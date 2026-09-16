@@ -1210,3 +1210,20 @@ role + scopes. Compatibility: mcp_sentinel ≥ 1.0 ↔ drupal-mcp-connector ≥ 
 See `MAINTAINERS.txt`. Report issues and feature requests in the
 [project issue queue](https://www.drupal.org/project/issues/mcp_sentinel); report
 sensitive security issues to the Drupal security team at security@drupal.org.
+
+### Upgrading flood event keys
+
+Update 10023 keeps request and page event names within Drupal's 64-byte flood
+column. Existing names that fit remain unchanged. Longer names use a stable
+hash of the complete old name, keeping profile, user and tool budgets separate.
+The update migrates database-backed counters in batches without changing their
+identifiers, timestamps or expiration. Run database updates before reopening
+traffic after the deployment.
+
+The update cannot enumerate a custom non-database flood store. For such a
+backend, preserve active long-name counters under the normalized key using
+`McpFloodKey::normalize()`, or drain the longest active request/page budget
+window in maintenance before switching code. Do not clear counters during an
+active traffic window. This does not affect the standard database backend.
+
+Upstream: [bounded flood event names](https://www.drupal.org/project/mcp_sentinel/issues/3623827).

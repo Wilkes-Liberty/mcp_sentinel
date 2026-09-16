@@ -594,6 +594,16 @@ jobs:
           done
           echo "::error::test webserver never answered"; cat /tmp/php-server.log; exit 1
 
+      - name: PHPUnit — PostgreSQL flood keys (blocking)
+        working-directory: drupal
+        env:
+          SIMPLETEST_DB: 'pgsql://drupal:drupal@127.0.0.1:5432/drupal'
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+        run: |
+          vendor/bin/phpunit -c "${PWD}/web/core/phpunit.xml.dist" \
+            "${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Kernel/McpRateLimiterTest.php"
+
       - name: PHPUnit — Functional PostgreSQL draft (blocking)
         working-directory: drupal
         env:

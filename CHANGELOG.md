@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep request and page flood-event names within Drupal's 64-byte limit for
+  long policy, principal and tool identifiers. Existing valid names stay
+  unchanged; database-backed legacy counters retain their timestamps and
+  expiration during update 10023.
+  ([#3623827](https://www.drupal.org/project/mcp_sentinel/issues/3623827))
+
+
 ## [2.21.1] - 2026-09-16
 
 ### Removed
