@@ -773,7 +773,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   /**
    * Update 10022 does not wipe webhook_url when it is the only copy.
    */
-  public function testUpdate10022KeepsUnmigratedLegacyUrl(): void {
+  public function testUpdate10022DoesNotClearSoleLegacyUrl(): void {
     $storage = $this->container->get('config.storage');
     $data = $storage->read('mcp_sentinel.settings') ?: [];
     $data['webhook_enabled'] = TRUE;

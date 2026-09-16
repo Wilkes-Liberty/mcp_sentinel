@@ -13,7 +13,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `webhook_endpoints` is populated or the legacy URL is empty. Those keys
   are gone from the config schema. Delivery still reads only
   `webhook_endpoints`. Update hooks `10001` and `10008` stay as the
-  migrators for sites that have not reached them yet.
+  upgrade path for sites that have not reached them yet.
 
 ## [2.21.0] - 2026-09-15
 

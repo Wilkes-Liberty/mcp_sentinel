@@ -1177,7 +1177,7 @@ function mcp_sentinel_update_10021(): string {
  * them since. Sites that already ran 10008 (or never had a legacy URL) still
  * export the silent no-ops. Clear them once endpoints are populated or the
  * legacy URL is empty so a leftover copy cannot look live. Do not clear when
- * webhook_url is the only copy — 10008 is the migrator.
+ * webhook_url is the only copy — 10008 copies it into webhook_endpoints.
  */
 function mcp_sentinel_update_10022(): string {
   $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
