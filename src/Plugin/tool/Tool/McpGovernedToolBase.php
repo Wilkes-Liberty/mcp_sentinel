@@ -150,12 +150,12 @@ abstract class McpGovernedToolBase extends ToolBase {
   /**
    * Checks catalog visibility without requiring or inventing execution inputs.
    */
-  final public function discoveryAccess(AccountInterface $account): AccessResultInterface {
+  final public function discoveryAccess(AccountInterface $account): AccessResult {
     $access = $this->commonAccess($account);
     if ($access->isAllowed()) {
       $access = $access->andIf($this->checkGovernedDiscoveryAccess($account));
     }
-    return $access->setCacheMaxAge(0);
+    return AccessResult::allowedIf($access->isAllowed())->setCacheMaxAge(0);
   }
 
   /**
