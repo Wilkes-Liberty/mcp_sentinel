@@ -1251,3 +1251,18 @@ profile input and cannot select a more permissive policy. There is no fallback
 to `drush sql:query` or an ungoverned database connection.
 
 Upstream: [module-owned governed SELECT](https://www.drupal.org/project/mcp_sentinel/issues/3623815).
+
+### Tool discovery access
+
+The optional `mcp_sentinel_server` module implements the Tool Bridge discovery
+access hook. With a bridge version supporting that hook, Sentinel tools enter
+`tools/list` only after the current account passes the same permission, source
+readiness, OAuth scope, and IP checks used for execution. SQL also requires the
+account policy to permit raw SQL. The decision is recomputed without execution
+inputs and is never cached across callers or policy changes.
+
+Module-owned tools may narrow `checkGovernedDiscoveryAccess()` for additional
+account-level requirements. Keep record-specific checks in
+`checkGovernedAccess()`, where validated inputs are available. The shared gate is
+final, so a module cannot bypass the source checks. Tools outside Sentinel keep
+their own discovery and execution policy.

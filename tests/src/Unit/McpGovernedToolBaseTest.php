@@ -53,6 +53,9 @@ final class McpGovernedToolBaseTest extends UnitTestCase {
       $method = new \ReflectionMethod($tool, 'checkAccess');
       $this->assertSame(McpGovernedToolBase::class, $method->getDeclaringClass()->getName());
       $this->assertTrue($method->isFinal());
+      $discovery = new \ReflectionMethod($tool, 'discoveryAccess');
+      $this->assertSame(McpGovernedToolBase::class, $discovery->getDeclaringClass()->getName());
+      $this->assertTrue($discovery->isFinal());
     }
   }
 

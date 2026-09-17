@@ -471,6 +471,25 @@ final class McpRawSqlCommandTest extends KernelTestBase {
   }
 
   /**
+   * Discovery follows policy and identity changes without requiring a query.
+   */
+  public function testDiscoveryRequiresCurrentPolicyWithoutInputs(): void {
+    $this->governedTool('SELECT nid FROM node_field_data');
+    $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_sql_query');
+    $account = $this->container->get('current_user');
+    self::assertFalse($tool->discoveryAccess($account)->isAllowed());
+    $this->setRawSqlCapability(TRUE);
+    self::assertTrue($tool->discoveryAccess($account)->isAllowed());
+    self::assertSame(0, $tool->discoveryAccess($account)->getCacheMaxAge());
+    self::assertFalse($tool->hasExecuted());
+    $this->setRawSqlCapability(FALSE);
+    self::assertFalse($tool->discoveryAccess($account)->isAllowed());
+    $this->setRawSqlCapability(TRUE);
+    $account->setAccount(new AnonymousUserSession());
+    self::assertFalse($tool->discoveryAccess($account)->isAllowed());
+  }
+
+  /**
    * Creates a governed machine account and a direct Tool API invocation.
    */
   private function governedTool(string $query): ToolInterface {
