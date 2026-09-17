@@ -144,45 +144,6 @@ trait McpEntityToolTrait {
   }
 
   /**
-   * Checks if a serialized payload exceeds the profile's response_size_cap.
-   *
-   * Returns a failure result when over-cap, NULL when within limits.
-   *
-   * This is appropriate for PURE-READ tools that want to refuse-with-failure
-   * before materialising any response. For write tools (where operations have
-   * already been executed), use truncateBulkResultsToSizeCap() instead so that
-   * completed work is never misreported as failed.
-   *
-   * @param string $serialized
-   *   The serialized response string whose byte length will be measured.
-   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
-   *   The active governance profile.
-   *
-   * @return \Drupal\tool\ExecutableResult|null
-   *   A failure result when over the cap, NULL when within limits.
-   */
-  protected function checkResponseSizeCap(
-    string $serialized,
-    McpPolicyProfileInterface $profile,
-  ): ?ExecutableResult {
-    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
-    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
-    $bytes = strlen($serialized);
-    if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
-      return ExecutableResult::failure(
-        $this->t(
-          'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
-          [
-            '@bytes' => $bytes,
-            '@cap'   => $guard->effectiveResponseSizeCap($profile),
-          ]
-        )
-      );
-    }
-    return NULL;
-  }
-
-  /**
    * Truncates a completed bulk-write results array to honour the size cap.
    *
    * This method is intended for bulk WRITE tools only. Because the operations

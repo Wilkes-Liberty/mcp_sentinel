@@ -131,7 +131,6 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
 
     $result = $command->setup([
       'allow-unauthenticated-development' => TRUE,
-      'require-oauth' => FALSE,
     ]);
 
     $this->assertSame(3, $result);
@@ -187,6 +186,33 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
     $this->assertSame(1, $command->setup());
     $this->assertCount(count(McpToolScopeResolver::REQUIRED_TOOLS), $entities);
     $this->assertSame(2, $deleted);
+  }
+
+  /**
+   * Teardown loads the same resolver constants setup uses, including optional.
+   */
+  public function testTeardownUsesResolverConstants(): void {
+    $loaded = [];
+    $storage = $this->createMock(EntityStorageInterface::class);
+    $storage->method('load')->willReturnCallback(
+      static function (string $id) use (&$loaded): ?ConfigEntityInterface {
+        $loaded[] = $id;
+        return NULL;
+      },
+    );
+    $entityTypeManager = $this->createMock(EntityTypeManagerInterface::class);
+    $entityTypeManager->method('getStorage')->with('mcp_tool_config')->willReturn($storage);
+
+    $command = $this->command(
+      $entityTypeManager,
+      $this->moduleHandler(['mcp_server_tool_bridge' => TRUE]),
+    );
+
+    $this->assertSame(0, $command->teardown());
+    $this->assertSame([
+      ...McpToolScopeResolver::REQUIRED_TOOLS,
+      ...McpToolScopeResolver::OPTIONAL_TOOLS,
+    ], $loaded);
   }
 
   /**

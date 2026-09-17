@@ -2,11 +2,12 @@
 
 declare(strict_types=1);
 
-namespace Drupal\Tests\mcp_sentinel_server\Unit;
+namespace Drupal\Tests\mcp_sentinel\Unit;
 
-use Drupal\mcp_sentinel_server\ToolScopeResolver;
+use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\tool\Tool\ToolOperation;
 use Drupal\Tests\UnitTestCase;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -15,24 +16,21 @@ use PHPUnit\Framework\Attributes\Group;
  *
  * The scope a tool requires is derived from two declared facts about the tool
  * itself — its ToolOperation (read vs modifying) and whether it operates on
- * configuration — rather than a hand-maintained per-tool table. This keeps the
- * plugin's own declarations the single source of truth for its scope.
+ * configuration — rather than a hand-maintained per-tool table.
  *
  * The annotations below duplicate the attributes deliberately. Drupal 10.6 —
  * a supported version — pins PHPUnit to ^9.6, which predates PHP 8 attributes
  * and ignores them silently rather than erroring. Without the data-provider
  * annotation, 9.6 collected this test with no data sets and called a
- * three-argument method with none: "ArgumentCountError: Too few arguments ...
- * 0 passed and exactly 3 expected". Drop an annotation and the 10.6 lane
+ * three-argument method with none. Drop an annotation and the 10.6 lane
  * breaks again, silently on any venue that does not run it.
  *
- * @covers \Drupal\mcp_sentinel_server\ToolScopeResolver
+ * @covers \Drupal\mcp_sentinel\Tool\McpToolScopeResolver
  * @group mcp_sentinel
- * @group mcp_sentinel_server
  */
+#[CoversClass(McpToolScopeResolver::class)]
 #[Group('mcp_sentinel')]
-#[Group('mcp_sentinel_server')]
-final class ToolScopeResolverTest extends UnitTestCase {
+final class McpToolScopeResolverTest extends UnitTestCase {
 
   /**
    * The resolver maps (config-domain, operation) to the correct scope.
@@ -41,7 +39,7 @@ final class ToolScopeResolverTest extends UnitTestCase {
    */
   #[DataProvider('scopeCases')]
   public function testResolveDerivesScopeFromOperationAndDomain(ToolOperation $operation, bool $isConfigDomain, string $expected): void {
-    $this->assertSame($expected, ToolScopeResolver::resolve($operation, $isConfigDomain));
+    $this->assertSame($expected, McpToolScopeResolver::resolve($operation, $isConfigDomain));
   }
 
   /**

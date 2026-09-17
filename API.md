@@ -104,7 +104,6 @@ protected helpers the shipped tools share:
 | `validationMessages(FieldableEntityInterface $entity)` | collect entity validation errors |
 | `checkRateLimit(...)` | enforce the profile's per-window request rate limit |
 | `applyResultCap(...)` | truncate a result list to the profile's `result_count_cap` |
-| `checkResponseSizeCap(...)` | enforce the profile's response-size cap |
 | `truncateBulkResultsToSizeCap(...)` | trim a bulk result set to the size cap |
 
 `McpGovernedToolBase::checkAccess()` is final. It enforces the Drupal

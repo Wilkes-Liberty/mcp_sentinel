@@ -11,9 +11,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
-use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
-use Drupal\mcp_sentinel_server\ToolScopeResolver;
 use Drupal\tool\Tool\ToolManager;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
@@ -36,35 +34,6 @@ final class McpSentinelServerCommands extends DrushCommands {
    * The OAuth scope namespace used for third-party settings.
    */
   private const OAUTH_PROVIDER = 'mcp_server_oauth';
-
-  /**
-   * MCP Sentinel tools to register with mcp_server, as Tool API plugin ids.
-   *
-   * This is the explicit allow-list of tools the setup command registers. The
-   * OAuth scope each tool requires is NOT stored here — it is derived from the
-   * plugin's own declarations (its ToolOperation and whether it implements
-   * ConfigScopeToolInterface) by scopeForTool(), so the plugin is the single
-   * source of truth for its scope and cannot drift from a parallel table.
-   */
-  private const TOOLS = [
-    'mcp_sentinel_site_context',
-    'mcp_sentinel_security_policy',
-    'mcp_sentinel_content_lock',
-    'mcp_sentinel_node_operations',
-    'mcp_sentinel_media_create',
-    'mcp_sentinel_workflow_transition',
-    'mcp_sentinel_bulk_operations',
-    // Calls still require the resolved policy's explicit raw SQL opt-in.
-    'mcp_sentinel_sql_query',
-    // Config tools derive to the config scope family (config_get/list =>
-    // mcp_config_read, config_set => mcp_config), so a content-tier token
-    // (mcp_read/mcp_write only) can never read or write configuration.
-    'mcp_sentinel_config_get',
-    'mcp_sentinel_config_list',
-    'mcp_sentinel_config_set',
-    // Registered only when the mcp_sentinel_graphql submodule is enabled.
-    'mcp_sentinel_graphql_schema',
-  ];
 
   /**
    * Cache tags to invalidate so mcp_server re-discovers the registered tools.
@@ -132,9 +101,9 @@ final class McpSentinelServerCommands extends DrushCommands {
     if (!$this->toolManager->hasDefinition($toolId)) {
       return NULL;
     }
-    $definition = $this->toolManager->getDefinition($toolId);
-    $isConfigDomain = is_a($definition->getClass(), ConfigScopeToolInterface::class, TRUE);
-    return ToolScopeResolver::resolve($definition->getOperation(), $isConfigDomain);
+    return McpToolScopeResolver::resolveDefinition(
+      $this->toolManager->getDefinition($toolId),
+    );
   }
 
   /**
@@ -145,13 +114,11 @@ final class McpSentinelServerCommands extends DrushCommands {
    */
   #[CLI\Command(name: 'mcp-sentinel:setup', aliases: ['mcps:setup'])]
   #[CLI\Option(name: 'allow-unauthenticated-development', description: 'Development only: register tools without required OAuth. The command exits nonzero and production readiness remains false.')]
-  #[CLI\Option(name: 'require-oauth', description: 'Deprecated compatibility flag. OAuth is required by default.')]
   #[CLI\Usage(name: 'drush mcp-sentinel:setup', description: 'Register every Sentinel tool with required OAuth and exact derived scope.')]
   #[CLI\Usage(name: 'drush mcp-sentinel:setup --allow-unauthenticated-development', description: 'Explicitly create a development-only, not-ready registration.')]
   public function setup(
     array $options = [
       'allow-unauthenticated-development' => FALSE,
-      'require-oauth' => FALSE,
     ],
   ): int {
     $development = !empty($options['allow-unauthenticated-development']);
@@ -171,12 +138,7 @@ final class McpSentinelServerCommands extends DrushCommands {
       ->get('mcp_sentinel.settings')
       ->get('agent_scopes') ?? []);
 
-    $toolIds = McpToolScopeResolver::REQUIRED_TOOLS;
-    foreach (McpToolScopeResolver::OPTIONAL_TOOLS as $toolId) {
-      if ($this->toolManager->hasDefinition($toolId)) {
-        $toolIds[] = $toolId;
-      }
-    }
+    $toolIds = $this->setupToolIds();
 
     $rows = [];
     $planned = [];
@@ -437,7 +399,7 @@ final class McpSentinelServerCommands extends DrushCommands {
     $storage = $this->entityTypeManager->getStorage('mcp_tool_config');
     $entities = array_filter(array_map(
       static fn(string $id) => $storage->load($id),
-      self::TOOLS,
+      $this->teardownToolIds(),
     ));
 
     if (!$entities) {
@@ -449,6 +411,41 @@ final class McpSentinelServerCommands extends DrushCommands {
     $this->cacheTagsInvalidator->invalidateTags(self::DISCOVERY_TAGS);
     $this->logger()?->success(sprintf('Unregistered %d MCP Sentinel tool(s).', count($entities)));
     return self::EXIT_SUCCESS;
+  }
+
+  /**
+   * Tool IDs mcp-sentinel:setup registers.
+   *
+   * Required tools always; optional tools only when their plugin is compiled.
+   *
+   * @return list<string>
+   *   Tool API plugin ids.
+   */
+  private function setupToolIds(): array {
+    $toolIds = McpToolScopeResolver::REQUIRED_TOOLS;
+    foreach (McpToolScopeResolver::OPTIONAL_TOOLS as $toolId) {
+      if ($this->toolManager->hasDefinition($toolId)) {
+        $toolIds[] = $toolId;
+      }
+    }
+    return $toolIds;
+  }
+
+  /**
+   * Tool IDs mcp-sentinel:teardown unregisters.
+   *
+   * Same resolver constants as setup, including optional ids even when the
+   * plugin is not compiled, so a leftover mcp_tool_config cannot remain after
+   * its submodule is disabled.
+   *
+   * @return list<string>
+   *   Tool API plugin ids.
+   */
+  private function teardownToolIds(): array {
+    return [
+      ...McpToolScopeResolver::REQUIRED_TOOLS,
+      ...McpToolScopeResolver::OPTIONAL_TOOLS,
+    ];
   }
 
   /**

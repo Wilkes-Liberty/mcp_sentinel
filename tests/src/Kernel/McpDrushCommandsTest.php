@@ -27,7 +27,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  *    on tamper.
  *  - webhook-prune: deletes rows past retention, returns EXIT_SUCCESS.
  *  - lock-clear: releases expired locks, returns EXIT_SUCCESS.
- *  - audit-purge: prunes old rows when retention > 0; no-op when retention = 0.
+ *  - audit-purge: asks the chain to prune when retention > 0; no-op when
+ *    retention = 0. Audit Chain 1.8.0 refuses the delete and keeps the rows.
  *  - webhook-replay: EXIT_FAILURE on bad ID, EXIT_SUCCESS when delivery exists.
  *  - status: EXIT_SUCCESS and includes key settings.
  *
@@ -255,7 +256,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
   }
 
   /**
-   * Audit-purge removes old entries when retention > 0.
+   * Audit-purge still succeeds when retention > 0, but the chain keeps rows.
    *
    * @covers ::auditPurge
    */
@@ -287,8 +288,12 @@ final class McpDrushCommandsTest extends KernelTestBase {
 
     $remaining = (int) $db->select('audit_chain_log')
       ->countQuery()->execute()->fetchField();
-    $this->assertSame(1, $remaining,
-      'audit-purge must delete rows past the retention window.');
+    $this->assertSame(2, $remaining,
+      'audit-purge must keep rows: Audit Chain 1.8.0 refuses per-channel prune.');
+    $this->assertTrue(
+      (bool) $this->container->get('state')->get('audit_chain.retention_refused'),
+      'Expired rows must surface as a retention refusal, not a silent keep.',
+    );
   }
 
   /**

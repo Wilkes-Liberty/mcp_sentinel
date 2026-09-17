@@ -14,6 +14,6 @@ namespace Drupal\mcp_sentinel\Tool;
  * operations, mcp_config for modifying) instead of the content family
  * (mcp_read / mcp_write). This keeps the plugin the single source of truth for
  * its scope; the derivation lives in
- * \Drupal\mcp_sentinel_server\ToolScopeResolver.
+ * \Drupal\mcp_sentinel\Tool\McpToolScopeResolver.
  */
 interface ConfigScopeToolInterface {}
