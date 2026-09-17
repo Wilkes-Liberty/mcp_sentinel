@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- Unused `mcp-sentinel:setup --require-oauth` flag (OAuth stays required
+  unless `--allow-unauthenticated-development`), the unused
+  `ToolScopeResolver` wrapper, the unused `McpApprovalGate::decide()` and
+  `McpEntityToolTrait::checkResponseSizeCap()` helpers, and unreferenced
+  `.mcp-sentinel-rows*` admin CSS. Setup and teardown now share
+  `McpToolScopeResolver::REQUIRED_TOOLS` / `OPTIONAL_TOOLS`.
+
 ## [2.22.0] - 2026-09-16
 
 ### Fixed

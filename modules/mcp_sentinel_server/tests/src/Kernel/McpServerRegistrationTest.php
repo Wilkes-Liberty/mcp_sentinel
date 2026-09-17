@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_server\Kernel;
 
+use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\mcp_sentinel_server\Drush\Commands\McpSentinelServerCommands;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
@@ -13,10 +14,10 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Tests that MCP Sentinel Tool plugins are discoverable by the Tool API.
  *
  * Covers gap G10: verifies that every plugin ID declared in
- * McpSentinelServerCommands::TOOLS is discoverable via the Tool plugin manager
- * (plugin.manager.tool). The mcp_sentinel_server submodule's setup command
- * iterates that list, so a missing or mis-keyed plugin would silently skip
- * registration.
+ * McpToolScopeResolver::REQUIRED_TOOLS is discoverable via the Tool plugin
+ * manager (plugin.manager.tool). The mcp_sentinel_server submodule's setup
+ * command iterates those resolver constants, so a missing or mis-keyed plugin
+ * would fail closed.
  *
  * The mcp_server_tool_bridge dependency (mcp_server_tool_bridge:McpToolConfig
  * entity storage) is NOT required for this test — we only exercise the Tool
@@ -60,10 +61,10 @@ final class McpServerRegistrationTest extends KernelTestBase {
   ];
 
   /**
-   * Tool plugin IDs that the server submodule registers with mcp_server.
+   * Content-only tool plugin IDs used as a discovery fixture.
    *
-   * These match the TOOLS constant in McpSentinelServerCommands (minus
-   * mcp_sentinel_graphql_schema, which requires the graphql submodule).
+   * Includes the SQL tool (Tool API / Drush, not mcp-sentinel:setup) and
+   * excludes config tools. Do not merge this into REQUIRED_TOOLS.
    */
   private const BASE_TOOL_IDS = [
     'mcp_sentinel_site_context',
@@ -89,8 +90,7 @@ final class McpServerRegistrationTest extends KernelTestBase {
   /**
    * Every base MCP Sentinel tool plugin is discoverable by plugin.manager.tool.
    *
-   * Verifies the server submodule's TOOLS map references real plugin IDs.
-   * A mismatch would cause mcp-sentinel:setup to silently skip the tool.
+   * Verifies the content-tool fixture references real plugin IDs.
    */
   public function testBaseSentinelToolPluginsAreDiscoverable(): void {
     /** @var \Drupal\tool\Tool\ToolManager $manager */
@@ -129,23 +129,34 @@ final class McpServerRegistrationTest extends KernelTestBase {
   }
 
   /**
-   * The TOOLS registration list covers every base tool plugin.
+   * Setup and teardown share the resolver constants; no parallel TOOLS list.
    *
-   * TOOLS is the explicit allow-list of tool ids the setup command registers;
-   * a refactored plugin id not updated here would silently lose registration.
+   * A refactored plugin id not updated on McpToolScopeResolver would fail
+   * closed at setup. SQL stays a content fixture, not a setup registration.
    */
-  public function testServerCommandsToolListCoversBasePlugins(): void {
+  public function testSetupAllowListComesFromResolverConstants(): void {
     $rc = new \ReflectionClass(McpSentinelServerCommands::class);
-    $constants = $rc->getConstants();
-    $this->assertArrayHasKey('TOOLS', $constants,
-      'McpSentinelServerCommands must declare a TOOLS constant.');
+    $this->assertArrayNotHasKey('TOOLS', $rc->getConstants(),
+      'McpSentinelServerCommands must not keep a parallel TOOLS list.');
 
-    // TOOLS is a flat list of tool ids; every base tool must appear (the
-    // graphql schema tool is conditional on the graphql submodule).
-    foreach (self::BASE_TOOL_IDS as $toolId) {
-      $this->assertContains($toolId, $constants['TOOLS'],
-        "Tool '$toolId' is missing from McpSentinelServerCommands::TOOLS.");
+    /** @var \Drupal\tool\Tool\ToolManager $manager */
+    $manager = $this->container->get('plugin.manager.tool');
+    foreach (McpToolScopeResolver::REQUIRED_TOOLS as $toolId) {
+      $this->assertTrue(
+        $manager->hasDefinition($toolId),
+        "Required tool '$toolId' must be discoverable by plugin.manager.tool."
+      );
     }
+    $this->assertNotContains(
+      'mcp_sentinel_sql_query',
+      McpToolScopeResolver::REQUIRED_TOOLS,
+      'SQL stays Tool API / Drush; setup must not register it as required.',
+    );
+    $this->assertNotContains(
+      'mcp_sentinel_sql_query',
+      McpToolScopeResolver::OPTIONAL_TOOLS,
+      'SQL stays Tool API / Drush; setup must not register it as optional.',
+    );
   }
 
   /**
@@ -158,16 +169,29 @@ final class McpServerRegistrationTest extends KernelTestBase {
    */
   public function testEveryRegisteredToolDerivesValidScope(): void {
     $command = $this->serverCommands();
-    $rc = new \ReflectionClass(McpSentinelServerCommands::class);
-    $toolIds = $rc->getConstants()['TOOLS'] ?? [];
+    $toolIds = array_values(array_unique([
+      ...McpToolScopeResolver::REQUIRED_TOOLS,
+      ...McpToolScopeResolver::OPTIONAL_TOOLS,
+      ...self::BASE_TOOL_IDS,
+    ]));
 
     foreach ($toolIds as $toolId) {
       // graphql_schema is conditional on the graphql submodule; only assert
-      // the base tools discoverable in this test's module set.
-      if (!in_array($toolId, self::BASE_TOOL_IDS, TRUE)) {
+      // tools discoverable in this test's module set.
+      $scope = $command->scopeForTool($toolId);
+      if ($scope === NULL) {
+        $this->assertNotContains(
+          $toolId,
+          McpToolScopeResolver::REQUIRED_TOOLS,
+          "Required tool '$toolId' must derive a scope.",
+        );
+        $this->assertNotContains(
+          $toolId,
+          self::BASE_TOOL_IDS,
+          "Content fixture tool '$toolId' must derive a scope.",
+        );
         continue;
       }
-      $scope = $command->scopeForTool($toolId);
       $this->assertIsString($scope, "Scope for '$toolId' must be a string.");
       $this->assertNotEmpty($scope, "Scope for '$toolId' must not be empty.");
       $this->assertStringStartsWith('mcp_', $scope,
