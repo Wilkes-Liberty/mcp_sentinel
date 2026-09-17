@@ -7,6 +7,10 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Access\AccessResultInterface;
+use Drupal\Core\Session\AccountInterface;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
+use Drupal\tool\Tool\ToolInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Url;
 
@@ -32,4 +36,11 @@ function mcp_sentinel_server_help(string $route_name, RouteMatchInterface $route
   $output .= '<p>' . t('For the tier model, the trust model, and full command reference, see the <a href=":help">MCP Sentinel help</a> and the project <code>README.md</code> / <code>API.md</code>.', [':help' => Url::fromRoute('help.page.mcp_sentinel')->toString()]) . '</p>';
 
   return $output;
+}
+
+/**
+ * Implements hook_mcp_server_tool_bridge_discovery_access().
+ */
+function mcp_sentinel_server_mcp_server_tool_bridge_discovery_access(ToolInterface $tool, AccountInterface $account): ?AccessResultInterface {
+  return $tool instanceof McpGovernedToolBase ? $tool->discoveryAccess($account) : NULL;
 }

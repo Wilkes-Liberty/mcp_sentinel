@@ -19,6 +19,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Account-aware Tool Bridge discovery uses the same source permission, scope,
+  readiness, and IP gates as execution. Module-owned tools can add input-free
+  policy restrictions; SQL discovery requires the account's raw-SQL capability.
+  ([#3623815](https://www.drupal.org/project/mcp_sentinel/issues/3623815))
+
 - A module-owned `mcp_sentinel_sql_query` Tool API action shares governed SELECT
   execution with `mcp-sentinel:sql-query`. The action resolves the authenticated
   account's policy and repeats source access checks on direct execution.

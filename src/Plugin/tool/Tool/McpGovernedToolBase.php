@@ -140,12 +140,34 @@ abstract class McpGovernedToolBase extends ToolBase {
     AccountInterface $account,
     bool $return_as_object = FALSE,
   ): bool|AccessResultInterface {
+    $access = $this->commonAccess($account);
+    if ($access->isAllowed()) {
+      $access = $access->andIf($this->checkGovernedAccess($values, $account));
+    }
+    return $return_as_object ? $access : $access->isAllowed();
+  }
+
+  /**
+   * Checks catalog visibility without requiring or inventing execution inputs.
+   */
+  final public function discoveryAccess(AccountInterface $account): AccessResult {
+    $access = $this->commonAccess($account);
+    if ($access->isAllowed()) {
+      $access = $access->andIf($this->checkGovernedDiscoveryAccess($account));
+    }
+    return AccessResult::allowedIf($access->isAllowed())->setCacheMaxAge(0);
+  }
+
+  /**
+   * Applies the shared identity, permission, readiness, scope and IP gates.
+   */
+  private function commonAccess(AccountInterface $account): AccessResultInterface {
     $access = AccessResult::allowedIfHasPermission(
       $account,
       'access mcp sentinel context',
     );
     if (!$access->isAllowed()) {
-      return $return_as_object ? $access : FALSE;
+      return $access;
     }
 
     // Name the surface on the request (d.o #3616540 part 2): Tool execution
@@ -167,7 +189,7 @@ abstract class McpGovernedToolBase extends ToolBase {
       $denied = AccessResult::forbidden(
         'MCP Sentinel source governance is not ready: ' . $reason . '.',
       )->addCacheableDependency($readiness);
-      return $return_as_object ? $denied : FALSE;
+      return $denied;
     }
 
     $profile = $readiness->profile();
@@ -175,13 +197,20 @@ abstract class McpGovernedToolBase extends ToolBase {
       $denied = AccessResult::forbidden(
         'Source IP not permitted by MCP Sentinel policy.',
       )->setCacheMaxAge(0);
-      return $return_as_object ? $denied : FALSE;
+      return $denied;
     }
 
-    $subclassAccess = $this->checkGovernedAccess($values, $account);
-    $access->addCacheableDependency($readiness);
-    $access = $access->andIf($subclassAccess);
-    return $return_as_object ? $access : $access->isAllowed();
+    return $access->addCacheableDependency($readiness);
+  }
+
+  /**
+   * Narrows catalog visibility using principal/tool policy, never input values.
+   *
+   * Override when a tool has additional principal-level requirements. Record-
+   * specific authorization remains in checkGovernedAccess() at execution.
+   */
+  protected function checkGovernedDiscoveryAccess(AccountInterface $account): AccessResultInterface {
+    return AccessResult::allowed();
   }
 
   /**

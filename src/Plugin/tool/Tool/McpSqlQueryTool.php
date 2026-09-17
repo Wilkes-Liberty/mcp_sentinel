@@ -60,6 +60,13 @@ final class McpSqlQueryTool extends McpGovernedToolBase {
   /**
    * {@inheritdoc}
    */
+  protected function checkGovernedDiscoveryAccess(AccountInterface $account): AccessResultInterface {
+    return $this->checkGovernedAccess([], $account);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   protected function doExecute(array $values): ExecutableResult {
     try {
       // Direct PHP execution must not bypass discovery/invoker access checks.

@@ -10,6 +10,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
 use Drupal\tool\Tool\ToolInterface;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpSqlQueryTool;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelSqlCommands;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\node\Entity\Node;
@@ -468,6 +469,26 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     self::assertFalse($tool->getResult()->isSuccess());
     self::assertSame(McpSentinelSqlCommands::EXIT_SUCCESS, $this->commands->sqlQuery('SELECT nid FROM node_field_data'));
     self::assertSame(2, json_decode($this->output->fetch(), TRUE)['row_count']);
+  }
+
+  /**
+   * Discovery follows policy and identity changes without requiring a query.
+   */
+  public function testDiscoveryRequiresCurrentPolicyWithoutInputs(): void {
+    $this->governedTool('SELECT nid FROM node_field_data');
+    $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_sql_query');
+    self::assertInstanceOf(McpSqlQueryTool::class, $tool);
+    $account = $this->container->get('current_user');
+    self::assertFalse($tool->discoveryAccess($account)->isAllowed());
+    $this->setRawSqlCapability(TRUE);
+    self::assertTrue($tool->discoveryAccess($account)->isAllowed());
+    self::assertSame(0, $tool->discoveryAccess($account)->getCacheMaxAge());
+    self::assertFalse($tool->hasExecuted());
+    $this->setRawSqlCapability(FALSE);
+    self::assertFalse($tool->discoveryAccess($account)->isAllowed());
+    $this->setRawSqlCapability(TRUE);
+    $account->setAccount(new AnonymousUserSession());
+    self::assertFalse($tool->discoveryAccess($account)->isAllowed());
   }
 
   /**
