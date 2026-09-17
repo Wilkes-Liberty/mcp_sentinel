@@ -249,11 +249,17 @@ final class McpAuditLoggerTest extends KernelTestBase {
       'operation' => 'fresh',
     ])->execute();
 
-    // Retention defaults to 90 days; the 100-day-old row should be pruned.
+    // Retention defaults to 90 days. Audit Chain 1.8.0 refuses destructive
+    // per-channel prune so a shared chain cannot lose a predecessor; Sentinel
+    // still asks, nothing is deleted, and the refusal is recorded.
     $pruned = $this->container->get('mcp_sentinel.audit_logger')->pruneOldEntries();
-    $this->assertSame(1, $pruned);
+    $this->assertSame(0, $pruned);
     $remaining = (int) $database->select('audit_chain_log')->countQuery()->execute()->fetchField();
-    $this->assertSame(1, $remaining);
+    $this->assertSame(2, $remaining);
+    $this->assertTrue(
+      (bool) $this->container->get('state')->get('audit_chain.retention_refused'),
+      'Expired rows must surface as a retention refusal, not a silent keep.',
+    );
   }
 
 }
