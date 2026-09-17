@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-09-16
+
 ### Fixed
 
 - Install and seed the Audit Chain 1.7.2 mutex in shared kernel fixtures,
