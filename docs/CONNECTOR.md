@@ -17,11 +17,12 @@ On the Drupal side that means:
 - **Log-only `X-MCP-Client` identity.** The connector's self-reported client
   label is recorded in the audit log (as the `mcp_client` metadata field) for
   forensics only — it is never an enforcement signal.
-- **OAuth scopes `mcp_read` / `mcp_write` / `mcp_config`.** Read/explain tools
-  require `mcp_read`; content write tools require `mcp_write`; the configuration
-  tools (`config_get` / `config_list` / `config_set`) require the dedicated
-  `mcp_config` scope so config management is isolated to the dev/config tier and
-  a content-tier token can never reach it.
+- **OAuth scopes `mcp_read` / `mcp_write` / `mcp_config` / `mcp_config_read`.**
+  Read/explain tools require `mcp_read`; content write tools require
+  `mcp_write`; config-read tools (`config_get` / `config_list`) require
+  `mcp_config_read`; the config-write tool (`config_set`) requires the dedicated
+  `mcp_config` scope so config management is isolated to the auditor/dev/config
+  tiers and a content-tier token can never reach it.
 - **The `/drupal-mcp/context` endpoint** exposes the governed site schema.
 - **Server-authoritative authorization keyed on role + scopes.** Every gate is
   decided server-side from the authenticated role and the token's OAuth scopes —
@@ -99,7 +100,7 @@ Each `mcp_tool_config` entity carries third-party settings under the
 | Setting | Value |
 |---------|-------|
 | `authentication_mode` | `required` |
-| `scopes` | `mcp_read` (read/explain tools), `mcp_write` (content write tools), or `mcp_config` (config tools) |
+| `scopes` | `mcp_read` (read/explain tools), `mcp_write` (content write tools), `mcp_config_read` (config-read tools), or `mcp_config` (config-write tools) |
 
 The `mcp_server_oauth` subscriber enforces these per tool call — a token that
 lacks the required scope is rejected before governance even fires.
@@ -531,8 +532,9 @@ returns a lock-conflict message).
 ```bash
 ddev drush php:eval "
   \$rows = \Drupal::database()
-    ->select('mcp_sentinel_audit_log', 'a')
+    ->select('audit_chain_log', 'a')
     ->fields('a', ['uid', 'operation', 'entity_type', 'timestamp'])
+    ->condition('channel', 'mcp_sentinel')
     ->orderBy('timestamp', 'DESC')
     ->range(0, 5)
     ->execute()

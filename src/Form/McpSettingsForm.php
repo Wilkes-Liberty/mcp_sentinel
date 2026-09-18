@@ -205,8 +205,8 @@ class McpSettingsForm extends ConfigFormBase {
       '#type' => 'textarea',
       '#title' => $this->t('Agent scopes'),
       '#description' => $this->t('One OAuth scope per line. A token carrying any of these scopes is on the agent channel.'),
-      '#default_value' => $lines($config->get('agent_scopes') ?? ['mcp_read', 'mcp_write', 'mcp_config']),
-      '#rows' => 3,
+      '#default_value' => $lines($config->get('agent_scopes') ?? ['mcp_read', 'mcp_write', 'mcp_config', 'mcp_config_read']),
+      '#rows' => 4,
     ];
     $form['oauth']['agent_oauth_clients'] = [
       '#type' => 'textarea',
