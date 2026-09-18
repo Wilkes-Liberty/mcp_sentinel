@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Kernel coverage now asks MCP Server's tool plugin manager whether
+  `mcp-sentinel:setup` registrations are in the catalog (`tool_api__<id>`).
+  Tool API discovery alone stayed green when a mismatched Tool Bridge left
+  `tools/list` empty.
+  ([#3624392](https://www.drupal.org/project/mcp_sentinel/issues/3624392))
+
 ### Changed
 
 - Operator docs and the settings-form `agent_scopes` fallback now match shipped
