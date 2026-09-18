@@ -105,7 +105,7 @@ final class McpServerCatalogTest extends KernelTestBase {
       $this->container->has('plugin.manager.mcp_server.tool'),
       'MCP Server tool plugin manager must exist after enabling mcp_server.',
     );
-    /** @var \Drupal\Component\Plugin\PluginManagerInterface $manager */
+    /** @var \Drupal\Component\Plugin\Discovery\CachedDiscoveryInterface $manager */
     $manager = $this->container->get('plugin.manager.mcp_server.tool');
     $manager->clearCachedDefinitions();
     $definitions = $manager->getDefinitions();
@@ -157,7 +157,7 @@ final class McpServerCatalogTest extends KernelTestBase {
       $this->container->has('plugin.manager.mcp_server.tool'),
       'MCP Server tool plugin manager must exist after enabling mcp_server.',
     );
-    /** @var \Drupal\Component\Plugin\PluginManagerInterface $manager */
+    /** @var \Drupal\Component\Plugin\Discovery\CachedDiscoveryInterface $manager */
     $manager = $this->container->get('plugin.manager.mcp_server.tool');
     $manager->clearCachedDefinitions();
     $definitions = $manager->getDefinitions();
