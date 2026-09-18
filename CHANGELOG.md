@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Operator docs and the settings-form `agent_scopes` fallback now match shipped
+  2.22: four OAuth scopes (`mcp_read` / `mcp_write` / `mcp_config` /
+  `mcp_config_read`), approval defaults `delete` / `config_import` /
+  `module_disable`, draft continuation on node and media, audit queries against
+  `audit_chain_log` (channel `mcp_sentinel`), publish gate as `McpDenyPublish`
+  plus the presave backstop, and leftover webhook keys cleared by update
+  `10022`.
+
 ### Removed
 
 - Unused `mcp-sentinel:setup --require-oauth` flag (OAuth stays required

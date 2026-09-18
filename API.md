@@ -176,11 +176,13 @@ content **publishing**. Both layers are additive and default to the safe value
   (`mcp_sentinel.moderation_gate` / `McpModerationGate::targetIsPublishedState()`)
   across both write paths: the `mcp_sentinel_workflow_transition` tool refuses a
   transition to a published state (and beyond `getMaxModerationState()`), and
-  `hook_entity_field_access` forbids `edit` on `moderation_state` only when the
-  *target* is a published state and on `status` only when set to `TRUE` — so the
-  non-publish editorial transitions a role grants (`draft`, `submit_for_review`,
-  `restore`, `archive`) and unpublishing are allowed. `hook_entity_presave` still
-  forces unmoderated publishable entities unpublished. A human publisher publishes.
+  the `McpDenyPublish` validation constraint refuses a go-live on the
+  JSON:API/REST write path (it sees the incoming `moderation_state` / `status`,
+  which field edit-access cannot). Non-publish editorial transitions a role
+  grants (`draft`, `submit_for_review`, `restore`, `archive`) and unpublishing
+  are allowed. `hook_entity_field_access` does not enforce the publish gate on
+  `edit`. `hook_entity_presave` keeps a `status=0` backstop for unvalidated
+  saves (custom code, Drush). A human publisher publishes.
 
 ## Drush commands
 
@@ -274,7 +276,7 @@ declared-ceiling header).
 ### `McpMetrics` — governance-dashboard data
 
 `mcp_sentinel.metrics` is the single read-only source of dashboard data. It
-aggregates from existing stores only — `mcp_sentinel_audit_log`,
+aggregates from existing stores only — `audit_chain_log` (channel `mcp_sentinel`),
 `mcp_sentinel_webhook_delivery`, approval entities (NULL-safe when the
 submodule is absent), anomaly `@state`, and config. Every audit/webhook query is
 **window-bounded** via the indexed `timestamp`/`created` columns and uses the

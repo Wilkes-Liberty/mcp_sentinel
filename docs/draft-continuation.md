@@ -1,7 +1,7 @@
 # Governed draft continuation
 
 With JSON:API enabled, Sentinel adds a PATCH endpoint at each mutable node
-resource's URL plus `/mcp-draft`. This is separate from core revision reads:
+and media resource's URL plus `/mcp-draft`. This is separate from core revision reads:
 core rejects PATCH requests carrying `resourceVersion`.
 
 The endpoint accepts the ordinary JSON:API `data` document, including attributes
@@ -74,8 +74,7 @@ refused. This endpoint never repins a host revision.
 
 Image alt is a translatable field on the host when the file target is
 unchanged (`translation_sync.file: file`, alt not synced). Replacing the
-file on a translation write is refused. Media entity translation is not
-enabled by this path.
+file on a translation write is refused.
 
 Creating a translation copies untranslated structure from the source, then
 applies only the submitted translatable fields. A published or default-revision

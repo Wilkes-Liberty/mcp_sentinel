@@ -156,8 +156,9 @@ them rather than replacing entity or field access.
   reason) without claiming policy effectiveness or overall posture.
 - **Governed Tool plugins** — ready-to-use Tool API tools (site context,
   security policy, content locks, node create/update, media creation, workflow
-  transitions, bulk publish/unpublish/delete, GraphQL schema discovery), each
-  routed through the same policy, access, and content-lock checks.
+  transitions, bulk publish/unpublish/delete, governed SQL query, GraphQL
+  schema discovery), each routed through the same policy, access, and
+  content-lock checks. JSON:API draft continuation covers node and media.
 
 ## Submodules
 

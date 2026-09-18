@@ -166,7 +166,8 @@ delete access), marks the request approved, and writes an `approval_decision`
 row to the audit log; denying records the denial and leaves the target intact.
 
 Which operations are gated is configurable via the
-`mcp_sentinel_approval.settings:gated_operations` key (default: `[delete]`).
+`mcp_sentinel_approval.settings:gated_operations` key (default:
+`[delete, config_import, module_disable]`).
 The base module has **no dependency** on this submodule — with the submodule
 absent, the event is never vetoed and destructive operations proceed unchanged.
 
@@ -238,8 +239,8 @@ MCP policy profiles → Configuration governance**.
   the non-publish editorial transitions a role grants (`draft`,
   `submit_for_review`, `restore`, `archive`) are permitted while a transition to a
   *published* state is refused. This holds on **both** write paths: the
-  workflow-transition tool and the JSON:API/REST write path (the
-  `moderation_state` / `status` field-access gate), which share one
+  workflow-transition tool and the JSON:API/REST write path (`McpDenyPublish`
+  plus the presave `status=0` backstop), which share one
   published-state check (`mcp_sentinel.moderation_gate`). An optional maximum
   moderation state still applies. On unmoderated publishable entities the
   `status` flag is blocked in the publish direction, and an in-place edit of
@@ -872,7 +873,7 @@ using `@state` (key `mcp_sentinel.anomaly_last_alert.{rule_id}`). Set
 ### Performance notes
 
 Queries hit only the indexed `operation` and `timestamp` columns of
-`mcp_sentinel_audit_log` — no full-table scans. Each rule is one
+`audit_chain_log` (channel `mcp_sentinel`) — no full-table scans. Each rule is one
 lightweight `COUNT` query. A bad rule (zero threshold, empty pattern) is
 skipped with a log warning rather than fataling cron.
 
@@ -943,8 +944,8 @@ The delivery log is bounded by `webhook_delivery_retention_days` (default 30,
 
 Sites that used the old single `webhook_url`/`webhook_secret_key` settings are
 migrated automatically (`update_10008`) into one `webhook_endpoints` entry.
-Delivery reads `webhook_endpoints` only; leftover legacy keys stay in existing
-site config for review and are not shipped on new installs.
+Delivery reads `webhook_endpoints` only; leftover legacy keys are cleared by
+update `10022` and are not shipped on new installs.
 
 ## Configuration
 
