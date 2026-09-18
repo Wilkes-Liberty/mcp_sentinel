@@ -6,13 +6,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- Kernel coverage now asks MCP Server's tool plugin manager whether
-  `mcp-sentinel:setup` registrations are in the catalog (`tool_api__<id>`).
-  Tool API discovery alone stayed green when a mismatched Tool Bridge left
-  `tools/list` empty.
-  ([#3624392](https://www.drupal.org/project/mcp_sentinel/issues/3624392))
+## [2.22.1] - 2026-09-18
 
 ### Changed
 
@@ -32,6 +26,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `McpEntityToolTrait::checkResponseSizeCap()` helpers, and unreferenced
   `.mcp-sentinel-rows*` admin CSS. Setup and teardown now share
   `McpToolScopeResolver::REQUIRED_TOOLS` / `OPTIONAL_TOOLS`.
+
+### Fixed
+
+- Kernel coverage now asks MCP Server's tool plugin manager whether
+  `mcp-sentinel:setup` registrations are in the catalog (`tool_api__<id>`).
+  Tool API discovery alone stayed green when a mismatched Tool Bridge left
+  `tools/list` empty.
+  ([#3624392](https://www.drupal.org/project/mcp_sentinel/issues/3624392))
 
 ## [2.22.0] - 2026-09-16
 
@@ -2288,7 +2290,9 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.22.1...1.x
+[2.22.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.22.0...2.22.1
+[2.22.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.1...2.22.0
 [2.21.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.21.0...2.21.1
 [2.21.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.20.0...2.21.0
 [2.20.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.19.0...2.20.0
