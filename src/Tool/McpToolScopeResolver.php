@@ -31,7 +31,15 @@ final class McpToolScopeResolver {
   /**
    * Optional Tool IDs, checked only when their plugin is compiled.
    */
-  public const OPTIONAL_TOOLS = ['mcp_sentinel_graphql_schema'];
+  public const OPTIONAL_TOOLS = [
+    'mcp_sentinel_graphql_schema',
+    'mcp_sentinel_governance_status',
+    'mcp_sentinel_effective_limits',
+    'mcp_sentinel_audit_metrics',
+    'mcp_sentinel_role_audit',
+    'mcp_sentinel_urgent_conditions',
+    'mcp_sentinel_my_approvals',
+  ];
 
   /**
    * Resolves the exact scope for one Tool operation/domain.
