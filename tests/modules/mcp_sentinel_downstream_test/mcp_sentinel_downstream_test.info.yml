@@ -1,0 +1,8 @@
+name: 'MCP Sentinel downstream tool contract test'
+type: module
+description: 'A governed tool outside the mcp_sentinel namespace. It calls every protected helper MCP Sentinel offers to downstream tool authors.'
+package: Testing
+core_version_requirement: ^10.6 || ^11.3
+dependencies:
+  - mcp_sentinel:mcp_sentinel
+  - tool:tool

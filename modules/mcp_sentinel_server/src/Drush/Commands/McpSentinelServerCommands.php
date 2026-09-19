@@ -111,14 +111,21 @@ final class McpSentinelServerCommands extends DrushCommands {
    *
    * Creates or updates one mcp_tool_config entity per available MCP Sentinel
    * Tool plugin. Idempotent — safe to run repeatedly.
+   *
+   * The require-oauth option does nothing: OAuth is required unless the
+   * development option is passed. It stays declared because Drush rejects an
+   * option it does not know, and provisioning scripts outside this project
+   * still pass it. 2.22.1 removed it and those scripts began to fail.
    */
   #[CLI\Command(name: 'mcp-sentinel:setup', aliases: ['mcps:setup'])]
   #[CLI\Option(name: 'allow-unauthenticated-development', description: 'Development only: register tools without required OAuth. The command exits nonzero and production readiness remains false.')]
+  #[CLI\Option(name: 'require-oauth', description: 'Deprecated compatibility flag. OAuth is required by default.')]
   #[CLI\Usage(name: 'drush mcp-sentinel:setup', description: 'Register every Sentinel tool with required OAuth and exact derived scope.')]
   #[CLI\Usage(name: 'drush mcp-sentinel:setup --allow-unauthenticated-development', description: 'Explicitly create a development-only, not-ready registration.')]
   public function setup(
     array $options = [
       'allow-unauthenticated-development' => FALSE,
+      'require-oauth' => FALSE,
     ],
   ): int {
     $development = !empty($options['allow-unauthenticated-development']);

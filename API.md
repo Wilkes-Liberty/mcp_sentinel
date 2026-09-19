@@ -104,7 +104,31 @@ protected helpers the shipped tools share:
 | `validationMessages(FieldableEntityInterface $entity)` | collect entity validation errors |
 | `checkRateLimit(...)` | enforce the profile's per-window request rate limit |
 | `applyResultCap(...)` | truncate a result list to the profile's `result_count_cap` |
+| `checkResponseSizeCap(string $serialized, McpPolicyProfileInterface $profile)` | refuse a read whose serialized response exceeds the profile's response-size cap; returns a failure result, or `NULL` when within the cap |
 | `truncateBulkResultsToSizeCap(...)` | trim a bulk result set to the size cap |
+
+These helpers are API for tool authors in other projects, together with the
+members of `McpGovernedToolBase` a subclass uses: the `checkGovernedAccess()`
+and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
+`discoveryAccess()` gates, and the protected `governance*` properties
+(`$governancePolicyResolver`, `$governanceAccessChecker`,
+`$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
+`$governanceDlp`, `$governanceClassification`). Each one carries `@api` in its
+docblock, except `checkAccess()`, whose docblock is inherited from the Tool
+API. A tool that operates on configuration also implements
+`Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface`.
+
+MCP Sentinel's own tools do not call every helper, so a search of this project
+alone reports some as unused. They are not dead code. Removing, renaming or
+retyping one breaks the modules that build on it and needs a major release.
+2.22.1 removed `checkResponseSizeCap()` this way and every GraphQL Compose
+Codegen MCP tool refused every request
+([#3624445](https://www.drupal.org/project/mcp_sentinel/issues/3624445)).
+
+`tests/modules/mcp_sentinel_downstream_test` holds a tool in another namespace
+that calls each helper. `McpDownstreamToolContractTest` executes it and compares
+the declared members with a pinned list. When you add a helper, add it to that
+tool, to the pinned list and to the table above.
 
 `McpGovernedToolBase::checkAccess()` is final. It enforces the Drupal
 permission, the shared connector-facing readiness contract, the exact OAuth
@@ -224,7 +248,7 @@ content **publishing**. Both layers are additive and default to the safe value
 | `mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Secure-install evidence document. Posture always; hostile-input probes with `--live`. Never persists. Skipped checks fail the run. |
 | `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
 | `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only governed raw-SQL path. Refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement; every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
-| `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. |
+| `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. OAuth is required unless `--allow-unauthenticated-development` is passed. `--require-oauth` is accepted and does nothing; it is kept so scripts written for earlier releases still run. |
 | `mcp-sentinel:agent-provision <tier> --env=<env>` | Idempotently provision a tier's role, dedicated agent account, and OAuth consumer (deterministic `client_id` = `<tier>-<env>`). Secrets stay a human action. |
 | `mcp-sentinel:break-glass <uid>` | Raise an always-gated approval request to grant the time-boxed `mcp_admin` role (auto-revoked at `break_glass_ttl_seconds`). |
 

@@ -8,6 +8,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `McpEntityToolTrait::checkResponseSizeCap()` is back, with the signature and
+  behaviour it had in 2.22.0. 2.22.1 removed it as unused. GraphQL Compose
+  Codegen's MCP submodule calls it, so with 2.22.1 installed its three tools
+  (inspect, diff, preview) answered every request with "Schema operation
+  refused". Access checks still passed and the tools were still listed.
+  ([#3624445](https://www.drupal.org/project/mcp_sentinel/issues/3624445))
+- `drush mcp-sentinel:setup --require-oauth` is accepted again. The flag still
+  does nothing: OAuth stays required unless
+  `--allow-unauthenticated-development` is passed. 2.22.1 removed the
+  declaration and Drush then rejected the option, which stopped provisioning
+  scripts that pass it.
+  ([#3624445](https://www.drupal.org/project/mcp_sentinel/issues/3624445))
 - `mcp_sentinel_config_set` validates the object a write would produce before
   it saves it or queues it for approval. It runs typed-config validation on the
   merged data, then the config import validators for that one object, as core's
@@ -29,6 +41,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is refused unless the profile turns this on. Update `10024` adds the key to
   existing profiles at `false`.
   ([#3624441](https://www.drupal.org/project/mcp_sentinel/issues/3624441))
+
+### Changed
+
+- The protected members of `McpGovernedToolBase` and `McpEntityToolTrait` are
+  documented as API for tool authors in other projects and tagged `@api`. A
+  new test module, `mcp_sentinel_downstream_test`, ships a tool in another
+  namespace that calls each helper. `McpDownstreamToolContractTest` executes it
+  and compares the declared members with a pinned list, so removing or
+  renaming one fails this project's tests.
+  ([#3624445](https://www.drupal.org/project/mcp_sentinel/issues/3624445))
 
 ## [2.22.1] - 2026-09-18
 

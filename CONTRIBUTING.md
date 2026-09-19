@@ -73,6 +73,21 @@ Never edit one without the other in the same commit. CI’s PHPUnit suite includ
 `McpBreakGlassTest::testOptionalConfigYamlShipsApprovedList`, which fails if they
 drift.
 
+### Protected tool helpers are API
+
+Other projects build governed tools on `McpGovernedToolBase` and
+`McpEntityToolTrait` and call their protected members. This project does not
+call all of them itself, so an unused-code search lists some as dead. Check
+`API.md` ("Tool plugin contract") before removing anything tagged `@api`.
+Removing, renaming or retyping one needs a major release.
+
+`McpDownstreamToolContractTest` runs a tool from
+`tests/modules/mcp_sentinel_downstream_test`, which sits in another namespace
+and calls every helper. It also compares the declared members with a pinned
+list. Add a new helper to the tool, the list and `API.md` in the same commit.
+The same applies to Drush options: Drush rejects an option a command no longer
+declares, so removing one breaks the scripts that pass it.
+
 ## Documentation
 
 Update `README.md`, `CHANGELOG.md` (under `[Unreleased]`), and the docs in
