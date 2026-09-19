@@ -11,12 +11,30 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\tool\ExecutableResult;
 
 /**
- * Shared helpers for MCP Sentinel content tool plugins.
+ * Shared helpers for governed tool plugins, in this project and in others.
+ *
+ * Every protected method here is API for downstream tool authors. Modules
+ * outside this project use this trait on a McpGovernedToolBase subclass and
+ * call these helpers. MCP Sentinel's own tools do not call all of them, so a
+ * search of this project alone reports some as unused. They are not dead
+ * code: 2.22.1 removed checkResponseSizeCap() on that reading and every
+ * GraphQL Compose Codegen MCP tool began refusing every request.
+ *
+ * Removing, renaming or changing the signature of a method tagged "@api" is a
+ * breaking change and needs a major release. The mcp_sentinel_downstream_test
+ * module calls each helper from another namespace and
+ * McpDownstreamToolContractTest compares this trait with a pinned list, so
+ * either change fails this project's own tests.
+ *
+ * @see \Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\DownstreamContractTool
+ * @see \Drupal\Tests\mcp_sentinel\Kernel\McpDownstreamToolContractTest
  */
 trait McpEntityToolTrait {
 
   /**
    * Returns the denial reason for a forbidden access result, or NULL.
+   *
+   * @api
    */
   protected function denyReason(AccessResultInterface $result): ?string {
     if (!$result->isForbidden()) {
@@ -47,6 +65,8 @@ trait McpEntityToolTrait {
    *   The attempted operation (e.g. 'create', 'update', 'delete').
    * @param string $reason
    *   Human-readable denial reason (from denyReason() or inline text).
+   *
+   * @api
    */
   protected function logDeniedAccess(
     string $toolId,
@@ -69,6 +89,8 @@ trait McpEntityToolTrait {
    *
    * @return string[]
    *   Violation messages (empty when the entity is valid).
+   *
+   * @api
    */
   protected function validationMessages(FieldableEntityInterface $entity): array {
     $messages = [];
@@ -92,6 +114,8 @@ trait McpEntityToolTrait {
    *
    * @return \Drupal\tool\ExecutableResult|null
    *   A failure result when throttled, NULL when within limits.
+   *
+   * @api
    */
   protected function checkRateLimit(
     McpPolicyProfileInterface $profile,
@@ -127,6 +151,8 @@ trait McpEntityToolTrait {
    *
    * @return array
    *   The (possibly truncated) results array.
+   *
+   * @api
    */
   protected function applyResultCap(
     array $results,
@@ -141,6 +167,47 @@ trait McpEntityToolTrait {
       $results['_result_cap'] = $guard->effectiveResultCap($profile);
     }
     return $results;
+  }
+
+  /**
+   * Checks if a serialized payload exceeds the profile's response_size_cap.
+   *
+   * Returns a failure result when over-cap, NULL when within limits.
+   *
+   * This is appropriate for PURE-READ tools that want to refuse-with-failure
+   * before materialising any response. For write tools (where operations have
+   * already been executed), use truncateBulkResultsToSizeCap() instead so that
+   * completed work is never misreported as failed.
+   *
+   * @param string $serialized
+   *   The serialized response string whose byte length will be measured.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The active governance profile.
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when over the cap, NULL when within limits.
+   *
+   * @api
+   */
+  protected function checkResponseSizeCap(
+    string $serialized,
+    McpPolicyProfileInterface $profile,
+  ): ?ExecutableResult {
+    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
+    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    $bytes = strlen($serialized);
+    if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
+      return ExecutableResult::failure(
+        $this->t(
+          'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
+          [
+            '@bytes' => $bytes,
+            '@cap'   => $guard->effectiveResponseSizeCap($profile),
+          ]
+        )
+      );
+    }
+    return NULL;
   }
 
   /**
@@ -165,6 +232,8 @@ trait McpEntityToolTrait {
    * @return array
    *   The (possibly truncated) results array with '_size_truncated' and
    *   '_size_cap' keys added when truncation was necessary.
+   *
+   * @api
    */
   protected function truncateBulkResultsToSizeCap(
     array $results,

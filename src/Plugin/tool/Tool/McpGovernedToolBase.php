@@ -21,21 +21,41 @@ use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Enforces the non-bypassable readiness gate for Sentinel Tool plugins.
+ *
+ * This class is the base for governed tools in other projects as well as in
+ * this one. Its protected properties, the two overridable access hooks
+ * (checkGovernedAccess() and checkGovernedDiscoveryAccess()) and the final
+ * gates checkAccess() and discoveryAccess() are API for downstream tool
+ * authors, together with the protected helpers of McpEntityToolTrait. Members
+ * tagged "@api" may look unused inside this project. Do not remove, rename or
+ * retype them outside a major release.
+ *
+ * McpDownstreamToolContractTest pins the member list and runs a tool from
+ * another namespace against it.
+ *
+ * @see \Drupal\mcp_sentinel\Plugin\tool\Tool\McpEntityToolTrait
+ * @see \Drupal\Tests\mcp_sentinel\Kernel\McpDownstreamToolContractTest
  */
 abstract class McpGovernedToolBase extends ToolBase {
 
   /**
    * Source-governance readiness service.
+   *
+   * @api
    */
   protected McpGovernanceReadiness $governanceReadiness;
 
   /**
    * IP allowlist and policy access checker.
+   *
+   * @api
    */
   protected McpAccessChecker $governanceAccessChecker;
 
   /**
    * Exact OAuth scope derived from this plugin's declaration.
+   *
+   * @api
    */
   protected string $governanceRequiredScope;
 
@@ -46,21 +66,31 @@ abstract class McpGovernedToolBase extends ToolBase {
    * subclass that overrides create()) still works; without it the surface is
    * simply not stamped and the classification resolver falls back to its
    * strictest-ceiling rule.
+   *
+   * @api
    */
   protected ?RequestStack $governanceRequestStack = NULL;
 
   /**
    * DLP scanner applied to successful Tool context.
+   *
+   * @api
    */
   protected ?McpDlp $governanceDlp = NULL;
 
   /**
    * Classification resolver used to tighten Tool egress (NULL in unit tests).
+   *
+   * @api
    */
   protected ?McpClassificationResolver $governanceClassification = NULL;
 
   /**
    * Policy resolver used to read the Tool ceiling (NULL in unit tests).
+   *
+   * Downstream tools resolve the active profile through this property.
+   *
+   * @api
    */
   protected ?McpPolicyResolver $governancePolicyResolver = NULL;
 
@@ -149,6 +179,8 @@ abstract class McpGovernedToolBase extends ToolBase {
 
   /**
    * Checks catalog visibility without requiring or inventing execution inputs.
+   *
+   * @api
    */
   final public function discoveryAccess(AccountInterface $account): AccessResult {
     $access = $this->commonAccess($account);
@@ -208,6 +240,8 @@ abstract class McpGovernedToolBase extends ToolBase {
    *
    * Override when a tool has additional principal-level requirements. Record-
    * specific authorization remains in checkGovernedAccess() at execution.
+   *
+   * @api
    */
   protected function checkGovernedDiscoveryAccess(AccountInterface $account): AccessResultInterface {
     return AccessResult::allowed();
@@ -218,6 +252,8 @@ abstract class McpGovernedToolBase extends ToolBase {
    *
    * Subclasses may narrow the decision but cannot bypass permission,
    * readiness, or IP policy because the public access seam above is final.
+   *
+   * @api
    */
   protected function checkGovernedAccess(
     array $values,
