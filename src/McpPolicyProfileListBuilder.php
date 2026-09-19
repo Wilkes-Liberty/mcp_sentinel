@@ -37,6 +37,7 @@ final class McpPolicyProfileListBuilder extends ConfigEntityListBuilder {
       'label' => $this->t('Profile'),
       'roles' => $this->t('Roles'),
       'weight' => $this->t('Weight'),
+      'status' => $this->t('Enabled'),
     ] + parent::buildHeader();
   }
 
@@ -57,6 +58,9 @@ final class McpPolicyProfileListBuilder extends ConfigEntityListBuilder {
         ? implode(', ', $labels)
         : $this->t('(default — all governed roles)'),
       'weight' => $entity->getWeight(),
+      'status' => $entity->status()
+        ? $this->t('Enabled')
+        : $this->t('Disabled'),
     ] + parent::buildRow($entity);
   }
 
