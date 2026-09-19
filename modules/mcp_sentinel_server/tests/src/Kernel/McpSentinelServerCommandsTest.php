@@ -163,7 +163,7 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
     ]);
 
     $this->assertSame(3, $result);
-    $this->assertSame(count(McpToolScopeResolver::REQUIRED_TOOLS), $saved);
+    $this->assertSame($this->setupToolCount(), $saved);
   }
 
   /**
@@ -213,7 +213,7 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
     );
 
     $this->assertSame(1, $command->setup());
-    $this->assertCount(count(McpToolScopeResolver::REQUIRED_TOOLS), $entities);
+    $this->assertCount($this->setupToolCount(), $entities);
     $this->assertSame(2, $deleted);
   }
 
@@ -301,6 +301,20 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
     $this->assertSame(1, $result);
     $this->assertSame([], $this->config('mcp_sentinel.settings')->get('agent_oauth_clients'));
     $this->assertSame(3, $deleted);
+  }
+
+  /**
+   * How many tools setup registers here: required plus compiled optional.
+   */
+  private function setupToolCount(): int {
+    $count = count(McpToolScopeResolver::REQUIRED_TOOLS);
+    $manager = $this->container->get('plugin.manager.tool');
+    foreach (McpToolScopeResolver::OPTIONAL_TOOLS as $toolId) {
+      if ($manager->hasDefinition($toolId)) {
+        $count++;
+      }
+    }
+    return $count;
   }
 
   /**

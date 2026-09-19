@@ -266,6 +266,9 @@ final class McpGovernanceReadiness {
     }
 
     $expected = $this->requiredToolScopes;
+    $registrations = $this->entityTypeManager
+      ->getStorage('mcp_tool_config')
+      ->loadMultiple();
     if ($expected === NULL) {
       if ($this->toolManager === NULL) {
         return $this->denied(McpGovernanceReadinessReason::ToolRegistrationMissing, $profile);
@@ -279,20 +282,25 @@ final class McpGovernanceReadiness {
           $this->toolManager->getDefinition($toolId),
         );
       }
+      // Optional tools are enforced only when a site has already registered
+      // them. A compiled plugin with no mcp_tool_config must not take the
+      // contract not-ready: new optional tools have to be addable without a
+      // setup rerun.
       foreach (McpToolScopeResolver::OPTIONAL_TOOLS as $toolId) {
-        if ($this->toolManager->hasDefinition($toolId)) {
-          $expected[$toolId] = McpToolScopeResolver::resolveDefinition(
-            $this->toolManager->getDefinition($toolId),
-          );
+        if (!$this->toolManager->hasDefinition($toolId)) {
+          continue;
         }
+        if (!isset($registrations[$toolId])) {
+          continue;
+        }
+        $expected[$toolId] = McpToolScopeResolver::resolveDefinition(
+          $this->toolManager->getDefinition($toolId),
+        );
       }
     }
     elseif ($this->compiledToolExists('mcp_sentinel_graphql_schema')) {
       $expected['mcp_sentinel_graphql_schema'] = 'mcp_read';
     }
-    $registrations = $this->entityTypeManager
-      ->getStorage('mcp_tool_config')
-      ->loadMultiple();
 
     foreach ($expected as $toolId => $requiredScope) {
       $tool = $registrations[$toolId] ?? NULL;
