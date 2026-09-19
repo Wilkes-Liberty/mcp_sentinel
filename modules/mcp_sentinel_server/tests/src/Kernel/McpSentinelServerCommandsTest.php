@@ -16,6 +16,7 @@ use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\mcp_sentinel_server\Drush\Commands\McpSentinelServerCommands;
 use Drupal\user\RoleInterface;
 use Drupal\user\UserInterface;
+use Drush\Attributes\Option;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -83,6 +84,34 @@ final class McpSentinelServerCommandsTest extends KernelTestBase {
     $command = $this->command($entityTypeManager, $moduleHandler);
 
     $this->assertSame(1, $command->setup());
+  }
+
+  /**
+   * The deprecated require-oauth option stays declared and changes nothing.
+   *
+   * Drush rejects an option a command does not declare. Provisioning scripts
+   * outside this project pass --require-oauth, so removing the declaration
+   * breaks them (d.o #3624445).
+   */
+  public function testDeprecatedRequireOauthOptionStaysDeclared(): void {
+    $declared = [];
+    $method = new \ReflectionMethod(McpSentinelServerCommands::class, 'setup');
+    foreach ($method->getAttributes(Option::class) as $attribute) {
+      $declared[] = $attribute->getArguments()['name'];
+    }
+    $this->assertContains('require-oauth', $declared);
+    $defaults = $method->getParameters()[0]->getDefaultValue();
+    $this->assertArrayHasKey('require-oauth', $defaults);
+    $this->assertFalse($defaults['require-oauth']);
+
+    // Passing it is not a way around the OAuth requirement.
+    $entityTypeManager = $this->createMock(EntityTypeManagerInterface::class);
+    $entityTypeManager->expects($this->never())->method('getStorage');
+    $command = $this->command($entityTypeManager, $this->moduleHandler([
+      'mcp_server_tool_bridge' => TRUE,
+      'mcp_server_oauth' => FALSE,
+    ]));
+    $this->assertSame(1, $command->setup(['require-oauth' => TRUE]));
   }
 
   /**
