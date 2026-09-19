@@ -220,6 +220,16 @@ final class McpConfigSetValidationTest extends KernelTestBase {
   }
 
   /**
+   * Keys that cannot be applied to a config object are refused.
+   */
+  public function testKeyThatCannotBeAppliedIsRefused(): void {
+    $before = $this->stored(ImportValidator::NAME);
+    // Config refuses a nested key that contains a dot.
+    $tool = $this->configSet(ImportValidator::NAME, ['nested' => ['bad.key' => self::SECRET]]);
+    $this->assertRefused($tool, ImportValidator::NAME, $before, 0, 'could not be applied');
+  }
+
+  /**
    * One bad key refuses the whole write, including its valid keys.
    */
   public function testPartlyValidWriteSavesNothing(): void {

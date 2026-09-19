@@ -172,7 +172,11 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
       // hard-denies a write to a denied config name.
       $editable->save();
     }
-    catch (\Exception $e) {
+    catch (\Throwable $e) {
+      // The factory caches the mutable object. Drop it, so values that were
+      // set but never written cannot ride along with a later save of this
+      // name in the same request.
+      $this->configFactory->reset($name);
       $this->logFailure('save', $name, $e);
       return ExecutableResult::failure($this->t('Configuration write failed or was blocked by policy. The error has been logged.'));
     }
