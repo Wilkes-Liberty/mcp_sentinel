@@ -132,7 +132,7 @@ final class McpApprovalConfigSecretTest extends KernelTestBase {
    * The display payload withholds a nested secret; approve still applies it.
    */
   public function testDisplayPayloadWithholdsTheSecretAndReplayIsIntact(): void {
-    $tool = $this->agentConfigSet(self::NAME, ['nested' => ['label' => 'visible', 'token' => self::SECRET]]);
+    $tool = $this->agentConfigSet(self::NAME, ['nested' => ['label' => 'lab-qx-99', 'token' => self::SECRET]]);
     self::assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
     self::assertTrue($tool->getResult()->getContextValues()['queued_for_approval']);
 
@@ -145,7 +145,7 @@ final class McpApprovalConfigSecretTest extends KernelTestBase {
     self::assertStringNotContainsString(self::SECRET, (string) $request->get('payload')->value);
     $shown = $request->getPayload()['data']['nested'];
     self::assertSame('[REDACTED]', $shown['token'], 'The path is still shown.');
-    self::assertSame('visible', $shown['label'], 'Ordinary values are still shown.');
+    self::assertSame('lab-qx-99', $shown['label'], 'Ordinary values are still shown.');
     self::assertStringNotContainsString(self::SECRET, $this->auditText());
 
     // What the reviewer is shown goes through the same redactor.
@@ -153,7 +153,7 @@ final class McpApprovalConfigSecretTest extends KernelTestBase {
     self::assertTrue($context['visible']);
     self::assertNotEmpty($context['rows'], 'The changed key still gets a row.');
     self::assertStringNotContainsString(self::SECRET, (string) json_encode($context));
-    self::assertStringContainsString('visible', (string) json_encode($context));
+    self::assertStringContainsString('lab-qx-99', (string) json_encode($context));
 
     $current = $this->container->get('current_user');
     $current->setAccount(new AnonymousUserSession());
@@ -229,6 +229,29 @@ final class McpApprovalConfigSecretTest extends KernelTestBase {
     $fields = array_column($context['rows'], 'field');
     self::assertContains('key_provider_settings', $fields);
     self::assertContains('label', $fields);
+  }
+
+  /**
+   * A profile redacted field is withheld in the reviewer rows at any depth.
+   */
+  public function testReviewerWithholdsProfileRedactedFields(): void {
+    $profile = McpPolicyProfile::load('agent_config_write');
+    self::assertNotNull($profile);
+    $profile->set('redacted_fields', ['label'])->save();
+
+    $tool = $this->agentConfigSet(self::NAME, ['nested' => ['label' => 'lab-qx-99', 'token' => self::SECRET]]);
+    self::assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
+    $requests = $this->container->get('entity_type.manager')->getStorage('mcp_approval_request')->loadMultiple();
+    self::assertCount(1, $requests);
+    $request = reset($requests);
+    self::assertInstanceOf(McpApprovalRequestInterface::class, $request);
+
+    $context = $this->container->get('mcp_sentinel_approval.reviewer_context')->build($request);
+    $text = (string) json_encode($context);
+    self::assertTrue($context['visible']);
+    self::assertStringNotContainsString(self::SECRET, $text);
+    self::assertStringNotContainsString('lab-qx-99', $text, 'A profile redacted field is withheld, not only built-in secret names.');
+    self::assertNotEmpty($context['rows']);
   }
 
 }
