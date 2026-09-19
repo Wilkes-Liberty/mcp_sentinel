@@ -4,6 +4,28 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Config secrets are withheld, and secret-bearing names cannot be written
+
+Values under sensitive key names (`password`, `token`, `key_value` and the rest
+of the built-in list) are no longer written to the audit log or returned by
+`mcp_sentinel_config_get`, at any depth. For `key.key.*`, `encrypt.profile.*`,
+`simple_oauth.*` and `consumer.*` the audit log records changed paths only and
+the get tool returns structure only, with `values_withheld` set.
+
+- **`mcp_sentinel_config_set` now refuses those names.** A workflow that had an
+  agent write a Key entity or an OAuth consumer through the tool stops working.
+  Have a human make that change.
+- **Audit rows already written are not rewritten.** The chain is append-only.
+  If a governed agent saved a secret through config before this release, rotate
+  that secret.
+- **Pending approval requests keep their values.** A request for a
+  secret-bearing name that was queued before this release is still pending and
+  its sealed manifest still holds the values. Deny it and purge decided
+  requests.
+- Update `10025` adds `audit_sensitive_config_keys` and
+  `audit_secret_config_prefixes`, both empty. They only add to the built-in
+  lists.
+
 ## Governed config writes are validated before they are saved
 
 `mcp_sentinel_config_set` used to save whatever a permitted agent sent. It now

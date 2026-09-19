@@ -109,13 +109,17 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
     catch (\Throwable $e) {
       // If we cannot record the request, veto anyway: a gated action must never
       // silently proceed because bookkeeping failed.
+      // Not the message: a storage exception repeats the query arguments,
+      // and those are the payload and the manifest.
       $this->logger->error(
-        'Failed to create approval request for @op on @type @id: @msg',
+        'Failed to create approval request for @op on @type @id: @class at @file:@line.',
         [
           '@op'   => $event->getOperation(),
           '@type' => $event->getTargetType(),
           '@id'   => $event->getTargetId(),
-          '@msg'  => $e->getMessage(),
+          '@class' => get_class($e),
+          '@file' => basename($e->getFile()),
+          '@line' => $e->getLine(),
         ],
       );
       $event->veto('Queued for approval (request could not be recorded; action blocked).');

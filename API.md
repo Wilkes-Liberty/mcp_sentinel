@@ -239,9 +239,21 @@ content **publishing**. Both layers are additive and default to the safe value
   - A site adds to either list with `audit_sensitive_config_keys` and
     `audit_secret_config_prefixes` in `mcp_sentinel.settings`. The built-in
     entries live in code and nothing in configuration removes one.
-  - Not covered: the sealed manifest of a queued config change holds the real
-    values, because it is what gets replayed on approve. Deny secret-bearing
-    names with `denied_config_types` if agents should not queue them.
+  - `mcp_sentinel_config_set` refuses a write to a secret-bearing name
+    outright, with one fixed message, before validation and before the approval
+    event. Nothing is queued or saved and the refusal is audited as
+    `denied_access`.
+  - **A queued config change holds its values at rest.** The sealed manifest in
+    `mcp_approval_request.manifest` keeps the real values, because it is what
+    gets replayed on approve. It stays in that table until the request is
+    decided and purged, and an account with `approve mcp sentinel operations`
+    can load the entity. The `payload` column, the reviewer's diff and every
+    log line go through the redactor; the manifest cannot. A sensitive value
+    nested inside ordinary config (an SMTP password in a module's settings, for
+    example) is therefore stored in the manifest if an agent queues it. Deny
+    such names with `denied_config_types`, or add their prefix to
+    `audit_secret_config_prefixes`, which makes the tool refuse them, instead
+    of letting them be queued.
   - `McpAuditLogger::computeConfigDiff()` takes the config name as an optional
     fourth argument. Without it only the key-name rule applies.
 - **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on

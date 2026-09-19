@@ -34,3 +34,6 @@ mcp_sentinel_config_validation_test.settings:
           constraints:
             Length:
               max: 12
+        token:
+          type: string
+          label: 'A secret held inside ordinary config'

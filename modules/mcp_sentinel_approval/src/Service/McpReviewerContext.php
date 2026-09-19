@@ -244,8 +244,15 @@ final class McpReviewerContext {
    */
   private function configRows(McpActionManifest $manifest): array {
     $name = $manifest->target()['id'];
+    // Rows are chosen by comparing the real values, so a changed secret still
+    // gets a row. What is rendered goes through the shared redactor first:
+    // sensitive names are masked at any depth, and a name that holds secrets
+    // by nature shows its structure only.
+    $secrets = new McpConfigSecretRedactor($this->configFactory);
     $live = $this->configFactory->get($name)->getRawData();
     $data = (array) ($manifest->arguments()['data'] ?? []);
+    $shownLive = $secrets->redactForName($name, $live);
+    $shownData = $secrets->redactForName($name, $data);
     $keys = array_unique(array_merge(array_keys($data), array_keys($live)));
     sort($keys);
     $rows = [];
@@ -258,8 +265,8 @@ final class McpReviewerContext {
       }
       $rows[] = $this->row(
         $key,
-        $this->displayValue($key, $sealed),
-        $this->displayValue($key, $current),
+        $this->displayValue($key, $shownData[$key] ?? NULL),
+        $this->displayValue($key, $shownLive[$key] ?? NULL),
       );
     }
     return $rows;

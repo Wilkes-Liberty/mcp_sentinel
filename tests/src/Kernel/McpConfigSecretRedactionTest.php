@@ -230,6 +230,25 @@ final class McpConfigSecretRedactionTest extends KernelTestBase {
   }
 
   /**
+   * The config set tool refuses a secret-bearing name with one fixed message.
+   */
+  public function testConfigSetToolRefusesSecretBearingNames(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_secret_config_prefixes', ['vendor_sso.'])->save();
+    foreach (['key.key.new_key', 'vendor_sso.settings'] as $name) {
+      $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_config_set');
+      $tool->setInputValue('name', $name);
+      $tool->setInputValue('data', ['key_provider_settings' => ['key_value' => self::SECRET]]);
+      $tool->execute();
+      self::assertFalse($tool->getResultStatus(), $name);
+      self::assertStringContainsString('holds secrets', (string) $tool->getResultMessage());
+      self::assertSame([], $this->container->get('config.storage')->read($name) ?: [], $name);
+    }
+    [, $text] = $this->lastConfigSave();
+    self::assertStringNotContainsString(self::SECRET, $text);
+    self::assertStringContainsString('secret-bearing configuration name', $text, 'The refusal is audited.');
+  }
+
+  /**
    * The config get tool returns structure, not secrets.
    */
   public function testConfigGetToolRedacts(): void {
