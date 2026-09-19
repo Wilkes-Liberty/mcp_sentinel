@@ -58,6 +58,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "id",
  *     "label",
  *     "weight",
+ *     "status",
  *     "roles",
  *     "allow_read",
  *     "allow_write",
