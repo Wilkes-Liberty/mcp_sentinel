@@ -65,6 +65,7 @@ services:
       - '@logger.channel.mcp_sentinel'
       - '@mcp_sentinel.action_manifest_sealer'
       - '@mcp_sentinel.policy_resolver'
+      - '@?mcp_sentinel.config_secret_redactor'
     tags:
       - { name: event_subscriber }
 

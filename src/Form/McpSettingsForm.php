@@ -10,6 +10,7 @@ use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
@@ -290,6 +291,24 @@ class McpSettingsForm extends ConfigFormBase {
       '#options'       => $profile_options,
       '#default_value' => $chainConfig->get('encryption_profile') ?? '',
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['audit']['audit_sensitive_config_keys'] = [
+      '#type'          => 'textarea',
+      '#title'         => $this->t('Additional secret config key names'),
+      '#description'   => $this->t('One key name per line. A config value under one of these names is never written to the audit log or returned by a config tool, at any depth. This list adds to the built-in names (@names). It cannot remove one.', [
+        '@names' => implode(', ', McpConfigSecretRedactor::SENSITIVE_KEYS),
+      ]),
+      '#default_value' => implode("\n", (array) ($config->get('audit_sensitive_config_keys') ?? [])),
+      '#rows'          => 3,
+    ];
+    $form['audit']['audit_secret_config_prefixes'] = [
+      '#type'          => 'textarea',
+      '#title'         => $this->t('Additional secret-bearing config name prefixes'),
+      '#description'   => $this->t('One config name prefix per line. For a matching config object the audit log records which paths changed and no values, and a config tool returns its structure only. This list adds to the built-in prefixes (@prefixes). It cannot remove one.', [
+        '@prefixes' => implode(', ', McpConfigSecretRedactor::SECRET_CONFIG_PREFIXES),
+      ]),
+      '#default_value' => implode("\n", (array) ($config->get('audit_secret_config_prefixes') ?? [])),
+      '#rows'          => 3,
     ];
 
     $form['dlp'] = [
@@ -1277,6 +1296,8 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_enabled', (bool) $form_state->getValue('audit_enabled'))
       ->set('audit_log_reads', (bool) $form_state->getValue('audit_log_reads'))
       ->set('audit_retention_days', (int) $form_state->getValue('audit_retention_days'))
+      ->set('audit_sensitive_config_keys', $split((string) $form_state->getValue('audit_sensitive_config_keys')))
+      ->set('audit_secret_config_prefixes', $split((string) $form_state->getValue('audit_secret_config_prefixes')))
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))
       ->set('dlp_mask_mode', (string) ($form_state->getValue('dlp_mask_mode') ?? 'redact'))
       ->set('dlp_patterns', $dlp_patterns)

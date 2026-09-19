@@ -188,7 +188,7 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
     }
 
     // Otherwise audit the mutation with a redaction/DLP-aware diff.
-    $diff = $this->auditLogger->computeConfigDiff($original, $new, $redacted);
+    $diff = $this->auditLogger->computeConfigDiff($original, $new, $redacted, $name);
     $this->auditLogger->log('config_save', [
       'entity_type' => 'config',
       'id' => $name,

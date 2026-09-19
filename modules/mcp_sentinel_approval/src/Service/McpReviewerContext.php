@@ -10,6 +10,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\RevisionableInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
+use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Value\McpActionManifest;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\user\UserInterface;
@@ -358,7 +359,10 @@ final class McpReviewerContext {
    * Replaces secret-looking keys with a redaction marker.
    */
   private function redact(string $key, mixed $value): mixed {
-    if (preg_match('/secret|password|token|hash_key|key_value/i', $key) === 1) {
+    // The pattern predates the shared list and matches substrings, so it stays;
+    // the shared built-in and site-added names are applied on top of it.
+    if (preg_match('/secret|password|token|hash_key|key_value/i', $key) === 1
+      || (new McpConfigSecretRedactor($this->configFactory))->isSensitiveKey($key)) {
       return $value === NULL ? NULL : '[REDACTED]';
     }
     if (!is_array($value)) {

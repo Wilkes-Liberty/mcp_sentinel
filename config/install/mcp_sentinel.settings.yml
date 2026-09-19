@@ -90,3 +90,5 @@ anomaly_rules: {  }
 dashboard_broadcast:
   message: ''
   severity: 'info'
+audit_sensitive_config_keys: {  }
+audit_secret_config_prefixes: {  }

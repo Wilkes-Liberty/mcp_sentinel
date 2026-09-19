@@ -8,6 +8,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
@@ -62,6 +63,11 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
   protected McpAuditLogger $auditLogger;
 
   /**
+   * Withholds secrets held in configuration.
+   */
+  protected McpConfigSecretRedactor $configSecrets;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -70,6 +76,7 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
     $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->auditLogger = $container->get('mcp_sentinel.audit_logger');
+    $instance->configSecrets = $container->get('mcp_sentinel.config_secret_redactor');
     return $instance;
   }
 
@@ -94,15 +101,26 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
       return ExecutableResult::failure($this->t('MCP Sentinel denied the config read: @reason', ['@reason' => $reason]));
     }
 
-    $data = $this->configFactory->get($name)->getRawData();
+    // Secrets are withheld before the data leaves this method. A value under
+    // a sensitive key name is masked at any depth, and a name that holds
+    // secrets by nature returns its structure only. The DLP pass that follows
+    // in execute() matches patterns; it cannot know a key is a secret.
+    $raw = $this->configFactory->get($name)->getRawData();
+    $withheld = $this->configSecrets->isSecretBearing($name);
+    $data = $this->configSecrets->redactForName($name, $raw, $profile->getRedactedFields());
     $this->auditLogger->log('config_read', [
       'entity_type' => 'config',
       'id' => $name,
     ]);
 
+    $context = ['name' => $name, 'data' => $data];
+    if ($withheld) {
+      // Tell the caller the markers are a policy, not the stored values.
+      $context['values_withheld'] = TRUE;
+    }
     return ExecutableResult::success(
       $this->t('Configuration @name read.', ['@name' => $name]),
-      ['name' => $name, 'data' => $data],
+      $context,
     );
   }
 

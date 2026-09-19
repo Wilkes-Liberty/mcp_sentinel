@@ -236,6 +236,18 @@ mcp_sentinel.settings:
         severity:
           type: string
           label: 'Severity (info, warning, critical)'
+    audit_sensitive_config_keys:
+      type: sequence
+      label: 'Additional config key names whose values are never logged or returned (adds to the built-in list)'
+      sequence:
+        type: string
+        label: 'Key name'
+    audit_secret_config_prefixes:
+      type: sequence
+      label: 'Additional config name prefixes whose values are never logged or returned (adds to the built-in list)'
+      sequence:
+        type: string
+        label: 'Config name prefix'
 
 mcp_sentinel.mcp_policy_profile.*:
   type: config_entity

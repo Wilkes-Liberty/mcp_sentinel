@@ -189,6 +189,29 @@ content **publishing**. Both layers are additive and default to the safe value
   require **`mcp_config`** (never `mcp_write`). A content-tier token
   (`mcp_read` / `mcp_write`) is rejected before governance fires — config
   management is isolated to the auditor/dev/config tiers.
+- **Secrets held in configuration.** `McpConfigSecretRedactor`
+  (`mcp_sentinel.config_secret_redactor`) is applied wherever a config value
+  would be written to the audit log, stored for display, or returned by a tool:
+  the `config_save` diff, the result of `mcp_sentinel_config_get`, the display
+  payload of a queued config change, and the reviewer's diff.
+  - A value under a sensitive key name is replaced with `[REDACTED]` at any
+    depth. Built-in names: `key_value`, `password`, `pass`, `secret`, `token`,
+    `api_key`, `apikey`, `client_secret`, `private_key`, `credentials`,
+    `authorization`. A name matches as a whole word, in any case and with any
+    separator (`clientSecret`, `SMTP_PASS`), so `bypass_cache` does not match.
+    The profile's `redacted_fields` apply the same way, at any depth.
+  - A config name that holds secrets by nature gives up no values. Built-in
+    prefixes: `key.key.`, `encrypt.profile.`, `simple_oauth.`, `consumer.`.
+    The audit diff lists the changed paths. The get tool returns the structure
+    with every value replaced and sets `values_withheld`.
+  - A site adds to either list with `audit_sensitive_config_keys` and
+    `audit_secret_config_prefixes` in `mcp_sentinel.settings`. The built-in
+    entries live in code and nothing in configuration removes one.
+  - Not covered: the sealed manifest of a queued config change holds the real
+    values, because it is what gets replayed on approve. Deny secret-bearing
+    names with `denied_config_types` if agents should not queue them.
+  - `McpAuditLogger::computeConfigDiff()` takes the config name as an optional
+    fourth argument. Without it only the key-name rule applies.
 - **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on
   `ConfigEvents::SAVE`) audits every governed config save as `config_save` (diff
   via `McpAuditLogger::computeConfigDiff()`) and, for a governed write to a

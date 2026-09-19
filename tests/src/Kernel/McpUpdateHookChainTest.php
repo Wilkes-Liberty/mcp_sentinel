@@ -797,6 +797,27 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10025 seeds the two config secret lists, empty, and keeps additions.
+   */
+  public function testUpdate10025SeedsConfigSecretLists(): void {
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.settings') ?: [];
+    unset($data['audit_sensitive_config_keys'], $data['audit_secret_config_prefixes']);
+    $storage->write('mcp_sentinel.settings', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+
+    $message = mcp_sentinel_update_10025();
+    $this->assertStringContainsString('audit_sensitive_config_keys', $message);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertSame([], $this->config('mcp_sentinel.settings')->get('audit_sensitive_config_keys'));
+    $this->assertSame([], $this->config('mcp_sentinel.settings')->get('audit_secret_config_prefixes'));
+
+    $this->config('mcp_sentinel.settings')->set('audit_sensitive_config_keys', ['license_code'])->save();
+    $this->assertStringContainsString('already present', mcp_sentinel_update_10025());
+    $this->assertSame(['license_code'], $this->config('mcp_sentinel.settings')->get('audit_sensitive_config_keys'));
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

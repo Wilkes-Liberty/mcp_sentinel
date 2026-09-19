@@ -6,6 +6,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- A governed config save no longer writes secrets into the audit log. The
+  `config_save` diff masked only top-level keys named on the profile and
+  JSON-encoded everything else, so saving a Key entity with the config provider
+  wrote its `key_value` into the append-only chain, and so did any module config
+  holding a password, token or API key in a nested map. Values under a sensitive
+  key name are now masked at any depth, and secret-bearing objects (`key.key.*`,
+  `encrypt.profile.*`, `simple_oauth.*`, `consumer.*`) record changed paths
+  only. `mcp_sentinel_config_get` applies the same rules to what it returns, and
+  the display payload of a queued config change no longer holds the values.
+  Rows already written are not rewritten: the chain is append-only. Rotate any
+  secret a governed agent saved through config before this release.
+- New settings `audit_sensitive_config_keys` and
+  `audit_secret_config_prefixes` add names and prefixes to the built-in lists.
+  They cannot remove a built-in entry. Update `10025` seeds both, empty.
+
 ### Fixed
 
 - `McpEntityToolTrait::checkResponseSizeCap()` is back, with the signature and

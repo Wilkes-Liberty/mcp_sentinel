@@ -234,6 +234,11 @@ MCP policy profiles → Configuration governance**.
   name-prefix denylist (deny always wins). A `ConfigEvents::SAVE` subscriber
   audits every governed config save and hard-denies (revert + throw) a governed
   write to a denied config name, so a direct `Config::save()` cannot bypass it.
+  Secrets held in configuration are kept out of the audit log and the config
+  tools: a value under a name such as `password`, `token` or `key_value` is
+  masked at any depth, and objects such as `key.key.*` record changed paths
+  only. Sites can add names and prefixes under *Audit* in the settings form.
+  The built-in ones cannot be removed.
 - **Publish gate.** When *Deny publishing* is on (the default), only the
   **go-live** transition is withheld from the agent — the gate is value-aware, so
   the non-publish editorial transitions a role grants (`draft`,

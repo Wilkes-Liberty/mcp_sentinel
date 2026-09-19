@@ -9,6 +9,7 @@ use Drupal\Core\Logger\LoggerChannelInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
+use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\mcp_sentinel_approval\Service\McpApprovalGate;
@@ -39,6 +40,8 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
    *   Mints a sealed manifest when the signing key resolves.
    * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
    *   Resolves the active profile for the policy digest.
+   * @param \Drupal\mcp_sentinel\Service\McpConfigSecretRedactor|null $configSecrets
+   *   Withholds secrets from the stored display payload of a config change.
    */
   public function __construct(
     private readonly McpApprovalGate $gate,
@@ -46,6 +49,7 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
     private readonly LoggerChannelInterface $logger,
     private readonly McpActionManifestSealer $sealer,
     private readonly McpPolicyResolver $policyResolver,
+    private readonly ?McpConfigSecretRedactor $configSecrets = NULL,
   ) {}
 
   /**
@@ -93,7 +97,10 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
         // columns so the request renders and the executor can replay it.
         'entity_type'  => $event->getTargetType(),
         'entity_id'    => $event->getTargetId(),
-        'payload'      => (string) json_encode($payload),
+        // The payload column is for display. The sealed manifest is what gets
+        // replayed, and it has to hold the real values to do that. Keep a
+        // queued config secret out of this second, plain copy.
+        'payload'      => (string) json_encode($this->displayPayload($event, $payload)),
         'status'       => McpApprovalRequestInterface::STATUS_PENDING,
         'manifest'     => $manifest?->toJson() ?? '',
       ]);
@@ -116,6 +123,19 @@ final class McpDestructiveActionSubscriber implements EventSubscriberInterface {
     }
 
     $event->veto(sprintf('Queued for approval (request #%s).', (string) $request->id()));
+  }
+
+  /**
+   * The payload as stored for display: config values with secrets withheld.
+   */
+  private function displayPayload(McpDestructiveActionEvent $event, array $payload): array {
+    if ($event->getTargetType() !== 'config' || !is_array($payload['data'] ?? NULL)) {
+      return $payload;
+    }
+    $secrets = $this->configSecrets ?? new McpConfigSecretRedactor();
+    $redacted = $this->policyResolver->resolve($event->getAccount())?->getRedactedFields() ?? [];
+    $payload['data'] = $secrets->redactForName($event->getTargetId(), $payload['data'], $redacted);
+    return $payload;
   }
 
   /**
