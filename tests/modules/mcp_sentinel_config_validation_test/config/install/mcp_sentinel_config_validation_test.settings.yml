@@ -1,0 +1,5 @@
+mode: open
+limit: 5
+enabled: true
+nested:
+  label: start

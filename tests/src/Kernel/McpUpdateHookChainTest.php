@@ -797,6 +797,37 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10024 backfills the schema-less config write opt-in, off.
+   *
+   * An upgrade must not hand an existing profile a relaxation it never asked
+   * for, and must not overwrite one an operator has already turned on.
+   */
+  public function testUpdate10024BackfillsSchemalessConfigWriteOff(): void {
+    McpPolicyProfile::create([
+      'id' => 'opted_in',
+      'label' => 'Opted in',
+      'allow_config_write' => TRUE,
+      'allow_schemaless_config_write' => TRUE,
+    ])->save();
+    // A profile saved before the knob existed has no such key in storage.
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.mcp_policy_profile.default');
+    unset($data['allow_schemaless_config_write']);
+    $storage->write('mcp_sentinel.mcp_policy_profile.default', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.mcp_policy_profile.default');
+
+    $message = mcp_sentinel_update_10024();
+    $this->assertStringContainsString('1 policy profile(s)', $message);
+
+    $this->container->get('config.factory')->reset();
+    $this->assertFalse($this->config('mcp_sentinel.mcp_policy_profile.default')->get('allow_schemaless_config_write'));
+    $this->assertTrue($this->config('mcp_sentinel.mcp_policy_profile.opted_in')->get('allow_schemaless_config_write'));
+
+    $again = mcp_sentinel_update_10024();
+    $this->assertStringContainsString('0 policy profile(s)', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

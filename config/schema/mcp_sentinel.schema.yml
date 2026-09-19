@@ -306,6 +306,9 @@ mcp_sentinel.mcp_policy_profile.*:
     allow_config_write:
       type: boolean
       label: 'Allow configuration write'
+    allow_schemaless_config_write:
+      type: boolean
+      label: 'Allow configuration write to names that have no schema (off by default)'
     denied_config_types:
       type: sequence
       label: 'Denied configuration name prefixes'

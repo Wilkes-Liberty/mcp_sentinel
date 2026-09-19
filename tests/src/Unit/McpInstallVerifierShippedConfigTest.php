@@ -67,6 +67,10 @@ final class McpInstallVerifierShippedConfigTest extends UnitTestCase {
     ));
     $this->assertTrue((bool) $profile['deny_publish']);
     $this->assertFalse((bool) $profile['allow_config_write']);
+    // Present and off: a missing key would hide the strict default from a
+    // config export.
+    $this->assertArrayHasKey('allow_schemaless_config_write', $profile);
+    $this->assertFalse($profile['allow_schemaless_config_write']);
     $this->assertFalse((bool) $profile['allow_delete']);
     $this->assertFalse((bool) $profile['allow_raw_sql']);
   }

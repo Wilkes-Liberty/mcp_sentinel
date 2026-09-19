@@ -157,6 +157,7 @@ governance the resolver selects per request. Read its gates and limits via:
 | `getResultCountCap()` / `getResponseSizeCap()` | exfiltration caps (`0` = unlimited) |
 | `getAllowedIps()` | per-profile CIDR allowlist (empty = no restriction) |
 | `allowsConfigRead()` / `allowsConfigWrite()` | configuration read/write gates (both default off) |
+| `allowsSchemalessConfigWrite()` | whether a governed write may target a config name that has no schema (default off) |
 | `getDeniedConfigTypes()` | config name-prefix denylist (deny always wins, e.g. `system.`) |
 | `deniesPublish()` | publish gate — when `TRUE` (default) the agent cannot publish content |
 | `getMaxModerationState()` | ceiling moderation state ID the agent may set (empty = no ceiling) |
@@ -189,6 +190,37 @@ content **publishing**. Both layers are additive and default to the safe value
   require **`mcp_config`** (never `mcp_write`). A content-tier token
   (`mcp_read` / `mcp_write`) is rejected before governance fires — config
   management is isolated to the auditor/dev/config tiers.
+- **Validation before a governed config write.** `mcp_sentinel_config_set`
+  validates the object the write would produce before it saves or queues
+  anything. `McpConfigWriteValidator`
+  (`mcp_sentinel.config_write_validator`) merges the submitted keys into a copy
+  of the active object and runs two checks. First, typed-config validation
+  (`TypedConfigManager::createFromNameAndData()` then `validate()`): wrong
+  types, schema constraints and keys the schema does not define. Second, the
+  config import validators (`ConfigEvents::IMPORT_VALIDATE`), against the active
+  storage with only this object replaced, the way core's single-object import
+  form validates. Nothing is imported. A module that checks its settings only
+  in an import validator is therefore checked on this path too.
+  - Any violation refuses the whole write. The refusal names property paths
+    and a reason code (`schema_missing`, `schema_violation`,
+    `import_validation`, `invalid_structure`, `validation_error`). It never
+    repeats a submitted value or a validator's message, and it is audited as
+    `denied_access`.
+  - A config name with **no schema** cannot be validated, so it is refused
+    unless the resolved profile sets `allow_schemaless_config_write` (default
+    off). The opt-in covers a missing schema only. It does not turn validation
+    off for a name that has one.
+  - The check covers the whole object. If the active data already violates its
+    schema, a write to another key is refused as well, and the paths say what
+    to fix first.
+  - Validation runs **before** the approval event, so an invalid change never
+    reaches the approval queue. `McpApprovalExecutor` validates again when it
+    replays a queued change, because the active configuration can move while a
+    request waits. A queued write to a schema-less name is replayed only when
+    the sealed manifest carries `schemaless_allowed`, which the tool adds when
+    the requesting profile allowed it.
+  - The import validators build a change list from the whole active
+    configuration. That cost is paid once per governed write.
 - **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on
   `ConfigEvents::SAVE`) audits every governed config save as `config_save` (diff
   via `McpAuditLogger::computeConfigDiff()`) and, for a governed write to a

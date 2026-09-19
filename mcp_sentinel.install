@@ -1237,3 +1237,30 @@ function mcp_sentinel_update_10023(array &$sandbox): void {
   }
   $sandbox['#finished'] = count($rows) < 500 ? 1 : 0;
 }
+
+/**
+ * Add the schema-less config write opt-in to existing policy profiles, off.
+ *
+ * Governed config writes are now validated against the config schema before
+ * they are saved, and a name that has no schema is refused. Backfills
+ * allow_schemaless_config_write = FALSE on every profile saved before the knob
+ * existed, so the strict default is visible in config export instead of
+ * implied by a missing key.
+ */
+function mcp_sentinel_update_10024(): string {
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  $count = 0;
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    if ($e->get('allow_schemaless_config_write') === NULL) {
+      $e->set('allow_schemaless_config_write', FALSE)->save();
+      $count++;
+    }
+  }
+  return "Added allow_schemaless_config_write (FALSE) to {$count} policy profile(s). "
+    . 'Governed config writes are now validated against the config schema; a name with '
+    . 'no schema is refused unless a profile turns this on.';
+}

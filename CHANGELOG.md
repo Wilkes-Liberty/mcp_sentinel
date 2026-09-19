@@ -20,6 +20,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   declaration and Drush then rejected the option, which stopped provisioning
   scripts that pass it.
   ([#3624445](https://www.drupal.org/project/mcp_sentinel/issues/3624445))
+- `mcp_sentinel_config_set` validates the object a write would produce before
+  it saves it or queues it for approval. It runs typed-config validation on the
+  merged data, then the config import validators for that one object, as core's
+  single-object import does. Before this, the tool saved values the owning
+  module would refuse on import and reported success. A refused write names the
+  property paths and a reason code, never a submitted value, and is audited as
+  `denied_access`. The approval executor validates a queued change again when it
+  is approved. See `docs/UPGRADE.md`.
+  ([#3624441](https://www.drupal.org/project/mcp_sentinel/issues/3624441))
+- A failed config save or approval-gate error no longer returns the exception
+  message to the caller. The message could repeat submitted values. The
+  exception class and location are logged instead.
+  ([#3624441](https://www.drupal.org/project/mcp_sentinel/issues/3624441))
+
+### Added
+
+- Policy-profile setting `allow_schemaless_config_write` (default `false`). A
+  config name that has no schema cannot be validated, so a governed write to it
+  is refused unless the profile turns this on. Update `10024` adds the key to
+  existing profiles at `false`.
+  ([#3624441](https://www.drupal.org/project/mcp_sentinel/issues/3624441))
 
 ### Changed
 

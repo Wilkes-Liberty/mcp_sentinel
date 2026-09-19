@@ -126,6 +126,16 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
   public function allowsConfigWrite(): bool;
 
   /**
+   * Whether a governed write may target a config name that has no schema.
+   *
+   * A governed config write is validated against the config schema before it
+   * is saved. A name without a schema cannot be validated, so the write is
+   * refused unless this returns TRUE. It never widens allowsConfigWrite() or
+   * the denied_config_types denylist.
+   */
+  public function allowsSchemalessConfigWrite(): bool;
+
+  /**
    * Config name prefixes denied for read and write (deny always wins).
    *
    * Each entry is matched as a prefix against the full config object name

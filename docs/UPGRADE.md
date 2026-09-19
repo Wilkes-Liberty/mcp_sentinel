@@ -4,6 +4,29 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Governed config writes are validated before they are saved
+
+`mcp_sentinel_config_set` used to save whatever a permitted agent sent. It now
+validates the merged object first (typed config, then the config import
+validators for that one object) and refuses the write on any violation. Writes
+that saved before can be refused after this update:
+
+- a value of the wrong type, a value that breaks a schema constraint, or a key
+  the schema does not define;
+- a value that the owning module's config import validator rejects;
+- any write to an object whose active data already violates its schema. Fix the
+  paths the refusal names, then retry;
+- any write to a config name that has **no schema**. To keep writing such a
+  name, turn on *Allow configuration write to names that have no schema*
+  (`allow_schemaless_config_write`) on the profile that needs it. Update
+  `10024` adds the key to existing profiles at `false`.
+
+A pending approval request for a schema-less name that was queued before this
+update is refused when approved. Ask the agent to submit it again.
+
+Run `drush updb` and rebuild caches: the approval executor gained a constructor
+argument.
+
 ## Governed MCP paths now refuse incomplete 2.3.0 wiring
 
 **Affects:** every site upgrading from 2.3.0, especially installs that left
