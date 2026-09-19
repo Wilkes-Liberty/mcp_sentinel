@@ -34,6 +34,7 @@ final class McpPolicyProfileUiTest extends BrowserTestBase {
     $this->drupalGet('/admin/config/services/mcp-sentinel/profiles');
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('Default');
+    $this->assertSession()->pageTextContains('Enabled');
     // Create a new profile via the add form.
     $this->drupalGet('/admin/config/services/mcp-sentinel/profiles/add');
     $this->submitForm([

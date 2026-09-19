@@ -152,6 +152,59 @@ final class McpPolicyResolverTest extends KernelTestBase {
   }
 
   /**
+   * Disabling a role-bound profile persists in CMI and the resolver skips it.
+   *
+   * Status is an entity key and an operator control, but Drupal only writes
+   * properties listed in config_export. Without that listing, save() drops
+   * Enabled; reload restores the in-memory default TRUE and the resolver
+   * treats the retired profile as live.
+   */
+  public function testDisabledRoleBoundProfileIsSkippedAfterReload(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('governed_roles', ['mcp_api'])
+      ->save();
+    McpPolicyProfile::create([
+      'id' => 'reader',
+      'label' => 'Reader',
+      'roles' => ['mcp_api'],
+      'weight' => 10,
+    ])->save();
+    $account = $this->userWithRoles(['mcp_api']);
+    $this->assertSame('reader', $this->resolver()->resolve($account)->id());
+
+    $profile = McpPolicyProfile::load('reader');
+    $this->assertNotNull($profile);
+    $profile->setStatus(FALSE)->save();
+
+    $this->container->get('entity_type.manager')
+      ->getStorage('mcp_policy_profile')
+      ->resetCache(['reader']);
+
+    $exported = $this->container->get('config.storage')
+      ->read('mcp_sentinel.mcp_policy_profile.reader');
+    $this->assertIsArray($exported);
+    $this->assertArrayHasKey('status', $exported);
+    $this->assertFalse(
+      $exported['status'],
+      'Disabled status is written to CMI so drush cex keeps Enabled off.'
+    );
+
+    $reloaded = McpPolicyProfile::load('reader');
+    $this->assertNotNull($reloaded);
+    $this->assertFalse(
+      $reloaded->status(),
+      'Reloaded entity keeps Enabled off after the entity cache reset.'
+    );
+    $resolved = $this->resolver()->resolve($account);
+    $this->assertNotNull($resolved);
+    $this->assertSame(
+      'default',
+      $resolved->id(),
+      'The resolver skips the disabled role-bound profile.'
+    );
+  }
+
+  /**
    * A role referenced only by a profile is still treated as governed.
    */
   public function testProfileRoleImpliesGoverned(): void {
