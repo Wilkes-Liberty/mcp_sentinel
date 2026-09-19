@@ -114,7 +114,8 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 (`$governancePolicyResolver`, `$governanceAccessChecker`,
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
 `$governanceDlp`, `$governanceClassification`). Each one carries `@api` in its
-docblock. A tool that operates on configuration also implements
+docblock, except `checkAccess()`, whose docblock is inherited from the Tool
+API. A tool that operates on configuration also implements
 `Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface`.
 
 MCP Sentinel's own tools do not call every helper, so a search of this project
