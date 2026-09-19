@@ -7,7 +7,7 @@ core_version_requirement: ^10.6 || ^11.3
 # Depends on the mcp_server Tool API bridge (which pulls in mcp_server itself).
 dependencies:
   - mcp_sentinel:mcp_sentinel
-  - mcp_server:mcp_server_tool_bridge
+  - mcp_server:mcp_server_tool_bridge (>=2.0.0-beta3)
 
 # mcp_server:mcp_server_oauth is installed independently, but production
 # readiness and the default `drush mcp-sentinel:setup` path require it. The

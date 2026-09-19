@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Composer requires `drupal/tool` `^1.0.0-beta8` instead of `*`. GraphQL
+  Compose Codegen MCP already needs that floor; a looser constraint could
+  install an older Tool API that does not satisfy it.
+- `mcp_sentinel_server` depends on `mcp_server_tool_bridge` 2.0.0-beta3 or
+  later. A stale bridge from before the plugin-directory move answers HTTP
+  200 with zero tools. The test dependency on `drupal/mcp_server` uses the
+  same floor.
+
 ## [2.23.0] - 2026-09-19
 
 ### Security
