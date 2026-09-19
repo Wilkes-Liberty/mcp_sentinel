@@ -22,6 +22,8 @@ services:
       - '@entity_type.manager'
       - '@config.factory'
       - '@module_handler'
+      - '@mcp_sentinel.policy_resolver'
+      - '@?mcp_sentinel.config_secret_redactor'
 
   mcp_sentinel_approval.manifest_binder:
     class: Drupal\mcp_sentinel_approval\Service\McpManifestBinder
@@ -66,6 +68,7 @@ services:
       - '@logger.channel.mcp_sentinel'
       - '@mcp_sentinel.action_manifest_sealer'
       - '@mcp_sentinel.policy_resolver'
+      - '@?mcp_sentinel.config_secret_redactor'
     tags:
       - { name: event_subscriber }
 

@@ -240,6 +240,15 @@ MCP policy profiles → Configuration governance**.
   names the property paths, never the values. A config name that has no schema
   is refused unless the profile turns on *Allow configuration write to names
   that have no schema* (`allow_schemaless_config_write`, off by default).
+  Secrets held in configuration are kept out of the audit log and the config
+  tools: a value under a name such as `password`, `token` or `key_value` is
+  masked at any depth, and objects such as `key.key.*` record changed paths
+  only. Sites can add names and prefixes under *Audit* in the settings form.
+  The built-in ones cannot be removed. A governed `config set` to a
+  secret-bearing name is refused outright and never queued. A queued config
+  change holds its values at rest in the approval tables until it is decided
+  and purged, so a config name that carries a secret should be denied
+  (`denied_config_types`) or listed as secret-bearing, not sent to approval.
 - **Publish gate.** When *Deny publishing* is on (the default), only the
   **go-live** transition is withheld from the agent — the gate is value-aware, so
   the non-publish editorial transitions a role grants (`draft`,

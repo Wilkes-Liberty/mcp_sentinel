@@ -1264,3 +1264,28 @@ function mcp_sentinel_update_10024(): string {
     . 'Governed config writes are now validated against the config schema; a name with '
     . 'no schema is refused unless a profile turns this on.';
 }
+
+/**
+ * Seed the site's additions to the config secret lists, empty.
+ *
+ * Config values under a sensitive key name, and every value of a config object
+ * that holds secrets by nature, are no longer written to the audit log or
+ * returned by the config tools. The built-in lists live in code. These two
+ * settings only add to them, so they start empty and are written explicitly to
+ * show up in a config export.
+ */
+function mcp_sentinel_update_10025(): string {
+  $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $added = [];
+  foreach (['audit_sensitive_config_keys', 'audit_secret_config_prefixes'] as $key) {
+    if ($settings->get($key) === NULL) {
+      $settings->set($key, []);
+      $added[] = $key;
+    }
+  }
+  if ($added === []) {
+    return 'The config secret lists are already present.';
+  }
+  $settings->save();
+  return 'Added ' . implode(', ', $added) . ' (empty) to mcp_sentinel.settings. The built-in secret names and prefixes apply regardless.';
+}

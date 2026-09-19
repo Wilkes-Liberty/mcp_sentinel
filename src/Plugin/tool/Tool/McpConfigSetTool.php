@@ -8,6 +8,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
@@ -27,6 +28,10 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  * import validators for that one object. A name with no schema is refused
  * unless the profile sets allow_schemaless_config_write. A refusal is written
  * to the audit log as denied_access and reports property paths, never values.
+ *
+ * A config name that holds secrets by nature (key.key.*, encrypt.profile.*,
+ * simple_oauth.*, consumer.*, plus the site's additions) is refused outright,
+ * never validated, queued or saved.
  *
  * Validation runs before the approval event on purpose. It only reads, so it
  * costs nothing to run first, and it keeps an invalid change out of the
@@ -92,6 +97,11 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
   protected McpConfigWriteValidator $configWriteValidator;
 
   /**
+   * Knows which config names hold secrets by nature.
+   */
+  protected McpConfigSecretRedactor $configSecrets;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -101,6 +111,7 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->eventDispatcher = $container->get('event_dispatcher');
     $instance->configWriteValidator = $container->get('mcp_sentinel.config_write_validator');
+    $instance->configSecrets = $container->get('mcp_sentinel.config_secret_redactor');
     return $instance;
   }
 
@@ -127,6 +138,16 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', $reason);
       return ExecutableResult::failure($this->t('MCP Sentinel denied the config write: @reason', ['@reason' => $reason]));
+    }
+
+    // A config name that holds secrets by nature is not written through this
+    // tool at all. The values would otherwise sit in the approval tables until
+    // the request is decided, and a governed agent has no business setting key
+    // material. Refused before validation and before the approval event, with
+    // one fixed message, so nothing about the submitted data is stored.
+    if ($this->configSecrets->isSecretBearing($name)) {
+      $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', 'secret-bearing configuration name');
+      return ExecutableResult::failure($this->t('MCP Sentinel refused the config write: this configuration holds secrets and cannot be written through a governed tool.'));
     }
 
     // Validate the object this write would produce before anything is queued

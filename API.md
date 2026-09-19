@@ -221,6 +221,41 @@ content **publishing**. Both layers are additive and default to the safe value
     the requesting profile allowed it.
   - The import validators build a change list from the whole active
     configuration. That cost is paid once per governed write.
+- **Secrets held in configuration.** `McpConfigSecretRedactor`
+  (`mcp_sentinel.config_secret_redactor`) is applied wherever a config value
+  would be written to the audit log, stored for display, or returned by a tool:
+  the `config_save` diff, the result of `mcp_sentinel_config_get`, the display
+  payload of a queued config change, and the reviewer's diff.
+  - A value under a sensitive key name is replaced with `[REDACTED]` at any
+    depth. Built-in names: `key_value`, `password`, `pass`, `secret`, `token`,
+    `api_key`, `apikey`, `client_secret`, `private_key`, `credentials`,
+    `authorization`. A name matches as a whole word, in any case and with any
+    separator (`clientSecret`, `SMTP_PASS`), so `bypass_cache` does not match.
+    The profile's `redacted_fields` apply the same way, at any depth.
+  - A config name that holds secrets by nature gives up no values. Built-in
+    prefixes: `key.key.`, `encrypt.profile.`, `simple_oauth.`, `consumer.`.
+    The audit diff lists the changed paths. The get tool returns the structure
+    with every value replaced and sets `values_withheld`.
+  - A site adds to either list with `audit_sensitive_config_keys` and
+    `audit_secret_config_prefixes` in `mcp_sentinel.settings`. The built-in
+    entries live in code and nothing in configuration removes one.
+  - `mcp_sentinel_config_set` refuses a write to a secret-bearing name
+    outright, with one fixed message, before validation and before the approval
+    event. Nothing is queued or saved and the refusal is audited as
+    `denied_access`.
+  - **A queued config change holds its values at rest.** The sealed manifest in
+    `mcp_approval_request.manifest` keeps the real values, because it is what
+    gets replayed on approve. It stays in that table until the request is
+    decided and purged, and an account with `approve mcp sentinel operations`
+    can load the entity. The `payload` column, the reviewer's diff and every
+    log line go through the redactor; the manifest cannot. A sensitive value
+    nested inside ordinary config (an SMTP password in a module's settings, for
+    example) is therefore stored in the manifest if an agent queues it. Deny
+    such names with `denied_config_types`, or add their prefix to
+    `audit_secret_config_prefixes`, which makes the tool refuse them, instead
+    of letting them be queued.
+  - `McpAuditLogger::computeConfigDiff()` takes the config name as an optional
+    fourth argument. Without it only the key-name rule applies.
 - **Hard-deny + audit on save.** `McpConfigSaveSubscriber` (on
   `ConfigEvents::SAVE`) audits every governed config save as `config_save` (diff
   via `McpAuditLogger::computeConfigDiff()`) and, for a governed write to a

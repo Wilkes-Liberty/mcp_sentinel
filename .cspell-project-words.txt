@@ -3,6 +3,7 @@ actualizado
 analysable
 analysed
 analysing
+apikey
 autowires
 Barcos
 behaviour

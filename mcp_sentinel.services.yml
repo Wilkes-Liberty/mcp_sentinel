@@ -23,6 +23,14 @@ services:
       # Optional so a missing bundle registry cannot break the 2.0.0-style
       # container compile path the audit_chain argument already protects.
       - '@?mcp_sentinel.policy_bundle_registry'
+      # Optional for the same reason. Without it the logger builds its own, so
+      # the built-in secret lists apply either way.
+      - '@?mcp_sentinel.config_secret_redactor'
+
+  mcp_sentinel.config_secret_redactor:
+    class: Drupal\mcp_sentinel\Service\McpConfigSecretRedactor
+    arguments:
+      - '@config.factory'
 
   mcp_sentinel.policy_bundle_registry:
     class: Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry

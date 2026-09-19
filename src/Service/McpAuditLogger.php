@@ -124,6 +124,9 @@ class McpAuditLogger {
    *   NULL is accepted so existing tests that construct the logger without
    *   this argument continue to work; without it the row is written with
    *   no digest, same as an install that has never activated a bundle.
+   * @param \Drupal\mcp_sentinel\Service\McpConfigSecretRedactor|null $configSecrets
+   *   Withholds secrets from config diffs. NULL is accepted for the same
+   *   reason; the logger then builds its own, so the built-in lists apply.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -132,6 +135,7 @@ class McpAuditLogger {
     private readonly ?McpDlp $dlp = NULL,
     private readonly ?Connection $database = NULL,
     private readonly ?McpPolicyBundleRegistry $policyBundles = NULL,
+    private readonly ?McpConfigSecretRedactor $configSecrets = NULL,
   ) {}
 
   /**
@@ -549,21 +553,40 @@ class McpAuditLogger {
    * The config counterpart to computeChangeDiff(). Config objects are not
    * fieldable entities, so this compares the two value arrays key-by-key over
    * their union of top-level keys. Each side is stringified (scalars cast,
-   * arrays JSON-encoded) and capped, redacted keys are masked, and non-redacted
-   * values are DLP-scanned, matching the entity-diff shape and guarantees.
+   * arrays JSON-encoded) and capped, and non-redacted values are DLP-scanned,
+   * matching the entity-diff shape and guarantees.
+   *
+   * Secrets are withheld before anything is encoded, because the audit chain
+   * is append-only and a secret written to it cannot be taken back:
+   * - a value under a sensitive key name is masked at ANY depth. The names are
+   *   McpConfigSecretRedactor's built-in list, the site's additions and
+   *   $redacted_fields;
+   * - for a config name that holds secrets by nature (key.key.*,
+   *   encrypt.profile.*, ...) the diff lists the changed paths and no values.
    *
    * @param array $old
    *   The configuration values before the write (empty for a new object).
    * @param array $new
    *   The configuration values after the write.
    * @param string[] $redacted_fields
-   *   Top-level config keys whose values must never appear in the diff.
+   *   Config keys whose values must never appear in the diff, at any depth.
+   * @param string|null $name
+   *   The config object name. Without it only the key-name rule can apply.
    *
    * @return array<string, array{old: string, new: string}>
-   *   A map of changed config keys to their old/new string representations.
+   *   A map of changed config keys (dotted paths for a secret-bearing name) to
+   *   their old/new string representations.
    */
-  public function computeConfigDiff(array $old, array $new, array $redacted_fields = []): array {
+  public function computeConfigDiff(array $old, array $new, array $redacted_fields = [], ?string $name = NULL): array {
+    // Never NULL in effect: without the service the built-in lists still hold.
+    $secrets = $this->configSecrets ?? new McpConfigSecretRedactor($this->configFactory);
     $diff = [];
+    if ($name !== NULL && $secrets->isSecretBearing($name)) {
+      foreach (array_slice($secrets->changedPaths($old, $new), 0, self::DIFF_MAX_FIELDS) as $path) {
+        $diff[$path] = ['old' => McpConfigSecretRedactor::MARKER, 'new' => McpConfigSecretRedactor::MARKER];
+      }
+      return $diff;
+    }
     $keys = array_keys($old + $new);
     foreach ($keys as $key) {
       if (count($diff) >= self::DIFF_MAX_FIELDS) {
@@ -571,15 +594,18 @@ class McpAuditLogger {
       }
       $oldHas = array_key_exists($key, $old);
       $newHas = array_key_exists($key, $new);
-      $old_str = $oldHas ? $this->stringifyConfigValue($old[$key]) : '';
-      $new_str = $newHas ? $this->stringifyConfigValue($new[$key]) : '';
-      if ($old_str === $new_str) {
+      // Decide "changed" the way this always has, on the real values, so a
+      // rotated secret is still reported as a change. These two strings are
+      // compared and dropped; only the masked ones below are stored.
+      if (($oldHas ? $this->stringifyConfigValue($old[$key]) : '') === ($newHas ? $this->stringifyConfigValue($new[$key]) : '')) {
         continue;
       }
-      if (in_array($key, $redacted_fields, TRUE)) {
-        $diff[$key] = ['old' => '[REDACTED]', 'new' => '[REDACTED]'];
+      if ($secrets->isSensitiveKey((string) $key, $redacted_fields)) {
+        $diff[$key] = ['old' => McpConfigSecretRedactor::MARKER, 'new' => McpConfigSecretRedactor::MARKER];
         continue;
       }
+      $old_str = $oldHas ? $this->stringifyConfigValue($this->maskConfigValue($secrets, $old[$key], $redacted_fields)) : '';
+      $new_str = $newHas ? $this->stringifyConfigValue($this->maskConfigValue($secrets, $new[$key], $redacted_fields)) : '';
       if ($this->dlp !== NULL) {
         $old_str = $this->dlp->scan($old_str);
         $new_str = $this->dlp->scan($new_str);
@@ -588,6 +614,13 @@ class McpAuditLogger {
     }
 
     return $diff;
+  }
+
+  /**
+   * Masks sensitive names inside a nested configuration value.
+   */
+  private function maskConfigValue(McpConfigSecretRedactor $secrets, mixed $value, array $redacted_fields): mixed {
+    return is_array($value) ? $secrets->redactTree($value, $redacted_fields) : $value;
   }
 
   /**

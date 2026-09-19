@@ -9,7 +9,10 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\RevisionableInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
+use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
+use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Value\McpActionManifest;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\user\UserInterface;
@@ -34,12 +37,18 @@ final class McpReviewerContext {
    *   Reads live config for config_import diffs.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
    *   Reports whether a module_disable target is installed.
+   * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
+   *   Supplies the actor's profile redacted fields for config diffs.
+   * @param \Drupal\mcp_sentinel\Service\McpConfigSecretRedactor|null $configSecrets
+   *   Withholds secrets from displayed config values.
    */
   public function __construct(
     private readonly McpActionManifestSealer $sealer,
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly ModuleHandlerInterface $moduleHandler,
+    private readonly McpPolicyResolver $policyResolver,
+    private readonly ?McpConfigSecretRedactor $configSecrets = NULL,
   ) {}
 
   /**
@@ -243,8 +252,17 @@ final class McpReviewerContext {
    */
   private function configRows(McpActionManifest $manifest): array {
     $name = $manifest->target()['id'];
+    // Rows are chosen by comparing the real values, so a changed secret still
+    // gets a row. What is rendered goes through the shared redactor first:
+    // sensitive names are masked at any depth, a name that holds secrets by
+    // nature shows its structure only, and the actor's profile redacted
+    // fields apply at any depth — the same rules as the stored display payload.
+    $secrets = $this->configSecrets ?? new McpConfigSecretRedactor($this->configFactory);
+    $extra = $this->redactedFieldsForActor($manifest->actorUid());
     $live = $this->configFactory->get($name)->getRawData();
     $data = (array) ($manifest->arguments()['data'] ?? []);
+    $shownLive = $secrets->redactForName($name, $live, $extra);
+    $shownData = $secrets->redactForName($name, $data, $extra);
     $keys = array_unique(array_merge(array_keys($data), array_keys($live)));
     sort($keys);
     $rows = [];
@@ -257,8 +275,8 @@ final class McpReviewerContext {
       }
       $rows[] = $this->row(
         $key,
-        $this->displayValue($key, $sealed),
-        $this->displayValue($key, $current),
+        $this->displayValue($key, $shownData[$key] ?? NULL),
+        $this->displayValue($key, $shownLive[$key] ?? NULL),
       );
     }
     return $rows;
@@ -355,10 +373,27 @@ final class McpReviewerContext {
   }
 
   /**
+   * Profile redacted field names for the actor who queued the change.
+   *
+   * @return string[]
+   *   Extra sensitive names. Empty when the actor or profile cannot be loaded.
+   */
+  private function redactedFieldsForActor(int $uid): array {
+    $account = $this->entityTypeManager->getStorage('user')->load($uid);
+    if (!$account instanceof AccountInterface) {
+      return [];
+    }
+    return $this->policyResolver->resolve($account)?->getRedactedFields() ?? [];
+  }
+
+  /**
    * Replaces secret-looking keys with a redaction marker.
    */
   private function redact(string $key, mixed $value): mixed {
-    if (preg_match('/secret|password|token|hash_key|key_value/i', $key) === 1) {
+    // The pattern predates the shared list and matches substrings, so it stays;
+    // the shared built-in and site-added names are applied on top of it.
+    if (preg_match('/secret|password|token|hash_key|key_value/i', $key) === 1
+      || (new McpConfigSecretRedactor($this->configFactory))->isSensitiveKey($key)) {
       return $value === NULL ? NULL : '[REDACTED]';
     }
     if (!is_array($value)) {
