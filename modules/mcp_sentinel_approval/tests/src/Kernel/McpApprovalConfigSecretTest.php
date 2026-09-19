@@ -196,7 +196,7 @@ final class McpApprovalConfigSecretTest extends KernelTestBase {
    *
    * Requests queued before the tool refused such names can still be pending.
    */
-  public function testReviewerContextShowsStructureOnlyForASecretBearingName(): void {
+  public function testReviewerShowsStructureOnlyForSecretBearingName(): void {
     $agent = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_agent']]);
     $this->container->get('current_user')->setAccount($agent);
     $payload = ['data' => ['label' => 'Renamed', 'key_provider_settings' => ['key_value' => self::SECRET]]];
