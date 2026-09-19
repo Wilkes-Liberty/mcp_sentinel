@@ -194,6 +194,12 @@ final class McpPolicyProfileForm extends EntityForm {
       '#description' => $this->t('Permit governed config set operations. Off by default; reserve for developer-tier profiles.'),
       '#default_value' => $profile->get('allow_config_write'),
     ];
+    $form['config_governance']['allow_schemaless_config_write'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Allow configuration write to names that have no schema'),
+      '#description' => $this->t('Off by default. A governed config write is validated against the config schema and the config import validators before it is saved. A name with no schema cannot be validated, so it is refused unless this is on. Has no effect unless configuration write is allowed.'),
+      '#default_value' => $profile->get('allow_schemaless_config_write'),
+    ];
     $form['config_governance']['denied_config_types'] = [
       '#type' => 'textarea',
       '#title' => $this->t('Denied configuration name prefixes'),
@@ -627,6 +633,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'allowed_ips',
       'allow_config_read',
       'allow_config_write',
+      'allow_schemaless_config_write',
       'denied_config_types',
       'deny_publish',
       'max_moderation_state',
@@ -692,6 +699,7 @@ final class McpPolicyProfileForm extends EntityForm {
     foreach ([
       'allow_config_read',
       'allow_config_write',
+      'allow_schemaless_config_write',
       'deny_publish',
       'deny_external_redirects',
       'allow_raw_sql',

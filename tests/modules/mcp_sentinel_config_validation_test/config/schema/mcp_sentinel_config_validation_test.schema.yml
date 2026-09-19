@@ -1,0 +1,36 @@
+# The constraints are spelled out here instead of borrowed from a core config
+# object: Drupal 10.6 core objects carry fewer constraints than 11.x, and the
+# tests must mean the same thing on both.
+mcp_sentinel_config_validation_test.settings:
+  type: config_object
+  label: 'Config write validation test settings'
+  mapping:
+    mode:
+      type: string
+      label: 'Mode'
+      constraints:
+        Choice:
+          choices:
+            - open
+            - closed
+            - import_refused
+    limit:
+      type: integer
+      label: 'Limit'
+      constraints:
+        Range:
+          min: 1
+          max: 10
+    enabled:
+      type: boolean
+      label: 'Enabled'
+    nested:
+      type: mapping
+      label: 'Nested'
+      mapping:
+        label:
+          type: string
+          label: 'Label'
+          constraints:
+            Length:
+              max: 12

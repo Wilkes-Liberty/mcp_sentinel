@@ -1,0 +1,5 @@
+services:
+  mcp_sentinel_config_validation_test.import_validator:
+    class: Drupal\mcp_sentinel_config_validation_test\EventSubscriber\ImportValidator
+    tags:
+      - { name: event_subscriber }
