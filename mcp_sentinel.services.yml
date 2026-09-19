@@ -350,3 +350,20 @@ services:
       - '@mcp_sentinel.rate_limiter'
       - '@current_user'
       - '@mcp_sentinel.read_budgets'
+
+  mcp_sentinel.config_write_validator:
+    class: Drupal\mcp_sentinel\Service\McpConfigWriteValidator
+    arguments:
+      - '@config.factory'
+      - '@config.typed'
+      - '@config.storage'
+      - '@event_dispatcher'
+      - '@config.manager'
+      - '@lock.persistent'
+      - '@module_handler'
+      - '@module_installer'
+      - '@theme_handler'
+      - '@string_translation'
+      - '@extension.list.module'
+      - '@extension.list.theme'
+      - '@logger.channel.mcp_sentinel'

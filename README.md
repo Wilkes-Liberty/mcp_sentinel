@@ -234,6 +234,12 @@ MCP policy profiles → Configuration governance**.
   name-prefix denylist (deny always wins). A `ConfigEvents::SAVE` subscriber
   audits every governed config save and hard-denies (revert + throw) a governed
   write to a denied config name, so a direct `Config::save()` cannot bypass it.
+  A governed `config set` is validated before it is saved or queued for
+  approval: typed-config validation of the merged object, then the config
+  import validators for that one object. A violation refuses the write and
+  names the property paths, never the values. A config name that has no schema
+  is refused unless the profile turns on *Allow configuration write to names
+  that have no schema* (`allow_schemaless_config_write`, off by default).
 - **Publish gate.** When *Deny publishing* is on (the default), only the
   **go-live** transition is withheld from the agent — the gate is value-aware, so
   the non-publish editorial transitions a role grants (`draft`,

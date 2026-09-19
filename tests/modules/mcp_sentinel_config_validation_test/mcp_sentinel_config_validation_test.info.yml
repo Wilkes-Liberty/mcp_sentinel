@@ -1,0 +1,5 @@
+name: 'MCP Sentinel config write validation test'
+type: module
+description: 'Ships a config object with typed constraints and a config import validator, so the governed config write path can be tested against both.'
+package: Testing
+core_version_requirement: ^10.6 || ^11.3

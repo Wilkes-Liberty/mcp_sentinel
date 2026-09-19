@@ -8,6 +8,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
@@ -21,12 +22,24 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  * Writes top-level keys into a configuration object under MCP Sentinel policy.
  *
  * The write is gated by the resolved profile's allow_config_write flag and the
- * denied_config_types denylist. Before the write the tool dispatches an
- * McpDestructiveActionEvent so the approval submodule (if enabled and the
- * operation is gated) can queue the change for human approval instead of
- * executing it. The actual config save is audited — and a write to a denied
- * config name is hard-denied — by McpConfigSaveSubscriber on the SAVE event,
- * which also backstops any direct TokenAuthUser config save.
+ * denied_config_types denylist. The object the write would produce is then
+ * validated: typed-config validation of the merged data, followed by the config
+ * import validators for that one object. A name with no schema is refused
+ * unless the profile sets allow_schemaless_config_write. A refusal is written
+ * to the audit log as denied_access and reports property paths, never values.
+ *
+ * Validation runs before the approval event on purpose. It only reads, so it
+ * costs nothing to run first, and it keeps an invalid change out of the
+ * approval queue: a reviewer is never asked to approve something the site
+ * would refuse. The approval executor validates again when it replays a queued
+ * change, because the active configuration can move while a request waits.
+ *
+ * After validation the tool dispatches an McpDestructiveActionEvent so the
+ * approval submodule (if enabled and the operation is gated) can queue the
+ * change for human approval instead of executing it. The actual config save is
+ * audited — and a write to a denied config name is hard-denied — by
+ * McpConfigSaveSubscriber on the SAVE event, which also backstops any direct
+ * TokenAuthUser config save.
  */
 #[Tool(
   id: 'mcp_sentinel_config_set',
@@ -74,6 +87,11 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
   protected EventDispatcherInterface $eventDispatcher;
 
   /**
+   * Validates the object a write would produce.
+   */
+  protected McpConfigWriteValidator $configWriteValidator;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -82,6 +100,7 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->eventDispatcher = $container->get('event_dispatcher');
+    $instance->configWriteValidator = $container->get('mcp_sentinel.config_write_validator');
     return $instance;
   }
 
@@ -110,11 +129,25 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
       return ExecutableResult::failure($this->t('MCP Sentinel denied the config write: @reason', ['@reason' => $reason]));
     }
 
+    // Validate the object this write would produce before anything is queued
+    // or saved. The verdict holds property paths and a reason code only.
+    $verdict = $this->configWriteValidator->validate($name, $data, $profile->allowsSchemalessConfigWrite());
+    if (!$verdict->valid) {
+      $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', 'config validation: ' . $verdict->summary());
+      return ExecutableResult::failure($this->t('MCP Sentinel refused the config write: @summary.', ['@summary' => $verdict->summary()]));
+    }
+
     // Give the approval submodule a chance to gate this write. A veto means the
     // change was queued for human approval and must not execute now. Fail
     // closed if the dispatcher itself errors.
     try {
-      $event = new McpDestructiveActionEvent('config', $name, 'config_import', $this->currentUser, ['data' => $data]);
+      $payload = ['data' => $data];
+      if ($verdict->schemaless) {
+        // Sealed into the approval manifest. The executor refuses to replay a
+        // write to a schema-less name without it.
+        $payload['schemaless_allowed'] = TRUE;
+      }
+      $event = new McpDestructiveActionEvent('config', $name, 'config_import', $this->currentUser, $payload);
       $this->eventDispatcher->dispatch($event, McpDestructiveActionEvent::NAME);
       if ($event->isVetoed()) {
         return ExecutableResult::success(
@@ -124,7 +157,10 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
       }
     }
     catch (\Throwable $e) {
-      return ExecutableResult::failure($this->t('Configuration change blocked: @message', ['@message' => $e->getMessage()]));
+      // An exception message can repeat the submitted values. Log where it
+      // came from and tell the caller only that the change was blocked.
+      $this->logFailure('approval gate', $name, $e);
+      return ExecutableResult::failure($this->t('Configuration change blocked: the approval gate failed. The error has been logged.'));
     }
 
     try {
@@ -137,13 +173,27 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
       $editable->save();
     }
     catch (\Exception $e) {
-      return ExecutableResult::failure($this->t('Configuration write failed: @message', ['@message' => $e->getMessage()]));
+      $this->logFailure('save', $name, $e);
+      return ExecutableResult::failure($this->t('Configuration write failed or was blocked by policy. The error has been logged.'));
     }
 
     return ExecutableResult::success(
       $this->t('Configuration @name updated.', ['@name' => $name]),
       ['name' => $name, 'keys' => array_keys($data)],
     );
+  }
+
+  /**
+   * Logs a failed stage by exception class and location, never its message.
+   */
+  private function logFailure(string $stage, string $name, \Throwable $e): void {
+    $this->logger->error('Config set (@stage) failed for @name: @type at @file:@line.', [
+      '@stage' => $stage,
+      '@name' => $name,
+      '@type' => get_class($e),
+      '@file' => basename($e->getFile()),
+      '@line' => $e->getLine(),
+    ]);
   }
 
 }

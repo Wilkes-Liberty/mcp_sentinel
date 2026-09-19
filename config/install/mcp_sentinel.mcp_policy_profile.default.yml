@@ -28,6 +28,7 @@ response_size_cap: 0
 allowed_ips: {  }
 allow_config_read: false
 allow_config_write: false
+allow_schemaless_config_write: false
 denied_config_types: {  }
 deny_publish: true
 max_moderation_state: ''

@@ -85,7 +85,11 @@ final class McpAdversarialManifestTest extends KernelTestBase {
       'mcp_sentinel_content_locks',
     ]);
     $this->installSchema('node', ['node_access']);
+    // The executor validates a queued config write against the whole merged
+    // object, so system.site has to be the complete shipped object here and
+    // not a fixture that only holds the key a test writes.
     $this->installConfig([
+      'system',
       'filter',
       'node',
       'mcp_sentinel',
@@ -483,6 +487,7 @@ final class McpAdversarialManifestTest extends KernelTestBase {
       $this->container->get('module_handler'),
       $binder,
       $this->container->get('mcp_sentinel.evidence_guard'),
+      $this->container->get('mcp_sentinel.config_write_validator'),
     ));
   }
 

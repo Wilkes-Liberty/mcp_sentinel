@@ -73,6 +73,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "allowed_ips",
  *     "allow_config_read",
  *     "allow_config_write",
+ *     "allow_schemaless_config_write",
  *     "denied_config_types",
  *     "deny_publish",
  *     "max_moderation_state",
@@ -207,6 +208,14 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * Whether configuration write operations are permitted.
    */
   protected bool $allow_config_write = FALSE;
+
+  /**
+   * Whether a config name that has no schema may be written.
+   *
+   * Off by default. A name without a schema cannot be validated before the
+   * write, so it is refused unless the operator opts this profile in.
+   */
+  protected bool $allow_schemaless_config_write = FALSE;
 
   /**
    * Config name prefixes denied for read and write (deny always wins).
@@ -440,6 +449,13 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    */
   public function allowsConfigWrite(): bool {
     return (bool) $this->allow_config_write;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsSchemalessConfigWrite(): bool {
+    return (bool) $this->allow_schemaless_config_write;
   }
 
   /**

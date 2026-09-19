@@ -13,6 +13,7 @@ use Drupal\Core\Extension\ModuleInstallerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpDecisionReason;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
 use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\mcp_sentinel\Value\McpActionManifest;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
@@ -23,7 +24,8 @@ use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
  * On approve, the stored destructive operation is replayed:
  *  - delete: the target entity is reloaded, re-access-checked for the approver,
  *    and deleted if it still exists (with a UUID guard against id reuse);
- *  - config_import: the queued config values are written to the target config;
+ *  - config_import: the queued config values are validated against the active
+ *    configuration as it is now, then written to the target config;
  *  - module_disable: the target module is uninstalled.
  * The decision is recorded on the request and an audit row is written via the
  * base audit logger. On deny, the request is marked denied and the decision
@@ -54,6 +56,8 @@ final class McpApprovalExecutor {
    *   Binds the decision to one sealed manifest.
    * @param \Drupal\mcp_sentinel\Service\McpEvidenceGuard $evidenceGuard
    *   The existing evidence receipt, extended with postconditions.
+   * @param \Drupal\mcp_sentinel\Service\McpConfigWriteValidator $configWriteValidator
+   *   Validates a queued config write again before it is replayed.
    */
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -66,6 +70,7 @@ final class McpApprovalExecutor {
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly McpManifestBinder $binder,
     private readonly McpEvidenceGuard $evidenceGuard,
+    private readonly McpConfigWriteValidator $configWriteValidator,
   ) {}
 
   /**
@@ -166,9 +171,22 @@ final class McpApprovalExecutor {
       // Replay the queued config write. The approver is a human admin (not a
       // governed agent), so McpConfigSaveSubscriber no-ops on this save.
       $data = (array) ($arguments['data'] ?? []);
-      if ($data === []) {
+      // The config set tool validated this change when it was queued, but the
+      // active configuration may have moved since, and the merged object is
+      // what gets saved. Validate it as it stands now. A schema-less name is
+      // replayed only when the sealed manifest records that the requesting
+      // profile allowed it; a request queued before that flag existed fails
+      // closed. The verdict carries paths and a reason code, never values.
+      $verdict = $data === []
+        ? NULL
+        : $this->configWriteValidator->validate($entity_id, $data, ($arguments['schemaless_allowed'] ?? FALSE) === TRUE);
+      if ($verdict === NULL) {
         $reason = 'empty_config_payload';
         $message = 'No queued config values to apply; request marked approved but not executed.';
+      }
+      elseif (!$verdict->valid) {
+        $reason = 'config_validation_failed:' . $verdict->reason;
+        $message = sprintf('Queued configuration change no longer validates (%s); request marked approved but not executed.', $verdict->summary());
       }
       elseif (!$this->binder->consume($manifest, (int) $request->id())) {
         $reason = McpDecisionReason::IdempotencyReplay->value;
