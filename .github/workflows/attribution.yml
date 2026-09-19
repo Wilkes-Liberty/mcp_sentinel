@@ -1,4 +1,8 @@
-name: Attribution
+# Named to be distinguishable from the org-ruleset required run, which
+# displays shared-ci's own "Attribution" — two entries per PR is by design
+# (this caller strips with write permission; the required run enforces
+# read-only and survives a repo deleting its caller).
+name: Attribution (strip + check)
 
 # Thin caller for the shared attribution check. The implementation — strip
 # AI-credit trailers from PR commits, then fail if any attribution credit
