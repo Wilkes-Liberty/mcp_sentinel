@@ -16,6 +16,7 @@ use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
 use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\mcp_sentinel\Value\McpActionManifest;
+use Drupal\mcp_sentinel\Value\McpConfigWriteVerdict;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 
 /**
@@ -183,6 +184,16 @@ final class McpApprovalExecutor {
       if ($verdict === NULL) {
         $reason = 'empty_config_payload';
         $message = 'No queued config values to apply; request marked approved but not executed.';
+      }
+      elseif ($verdict->reason === McpConfigWriteVerdict::VALIDATION_ERROR) {
+        // Validation did not run, so it proved nothing about the payload.
+        // Nothing is written and the request stays pending: the cause is on
+        // the site, not in the request, and an approver can retry.
+        return [
+          'executed' => FALSE,
+          'error'    => TRUE,
+          'message'  => 'The queued configuration change could not be validated; request left pending. The error has been logged.',
+        ];
       }
       elseif (!$verdict->valid) {
         $reason = 'config_validation_failed:' . $verdict->reason;

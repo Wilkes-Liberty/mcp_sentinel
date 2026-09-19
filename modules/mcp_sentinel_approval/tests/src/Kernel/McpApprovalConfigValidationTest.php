@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel_approval\Kernel;
 
+use Drupal\Core\Config\TypedConfigManagerInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\mcp_sentinel_config_validation_test\EventSubscriber\ImportValidator;
 use Drupal\user\Entity\Role;
@@ -247,6 +249,42 @@ final class McpApprovalConfigValidationTest extends KernelTestBase {
     self::assertSame(0, $this->consumedKeyCount(), 'A refused replay does not spend the sealed manifest.');
     $requests = $this->requests();
     self::assertFalse(end($requests)->isPending(), 'The refusal is terminal: retrying cannot make the payload valid.');
+  }
+
+  /**
+   * When validation cannot run at replay, nothing is written or decided.
+   */
+  public function testValidatorFailureLeavesTheRequestPending(): void {
+    $result = $this->agentConfigSet(ImportValidator::NAME, ['limit' => 7]);
+    self::assertTrue($result['context']['queued_for_approval'], $result['message']);
+
+    $typed = $this->createMock(TypedConfigManagerInterface::class);
+    $typed->method('hasConfigSchema')->willThrowException(new \RuntimeException('typed config down'));
+    $this->container->set('mcp_sentinel.config_write_validator', new McpConfigWriteValidator(
+      $this->container->get('config.factory'),
+      $typed,
+      $this->container->get('config.storage'),
+      $this->container->get('event_dispatcher'),
+      $this->container->get('config.manager'),
+      $this->container->get('lock.persistent'),
+      $this->container->get('module_handler'),
+      $this->container->get('module_installer'),
+      $this->container->get('theme_handler'),
+      $this->container->get('string_translation'),
+      $this->container->get('extension.list.module'),
+      $this->container->get('extension.list.theme'),
+      $this->container->get('logger.channel.mcp_sentinel'),
+    ));
+    // The executor has not been built yet in this test, so it picks up the
+    // failing validator when approveNewest() first asks for it.
+    $approved = $this->approveNewest();
+    self::assertFalse($approved['executed']);
+    self::assertTrue($approved['error']);
+    self::assertStringNotContainsString('typed config down', $approved['message']);
+    self::assertSame(5, $this->stored(ImportValidator::NAME)['limit']);
+    self::assertSame(0, $this->consumedKeyCount());
+    $requests = $this->requests();
+    self::assertTrue(end($requests)->isPending(), 'An approver can retry once validation works again.');
   }
 
   /**

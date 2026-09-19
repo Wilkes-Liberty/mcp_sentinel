@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Config\TypedConfigManagerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
+use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
 use Drupal\mcp_sentinel_config_validation_test\EventSubscriber\ImportValidator;
 use Drupal\tool\Tool\ToolInterface;
 use Drupal\user\Entity\Role;
@@ -328,6 +330,33 @@ final class McpConfigSetValidationTest extends KernelTestBase {
     self::assertTrue($tool->getResult()->getContextValues()['queued_for_approval']);
     self::assertSame(['data' => ['anything' => 'goes'], 'schemaless_allowed' => TRUE], $this->queued[1]);
     self::assertSame([], $this->stored(self::SCHEMALESS));
+  }
+
+  /**
+   * When validation cannot run, the write is refused and nothing is saved.
+   */
+  public function testValidatorFailureRefusesTheWrite(): void {
+    $typed = $this->createMock(TypedConfigManagerInterface::class);
+    $typed->method('hasConfigSchema')->willThrowException(new \RuntimeException('typed config down ' . self::SECRET));
+    $this->container->set('mcp_sentinel.config_write_validator', new McpConfigWriteValidator(
+      $this->container->get('config.factory'),
+      $typed,
+      $this->container->get('config.storage'),
+      $this->container->get('event_dispatcher'),
+      $this->container->get('config.manager'),
+      $this->container->get('lock.persistent'),
+      $this->container->get('module_handler'),
+      $this->container->get('module_installer'),
+      $this->container->get('theme_handler'),
+      $this->container->get('string_translation'),
+      $this->container->get('extension.list.module'),
+      $this->container->get('extension.list.theme'),
+      $this->container->get('logger.channel.mcp_sentinel'),
+    ));
+    $before = $this->stored(ImportValidator::NAME);
+    $tool = $this->configSet(ImportValidator::NAME, ['limit' => 7]);
+    $this->assertRefused($tool, ImportValidator::NAME, $before, 0, 'validation could not be completed');
+    self::assertStringNotContainsString('typed config down', (string) $tool->getResultMessage());
   }
 
   /**
