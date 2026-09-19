@@ -177,6 +177,19 @@ Beyond entity operations, a profile also governs **configuration** access and
 content **publishing**. Both layers are additive and default to the safe value
 (config off, publishing denied).
 
+- **Status tools.** Optional read-only tools over services that already exist:
+  `mcp_sentinel_governance_status` (contract ready flag and reason code),
+  `mcp_sentinel_effective_limits` (acting profile budgets),
+  `mcp_sentinel_audit_metrics` (24h/7d/30d counts, no agent identities),
+  `mcp_sentinel_role_audit` (role and permission names; administer permission),
+  `mcp_sentinel_urgent_conditions` (condition keys and anomaly ids, no
+  messages or URLs), and `mcp_sentinel_my_approvals` in the approval submodule
+  (the acting account's requests: id, operation, target, status, times; never
+  the payload). They are listed in `McpToolScopeResolver::OPTIONAL_TOOLS`.
+  Setup registers a compiled optional tool; an unregistered one does not make
+  the contract not-ready. Not tools: approve or deny, break-glass, provisioning,
+  setup, teardown, audit purge, lock clearing, webhook replay, install
+  verification.
 - **Config tools.** `mcp_sentinel_config_get`, `mcp_sentinel_config_list`, and
   `mcp_sentinel_config_set` are governed MCP tools registered with
   `drush mcp-sentinel:setup`. Each calls

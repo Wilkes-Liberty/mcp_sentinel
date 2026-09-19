@@ -1208,7 +1208,9 @@ count of Sentinel's own plugins. It exposes **66 connector tools across 9
 modules** (multi-site, GraphQL, and a Drush bridge) that an MCP client can call
 against a Drupal site. MCP Sentinel governs those calls when they reach Drupal;
 it does not provide them. For reference, this module itself ships 10 base Tool
-plugins plus 1 conditional GraphQL schema tool (via `mcp_sentinel_graphql`).
+plugins, five optional status tools, `mcp_sentinel_my_approvals` in the
+approval submodule, and 1 conditional GraphQL schema tool (via
+`mcp_sentinel_graphql`).
 
 MCP Sentinel implements **Integration Contract v1.0** (published by the connector
 at `docs/integration-contract.md` in

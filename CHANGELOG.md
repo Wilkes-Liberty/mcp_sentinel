@@ -64,6 +64,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Read-only status tools: `mcp_sentinel_governance_status`,
+  `mcp_sentinel_effective_limits`, `mcp_sentinel_audit_metrics`,
+  `mcp_sentinel_role_audit`, `mcp_sentinel_urgent_conditions`, and
+  `mcp_sentinel_my_approvals` (approval submodule). They report codes, counts
+  and limits. They do not return secrets, personal data, payloads or URLs.
+  They are optional: setup registers them when the plugin is compiled, and a
+  site that has not registered them stays ready. Role audit requires
+  `administer mcp sentinel`. Approvals lists only the acting account's
+  requests.
+  ([#3624475](https://www.drupal.org/project/mcp_sentinel/issues/3624475))
 - Policy-profile setting `allow_schemaless_config_write` (default `false`). A
   config name that has no schema cannot be validated, so a governed write to it
   is refused unless the profile turns this on. Update `10024` adds the key to
