@@ -1,3 +1,4 @@
+langcode: en
 enabled: true
 governed_roles:
   - mcp_api
