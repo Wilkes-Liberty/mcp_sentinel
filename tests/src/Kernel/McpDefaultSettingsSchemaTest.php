@@ -43,8 +43,11 @@ final class McpDefaultSettingsSchemaTest extends KernelTestBase {
     $checker->onConfigSave(new ConfigCrudEvent($config));
     $this->assertSame('en', $config->get('langcode'));
     $this->assertSame('', $config->get('dashboard_broadcast.message'));
+    /** @var \Drupal\Core\Config\Schema\Mapping $schema */
     $schema = $this->container->get('config.typed')->get('mcp_sentinel.settings');
-    $this->assertTrue($schema->get('dashboard_broadcast')->get('message')->getDataDefinition()['translatable']);
+    /** @var \Drupal\Core\Config\Schema\Mapping $broadcast */
+    $broadcast = $schema->get('dashboard_broadcast');
+    $this->assertTrue($broadcast->get('message')->getDataDefinition()['translatable']);
   }
 
 }
