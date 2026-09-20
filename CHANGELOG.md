@@ -6,6 +6,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- #3624679: Declare the default settings language so strict configuration validation accepts the translatable dashboard broadcast message.
+
 ## [2.23.1] - 2026-09-19
 
 ### Changed
