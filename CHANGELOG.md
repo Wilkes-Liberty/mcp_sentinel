@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-09-23
+
 ### Added
 - #3625483: `POST .../mcp-draft/translations` accepts `X-MCP-Draft-Mode: revise`
   to open an unpublished forward draft over a translation that is already
@@ -2402,7 +2404,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.2...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.0...1.x
+[2.24.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.2...2.24.0
 [2.23.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.1...2.23.2
 [2.23.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.0...2.23.1
 [2.23.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.22.1...2.23.0
