@@ -6,6 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- #3625484: Set draft translation source metadata when media or nodes use native
+  author and created fields. Image translations with shared files can now save
+  independently translated alt text without an undefined-language error.
+
 ## [2.23.2] - 2026-09-21
 
 ### Fixed

@@ -752,21 +752,22 @@ final class McpDraftResource extends EntityResource {
       || !method_exists($this->translationManager, 'getTranslationMetadata')) {
       return;
     }
-    // Paragraphs (and other types) may lack content_translation_* fields
-    // until bundle info is rebuilt. The wrapper calls isTranslatable() on
-    // getFieldDefinition() without a null check.
-    if (!$translation->hasField('content_translation_source')
-      || !$translation->hasField('content_translation_uid')
-      || !$translation->hasField('content_translation_created')) {
+    // Some types lack translation metadata until bundle info is rebuilt.
+    // Core also uses native uid/created fields when separate metadata fields
+    // are absent; their absence must not prevent setting the source language.
+    if (!$translation->hasField('content_translation_source')) {
       return;
     }
     $metadata = $this->translationManager->getTranslationMetadata($translation);
     $account = $this->entityTypeManager->getStorage('user')->load($this->user->id());
-    if ($account instanceof UserInterface) {
+    if ($account instanceof UserInterface
+      && ($translation->hasField('content_translation_uid') || $translation->hasField('uid'))) {
       $metadata->setAuthor($account);
     }
     $metadata->setSource($source_langcode);
-    $metadata->setCreatedTime($this->time->getRequestTime());
+    if ($translation->hasField('content_translation_created') || $translation->hasField('created')) {
+      $metadata->setCreatedTime($this->time->getRequestTime());
+    }
   }
 
   /**
