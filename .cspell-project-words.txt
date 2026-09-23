@@ -49,7 +49,10 @@ hostnames
 idempotently
 jmcerda
 langcode
+nosotros
+Acerca
 Artículos
+Empresa
 Foto
 Inicio
 Otro

@@ -12,6 +12,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Entity\TranslatableInterface;
 use Drupal\Core\Language\LanguageInterface;
+use Drupal\mcp_sentinel\Controller\McpDraftResource;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -412,7 +413,8 @@ class McpAuditLogger {
    *
    * @return array{langcode?: string, translation?: string, source?: string}
    *   langcode when the entity is a content entity; translation=create when
-   *   this save adds a language the original did not have; source when
+   *   this save adds a language the original did not have; translation=revise
+   *   when the request is revising a published translation; source when
    *   content_translation_source is a real language (not empty or und).
    */
   public function translationMetadata(EntityInterface $entity): array {
@@ -422,8 +424,27 @@ class McpAuditLogger {
     $langcode = $entity->language()->getId();
     $metadata = ['langcode' => $langcode];
 
+    $request = $this->requestStack->getCurrentRequest();
+    $mode = $request
+      ? strtolower(trim((string) $request->headers->get(McpDraftResource::MODE_HEADER, '')))
+      : '';
+    $requested = $request
+      ? strtolower(trim((string) $request->headers->get(McpDraftResource::LANGCODE_HEADER, '')))
+      : '';
     $original = $this->originalOf($entity);
-    if ($original instanceof TranslatableInterface
+    // The saved object may be the default translation even when the request
+    // revised another language. Stamp only the host, not moderation state.
+    $host = in_array($entity->getEntityTypeId(), ['node', 'media'], TRUE);
+    $revising = $mode === 'revise' && $host && ($requested === ''
+      || $requested === $langcode
+      || $entity->hasTranslation($requested));
+    if ($revising) {
+      $metadata['translation'] = 'revise';
+      if ($requested !== '' && $requested !== $langcode) {
+        $metadata['langcode'] = $requested;
+      }
+    }
+    elseif ($original instanceof TranslatableInterface
       && !$entity->isNew()
       && !$original->hasTranslation($langcode)
       && $entity->hasTranslation($langcode)) {

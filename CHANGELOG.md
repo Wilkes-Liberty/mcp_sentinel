@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- #3625483: `POST .../mcp-draft/translations` accepts `X-MCP-Draft-Mode: revise`
+  to open an unpublished forward draft over a translation that is already
+  published on the live default revision. The live revision, its other
+  languages, and the alias stay unchanged. If-Match uses the same live and
+  working pointers as create. A working copy is 409. Omitting the header keeps
+  create, including the existing 409 when the language already exists.
+  Translation inventory advertises `revise_published_translation`. The
+  entity_save audit row records `translation: revise`.
+
 ## [2.23.2] - 2026-09-21
 
 ### Fixed
