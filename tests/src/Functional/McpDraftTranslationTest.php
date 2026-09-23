@@ -9,6 +9,7 @@ use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\file\Entity\File;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\NodeInterface;
+use Drupal\path_alias\PathAliasInterface;
 use Drupal\Tests\BrowserTestBase;
 use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
@@ -300,6 +301,135 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * Revising published Spanish leaves the live revision and alias in place.
+   */
+  public function testRevisePublishedTranslation(): void {
+    [$agent, $node, , $path_create] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $storage->resetCache([$node->id()]);
+    $node = $storage->load($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $node);
+    $spanish = $node->addTranslation('es', [
+      'title' => 'Empresa',
+      'moderation_state' => 'published',
+    ]);
+    $spanish->setPublished();
+    $spanish->save();
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $live_vid = (string) $live->getRevisionId();
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+    $this->assertSame('Empresa', $live->getTranslation('es')->label());
+    $this->assertSame('Articles', $live->label());
+    $this->assertSame('/resources/articles', $live->get('path')->alias);
+    $aliases_before = $this->aliasMap($node);
+    $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $plain = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Sobreescrito'], '"' . $live_vid . '"', FALSE, 'es');
+    $this->assertSame(409, $plain->getStatusCode(), (string) $plain->getBody());
+    $this->assertStringContainsString('already exists', (string) $plain->getBody());
+    $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $stale = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"999999"', FALSE, 'es', [], 'revise');
+    $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
+    $this->assertStringContainsString('Reload before retrying', (string) $stale->getBody());
+    $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $preflight = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . '"', TRUE, 'es', [], 'revise');
+    $this->assertSame(200, $preflight->getStatusCode(), (string) $preflight->getBody());
+    $preflight_meta = json_decode((string) $preflight->getBody(), TRUE)['meta'];
+    $this->assertTrue($preflight_meta['draft_preflight']);
+    $this->assertSame('revise_published_translation', $preflight_meta['operation']);
+    $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $revised = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
+    $revised_body = json_decode((string) $revised->getBody(), TRUE);
+    $this->assertSame('Acerca de nosotros', $revised_body['data']['attributes']['title']);
+    $this->assertSame('es', $revised_body['data']['attributes']['langcode']);
+    $this->assertFalse($revised_body['data']['attributes']['status']);
+
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($live_vid, $working_vid);
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertSame('Articles', $live->label());
+    $this->assertTrue($live->isPublished());
+    $this->assertSame('Empresa', $live->getTranslation('es')->label());
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+    $this->assertSame('/resources/articles', $live->get('path')->alias);
+    $this->assertSame($aliases_before, $this->aliasMap($node));
+
+    $working = $storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $this->assertFalse($working->isDefaultRevision());
+    $this->assertSame('Articles', $working->getUntranslated()->label());
+    $this->assertTrue($working->getUntranslated()->isPublished());
+    $draft_es = $working->getTranslation('es');
+    $this->assertSame('Acerca de nosotros', $draft_es->label());
+    $this->assertFalse($draft_es->isPublished());
+    $this->assertSame('draft', $draft_es->get('moderation_state')->value);
+
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $found_revise = FALSE;
+    $audit = $this->container->get('database')->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('operation', 'entity_save')
+      ->execute();
+    if ($audit) {
+      while ($row = $audit->fetchAssoc()) {
+        $meta = $logger->decodeMetadata((string) ($row['metadata'] ?? ''));
+        if (($meta['translation'] ?? '') === 'revise'
+          && ($meta['langcode'] ?? '') === 'es'
+          && ($meta['entity_type'] ?? '') === 'node') {
+          $found_revise = TRUE;
+        }
+      }
+    }
+    $this->assertTrue($found_revise, 'The revise decision must be on the node entity_save row.');
+
+    $blocked = $this->drupalCreateNode([
+      'type' => 'page',
+      'title' => 'Articles',
+      'moderation_state' => 'published',
+      'path' => ['alias' => '/resources/blocked'],
+    ]);
+    $storage->resetCache([$blocked->id()]);
+    $blocked = $storage->load($blocked->id());
+    $this->assertInstanceOf(NodeInterface::class, $blocked);
+    $blocked->addTranslation('es', [
+      'title' => 'Empresa',
+      'moderation_state' => 'published',
+    ]);
+    $blocked->getTranslation('es')->setPublished();
+    $blocked->save();
+    $storage->resetCache([$blocked->id()]);
+    $blocked = $storage->load($blocked->id());
+    $this->assertInstanceOf(NodeInterface::class, $blocked);
+    $blocked->setNewRevision(TRUE);
+    $blocked->setTitle('English pending');
+    $blocked->set('moderation_state', 'draft');
+    $blocked->save();
+    $storage->resetCache([$blocked->id()]);
+    $blocked_live = $storage->loadUnchanged($blocked->id());
+    $this->assertInstanceOf(NodeInterface::class, $blocked_live);
+    $blocked_live_vid = (string) $blocked_live->getRevisionId();
+    $blocked_working = (string) $storage->getLatestRevisionId($blocked->id());
+    $this->assertNotSame($blocked_live_vid, $blocked_working);
+    $blocked_path = $this->buildUrl('/jsonapi/node/page/' . $blocked->uuid() . '/mcp-draft/translations');
+    $refused = $this->translationRequest('POST', $blocked_path, $agent, $blocked, ['title' => 'Acerca de nosotros'], '"' . $blocked_live_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(409, $refused->getStatusCode(), (string) $refused->getBody());
+    $this->assertStringContainsString('working copy already exists', (string) $refused->getBody());
+    $this->assertSame($blocked_working, (string) $storage->getLatestRevisionId($blocked->id()));
+    $named = $this->translationRequest('POST', $blocked_path, $agent, $blocked, ['title' => 'Acerca de nosotros'], '"' . $blocked_live_vid . ':' . $blocked_working . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(409, $named->getStatusCode(), (string) $named->getBody());
+    $this->assertSame($blocked_working, (string) $storage->getLatestRevisionId($blocked->id()));
+  }
+
+  /**
    * Builds a translatable published page and a governed agent.
    *
    * @return array{0: \Drupal\user\UserInterface, 1: \Drupal\node\NodeInterface, 2: string, 3: string, 4: string, 5: string}
@@ -365,11 +495,13 @@ final class McpDraftTranslationTest extends BrowserTestBase {
    *   Target language header, or NULL to omit it.
    * @param array<string, mixed> $relationships
    *   Optional JSON:API relationships (image alt, etc.).
+   * @param string|null $mode
+   *   X-MCP-Draft-Mode value, or NULL to omit the header.
    *
    * @return \Psr\Http\Message\ResponseInterface
    *   The HTTP response.
    */
-  private function translationRequest(string $method, string $path, UserInterface $agent, NodeInterface $node, array $attributes, string $if_match, bool $preflight, ?string $langcode, array $relationships = []): ResponseInterface {
+  private function translationRequest(string $method, string $path, UserInterface $agent, NodeInterface $node, array $attributes, string $if_match, bool $preflight, ?string $langcode, array $relationships = [], ?string $mode = NULL): ResponseInterface {
     $headers = [
       'Accept' => 'application/vnd.api+json',
       'Content-Type' => 'application/vnd.api+json',
@@ -378,6 +510,9 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     ];
     if ($langcode !== NULL) {
       $headers['X-MCP-Draft-Langcode'] = $langcode;
+    }
+    if ($mode !== NULL) {
+      $headers['X-MCP-Draft-Mode'] = $mode;
     }
     $data = [
       'type' => 'node--page',
@@ -432,6 +567,31 @@ final class McpDraftTranslationTest extends BrowserTestBase {
       ],
     ])->save();
     $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+  }
+
+  /**
+   * Language-keyed public aliases for a node.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The node.
+   *
+   * @return array<string, string>
+   *   Alias strings keyed by langcode.
+   */
+  private function aliasMap(NodeInterface $node): array {
+    $storage = $this->container->get('entity_type.manager')->getStorage('path_alias');
+    $ids = $storage->getQuery()
+      ->accessCheck(FALSE)
+      ->condition('path', '/node/' . $node->id())
+      ->execute();
+    $map = [];
+    foreach ($storage->loadMultiple($ids) as $alias) {
+      if ($alias instanceof PathAliasInterface) {
+        $map[$alias->language()->getId()] = $alias->getAlias();
+      }
+    }
+    ksort($map);
+    return $map;
   }
 
 }

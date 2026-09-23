@@ -53,9 +53,12 @@ variables:
   #
   # PostgreSQL draft-continuation coverage is the same pattern: GitHub Actions
   # runs McpDraftResourceTest, McpDraftTranslationTest, and
-  # McpDraftParagraphTranslationTest against Postgres 16. This GitLab default
-  # lane stays on the template database. Do not treat a green GitLab phpunit
-  # job as PostgreSQL acceptance.
+  # McpDraftParagraphTranslationTest against Postgres 16. The published
+  # translation revise test lives in McpDraftTranslationTest, so that Postgres
+  # job runs it. The Drupal 10.6 functional floor for the same file is the
+  # GitHub job "PHPUnit — Functional draft translation (Drupal 10.6)". This
+  # GitLab default lane stays on the template database. Do not treat a green
+  # GitLab phpunit job as PostgreSQL acceptance or as the 10.6 functional floor.
   #
   # Missing ext-sodium is filed upstream against project/gitlab_templates. Turn
   # this lane back on once the image carries it.

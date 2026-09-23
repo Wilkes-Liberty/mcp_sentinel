@@ -108,8 +108,11 @@ For iterative JSON:API authoring of existing node drafts, see
 [Governed draft continuation](docs/draft-continuation.md). This endpoint requires
 MCP Sentinel 2.15.0 or later and keeps the live revision unchanged. Translation
 create/read/update (a Spanish unpublished draft beside published English) uses
-the same surface with `X-MCP-Draft-Langcode`; media items (name, caption,
-image alt) get the same surface on the media resource from 2.20.0. On PostgreSQL,
+the same surface with `X-MCP-Draft-Langcode`. A language that is already
+published on the live revision is revised with `X-MCP-Draft-Mode: revise` on
+that same POST (2.24.0); create without the header still 409s. Media items
+(name, caption, image alt) get the same surface on the media resource from
+2.20.0. On PostgreSQL,
 validation runs outside the exclusive write transaction so node-reference
 checks do not depend on core #2920527.
 
