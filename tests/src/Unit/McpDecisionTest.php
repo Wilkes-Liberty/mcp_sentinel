@@ -144,7 +144,8 @@ final class McpDecisionTest extends UnitTestCase {
    */
   public function testUnknownReasonCannotBeConstructed(): void {
     $this->expectException(\ValueError::class);
-    McpDecisionReason::from('not_a_reason');
+    $reason = McpDecisionReason::from('not_a_reason');
+    $this->fail('Unexpected reason: ' . $reason->value);
   }
 
   /**
@@ -152,7 +153,8 @@ final class McpDecisionTest extends UnitTestCase {
    */
   public function testUnknownOutcomeCannotBeConstructed(): void {
     $this->expectException(\ValueError::class);
-    McpDecisionOutcome::from('maybe');
+    $outcome = McpDecisionOutcome::from('maybe');
+    $this->fail('Unexpected outcome: ' . $outcome->value);
   }
 
   /**
