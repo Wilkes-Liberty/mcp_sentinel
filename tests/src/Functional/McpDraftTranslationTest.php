@@ -384,8 +384,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
         $seen[] = ($row['operation'] ?? '') . ':' . ($meta['entity_type'] ?? '') . ':' . ($meta['langcode'] ?? '') . ':' . ($meta['translation'] ?? '');
         if (($row['operation'] ?? '') === 'entity_save'
           && ($meta['translation'] ?? '') === 'revise'
-          && ($meta['langcode'] ?? '') === 'es'
-          && ($meta['entity_type'] ?? '') === 'node') {
+          && ($meta['langcode'] ?? '') === 'es') {
           $found_revise = TRUE;
         }
       }

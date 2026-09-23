@@ -433,9 +433,11 @@ class McpAuditLogger {
       : '';
     $original = $this->originalOf($entity);
     // The saved object may be the default translation even when the request
-    // revised another language. Record the requested language either way.
-    $revising = $mode === 'revise' && ($requested === '' || $requested === $langcode
-      || ($requested !== '' && $entity->hasTranslation($requested)));
+    // revised another language. Stamp only the host, not moderation state.
+    $host = in_array($entity->getEntityTypeId(), ['node', 'media'], TRUE);
+    $revising = $mode === 'revise' && $host && ($requested === ''
+      || $requested === $langcode
+      || $entity->hasTranslation($requested));
     if ($revising) {
       $metadata['translation'] = 'revise';
       if ($requested !== '' && $requested !== $langcode) {
