@@ -432,8 +432,15 @@ class McpAuditLogger {
       ? strtolower(trim((string) $request->headers->get(McpDraftResource::LANGCODE_HEADER, '')))
       : '';
     $original = $this->originalOf($entity);
-    if ($mode === 'revise' && ($requested === '' || $requested === $langcode)) {
+    // The saved object may be the default translation even when the request
+    // revised another language. Record the requested language either way.
+    $revising = $mode === 'revise' && ($requested === '' || $requested === $langcode
+      || ($requested !== '' && $entity->hasTranslation($requested)));
+    if ($revising) {
       $metadata['translation'] = 'revise';
+      if ($requested !== '' && $requested !== $langcode) {
+        $metadata['langcode'] = $requested;
+      }
     }
     elseif ($original instanceof TranslatableInterface
       && !$entity->isNew()

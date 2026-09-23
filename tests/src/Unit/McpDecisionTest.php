@@ -144,6 +144,7 @@ final class McpDecisionTest extends UnitTestCase {
    */
   public function testUnknownReasonCannotBeConstructed(): void {
     $this->expectException(\ValueError::class);
+    // @phpstan-ignore staticMethod.resultUnused (from() is required to throw)
     McpDecisionReason::from('not_a_reason');
   }
 
@@ -152,6 +153,7 @@ final class McpDecisionTest extends UnitTestCase {
    */
   public function testUnknownOutcomeCannotBeConstructed(): void {
     $this->expectException(\ValueError::class);
+    // @phpstan-ignore staticMethod.resultUnused (from() is required to throw)
     McpDecisionOutcome::from('maybe');
   }
 

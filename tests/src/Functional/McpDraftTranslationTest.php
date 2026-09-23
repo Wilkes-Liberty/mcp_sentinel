@@ -9,7 +9,6 @@ use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\file\Entity\File;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\NodeInterface;
-use Drupal\path_alias\PathAliasInterface;
 use Drupal\Tests\BrowserTestBase;
 use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
@@ -375,21 +374,23 @@ final class McpDraftTranslationTest extends BrowserTestBase {
 
     $logger = $this->container->get('mcp_sentinel.audit_logger');
     $found_revise = FALSE;
+    $seen = [];
     $audit = $this->container->get('database')->select('audit_chain_log', 'l')
-      ->fields('l', ['metadata'])
-      ->condition('operation', 'entity_save')
+      ->fields('l', ['operation', 'metadata'])
       ->execute();
     if ($audit) {
       while ($row = $audit->fetchAssoc()) {
         $meta = $logger->decodeMetadata((string) ($row['metadata'] ?? ''));
-        if (($meta['translation'] ?? '') === 'revise'
+        $seen[] = ($row['operation'] ?? '') . ':' . ($meta['entity_type'] ?? '') . ':' . ($meta['langcode'] ?? '') . ':' . ($meta['translation'] ?? '');
+        if (($row['operation'] ?? '') === 'entity_save'
+          && ($meta['translation'] ?? '') === 'revise'
           && ($meta['langcode'] ?? '') === 'es'
           && ($meta['entity_type'] ?? '') === 'node') {
           $found_revise = TRUE;
         }
       }
     }
-    $this->assertTrue($found_revise, 'The revise decision must be on the node entity_save row.');
+    $this->assertTrue($found_revise, 'The revise decision must be on the node entity_save row. Saw: ' . implode(', ', array_slice($seen, -8)));
 
     $blocked = $this->drupalCreateNode([
       'type' => 'page',
@@ -586,9 +587,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
       ->execute();
     $map = [];
     foreach ($storage->loadMultiple($ids) as $alias) {
-      if ($alias instanceof PathAliasInterface) {
-        $map[$alias->language()->getId()] = $alias->getAlias();
-      }
+      $map[$alias->language()->getId()] = $alias->getAlias();
     }
     ksort($map);
     return $map;

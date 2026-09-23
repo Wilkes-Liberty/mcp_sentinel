@@ -307,7 +307,7 @@ final class McpDraftResource extends EntityResource {
       throw new ConflictHttpException('No published translation exists for this language. Create it instead of revising it.');
     }
     $published = $live->getTranslation($langcode);
-    if (!$published instanceof EntityPublishedInterface || !$published->isPublished()) {
+    if (!$published->isPublished()) {
       throw new ConflictHttpException('The live translation is not published. Continue it instead of revising it.');
     }
     if (!$live->access('update', $this->user)) {
