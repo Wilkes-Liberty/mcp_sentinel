@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\node\NodeAccessRebuild;
+use Drupal\node\Entity\NodeType;
 use Drupal\node\NodeInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
@@ -201,6 +202,16 @@ final class McpDraftResourceTest extends BrowserTestBase {
     $this->assertSame('', (string) $third->getRevisionLogMessage());
     $this->assertContains($send(['moderation_state' => 'published'], $third_vid)->getStatusCode(), [403, 422]);
     $this->assertSame($third_vid, (string) $storage->getLatestRevisionId($node->id()));
+    // Core grants edit on revision_log only with "administer nodes" or when
+    // the bundle creates new revisions. Without either, the log is refused.
+    $page_type = NodeType::load('page');
+    $this->assertInstanceOf(NodeType::class, $page_type);
+    $page_type->setNewRevision(FALSE);
+    $page_type->save();
+    $this->assertSame(403, $send(['title' => 'Log denied', 'revision_log' => 'Not allowed'], $third_vid)->getStatusCode());
+    $this->assertSame($third_vid, (string) $storage->getLatestRevisionId($node->id()));
+    $page_type->setNewRevision(TRUE);
+    $page_type->save();
     $this->config('mcp_sentinel.mcp_policy_profile.default')->set('allow_write', FALSE)->save();
     $this->assertSame(403, $send(['title' => 'Forbidden'], $third_vid, TRUE)->getStatusCode());
     $live = $storage->loadUnchanged($node->id());

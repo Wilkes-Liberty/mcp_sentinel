@@ -440,6 +440,81 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * Continues an English draft on a node whose Spanish is published.
+   *
+   * Naming the default language must not turn the write into a translation
+   * write, so shared (untranslatable) fields stay editable. The revision log
+   * is stored on the new revision.
+   */
+  public function testDefaultLanguageContinuationOnMultilingualNode(): void {
+    [$agent, $node, $live_vid, , $path_draft] = $this->setUpTranslatedPage();
+    FieldStorageConfig::create([
+      'field_name' => 'field_related',
+      'entity_type' => 'node',
+      'type' => 'entity_reference',
+      'settings' => ['target_type' => 'node'],
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_related',
+      'entity_type' => 'node',
+      'bundle' => 'page',
+      'label' => 'Related',
+      'translatable' => FALSE,
+      'settings' => ['handler' => 'default:node'],
+    ])->save();
+    $this->container->get('router.builder')->rebuild();
+    $related = $this->drupalCreateNode([
+      'type' => 'page',
+      'title' => 'Related',
+      'moderation_state' => 'published',
+    ]);
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $node = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $node);
+    $spanish = $node->addTranslation('es', ['title' => 'Artículos']);
+    $spanish->set('moderation_state', 'published');
+    $spanish->save();
+    $live_vid = (string) $storage->loadUnchanged($node->id())->getRevisionId();
+    $node = $storage->loadUnchanged($node->id());
+    $node->setNewRevision(TRUE);
+    $node->setTitle('English draft');
+    $node->setRevisionLogMessage('English pass one');
+    $node->set('moderation_state', 'draft');
+    $node->save();
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($live_vid, $working_vid);
+    $if_match = '"' . $live_vid . ':' . $working_vid . '"';
+
+    $no_header = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Guess'], $if_match, FALSE, NULL);
+    $this->assertSame(409, $no_header->getStatusCode(), (string) $no_header->getBody());
+    $detail = json_decode((string) $no_header->getBody(), TRUE)['errors'][0]['detail'] ?? '';
+    $this->assertStringContainsString('"en" for the default language', $detail);
+
+    $relationships = [
+      'field_related' => ['data' => [['type' => 'node--page', 'id' => $related->uuid()]]],
+    ];
+    $attributes = ['title' => 'English draft two', 'revision_log' => 'English pass two'];
+    $response = $this->translationRequest('PATCH', $path_draft, $agent, $node, $attributes, $if_match, FALSE, 'en', $relationships);
+    $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+    $storage->resetCache([$node->id()]);
+    $second_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($working_vid, $second_vid);
+    $second = $storage->loadRevision($second_vid);
+    $this->assertInstanceOf(NodeInterface::class, $second);
+    $this->assertSame('English draft two', $second->label());
+    $this->assertSame('English pass two', $second->getRevisionLogMessage());
+    $this->assertSame($related->id(), $second->get('field_related')->target_id);
+    $this->assertSame('Artículos', $second->getTranslation('es')->label());
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertSame('Articles', $live->label());
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+    $this->assertTrue($live->get('field_related')->isEmpty());
+  }
+
+  /**
    * Builds a translatable published page and a governed agent.
    *
    * @return array{0: \Drupal\user\UserInterface, 1: \Drupal\node\NodeInterface, 2: string, 3: string, 4: string, 5: string}
