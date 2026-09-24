@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- #3625509: Governed draft writes (continue, create, and revise) store the
+  submitted `revision_log`. Before, the log was dropped and the new revision
+  kept the message of the revision it was cloned from. A write without a log
+  now clears it. A log that is not a string is a 400. The 409 for a
+  multilingual draft sent without `X-MCP-Draft-Langcode` now names the default
+  language to send.
+
 ## [2.24.1] - 2026-09-23
 
 ### Fixed

@@ -114,6 +114,7 @@ final class McpDraftResourceTest extends BrowserTestBase {
     $live_card_vid = (string) $node->get('field_cards')->target_revision_id;
     $node->setNewRevision(TRUE);
     $node->setTitle('First draft');
+    $node->setRevisionLogMessage('First pass');
     $node->set('moderation_state', 'draft');
     $node->save();
     $first_vid = (string) $node->getRevisionId();
@@ -174,20 +175,30 @@ final class McpDraftResourceTest extends BrowserTestBase {
       'uid' => ['data' => ['type' => 'user--user', 'id' => $agent->uuid()]],
     ])->getStatusCode(), [400, 403, 422]);
     $this->assertSame($first_vid, (string) $storage->getLatestRevisionId($node->id()));
-    $response = $send(['title' => 'Second draft'], $first_vid, FALSE, $relationships);
+    $this->assertSame(400, $send(['title' => 'Bad log', 'revision_log' => ['not', 'a', 'string']], $first_vid, TRUE)->getStatusCode());
+    $response = $send(['title' => 'Second draft', 'revision_log' => 'Second pass'], $first_vid, FALSE, $relationships);
     $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
     $second_vid = (string) $storage->getLatestRevisionId($node->id());
     $this->assertNotSame($first_vid, $second_vid, (string) $response->getBody());
     $this->assertSame('First draft', $storage->loadRevision($first_vid)->label());
     $this->assertSame('Second draft', $storage->loadRevision($second_vid)->label());
+    // The continuation stores its own log, not the one it was cloned from.
+    $first = $storage->loadRevision($first_vid);
+    $this->assertInstanceOf(NodeInterface::class, $first);
+    $this->assertSame('First pass', $first->getRevisionLogMessage());
     $second = $storage->loadRevision($second_vid);
     $this->assertInstanceOf(NodeInterface::class, $second);
+    $this->assertSame('Second pass', $second->getRevisionLogMessage());
     $this->assertSame($new_card->uuid(), $second->get('field_cards')->entity->uuid());
     $this->assertSame(409, $send(['title' => 'Stale edit'], $first_vid)->getStatusCode());
     $response = $send(['title' => 'Third draft'], $second_vid);
     $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
     $third_vid = (string) $storage->getLatestRevisionId($node->id());
     $this->assertNotSame($second_vid, $third_vid);
+    // No submitted log clears it rather than repeating the previous message.
+    $third = $storage->loadRevision($third_vid);
+    $this->assertInstanceOf(NodeInterface::class, $third);
+    $this->assertSame('', (string) $third->getRevisionLogMessage());
     $this->assertContains($send(['moderation_state' => 'published'], $third_vid)->getStatusCode(), [403, 422]);
     $this->assertSame($third_vid, (string) $storage->getLatestRevisionId($node->id()));
     $this->config('mcp_sentinel.mcp_policy_profile.default')->set('allow_write', FALSE)->save();

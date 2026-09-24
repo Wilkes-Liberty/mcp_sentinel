@@ -72,7 +72,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertContains($denied_publish->getStatusCode(), [403, 422], (string) $denied_publish->getBody());
     $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
 
-    $created = $send_create(['title' => 'Artículos'], '"' . $live_vid . '"');
+    $created = $send_create(['title' => 'Artículos', 'revision_log' => 'Add es draft'], '"' . $live_vid . '"');
     $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
     $created_body = json_decode((string) $created->getBody(), TRUE);
     $this->assertSame('Artículos', $created_body['data']['attributes']['title']);
@@ -99,9 +99,13 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('Artículos', $spanish->label());
     $this->assertFalse($spanish->isPublished());
     $this->assertSame('draft', $spanish->get('moderation_state')->value);
+    $this->assertSame('Add es draft', $working->getRevisionLogMessage());
 
-    $this->assertSame(409, $send_patch(['title' => 'Guess'], '"' . $live_vid . ':' . $working_vid . '"', FALSE, NULL)->getStatusCode());
-    $second = $send_patch(['title' => 'Artículos actualizados'], '"' . $live_vid . ':' . $working_vid . '"');
+    $guess = $send_patch(['title' => 'Guess'], '"' . $live_vid . ':' . $working_vid . '"', FALSE, NULL);
+    $this->assertSame(409, $guess->getStatusCode());
+    $guess_detail = json_decode((string) $guess->getBody(), TRUE)['errors'][0]['detail'] ?? '';
+    $this->assertStringContainsString('"en" for the default language', $guess_detail);
+    $second = $send_patch(['title' => 'Artículos actualizados', 'revision_log' => 'Update es draft'], '"' . $live_vid . ':' . $working_vid . '"');
     $this->assertSame(200, $second->getStatusCode(), (string) $second->getBody());
     $second_vid = (string) $storage->getLatestRevisionId($node->id());
     $this->assertNotSame($working_vid, $second_vid);
@@ -116,6 +120,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $updated_revision = $storage->loadRevision($second_vid);
     $this->assertInstanceOf(NodeInterface::class, $updated_revision);
     $this->assertSame('Artículos actualizados', $updated_revision->getTranslation('es')->label());
+    $this->assertSame('Update es draft', $updated_revision->getRevisionLogMessage());
     $this->assertSame('Articles', $updated_revision->getUntranslated()->label());
 
     $inventory = $this->getHttpClient()->request('GET', $path_inventory, [
@@ -342,7 +347,11 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('revise_published_translation', $preflight_meta['operation']);
     $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
 
-    $revised = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
+    $revise_attributes = [
+      'title' => 'Acerca de nosotros',
+      'revision_log' => 'Revise es copy',
+    ];
+    $revised = $this->translationRequest('POST', $path_create, $agent, $node, $revise_attributes, '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
     $this->assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
     $revised_body = json_decode((string) $revised->getBody(), TRUE);
     $this->assertSame('Acerca de nosotros', $revised_body['data']['attributes']['title']);
@@ -369,6 +378,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertTrue($working->getUntranslated()->isPublished());
     $draft_es = $working->getTranslation('es');
     $this->assertSame('Acerca de nosotros', $draft_es->label());
+    $this->assertSame('Revise es copy', $working->getRevisionLogMessage());
     $this->assertFalse($draft_es->isPublished());
     $this->assertSame('draft', $draft_es->get('moderation_state')->value);
 
