@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.24.1] - 2026-09-23
+
 ### Fixed
 - #3625484: Set draft translation source metadata when media or nodes use native
   author and created fields. Image translations with shared files can now save
@@ -2409,7 +2411,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.1...1.x
+[2.24.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.0...2.24.1
 [2.24.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.2...2.24.0
 [2.23.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.1...2.23.2
 [2.23.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.0...2.23.1
