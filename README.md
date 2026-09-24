@@ -837,6 +837,12 @@ Each rule specifies:
 | `debounce_seconds` | Minimum seconds between alerts for this rule (default 3600). Prevents alert storms. |
 | `enabled` | `1` to enable; `0` to disable. |
 | `signal` | `count` (default), `off_hours`, or `bulk_read`. |
+| `complete_ratio` | Optional. Bulk-read near-complete ratio of the live collection (`0`–`1`). Defaults to `0.8` when omitted. |
+| `entity_type` | Optional. Restrict a `bulk_read` rule to one entity type. |
+
+The Settings editor exposes `signal` but not `complete_ratio` or `entity_type`.
+Both keys are preserved on Save so a YAML-tuned bulk-read rule is not stripped
+by an unrelated form submit.
 
 An **operating-hours schedule** (timezone, weekdays, start/end) can be set on
 the same tab. Off-hours rules fire only when the schedule is enabled and a
