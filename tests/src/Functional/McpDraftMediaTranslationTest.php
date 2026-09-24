@@ -106,6 +106,7 @@ final class McpDraftMediaTranslationTest extends BrowserTestBase {
     $this->assertSame('Boats in the harbour', $working->getUntranslated()->get('field_media_image')->alt);
     $spanish = $working->getTranslation('es');
     $this->assertSame('Puerto', $spanish->label());
+    $this->assertSame('en', $this->container->get('content_translation.manager')->getTranslationMetadata($spanish)->getSource());
     $this->assertFalse($spanish->isPublished());
     $this->assertSame((string) $file->id(), (string) $spanish->get('field_media_image')->target_id);
     $this->assertSame('Barcos en el puerto', $spanish->get('field_media_image')->alt);
@@ -239,9 +240,9 @@ final class McpDraftMediaTranslationTest extends BrowserTestBase {
       $this->assertInstanceOf(FieldConfig::class, $field);
       $field->setTranslatable(TRUE);
       $field->setThirdPartySetting('content_translation', 'translation_sync', [
-        'file' => 'file',
-        'alt' => '0',
-        'title' => '0',
+        'file' => '0',
+        'alt' => 'alt',
+        'title' => 'title',
       ]);
       $field->save();
       $field_storage = FieldStorageConfig::loadByName('media', 'field_media_image');
