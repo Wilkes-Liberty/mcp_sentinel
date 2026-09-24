@@ -72,7 +72,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertContains($denied_publish->getStatusCode(), [403, 422], (string) $denied_publish->getBody());
     $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
 
-    $created = $send_create(['title' => 'Artículos'], '"' . $live_vid . '"');
+    $created = $send_create(['title' => 'Artículos', 'revision_log' => 'Add es draft'], '"' . $live_vid . '"');
     $this->assertSame(200, $created->getStatusCode(), (string) $created->getBody());
     $created_body = json_decode((string) $created->getBody(), TRUE);
     $this->assertSame('Artículos', $created_body['data']['attributes']['title']);
@@ -99,9 +99,13 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('Artículos', $spanish->label());
     $this->assertFalse($spanish->isPublished());
     $this->assertSame('draft', $spanish->get('moderation_state')->value);
+    $this->assertSame('Add es draft', $working->getRevisionLogMessage());
 
-    $this->assertSame(409, $send_patch(['title' => 'Guess'], '"' . $live_vid . ':' . $working_vid . '"', FALSE, NULL)->getStatusCode());
-    $second = $send_patch(['title' => 'Artículos actualizados'], '"' . $live_vid . ':' . $working_vid . '"');
+    $guess = $send_patch(['title' => 'Guess'], '"' . $live_vid . ':' . $working_vid . '"', FALSE, NULL);
+    $this->assertSame(409, $guess->getStatusCode());
+    $guess_detail = json_decode((string) $guess->getBody(), TRUE)['errors'][0]['detail'] ?? '';
+    $this->assertStringContainsString('"en" for the default language', $guess_detail);
+    $second = $send_patch(['title' => 'Artículos actualizados', 'revision_log' => 'Update es draft'], '"' . $live_vid . ':' . $working_vid . '"');
     $this->assertSame(200, $second->getStatusCode(), (string) $second->getBody());
     $second_vid = (string) $storage->getLatestRevisionId($node->id());
     $this->assertNotSame($working_vid, $second_vid);
@@ -116,6 +120,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $updated_revision = $storage->loadRevision($second_vid);
     $this->assertInstanceOf(NodeInterface::class, $updated_revision);
     $this->assertSame('Artículos actualizados', $updated_revision->getTranslation('es')->label());
+    $this->assertSame('Update es draft', $updated_revision->getRevisionLogMessage());
     $this->assertSame('Articles', $updated_revision->getUntranslated()->label());
 
     $inventory = $this->getHttpClient()->request('GET', $path_inventory, [
@@ -342,7 +347,11 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('revise_published_translation', $preflight_meta['operation']);
     $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
 
-    $revised = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
+    $revise_attributes = [
+      'title' => 'Acerca de nosotros',
+      'revision_log' => 'Revise es copy',
+    ];
+    $revised = $this->translationRequest('POST', $path_create, $agent, $node, $revise_attributes, '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
     $this->assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
     $revised_body = json_decode((string) $revised->getBody(), TRUE);
     $this->assertSame('Acerca de nosotros', $revised_body['data']['attributes']['title']);
@@ -369,6 +378,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertTrue($working->getUntranslated()->isPublished());
     $draft_es = $working->getTranslation('es');
     $this->assertSame('Acerca de nosotros', $draft_es->label());
+    $this->assertSame('Revise es copy', $working->getRevisionLogMessage());
     $this->assertFalse($draft_es->isPublished());
     $this->assertSame('draft', $draft_es->get('moderation_state')->value);
 
@@ -427,6 +437,81 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $named = $this->translationRequest('POST', $blocked_path, $agent, $blocked, ['title' => 'Acerca de nosotros'], '"' . $blocked_live_vid . ':' . $blocked_working . '"', FALSE, 'es', [], 'revise');
     $this->assertSame(409, $named->getStatusCode(), (string) $named->getBody());
     $this->assertSame($blocked_working, (string) $storage->getLatestRevisionId($blocked->id()));
+  }
+
+  /**
+   * Continues an English draft on a node whose Spanish is published.
+   *
+   * Naming the default language must not turn the write into a translation
+   * write, so shared (untranslatable) fields stay editable. The revision log
+   * is stored on the new revision.
+   */
+  public function testDefaultLanguageContinuationOnMultilingualNode(): void {
+    [$agent, $node, $live_vid, , $path_draft] = $this->setUpTranslatedPage();
+    FieldStorageConfig::create([
+      'field_name' => 'field_related',
+      'entity_type' => 'node',
+      'type' => 'entity_reference',
+      'settings' => ['target_type' => 'node'],
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_related',
+      'entity_type' => 'node',
+      'bundle' => 'page',
+      'label' => 'Related',
+      'translatable' => FALSE,
+      'settings' => ['handler' => 'default:node'],
+    ])->save();
+    $this->container->get('router.builder')->rebuild();
+    $related = $this->drupalCreateNode([
+      'type' => 'page',
+      'title' => 'Related',
+      'moderation_state' => 'published',
+    ]);
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $node = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $node);
+    $spanish = $node->addTranslation('es', ['title' => 'Artículos']);
+    $spanish->set('moderation_state', 'published');
+    $spanish->save();
+    $live_vid = (string) $storage->loadUnchanged($node->id())->getRevisionId();
+    $node = $storage->loadUnchanged($node->id());
+    $node->setNewRevision(TRUE);
+    $node->setTitle('English draft');
+    $node->setRevisionLogMessage('English pass one');
+    $node->set('moderation_state', 'draft');
+    $node->save();
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($live_vid, $working_vid);
+    $if_match = '"' . $live_vid . ':' . $working_vid . '"';
+
+    $no_header = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Guess'], $if_match, FALSE, NULL);
+    $this->assertSame(409, $no_header->getStatusCode(), (string) $no_header->getBody());
+    $detail = json_decode((string) $no_header->getBody(), TRUE)['errors'][0]['detail'] ?? '';
+    $this->assertStringContainsString('"en" for the default language', $detail);
+
+    $relationships = [
+      'field_related' => ['data' => [['type' => 'node--page', 'id' => $related->uuid()]]],
+    ];
+    $attributes = ['title' => 'English draft two', 'revision_log' => 'English pass two'];
+    $response = $this->translationRequest('PATCH', $path_draft, $agent, $node, $attributes, $if_match, FALSE, 'en', $relationships);
+    $this->assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+    $storage->resetCache([$node->id()]);
+    $second_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($working_vid, $second_vid);
+    $second = $storage->loadRevision($second_vid);
+    $this->assertInstanceOf(NodeInterface::class, $second);
+    $this->assertSame('English draft two', $second->label());
+    $this->assertSame('English pass two', $second->getRevisionLogMessage());
+    $this->assertSame($related->id(), $second->get('field_related')->target_id);
+    $this->assertSame('Artículos', $second->getTranslation('es')->label());
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertSame('Articles', $live->label());
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+    $this->assertTrue($live->get('field_related')->isEmpty());
   }
 
   /**

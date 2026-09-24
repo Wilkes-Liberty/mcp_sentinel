@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- #3625509: Governed draft writes (continue, create, and revise) store the
+  submitted `revision_log`. Before, the log was dropped and the new revision
+  kept the message of the revision it was cloned from. A write without a log
+  now clears it. A log that is not a string is a 400. Changing the log needs
+  edit access to the field, as core JSON:API requires.
+- #3625509: Continuing a draft with `X-MCP-Draft-Langcode` set to the default
+  language is no longer treated as a translation write, so shared
+  (untranslatable) fields and paragraph structure stay editable on the default
+  language of a multilingual node. The 409 for a multilingual draft sent
+  without the header now names the default language to send.
+
 ## [2.24.1] - 2026-09-23
 
 ### Fixed

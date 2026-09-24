@@ -9,6 +9,7 @@ use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\ContentEntityTypeInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
@@ -193,7 +194,13 @@ final class McpDraftResource extends EntityResource {
     if (($data['id'] ?? NULL) !== $draft->uuid()) {
       throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
     }
-    $this->applySubmittedDraftFields($resource_type, $parsed, $draft, $live, $data, $langcode !== NULL);
+    // Naming the default language selects the draft on a multilingual
+    // revision. It is not a translation write, so shared structure stays
+    // editable exactly as on a single-language draft.
+    $translation_write = $langcode !== NULL
+      && $langcode !== $draft->getUntranslated()->language()->getId();
+    $this->applySubmittedDraftFields($resource_type, $parsed, $draft, $live, $data, $translation_write);
+    $this->applySubmittedRevisionLog($resource_type, $draft, $data);
     $this->assertDraftRemainsUnpublished($draft);
     // Include entity-level governance constraints, not only changed fields.
     static::validate($draft);
@@ -265,6 +272,7 @@ final class McpDraftResource extends EntityResource {
       throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
     }
     $this->applySubmittedDraftFields($resource_type, $parsed, $translation, $live, $data, TRUE);
+    $this->applySubmittedRevisionLog($resource_type, $translation, $data);
     $this->assertDraftRemainsUnpublished($translation);
     static::validate($translation);
     $save_versions = [
@@ -338,6 +346,7 @@ final class McpDraftResource extends EntityResource {
       throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
     }
     $this->applySubmittedDraftFields($resource_type, $parsed, $translation, $live, $data, TRUE);
+    $this->applySubmittedRevisionLog($resource_type, $translation, $data);
     $this->assertDraftRemainsUnpublished($translation);
     static::validate($translation);
     $save_versions = [
@@ -829,7 +838,8 @@ final class McpDraftResource extends EntityResource {
     $languages = $draft->getTranslationLanguages();
     if ($langcode === NULL) {
       if (count($languages) !== 1) {
-        throw new ConflictHttpException('Translated draft continuation requires X-MCP-Draft-Langcode.');
+        $default = $draft->getUntranslated()->language()->getId();
+        throw new ConflictHttpException(sprintf('This draft has more than one language. Send X-MCP-Draft-Langcode with the language to continue, for example "%s" for the default language.', $default));
       }
       if ($draft->isPublished()) {
         throw new ConflictHttpException('The target is not an unpublished forward revision.');
@@ -1036,6 +1046,56 @@ final class McpDraftResource extends EntityResource {
       }
       $this->updateEntityField($resource_type, $parsed, $draft, $public_name);
     }
+  }
+
+  /**
+   * Stores the submitted revision log on the draft revision.
+   *
+   * The generic field copy skips revision_log because translation writes must
+   * not copy revision bookkeeping from the parsed entity. The log message is
+   * different: it describes the revision this request creates. Without this,
+   * the new revision silently keeps the log of the revision it was cloned
+   * from. A request without a log clears it for the same reason.
+   *
+   * A submitted message that differs from the stored one needs edit access to
+   * the field, as core JSON:API requires for every other field. Clearing the
+   * log is revision bookkeeping, like the revision user and time.
+   *
+   * @param \Drupal\jsonapi\ResourceType\ResourceType $resource_type
+   *   The resource type.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
+   *   The working revision or translation being saved.
+   * @param array<string, mixed> $data
+   *   The JSON:API `data` document.
+   *
+   * @throws \Symfony\Component\HttpKernel\Exception\BadRequestHttpException
+   *   When the submitted log is not a string.
+   * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+   *   When the account may not edit the revision log field.
+   */
+  private function applySubmittedRevisionLog(ResourceType $resource_type, ContentEntityInterface $draft, array $data): void {
+    if (!$draft instanceof RevisionLogInterface) {
+      return;
+    }
+    $entity_type = $draft->getEntityType();
+    if (!$entity_type instanceof ContentEntityTypeInterface) {
+      return;
+    }
+    $key = $entity_type->getRevisionMetadataKey('revision_log_message');
+    if (!is_string($key) || $key === '') {
+      return;
+    }
+    $attributes = is_array($data['attributes'] ?? NULL) ? $data['attributes'] : [];
+    $public_name = $resource_type->getPublicName($key);
+    $message = $attributes[$public_name] ?? NULL;
+    if ($message !== NULL && !is_string($message)) {
+      throw new BadRequestHttpException('The revision log must be a string.');
+    }
+    if ($message !== NULL && $message !== '' && $message !== (string) $draft->getRevisionLogMessage()
+      && $draft->hasField($key) && !$draft->get($key)->access('edit', $this->user)) {
+      throw new AccessDeniedHttpException(sprintf('The current user is not allowed to PATCH the selected field (%s).', $public_name));
+    }
+    $draft->setRevisionLogMessage($message ?? '');
   }
 
   /**
