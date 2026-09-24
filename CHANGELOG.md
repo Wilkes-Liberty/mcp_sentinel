@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.24.2] - 2026-09-23
+
 ### Fixed
 - #3625509: Governed draft writes (continue, create, and revise) store the
   submitted `revision_log`. Before, the log was dropped and the new revision
