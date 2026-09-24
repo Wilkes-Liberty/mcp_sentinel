@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.24.3] - 2026-09-24
+
 ### Fixed
 - Settings Save no longer drops `complete_ratio` or `entity_type` from a
   YAML-tuned `bulk_read` anomaly rule. The editor exposes `signal` but not
