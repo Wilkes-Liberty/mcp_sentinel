@@ -24,6 +24,15 @@ used here. Translation writes are explicit:
   working revision, or `"<live>:<working>"` when adding the language onto an
   existing unpublished forward revision. An existing translation on live or
   working is 409, not an overwrite.
+- The same POST with `X-MCP-Draft-Mode: revise` opens that forward draft when
+  the language is already published on the live default revision and nothing
+  is ahead of it. The target translation is saved as `moderation_state: draft`
+  and unpublished. The live default revision, every other language, and the
+  alias stay unchanged. A different working copy is 409. Omitting the header
+  is still create, and create still returns the existing 409 when the language
+  already exists. `GET .../mcp-translations` lists `revise_published_translation`
+  in `operations` on hosts that support it. Preflight echoes
+  `meta.operation: revise_published_translation`.
 - `PATCH .../mcp-draft` with `X-MCP-Draft-Langcode` continues that translation
   only. Omitting the header on a multilingual working revision is 409.
 - `GET .../mcp-translations` reports live and (when the principal can view the

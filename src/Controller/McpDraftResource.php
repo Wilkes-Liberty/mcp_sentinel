@@ -39,6 +39,9 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  *
  * Translation create/update uses the same revision pointers plus
  * X-MCP-Draft-Langcode so a Spanish draft can sit beside published English.
+ * X-MCP-Draft-Mode: revise opens a forward draft over a translation that is
+ * already published on the live default revision. Omitting the header keeps
+ * create, including its 409 when that language already exists.
  * Media items get the node contract: the translation lives on an unpublished
  * forward revision and the source file target must not change. Paragraph
  * field values use the same surface on the pinned paragraph revision; image
@@ -61,6 +64,16 @@ final class McpDraftResource extends EntityResource {
    * Header that selects the translation to create, read, or continue.
    */
   public const LANGCODE_HEADER = 'X-MCP-Draft-Langcode';
+
+  /**
+   * Header that selects create (omitted) or revise.
+   */
+  public const MODE_HEADER = 'X-MCP-Draft-Mode';
+
+  /**
+   * Inventory name for opening a draft over a published translation.
+   */
+  public const REVISE_OPERATION = 'revise_published_translation';
 
   /**
    * Bookkeeping fields that a translation write must never copy.
@@ -201,8 +214,15 @@ final class McpDraftResource extends EntityResource {
    *   The saved translation resource or preflight metadata.
    */
   public function postTranslation(ResourceType $resource_type, EntityInterface $entity, Request $request): ResourceResponse|JsonResponse {
+    $mode = $this->requestDraftMode($request);
     if ($entity->getEntityTypeId() === 'paragraph') {
+      if ($mode === 'revise') {
+        throw new BadRequestHttpException('Revising a published paragraph translation is not supported.');
+      }
       return $this->postParagraphTranslation($resource_type, $entity, $request);
+    }
+    if ($mode === 'revise') {
+      return $this->revisePublishedTranslation($resource_type, $entity, $request);
     }
     $this->assertGovernedForwardRevisionEntity($entity);
     $versions = $this->parseRevisionMatch($request, TRUE);
@@ -255,7 +275,79 @@ final class McpDraftResource extends EntityResource {
     if ($preflight === '1') {
       return $this->preflightResponse($save_versions, $langcode);
     }
-    return $this->saveForwardRevision($storage, $entity, $translation, $resource_type, $request, $save_versions, TRUE);
+    return $this->saveForwardRevision($storage, $entity, $translation, $resource_type, $request, $save_versions, 'create');
+  }
+
+  /**
+   * Opens an unpublished draft over a published translation.
+   *
+   * If-Match matches create: `"live"` when nothing is ahead of the default
+   * revision. A working copy is a conflict, whether or not the caller named
+   * it. The live default revision, its other languages, and the alias stay
+   * put. Plain create is unchanged and still 409s when the language exists.
+   *
+   * @return \Drupal\jsonapi\ResourceResponse|\Symfony\Component\HttpFoundation\JsonResponse
+   *   The saved translation resource or preflight metadata.
+   */
+  private function revisePublishedTranslation(ResourceType $resource_type, EntityInterface $entity, Request $request): ResourceResponse|JsonResponse {
+    $this->assertGovernedForwardRevisionEntity($entity);
+    $versions = $this->parseRevisionMatch($request, TRUE);
+    $langcode = $this->requestLangcode($request, TRUE);
+    $this->assertEnabledLanguage($langcode);
+    $preflight = $this->parsePreflight($request);
+    $storage = $this->forwardRevisionStorage($entity);
+    $latest_id = $storage->getLatestRevisionId($entity->id());
+    $stored = $storage->loadUnchanged($entity->id());
+    $live = $this->assertReviseRevisionPointers($stored, $latest_id, $versions);
+    if ($live->language()->getId() === $langcode) {
+      throw new BadRequestHttpException('The target language is already the default language.');
+    }
+    $this->assertBundleTranslatable($live);
+    if (!$live->hasTranslation($langcode)) {
+      throw new ConflictHttpException('No published translation exists for this language. Create it instead of revising it.');
+    }
+    $published = $live->getTranslation($langcode);
+    if (!$published->isPublished()) {
+      throw new ConflictHttpException('The live translation is not published. Continue it instead of revising it.');
+    }
+    if (!$live->access('update', $this->user)) {
+      throw new AccessDeniedHttpException('Draft update access denied.');
+    }
+    // Mutate a copy so moderation's default-revision check still sees the
+    // published languages in storage, not this in-progress draft.
+    $base = clone $live;
+    foreach ($base->getTranslationLanguages() as $language) {
+      $code = $language->getId();
+      if ($code === $langcode) {
+        continue;
+      }
+      $base->getTranslation($code)->setRevisionTranslationAffected(FALSE);
+    }
+    $translation = $base->getTranslation($langcode);
+    $translation->setRevisionTranslationAffected(TRUE);
+    $translation->setUnpublished();
+    if ($translation->hasField('moderation_state')) {
+      $translation->set('moderation_state', 'draft');
+    }
+    // Core's deserialize() docblock says array, but this normalizer returns
+    // the content entity. Keep the actual contract explicit here.
+    /** @var \Drupal\Core\Entity\ContentEntityInterface $parsed */
+    $parsed = $this->deserialize($resource_type, $request, JsonApiDocumentTopLevel::class);
+    $data = $this->requestData($request);
+    if (($data['id'] ?? NULL) !== $base->uuid()) {
+      throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
+    }
+    $this->applySubmittedDraftFields($resource_type, $parsed, $translation, $live, $data, TRUE);
+    $this->assertDraftRemainsUnpublished($translation);
+    static::validate($translation);
+    $save_versions = [
+      1 => (string) $live->getRevisionId(),
+      2 => '',
+    ];
+    if ($preflight === '1') {
+      return $this->preflightResponse($save_versions, $langcode, self::REVISE_OPERATION);
+    }
+    return $this->saveForwardRevision($storage, $entity, $translation, $resource_type, $request, $save_versions, 'revise');
   }
 
   /**
@@ -285,6 +377,10 @@ final class McpDraftResource extends EntityResource {
       'defaultLangcode' => $live->getUntranslated()->language()->getId(),
       'live' => $this->summarizeRevisionTranslations($live),
       'working' => NULL,
+      'operations' => [
+        'create_translation',
+        self::REVISE_OPERATION,
+      ],
     ];
     if ((string) $latest_id !== (string) $live->getRevisionId()) {
       $working = $storage->loadRevision($latest_id);
@@ -457,6 +553,28 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
+   * Reads X-MCP-Draft-Mode.
+   *
+   * Absent means create. `revise` opens a draft over a published translation.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The request.
+   *
+   * @return string
+   *   `create` or `revise`.
+   */
+  private function requestDraftMode(Request $request): string {
+    $mode = strtolower(trim((string) $request->headers->get(self::MODE_HEADER, '')));
+    if ($mode === '' || $mode === 'create') {
+      return 'create';
+    }
+    if ($mode === 'revise') {
+      return 'revise';
+    }
+    throw new BadRequestHttpException('X-MCP-Draft-Mode must be revise or omitted.');
+  }
+
+  /**
    * Refuses a language that is not enabled on the site.
    *
    * @param string $langcode
@@ -492,11 +610,13 @@ final class McpDraftResource extends EntityResource {
    *   Live and working revision ids.
    * @param string|null $langcode
    *   The selected language, if any.
+   * @param string|null $operation
+   *   Optional operation name echoed so clients can tell revise from create.
    *
    * @return \Symfony\Component\HttpFoundation\JsonResponse
    *   Preflight metadata.
    */
-  private function preflightResponse(array $versions, ?string $langcode): JsonResponse {
+  private function preflightResponse(array $versions, ?string $langcode, ?string $operation = NULL): JsonResponse {
     $meta = [
       'draft_preflight' => TRUE,
       'live' => $versions[1],
@@ -504,6 +624,9 @@ final class McpDraftResource extends EntityResource {
     ];
     if ($langcode !== NULL) {
       $meta['langcode'] = $langcode;
+    }
+    if ($operation !== NULL && $operation !== '') {
+      $meta['operation'] = $operation;
     }
     return new JsonResponse(['meta' => $meta], 200, ['Cache-Control' => 'no-store']);
   }
@@ -523,14 +646,15 @@ final class McpDraftResource extends EntityResource {
    *   The request.
    * @param array<int, string> $versions
    *   Live and working revision ids checked before save.
-   * @param bool $creating_translation
-   *   TRUE when this save must leave the live revision without the new
-   *   language.
+   * @param string $write_mode
+   *   One of continue, create, or revise. Continue updates a working draft.
+   *   Create adds a language and must leave the live revision without it.
+   *   Revise opens a draft over a language already published on live.
    *
    * @return \Drupal\jsonapi\ResourceResponse
    *   The saved resource.
    */
-  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, bool $creating_translation = FALSE): ResourceResponse {
+  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, string $write_mode = 'continue'): ResourceResponse {
     $database = $this->draftDatabase;
     $transaction = $database->startTransaction();
     $langcode = $draft->language()->getId();
@@ -550,13 +674,16 @@ final class McpDraftResource extends EntityResource {
       $lock_query->execute()->fetchField();
       $stored_live = $storage->loadUnchanged($entity->id());
       $latest_id = $storage->getLatestRevisionId($entity->id());
-      if ($creating_translation && $versions[2] === '') {
+      if ($write_mode === 'revise') {
+        $this->assertReviseRevisionPointers($stored_live, $latest_id, $versions);
+      }
+      elseif ($write_mode === 'create' && $versions[2] === '') {
         $this->assertCreateRevisionPointers($stored_live, $latest_id, $versions);
       }
       else {
         $this->assertRevisionPointers($stored_live, $latest_id, $versions);
       }
-      if ($creating_translation) {
+      if ($write_mode === 'create') {
         $current = $versions[2] === '' ? $stored_live : $storage->loadRevision($latest_id);
         if ($current instanceof ContentEntityInterface && $current->hasTranslation($langcode)) {
           throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
@@ -575,7 +702,7 @@ final class McpDraftResource extends EntityResource {
         || $draft->isPublished() || $draft->isDefaultRevision()) {
         throw new ConflictHttpException('Draft continuation changed the live revision; the save was rolled back.');
       }
-      if ($creating_translation && $stored_live->hasTranslation($langcode)) {
+      if ($write_mode === 'create' && $stored_live->hasTranslation($langcode)) {
         throw new ConflictHttpException('Draft continuation changed the live revision; the save was rolled back.');
       }
       $primary_data = new ResourceObjectData([ResourceObject::createFromEntity($resource_type, $draft)], 1);
@@ -638,6 +765,40 @@ final class McpDraftResource extends EntityResource {
     if ((string) $latest_id !== $versions[2] || $versions[1] === $versions[2]) {
       throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
     }
+  }
+
+  /**
+   * Validates pointers for revising a published translation.
+   *
+   * The live id must match. A working copy — named or not — is a conflict.
+   * A working id that is not the stored latest revision is a stale match.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface|null $live
+   *   The stored default revision.
+   * @param int|string|null $latest_id
+   *   The stored latest revision id.
+   * @param array<int, string> $versions
+   *   Live and optional working ids.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
+   *   The stored default revision.
+   */
+  private function assertReviseRevisionPointers(?EntityInterface $live, int|string|null $latest_id, array $versions): ContentEntityInterface&EntityPublishedInterface {
+    if (!self::isPublishableContent($live) || (string) $live->getRevisionId() !== $versions[1]) {
+      throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
+    }
+    $latest = (string) $latest_id;
+    $live_id = (string) $live->getRevisionId();
+    if ($latest !== $live_id) {
+      if ($versions[2] !== '' && $versions[2] !== $latest) {
+        throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
+      }
+      throw new ConflictHttpException('A working copy already exists. Continue that draft instead of revising the published translation.');
+    }
+    if ($versions[2] !== '') {
+      throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
+    }
+    return $live;
   }
 
   /**
