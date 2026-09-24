@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Settings Save no longer drops `complete_ratio` or `entity_type` from a
+  YAML-tuned `bulk_read` anomaly rule. The editor exposes `signal` but not
+  those keys; they are now copied from the stored rule of the same id, the
+  same way the profile form keeps non-delete `entity_rules` keys.
+
 ## [2.24.2] - 2026-09-23
 
 ### Fixed

@@ -1229,7 +1229,19 @@ class McpSettingsForm extends ConfigFormBase {
     }
 
     // Assemble the anomaly rules sequence-of-maps from the row editor, dropping
-    // rows that lack an id or operation pattern.
+    // rows that lack an id or operation pattern. Keys the editor does not
+    // expose (complete_ratio, entity_type on a bulk_read rule) are copied
+    // from the stored rule of the same id so a YAML-tuned ratio or type
+    // filter survives an unrelated Save. Same idea as the profile form
+    // keeping non-delete entity_rules keys.
+    $previous_rules = [];
+    $stored_rules = (array) ($this->config('mcp_sentinel.settings')
+      ->get('anomaly_rules') ?? []);
+    foreach ($stored_rules as $stored) {
+      if (is_array($stored) && ($stored['id'] ?? '') !== '') {
+        $previous_rules[(string) $stored['id']] = $stored;
+      }
+    }
     $anomaly_rules = [];
     foreach ((array) ($form_state->getValue('anomaly_rules_rows') ?? []) as $row) {
       if (!is_array($row)) {
@@ -1257,6 +1269,12 @@ class McpSettingsForm extends ConfigFormBase {
       // byte-identical on a no-op save.
       if ($signal !== 'count') {
         $entry['signal'] = $signal;
+      }
+      $previous = $previous_rules[$rId] ?? [];
+      foreach (['complete_ratio', 'entity_type'] as $key) {
+        if (array_key_exists($key, $previous)) {
+          $entry[$key] = $previous[$key];
+        }
       }
       $anomaly_rules[] = $entry;
     }
