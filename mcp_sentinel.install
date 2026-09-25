@@ -274,21 +274,17 @@ function mcp_sentinel_requirements(string $phase): array {
   // Pre-flight every enabled endpoint's signing key (#3613291): a declared
   // secret_key whose Key entity is missing or resolves empty means the worker
   // will refuse every delivery for that endpoint (fail closed) — surface the
-  // misconfiguration before a single delivery is attempted.
-  $badKeys = [];
-  foreach ((array) $config->get('webhook_endpoints') as $endpoint) {
-    if (empty($endpoint['enabled'])) {
-      continue;
-    }
-    $keyId = (string) ($endpoint['secret_key'] ?? '');
-    if ($keyId === '') {
-      continue;
-    }
-    $key = \Drupal::service('key.repository')->getKey($keyId);
-    if ($key === NULL || (string) $key->getKeyValue() === '') {
-      $badKeys[] = (string) ($endpoint['id'] ?? '?') . ' → ' . $keyId;
-    }
-  }
+  // misconfiguration before a single delivery is attempted. Same helper as
+  // the urgent banner so the two surfaces cannot drift.
+  $issues = \Drupal::service('mcp_sentinel.urgent_conditions')
+    ->webhookEndpointSigningIssues();
+  $badKeys = array_map(
+    static function (array $issue): string {
+      $id = $issue['id'] !== '' ? $issue['id'] : '?';
+      return $id . ' → ' . $issue['secret_key'];
+    },
+    $issues,
+  );
   if ($badKeys !== []) {
     $requirements['mcp_sentinel_webhook_signing_keys'] = [
       'title' => t('MCP Sentinel: webhook signing key unresolvable'),
