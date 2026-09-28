@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.24.4] - 2026-09-28
+
 ### Fixed
 - The dashboard urgent banner now treats an empty webhook signing-key
   value the same way the status report and worker already do: a declared
