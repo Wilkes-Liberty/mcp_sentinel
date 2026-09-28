@@ -202,6 +202,58 @@ class McpUrgentConditionsTest extends KernelTestBase {
   }
 
   /**
+   * A Key entity that exists but has an empty value is unresolvable.
+   *
+   * Status report and the worker already treat missing OR empty key
+   * material as endpoint_key_unresolvable; the dashboard banner must match.
+   *
+   * @covers ::evaluate
+   */
+  public function testEnabledEndpointWithEmptyKeyValueFires(): void {
+    Key::create([
+      'id' => 'empty_secret',
+      'label' => 'Empty secret',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => ''],
+    ])->save();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [[
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => 'empty_secret',
+        'events' => [],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      ])->save();
+    $keys = array_column($this->evaluate(), 'key');
+    $this->assertContains('endpoint_key_unresolvable', $keys);
+  }
+
+  /**
+   * An enabled endpoint with no secret_key is unsigned by design.
+   *
+   * @covers ::evaluate
+   */
+  public function testEnabledEndpointWithoutSecretKeyDoesNotFire(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [[
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => '',
+        'events' => [],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      ])->save();
+    $keys = array_column($this->evaluate(), 'key');
+    $this->assertNotContains('endpoint_key_unresolvable', $keys);
+  }
+
+  /**
    * @covers ::evaluate
    */
   public function testEnabledEndpointWithResolvableKeyDoesNotFire(): void {

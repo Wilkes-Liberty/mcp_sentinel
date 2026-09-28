@@ -30,8 +30,9 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *    its EncryptionProfile (or its Key) cannot be loaded.
  *  - master_switch_off (warning): governance is OFF yet an agent audit row was
  *    written within the last 24 hours.
- *  - endpoint_key_unresolvable (critical): an enabled webhook endpoint's
- *    secret_key does not resolve via the Key repository.
+ *  - endpoint_key_unresolvable (critical): an enabled webhook endpoint
+ *    declares a secret_key whose Key entity is missing or resolves to
+ *    an empty value. An empty secret_key is unsigned by design.
  *  - role_escape_hatch (critical): a governed role holds a permission its
  *    policy profile forbids, or is an admin role — the profile's guarantees
  *    are not true for that role.
@@ -92,11 +93,49 @@ final class McpUrgentConditions {
     $this->evaluateEncryption($config, $conditions);
     $this->evaluateMasterSwitch($config, $conditions);
     $this->evaluateConfigGovernance($config, $conditions);
-    $this->evaluateEndpoints($config, $conditions);
+    $this->evaluateEndpoints($conditions);
     $this->evaluateRoleAssertions($conditions);
     $this->evaluateBroadcast($config, $conditions);
 
     return $conditions;
+  }
+
+  /**
+   * Enabled endpoints whose declared signing key is missing or empty.
+   *
+   * An empty secret_key is unsigned-by-design and is not an issue. A
+   * declared secret_key whose Key entity is missing or resolves to an
+   * empty value is the same fail-closed case the worker refuses as
+   * failed_key (#3613291). Shared with hook_requirements() so the
+   * status report and the urgent banner cannot drift.
+   *
+   * @return array<int, array{id: string, label: string, secret_key: string}>
+   *   One entry per misconfigured enabled endpoint.
+   */
+  public function webhookEndpointSigningIssues(): array {
+    $issues = [];
+    $endpoints = (array) ($this->configFactory
+      ->get('mcp_sentinel.settings')
+      ->get('webhook_endpoints') ?? []);
+    foreach ($endpoints as $endpoint) {
+      if (!is_array($endpoint) || empty($endpoint['enabled'])) {
+        continue;
+      }
+      $keyId = (string) ($endpoint['secret_key'] ?? '');
+      if ($keyId === '') {
+        continue;
+      }
+      $key = $this->keyRepository->getKey($keyId);
+      if ($key !== NULL && (string) $key->getKeyValue() !== '') {
+        continue;
+      }
+      $issues[] = [
+        'id' => (string) ($endpoint['id'] ?? ''),
+        'label' => (string) ($endpoint['label'] ?? $endpoint['id'] ?? 'unnamed'),
+        'secret_key' => $keyId,
+      ];
+    }
+    return $issues;
   }
 
   /**
@@ -332,25 +371,19 @@ final class McpUrgentConditions {
   /**
    * Adds endpoint_key_unresolvable for each enabled endpoint with a bad key.
    *
-   * @param \Drupal\Core\Config\ImmutableConfig $config
-   *   The settings config.
    * @param array $conditions
    *   The condition list, modified by reference.
    */
-  private function evaluateEndpoints(ImmutableConfig $config, array &$conditions): void {
-    foreach ((array) ($config->get('webhook_endpoints') ?? []) as $endpoint) {
-      if (!is_array($endpoint) || empty($endpoint['enabled'])) {
-        continue;
-      }
-      $secretKey = (string) ($endpoint['secret_key'] ?? '');
-      if ($secretKey === '' || $this->keyRepository->getKey($secretKey) !== NULL) {
-        continue;
-      }
-      $label = (string) ($endpoint['label'] ?? $endpoint['id'] ?? 'unnamed');
+  private function evaluateEndpoints(array &$conditions): void {
+    foreach ($this->webhookEndpointSigningIssues() as $issue) {
       $conditions[] = [
         'severity' => 'critical',
         'key' => 'endpoint_key_unresolvable',
-        'message' => sprintf("Webhook endpoint '%s' is enabled but its signing key '%s' cannot be resolved. Deliveries cannot be signed.", $label, $secretKey),
+        'message' => sprintf(
+          "Webhook endpoint '%s' is enabled but its signing key '%s' cannot be resolved. Deliveries cannot be signed.",
+          $issue['label'],
+          $issue['secret_key'],
+        ),
         'url' => $this->routeUrl('mcp_sentinel.settings'),
       ];
     }

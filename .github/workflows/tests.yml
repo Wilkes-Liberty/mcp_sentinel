@@ -174,8 +174,14 @@ jobs:
           # refuses to move transitive packages the lock pins — core-dev wants
           # phpunit, phpunit wants sebastian/diff ^6, the lock says 7.0.0, and
           # resolution fails. -W lets it move them.
+          #
+          # twig/twig <3.30: 3.30.0 compiles Drupal's swapped escape filter
+          # straight into EscaperRuntime::escape() and every rendered page
+          # 500s (twigphp/Twig#4952). -W otherwise floats to 3.30. Drop the
+          # pin when that issue ships a fixed release.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev"
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
           # core-dev brings PHPUnit; drush because the module ships Drush
           # commands whose tests instantiate them (they extend
           # Drush\Commands\DrushCommands); the rest are the contrib modules the
@@ -399,8 +405,10 @@ jobs:
             done
             return "$rc"
           }
+          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev"
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
           retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
             "phpunit/phpunit:${PHPUNIT_CONSTRAINT}" \
@@ -565,8 +573,10 @@ jobs:
             done
             return "$rc"
           }
+          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev"
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
           retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^11" \
             "phpunit/phpunit:^11.5" \
@@ -714,8 +724,10 @@ jobs:
             done
             return "$rc"
           }
+          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev"
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
           retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:~10.6.0" \
             "phpunit/phpunit:^9.6" \
@@ -915,8 +927,10 @@ jobs:
             done
             return "$rc"
           }
+          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev"
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
           # The same contrib set the tests enable: phpstan resolves types
           # against these, and a missing one turns a real error into a
           # "class not found" that hides it.

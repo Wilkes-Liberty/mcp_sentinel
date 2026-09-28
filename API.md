@@ -409,8 +409,10 @@ governance dashboard banner:
   but its EncryptionProfile or its Key cannot be resolved.
 - `master_switch_off` (warning) — governance is OFF yet an agent audit row was
   written within the last 24 hours.
-- `endpoint_key_unresolvable` (critical) — an enabled webhook endpoint's
-  `secret_key` does not resolve via the Key repository.
+- `endpoint_key_unresolvable` (critical) — an enabled webhook endpoint
+  declares a `secret_key` whose Key entity is missing or resolves to an
+  empty value. An empty `secret_key` is unsigned by design and is not
+  this condition.
 - `operator_broadcast` (config severity) — the `dashboard_broadcast` message is
   non-empty.
 
