@@ -506,7 +506,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     // Core keeps one pending revision per translation: the English draft
     // stays the latest English-affected revision, so editors and publishing
     // still find it, and the new revision does not claim to change English.
-    $this->assertFalse($english->isRevisionTranslationAffected());
+    $this->assertFalse((bool) $english->isRevisionTranslationAffected());
     $this->assertSame($working_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'en'));
     $this->assertSame($new_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'es'));
     $moderation = $this->container->get('content_moderation.moderation_information');
@@ -519,11 +519,11 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('Revise es on working copy', $spanish->getRevisionLogMessage());
 
     // The Spanish draft is now a normal working draft: continue works.
-    $continued = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Sobre nosotros'], '"' . $live_vid . ':' . $new_vid . '"', FALSE, 'es');
+    $continued = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Acerca de Empresa'], '"' . $live_vid . ':' . $new_vid . '"', FALSE, 'es');
     $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
     $latest = $storage->loadRevision($storage->getLatestRevisionId($node->id()));
     $this->assertInstanceOf(NodeInterface::class, $latest);
-    $this->assertSame('Sobre nosotros', $latest->getTranslation('es')->label());
+    $this->assertSame('Acerca de Empresa', $latest->getTranslation('es')->label());
     $this->assertSame('English pending', $latest->getUntranslated()->label());
   }
 
@@ -544,7 +544,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $working->setSyncing(TRUE);
     $working->setNewRevision(FALSE);
     $working->isDefaultRevision(FALSE);
-    $working->getTranslation('es')->setTitle('Texto anticuado');
+    $working->getTranslation('es')->setTitle('Artículos');
     $working->save();
     $storage->resetCache([$node->id()]);
     $this->assertSame($working_vid, (string) $storage->getLatestRevisionId($node->id()));

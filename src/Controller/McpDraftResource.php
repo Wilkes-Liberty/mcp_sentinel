@@ -963,7 +963,9 @@ final class McpDraftResource extends EntityResource {
    */
   private function translationDiffers(ContentEntityInterface $candidate, ContentEntityInterface $published): bool {
     $entity_type = $candidate->getEntityType();
-    $skip = array_values($entity_type->getRevisionMetadataKeys());
+    $skip = $entity_type instanceof ContentEntityTypeInterface
+      ? array_values($entity_type->getRevisionMetadataKeys())
+      : [];
     foreach (['id', 'uuid', 'revision', 'langcode', 'default_langcode', 'published', 'revision_translation_affected'] as $key) {
       if ($entity_type->hasKey($key)) {
         $skip[] = (string) $entity_type->getKey($key);
