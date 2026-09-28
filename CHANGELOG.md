@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-09-28
+
 ### Fixed
 - A published translation can now be drafted when the node already has a
   working copy, for example an English draft. Before, revise refused with
