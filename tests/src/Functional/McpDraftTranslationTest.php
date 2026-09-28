@@ -432,11 +432,172 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $blocked_path = $this->buildUrl('/jsonapi/node/page/' . $blocked->uuid() . '/mcp-draft/translations');
     $refused = $this->translationRequest('POST', $blocked_path, $agent, $blocked, ['title' => 'Acerca de nosotros'], '"' . $blocked_live_vid . '"', FALSE, 'es', [], 'revise');
     $this->assertSame(409, $refused->getStatusCode(), (string) $refused->getBody());
-    $this->assertStringContainsString('working copy already exists', (string) $refused->getBody());
+    $this->assertStringContainsString('Send both revision IDs', (string) $refused->getBody());
+    $this->assertStringNotContainsString('Continue', (string) $refused->getBody());
     $this->assertSame($blocked_working, (string) $storage->getLatestRevisionId($blocked->id()));
-    $named = $this->translationRequest('POST', $blocked_path, $agent, $blocked, ['title' => 'Acerca de nosotros'], '"' . $blocked_live_vid . ':' . $blocked_working . '"', FALSE, 'es', [], 'revise');
-    $this->assertSame(409, $named->getStatusCode(), (string) $named->getBody());
-    $this->assertSame($blocked_working, (string) $storage->getLatestRevisionId($blocked->id()));
+  }
+
+  /**
+   * Revises published Spanish on top of an English working copy.
+   *
+   * The caller names the working copy. The new forward revision keeps the
+   * English draft as it was, drafts Spanish, and leaves live untouched.
+   * Refusals: an unnamed working copy, a stale working id, and a working copy
+   * whose Spanish no longer matches live.
+   */
+  public function testReviseOverNamedWorkingCopy(): void {
+    [$agent, $node, , $path_create, $path_draft, $path_inventory] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    [$live_vid, $working_vid] = $this->publishSpanishThenDraftEnglish($node);
+
+    $inventory = $this->getHttpClient()->request('GET', $path_inventory, [
+      'http_errors' => FALSE,
+      // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
+      'auth' => [$agent->getAccountName(), $agent->passRaw],
+      'headers' => ['Accept' => 'application/vnd.api+json'],
+    ]);
+    $this->assertSame(200, $inventory->getStatusCode(), (string) $inventory->getBody());
+    $this->assertContains('revise_over_working_copy', json_decode((string) $inventory->getBody(), TRUE)['meta']['operations']);
+
+    $unnamed = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(409, $unnamed->getStatusCode(), (string) $unnamed->getBody());
+    $this->assertStringContainsString('Send both revision IDs', (string) $unnamed->getBody());
+    $this->assertSame($working_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $stale = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . ':999999"', FALSE, 'es', [], 'revise');
+    $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
+    $this->assertStringContainsString('Reload before retrying', (string) $stale->getBody());
+    $this->assertSame($working_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    // Continuing Spanish is refused because Spanish is still published on the
+    // working copy; the message must point at revise, not back at continue.
+    $continue = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . ':' . $working_vid . '"', FALSE, 'es');
+    $this->assertSame(409, $continue->getStatusCode(), (string) $continue->getBody());
+    $this->assertStringContainsString('X-MCP-Draft-Mode: revise', (string) $continue->getBody());
+
+    $preflight = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . ':' . $working_vid . '"', TRUE, 'es', [], 'revise');
+    $this->assertSame(200, $preflight->getStatusCode(), (string) $preflight->getBody());
+    $this->assertSame('revise_published_translation', json_decode((string) $preflight->getBody(), TRUE)['meta']['operation']);
+    $this->assertSame($working_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $named = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'Acerca de nosotros',
+      'revision_log' => 'Revise es on working copy',
+    ], '"' . $live_vid . ':' . $working_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(200, $named->getStatusCode(), (string) $named->getBody());
+    $new_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($working_vid, $new_vid);
+
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertSame('Articles', $live->label());
+    $this->assertTrue($live->isPublished());
+    $this->assertSame('Empresa', $live->getTranslation('es')->label());
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+
+    $revised = $storage->loadRevision($new_vid);
+    $this->assertInstanceOf(NodeInterface::class, $revised);
+    $this->assertFalse($revised->isDefaultRevision());
+    $english = $revised->getUntranslated();
+    $this->assertSame('English pending', $english->label());
+    $this->assertFalse($english->isPublished());
+    // Core keeps one pending revision per translation: the English draft
+    // stays the latest English-affected revision, so editors and publishing
+    // still find it, and the new revision does not claim to change English.
+    $this->assertFalse((bool) $english->isRevisionTranslationAffected());
+    $this->assertSame($working_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'en'));
+    $this->assertSame($new_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'es'));
+    $moderation = $this->container->get('content_moderation.moderation_information');
+    $this->assertTrue($moderation->hasPendingRevision($live));
+    $this->assertTrue($moderation->hasPendingRevision($live->getTranslation('es')));
+    $spanish = $revised->getTranslation('es');
+    $this->assertSame('Acerca de nosotros', $spanish->label());
+    $this->assertFalse($spanish->isPublished());
+    $this->assertSame('draft', $spanish->get('moderation_state')->value);
+    $this->assertSame('Revise es on working copy', $spanish->getRevisionLogMessage());
+
+    // The Spanish draft is now a normal working draft: continue works.
+    $continued = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Acerca de Empresa'], '"' . $live_vid . ':' . $new_vid . '"', FALSE, 'es');
+    $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
+    $latest = $storage->loadRevision($storage->getLatestRevisionId($node->id()));
+    $this->assertInstanceOf(NodeInterface::class, $latest);
+    $this->assertSame('Acerca de Empresa', $latest->getTranslation('es')->label());
+    $this->assertSame('English pending', $latest->getUntranslated()->label());
+  }
+
+  /**
+   * Refuses to revise over a working copy whose translation diverged.
+   *
+   * Drafting on top of it would carry text that is no longer live forward.
+   */
+  public function testReviseOverDivergedWorkingCopyIsRefused(): void {
+    [$agent, $node, , $path_create] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    [$live_vid, $working_vid] = $this->publishSpanishThenDraftEnglish($node);
+
+    // Rewrite Spanish on the stored working revision, bypassing moderation, so
+    // the working copy no longer matches the published Spanish.
+    $working = $storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $working->setSyncing(TRUE);
+    $working->setNewRevision(FALSE);
+    $working->isDefaultRevision(FALSE);
+    $working->getTranslation('es')->setTitle('Artículos');
+    $working->save();
+    $storage->resetCache([$node->id()]);
+    $this->assertSame($working_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $diverged = $this->translationRequest('POST', $path_create, $agent, $node, ['title' => 'Acerca de nosotros'], '"' . $live_vid . ':' . $working_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(409, $diverged->getStatusCode(), (string) $diverged->getBody());
+    $this->assertStringContainsString('differs from the published translation', (string) $diverged->getBody());
+    $this->assertSame($working_vid, (string) $storage->getLatestRevisionId($node->id()));
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+  }
+
+  /**
+   * Publishes Spanish, then saves an English forward draft over it.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The published English node.
+   *
+   * @return array{0: string, 1: string}
+   *   Live revision id and English working revision id.
+   */
+  private function publishSpanishThenDraftEnglish(NodeInterface $node): array {
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $storage->resetCache([$node->id()]);
+    $node = $storage->load($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $node);
+    $node->addTranslation('es', [
+      'title' => 'Empresa',
+      'moderation_state' => 'published',
+    ]);
+    $node->getTranslation('es')->setPublished();
+    $node->save();
+    $storage->resetCache([$node->id()]);
+    $node = $storage->load($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $node);
+    $node->setNewRevision(TRUE);
+    $node->setTitle('English pending');
+    $node->set('moderation_state', 'draft');
+    $node->save();
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $live_vid = (string) $live->getRevisionId();
+    $working_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($live_vid, $working_vid);
+    $working = $storage->loadRevision($working_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $this->assertTrue($working->getTranslation('es')->isPublished());
+    $this->assertSame('Empresa', $working->getTranslation('es')->label());
+    $this->assertFalse($working->getUntranslated()->isPublished());
+    $this->assertSame('draft', $working->getUntranslated()->get('moderation_state')->value);
+    return [$live_vid, $working_vid];
   }
 
   /**

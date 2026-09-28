@@ -6,6 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- A published translation can now be drafted when the node already has a
+  working copy, for example an English draft. Before, revise refused with
+  "A working copy already exists. Continue that draft", and continuing the
+  translation refused because it is still published on the working copy, so
+  the language could not be drafted at all. Revise now accepts
+  `If-Match: "live:working"`, builds the new forward revision on the named
+  working copy, and drafts only the requested language. The other
+  languages' drafts carry forward, and each stays the latest revision that
+  affects its own language, so editors and publishing still find it. The
+  live revision is unchanged.
+- `GET .../mcp-translations` lists `revise_over_working_copy` in
+  `operations`, so clients can tell hosts that accept a named working copy on
+  revise from older ones.
+- Revise over a working copy is refused when that working copy's text for
+  the language differs from the published translation, so older copy is not
+  carried forward. The comparison covers the language's translatable stored
+  fields and ignores revision metadata, timestamps, publishing status, and
+  moderation state.
+- Error messages no longer send callers in a loop: an unnamed working copy
+  on revise asks for both revision IDs, and continuing a translation that is
+  still published on the working copy points to revise.
+
 ## [2.24.4] - 2026-09-28
 
 ### Fixed

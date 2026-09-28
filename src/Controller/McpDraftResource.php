@@ -77,6 +77,14 @@ final class McpDraftResource extends EntityResource {
   public const REVISE_OPERATION = 'revise_published_translation';
 
   /**
+   * Inventory name for revising a published translation over a working copy.
+   *
+   * Clients use it to tell hosts that accept `If-Match: "live:working"` on
+   * revise from hosts that refuse any working copy.
+   */
+  public const REVISE_OVER_WORKING_OPERATION = 'revise_over_working_copy';
+
+  /**
    * Bookkeeping fields that a translation write must never copy.
    */
   private const SKIP_FIELD_NAMES = [
@@ -290,9 +298,12 @@ final class McpDraftResource extends EntityResource {
    * Opens an unpublished draft over a published translation.
    *
    * If-Match matches create: `"live"` when nothing is ahead of the default
-   * revision. A working copy is a conflict, whether or not the caller named
-   * it. The live default revision, its other languages, and the alias stay
-   * put. Plain create is unchanged and still 409s when the language exists.
+   * revision, `"live:working"` when a working copy exists (for example an
+   * English draft). With a working copy the new revision is built on it, so
+   * its drafts in other languages carry forward unchanged; the target
+   * language must still match the published translation there. The live
+   * default revision, its other languages, and the alias stay put. Plain
+   * create is unchanged and still 409s when the language exists.
    *
    * @return \Drupal\jsonapi\ResourceResponse|\Symfony\Component\HttpFoundation\JsonResponse
    *   The saved translation resource or preflight metadata.
@@ -322,8 +333,11 @@ final class McpDraftResource extends EntityResource {
       throw new AccessDeniedHttpException('Draft update access denied.');
     }
     // Mutate a copy so moderation's default-revision check still sees the
-    // published languages in storage, not this in-progress draft.
-    $base = clone $live;
+    // published languages in storage, not this in-progress draft. With a
+    // named working copy, build on it so its other drafts carry forward.
+    $base = $versions[2] === ''
+      ? clone $live
+      : $this->loadReviseWorkingBase($storage, $live, $versions[2], $langcode);
     foreach ($base->getTranslationLanguages() as $language) {
       $code = $language->getId();
       if ($code === $langcode) {
@@ -351,7 +365,7 @@ final class McpDraftResource extends EntityResource {
     static::validate($translation);
     $save_versions = [
       1 => (string) $live->getRevisionId(),
-      2 => '',
+      2 => $versions[2],
     ];
     if ($preflight === '1') {
       return $this->preflightResponse($save_versions, $langcode, self::REVISE_OPERATION);
@@ -389,6 +403,7 @@ final class McpDraftResource extends EntityResource {
       'operations' => [
         'create_translation',
         self::REVISE_OPERATION,
+        self::REVISE_OVER_WORKING_OPERATION,
       ],
     ];
     if ((string) $latest_id !== (string) $live->getRevisionId()) {
@@ -779,8 +794,10 @@ final class McpDraftResource extends EntityResource {
   /**
    * Validates pointers for revising a published translation.
    *
-   * The live id must match. A working copy — named or not — is a conflict.
-   * A working id that is not the stored latest revision is a stale match.
+   * The live id must match. With no working copy, If-Match is `"live"`. With
+   * a working copy, the caller must name it (`"live:working"`); an unnamed
+   * working copy is a conflict. A working id that is not the stored latest
+   * revision is a stale match.
    *
    * @param \Drupal\Core\Entity\EntityInterface|null $live
    *   The stored default revision.
@@ -799,10 +816,13 @@ final class McpDraftResource extends EntityResource {
     $latest = (string) $latest_id;
     $live_id = (string) $live->getRevisionId();
     if ($latest !== $live_id) {
-      if ($versions[2] !== '' && $versions[2] !== $latest) {
+      if ($versions[2] === '') {
+        throw new ConflictHttpException('A working copy exists. Send both revision IDs in If-Match ("live:working") to revise this translation on top of it.');
+      }
+      if ($versions[2] !== $latest || $versions[1] === $versions[2]) {
         throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
       }
-      throw new ConflictHttpException('A working copy already exists. Continue that draft instead of revising the published translation.');
+      return $live;
     }
     if ($versions[2] !== '') {
       throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
@@ -851,7 +871,9 @@ final class McpDraftResource extends EntityResource {
     }
     $translation = $draft->getTranslation($langcode);
     if ($translation->isPublished()) {
-      throw new ConflictHttpException('The requested translation is not an unpublished working draft.');
+      // The working copy carries this language as published text. Continue
+      // cannot draft it; revise over the named working copy can.
+      throw new ConflictHttpException('The requested translation is still published on the working copy. Open a draft of it with X-MCP-Draft-Mode: revise and both revision IDs in If-Match.');
     }
     return $translation;
   }
@@ -882,6 +904,89 @@ final class McpDraftResource extends EntityResource {
       throw new ConflictHttpException('The target is not an unpublished forward revision.');
     }
     return $working;
+  }
+
+  /**
+   * Loads the named working copy a revise write will build on.
+   *
+   * The working copy must be an unpublished forward revision of this entity
+   * that still carries the target language as published text. That text must
+   * match the live translation: if it differs, drafting on top of it would
+   * carry copy forward that is no longer what readers see, so the write is
+   * refused. The comparison covers the target language's translatable,
+   * stored fields and ignores revision metadata, timestamps, publishing
+   * status, moderation state, and content-translation bookkeeping, which
+   * legitimately differ between the two revisions. Untranslatable fields are
+   * shared with the working copy's other languages and are not compared.
+   *
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
+   * @param \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface $live
+   *   The live default revision.
+   * @param string $working_id
+   *   The working revision id already checked against the stored latest.
+   * @param string $langcode
+   *   The language being revised.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
+   *   The working revision, loaded fresh so the caller may mutate it.
+   */
+  private function loadReviseWorkingBase(RevisionableStorageInterface $storage, ContentEntityInterface&EntityPublishedInterface $live, string $working_id, string $langcode): ContentEntityInterface&EntityPublishedInterface {
+    $working = $storage->loadRevision($working_id);
+    if (!self::isPublishableContent($working) || $working->isDefaultRevision()
+      || $working->uuid() !== $live->uuid()) {
+      throw new ConflictHttpException('The target is not an unpublished forward revision.');
+    }
+    if (!$working->hasTranslation($langcode)) {
+      throw new ConflictHttpException('The working copy has no translation for the requested language. Reload before retrying.');
+    }
+    $target = $working->getTranslation($langcode);
+    if (!$target->isPublished()) {
+      throw new ConflictHttpException('This translation is already a draft on the working copy. Continue it instead of revising it.');
+    }
+    if ($this->translationDiffers($target, $live->getTranslation($langcode))) {
+      throw new ConflictHttpException('The working copy of this translation differs from the published translation. Publish or discard the working copy before revising.');
+    }
+    return $working;
+  }
+
+  /**
+   * Whether two revisions of one translation differ in translatable content.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $candidate
+   *   The translation on the working copy.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $published
+   *   The same translation on the live default revision.
+   *
+   * @return bool
+   *   TRUE when a compared field differs.
+   */
+  private function translationDiffers(ContentEntityInterface $candidate, ContentEntityInterface $published): bool {
+    $entity_type = $candidate->getEntityType();
+    $skip = $entity_type instanceof ContentEntityTypeInterface
+      ? array_values($entity_type->getRevisionMetadataKeys())
+      : [];
+    foreach (['id', 'uuid', 'revision', 'langcode', 'default_langcode', 'published', 'revision_translation_affected'] as $key) {
+      if ($entity_type->hasKey($key)) {
+        $skip[] = (string) $entity_type->getKey($key);
+      }
+    }
+    $skip = array_merge($skip, ['changed', 'moderation_state', 'default_langcode', 'revision_translation_affected']);
+    $langcode = $candidate->language()->getId();
+    foreach ($candidate->getFieldDefinitions() as $name => $definition) {
+      if (in_array($name, $skip, TRUE) || str_starts_with($name, 'content_translation_')
+        || $definition->isComputed() || !$definition->isTranslatable()) {
+        continue;
+      }
+      // filterEmptyItems() mutates the list; compare copies so neither the
+      // entity about to be saved nor the live revision changes here.
+      $items = (clone $candidate->get($name))->filterEmptyItems();
+      $original = (clone $published->get($name))->filterEmptyItems();
+      if ($items->hasAffectingChanges($original, $langcode)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
   /**
