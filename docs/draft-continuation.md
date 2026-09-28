@@ -25,14 +25,25 @@ used here. Translation writes are explicit:
   existing unpublished forward revision. An existing translation on live or
   working is 409, not an overwrite.
 - The same POST with `X-MCP-Draft-Mode: revise` opens that forward draft when
-  the language is already published on the live default revision and nothing
-  is ahead of it. The target translation is saved as `moderation_state: draft`
-  and unpublished. The live default revision, every other language, and the
-  alias stay unchanged. A different working copy is 409. Omitting the header
-  is still create, and create still returns the existing 409 when the language
-  already exists. `GET .../mcp-translations` lists `revise_published_translation`
-  in `operations` on hosts that support it. Preflight echoes
-  `meta.operation: revise_published_translation`.
+  the language is already published on the live default revision.
+  `If-Match` is `"<live>"` when nothing is ahead of live, or
+  `"<live>:<working>"` when a working copy exists (for example an English
+  draft). The target translation is saved as `moderation_state: draft` and
+  unpublished. The live default revision, every other language, and the
+  alias stay unchanged. Over a working copy, the new revision is built on that
+  working copy, so its drafts in other languages carry forward; each language's
+  draft stays the latest revision that affects that language, which is where
+  the core edit form and publishing look for it. An unnamed working copy is
+  409 and asks for both revision IDs. A stale working id is 409. A working copy
+  whose text for the target language differs from the published translation is
+  409, so older copy is never carried forward (translatable stored fields are
+  compared; revision metadata, timestamps, status, and moderation state are
+  not). If the language is already a draft on the working copy, continue it
+  instead. Omitting the header is still create, and create still returns the
+  existing 409 when the language already exists. `GET .../mcp-translations`
+  lists `revise_published_translation` in `operations` on hosts that support
+  revise, and `revise_over_working_copy` on hosts that accept a named working
+  copy. Preflight echoes `meta.operation: revise_published_translation`.
 - `PATCH .../mcp-draft` with `X-MCP-Draft-Langcode` continues that translation
   only. Omitting the header on a multilingual working revision is 409.
 - `GET .../mcp-translations` reports live and (when the principal can view the
