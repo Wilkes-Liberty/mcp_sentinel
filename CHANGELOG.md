@@ -6,11 +6,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-- Apply the MCP Server beta floor to the server dependency and identify Tool
-  Bridge by its extracted project. The Bridge has an independent 1.x version
-  line; comparing it to a 2.x server floor incorrectly blocks update requirements
-  (#3624538).
+## [2.25.1] - 2026-09-29
 
 ### Changed
 - #3626616: A leading unsigned prefix followed by signed rows is a dashboard
@@ -19,6 +15,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not clear. An edited signed row, a missing signing key, an unsigned
   row after the signed successor, a foreign seal, and a stored result
   without the prefix flag remain a critical chain failure.
+
+### Fixed
+- Apply the MCP Server beta floor to the server dependency and identify Tool
+  Bridge by its extracted project. The Bridge has an independent 1.x version
+  line; comparing it to a 2.x server floor incorrectly blocks update requirements
+  (#3624538).
 
 ## [2.25.0] - 2026-09-28
 
