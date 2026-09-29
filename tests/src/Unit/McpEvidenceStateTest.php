@@ -82,6 +82,19 @@ final class McpEvidenceStateTest extends UnitTestCase {
         $now,
         McpEvidenceState::Failed,
       ],
+      'failed_unsigned_prefix' => [
+        [
+          'ok' => FALSE,
+          'broken_at' => NULL,
+          'reason' => 'written_unkeyed',
+          'unsigned_prefix' => TRUE,
+          'rows' => 4,
+          'time' => $now,
+        ],
+        4,
+        $now,
+        McpEvidenceState::Failed,
+      ],
       'unavailable' => [
         ['ok' => NULL, 'error' => TRUE, 'time' => $now],
         4,

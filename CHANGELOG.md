@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- #3626616: A leading unsigned prefix followed by signed rows is a dashboard
+  warning. Those rows stay in the log and are not re-signed or deleted.
+  Whole-history verification stays unsuccessful, and the posture stays
+  not clear. An edited signed row, a missing signing key, an unsigned
+  row after the signed successor, a foreign seal, and a stored result
+  without the prefix flag remain a critical chain failure.
+
 ## [2.25.0] - 2026-09-28
 
 ### Fixed

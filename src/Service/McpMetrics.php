@@ -12,6 +12,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Value\McpLastVerify;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -447,24 +448,39 @@ final class McpMetrics {
    * 'mcp_sentinel.last_verify' (written by the explicit "Verify now" action /
    * Drush). verifyChain() is intentionally never called on this hot path.
    *
-   * @return array{ok: bool|null, broken_at: int|null, verified_at: int|null, rows: int}
+   * @return array{ok: bool|null, broken_at: int|null, verified_at: int|null, rows: int, unsigned_prefix: bool}
    *   The last-verify outcome (ok NULL when never verified) and the current
-   *   audit row count.
+   *   audit row count. unsigned_prefix is true only for the documented
+   *   leading unsigned prefix.
    */
   public function chainIntegrity(): array {
-    return $this->guard(__FUNCTION__, NULL, ['ok' => NULL, 'broken_at' => NULL, 'verified_at' => NULL, 'rows' => 0], function (): array {
+    $empty = [
+      'ok' => NULL,
+      'broken_at' => NULL,
+      'verified_at' => NULL,
+      'rows' => 0,
+      'unsigned_prefix' => FALSE,
+    ];
+    return $this->guard(__FUNCTION__, NULL, $empty, function (): array {
       $last = $this->state->get('mcp_sentinel.last_verify');
       $rows = (int) $this->database->select('audit_chain_log', 'l')
         ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
         ->countQuery()->execute()->fetchField();
       if (!is_array($last)) {
-        return ['ok' => NULL, 'broken_at' => NULL, 'verified_at' => NULL, 'rows' => $rows];
+        return [
+          'ok' => NULL,
+          'broken_at' => NULL,
+          'verified_at' => NULL,
+          'rows' => $rows,
+          'unsigned_prefix' => FALSE,
+        ];
       }
       return [
         'ok' => isset($last['ok']) ? (bool) $last['ok'] : NULL,
         'broken_at' => isset($last['broken_at']) ? (int) $last['broken_at'] : NULL,
         'verified_at' => isset($last['time']) ? (int) $last['time'] : NULL,
         'rows' => $rows,
+        'unsigned_prefix' => McpLastVerify::isDocumentedUnsignedPrefix($last),
       ];
     });
   }
@@ -476,8 +492,10 @@ final class McpMetrics {
    * against the live row count so an unverified, stale, failed or
    * unavailable chain cannot be reported as clear (d.o #3616611).
    *
-   * @return array{state: \Drupal\mcp_sentinel\Enum\McpEvidenceState, rows: int, verified_at: int|null, broken_at: int|null}
+   * @return array{state: \Drupal\mcp_sentinel\Enum\McpEvidenceState, rows: int, verified_at: int|null, broken_at: int|null, unsigned_prefix: bool}
    *   The classified state plus the numbers the UI cites.
+   *   unsigned_prefix is true only for the documented leading prefix.
+   *   That result stays Failed: whole-history verification is unsuccessful.
    */
   public function evidenceState(): array {
     $empty = [
@@ -485,6 +503,7 @@ final class McpMetrics {
       'rows' => 0,
       'verified_at' => NULL,
       'broken_at' => NULL,
+      'unsigned_prefix' => FALSE,
     ];
     return $this->guard(__FUNCTION__, NULL, $empty, function (): array {
       $chain = $this->chainIntegrity();
@@ -499,6 +518,7 @@ final class McpMetrics {
         'rows' => $chain['rows'],
         'verified_at' => $chain['verified_at'],
         'broken_at' => $chain['broken_at'],
+        'unsigned_prefix' => $chain['unsigned_prefix'],
       ];
     });
   }

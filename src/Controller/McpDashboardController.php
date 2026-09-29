@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Service\McpChartRenderer;
 use Drupal\mcp_sentinel\Service\McpMetrics;
 use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
+use Drupal\mcp_sentinel\Value\McpLastVerify;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -340,13 +341,19 @@ class McpDashboardController extends ControllerBase {
         'label' => (string) $this->t('Verified'),
         'detail' => (string) $this->t('@n rows verified.', ['@n' => $rows]),
       ],
-      McpEvidenceState::Failed => [
-        'state' => 'crit',
-        'label' => (string) $this->t('Failed'),
-        'detail' => $brokenAt !== NULL
-          ? (string) $this->t('Tampering indicated at row @id.', ['@id' => (int) $brokenAt])
-          : (string) $this->t('Tampering indicated.'),
-      ],
+      McpEvidenceState::Failed => $evidence['unsigned_prefix'] === TRUE
+        ? [
+          'state' => 'warn',
+          'label' => (string) $this->t('Unsigned prefix'),
+          'detail' => (string) $this->t('Leading rows were hashed with unkeyed SHA-256. They stay in the log and are not re-signed or deleted.'),
+        ]
+        : [
+          'state' => 'crit',
+          'label' => (string) $this->t('Failed'),
+          'detail' => $brokenAt !== NULL
+            ? (string) $this->t('Tampering indicated at row @id.', ['@id' => (int) $brokenAt])
+            : (string) $this->t('Tampering indicated.'),
+        ],
       McpEvidenceState::Stale => [
         'state' => 'warn',
         'label' => (string) $this->t('Stale'),
@@ -639,9 +646,9 @@ class McpDashboardController extends ControllerBase {
    * CSRF-protected (route requirement). Walks the audit chain via the audit
    * logger, writes the outcome to @state 'mcp_sentinel.last_verify' in the SAME
    * shape the `drush mcp-sentinel:audit-verify` command writes (ok, broken_at,
-   * rows, time) so the chain-integrity widget and the urgent-conditions
-   * chain_broken alert stay live, then redirects back to the dashboard with a
-   * status message.
+   * rows, time, reason, unsigned_prefix) so the chain-integrity widget and
+   * the urgent-conditions alert stay live, then redirects back to the
+   * dashboard with a status message.
    *
    * @return \Symfony\Component\HttpFoundation\RedirectResponse
    *   A redirect back to the dashboard.
@@ -655,15 +662,16 @@ class McpDashboardController extends ControllerBase {
         ->countQuery()
         ->execute()
         ->fetchField();
-      $this->state->set('mcp_sentinel.last_verify', [
-        'ok' => (bool) $result['ok'],
-        'broken_at' => isset($result['broken_at']) ? (int) $result['broken_at'] : NULL,
-        'rows' => $rows,
-        'time' => $this->time->getRequestTime(),
-      ]);
-      if ($result['ok']) {
+      $stored = McpLastVerify::fromVerifyResult($result, $rows, $this->time->getRequestTime());
+      $this->state->set('mcp_sentinel.last_verify', $stored);
+      if ($stored['ok']) {
         $this->messenger()->addStatus($this->t('Audit hash chain verified — @n rows intact.', [
           '@n' => $rows,
+        ]));
+      }
+      elseif (McpLastVerify::isDocumentedUnsignedPrefix($stored)) {
+        $this->messenger()->addWarning($this->t('Audit hash chain has a documented unsigned prefix through row @id. Leading rows were hashed with unkeyed SHA-256, stay in the log, and are not re-signed or deleted. Whole-history verification stays unsuccessful.', [
+          '@id' => (int) ($result['unkeyed_through'] ?? 0),
         ]));
       }
       else {
