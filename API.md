@@ -405,7 +405,13 @@ returns a list of `['severity', 'key', 'message', 'url']` entries for the
 governance dashboard banner:
 
 - `chain_broken` (critical) — the stored last-verify result in `@state`
-  (`mcp_sentinel.last_verify`) is FALSE.
+  (`mcp_sentinel.last_verify`) failed, and it is not the documented
+  unsigned prefix. A missing `unsigned_prefix` flag stays this condition.
+- `unsigned_prefix` (warning) — verification failed because every unsigned
+  row is a leading prefix followed by a signed row (`reason` is
+  `written_unkeyed` and `unsigned_prefix` is strictly true). Those rows
+  stay in the log. Whole-history verification stays unsuccessful, and the
+  posture stays not clear. This warning is dashboard-only.
 - `encryption_unresolvable` (critical) — an `audit_encryption_profile` is set
   but its EncryptionProfile or its Key cannot be resolved.
 - `master_switch_off` (warning) — governance is OFF yet an agent audit row was
@@ -454,8 +460,10 @@ links target the filtered audit (and webhook) logs.
 settings*, **CSRF-protected** via `_csrf_token: TRUE`). It re-runs
 `McpAuditLogger::verifyChain()`, writes the outcome to `@state`
 `mcp_sentinel.last_verify` in the SAME shape the `drush
-mcp-sentinel:audit-verify` command writes (`ok`, `broken_at`, `rows`, `time`),
-then redirects to the dashboard with a status message.
+mcp-sentinel:audit-verify` command writes (`ok`, `broken_at`, `rows`, `time`,
+`reason`, `unsigned_prefix`), then redirects to the dashboard with a status
+message. `unsigned_prefix` is stored true only when `ok` is false, the
+flag on the verdict is strictly true, and `reason` is `written_unkeyed`.
 
 When the audit listing moved to `/admin/reports/mcp-sentinel/audit`, the route
 name `mcp_sentinel.audit_log` and the `mcp_sentinel.audit_export` route were

@@ -331,13 +331,17 @@ class McpAuditLogger {
    *   unkeyed_through: int|null,
    *   verified_from: int|null,
    *   sealed_through: int|null,
-   *   seal_intact: bool|null
+   *   seal_intact: bool|null,
+   *   unsigned_prefix: bool
    *   }
    *   Pass-through of audit_chain's verify() shape (must stay aligned with
    *   AuditChainLoggerInterface::verify()). 'ok' is TRUE when the chain is
    *   intact; 'broken_at' is the first broken row id or NULL; 'reason' and
    *   the unkeyed_* fields distinguish tampering from pre-key rows; seal_* /
    *   verified_from describe an operator seal over a historical prefix.
+   *   unsigned_prefix is TRUE only for a leading unsigned run followed by
+   *   a row that verifies under a signing key. The verdict stays
+   *   unsuccessful. Older Audit Chain versions omit the key.
    */
   public function verifyChain(): array {
     // Verification walks the whole chain, not just this channel's rows: the

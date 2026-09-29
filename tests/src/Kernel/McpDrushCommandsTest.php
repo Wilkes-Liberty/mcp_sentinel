@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\key\Entity\Key;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelCommands;
@@ -415,6 +417,8 @@ final class McpDrushCommandsTest extends KernelTestBase {
     $this->assertIsArray($state, 'audit-verify must write mcp_sentinel.last_verify state.');
     $this->assertTrue($state['ok'], 'State ok must be TRUE on a clean chain.');
     $this->assertNull($state['broken_at'], 'State broken_at must be NULL on a clean chain.');
+    $this->assertNull($state['reason'], 'A clean chain stores no failure reason.');
+    $this->assertFalse($state['unsigned_prefix'], 'A clean chain is not an unsigned prefix.');
     $this->assertSame(1, $state['rows'], 'State rows must equal the audit log row count.');
     $this->assertIsInt($state['time'], 'State time must be an integer timestamp.');
 
@@ -453,6 +457,8 @@ final class McpDrushCommandsTest extends KernelTestBase {
     $this->assertIsArray($state, 'audit-verify must write mcp_sentinel.last_verify state even on failure.');
     $this->assertFalse($state['ok'], 'State ok must be FALSE on a tampered chain.');
     $this->assertNotNull($state['broken_at'], 'State broken_at must be set when the chain is broken.');
+    $this->assertSame('tampered', $state['reason']);
+    $this->assertFalse($state['unsigned_prefix'], 'Tampering must not be stored as the unsigned prefix.');
 
     // McpUrgentConditions must fire chain_broken when ok===FALSE.
     $conditions = \Drupal::service('mcp_sentinel.urgent_conditions')->evaluate();
@@ -460,6 +466,76 @@ final class McpDrushCommandsTest extends KernelTestBase {
     $this->assertContains('chain_broken', $keys, 'chain_broken urgent condition must fire after a failed audit-verify.');
     $crit = array_filter($conditions, fn($c) => $c['key'] === 'chain_broken');
     $this->assertSame('critical', reset($crit)['severity']);
+  }
+
+  /**
+   * A leading unsigned prefix fails the command and is stored as a warning.
+   *
+   * The prefix is not re-signed and is not deleted. Whole-history
+   * verification stays unsuccessful, and the dashboard must not call it
+   * tampering.
+   *
+   * @covers ::auditVerify
+   */
+  public function testAuditVerifyStoresUnsignedPrefixAsWarning(): void {
+    /** @var \Drupal\mcp_sentinel\Service\McpAuditLogger $logger */
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $logger->log('entity_save', ['entity_type' => 'node', 'id' => 'legacy', 'label' => 'Unsigned']);
+
+    Key::create([
+      'id' => 'mcp_prefix_key',
+      'label' => 'MCP prefix key',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'prefix-successor-secret'],
+    ])->save();
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'mcp_prefix_key')
+      ->save();
+    $logger->log('entity_save', ['entity_type' => 'node', 'id' => 'successor', 'label' => 'Signed']);
+
+    $spy = new class() extends AbstractLogger {
+
+      /**
+       * Captured log records.
+       *
+       * @var array<int, array{0: string, 1: string}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = [(string) $level, (string) $message];
+      }
+
+    };
+    $drushLogger = new DrushLoggerManager();
+    $drushLogger->add('spy', $spy);
+    $this->commands->setLogger($drushLogger);
+
+    $result = $this->commands->auditVerify();
+    $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+
+    $state = \Drupal::state()->get('mcp_sentinel.last_verify');
+    $this->assertIsArray($state);
+    $this->assertFalse($state['ok']);
+    $this->assertNull($state['broken_at']);
+    $this->assertSame('written_unkeyed', $state['reason']);
+    $this->assertTrue($state['unsigned_prefix']);
+    $this->assertSame(2, $state['rows']);
+
+    $conditions = \Drupal::service('mcp_sentinel.urgent_conditions')->evaluate();
+    $keys = array_column($conditions, 'key');
+    $this->assertContains('unsigned_prefix', $keys);
+    $this->assertNotContains('chain_broken', $keys);
+    $prefix = array_filter($conditions, fn($c) => $c['key'] === 'unsigned_prefix');
+    $this->assertSame('warning', reset($prefix)['severity']);
+
+    $messages = implode("\n", array_column($spy->records, 1));
+    $this->assertStringContainsString('unkeyed SHA-256', $messages);
+    $this->assertStringNotContainsString('tampered', strtolower($messages));
   }
 
   /**

@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -97,6 +98,93 @@ class McpUrgentConditionsTest extends KernelTestBase {
     $this->assertContains('chain_broken', $keys);
     $crit = array_filter($conditions, fn($c) => $c['key'] === 'chain_broken');
     $this->assertSame('critical', reset($crit)['severity']);
+  }
+
+  /**
+   * A documented leading unsigned prefix is a warning, not tampering.
+   *
+   * Whole-history verification is still unsuccessful: ok stays false, so
+   * the posture cannot be reported clear. The rows stay in the log.
+   *
+   * @covers ::evaluate
+   */
+  public function testDocumentedUnsignedPrefixIsWarningNotTampering(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => FALSE,
+      'broken_at' => NULL,
+      'rows' => 4,
+      'time' => \Drupal::time()->getRequestTime(),
+      'reason' => 'written_unkeyed',
+      'unsigned_prefix' => TRUE,
+    ]);
+    $conditions = $this->evaluate();
+    $keys = array_column($conditions, 'key');
+    $this->assertContains('unsigned_prefix', $keys);
+    $this->assertNotContains('chain_broken', $keys);
+    $prefix = array_filter($conditions, fn($c) => $c['key'] === 'unsigned_prefix');
+    $condition = reset($prefix);
+    $this->assertSame('warning', $condition['severity']);
+    $this->assertStringContainsString('unkeyed SHA-256', $condition['message']);
+    $this->assertStringNotContainsString('Tampering', $condition['message']);
+  }
+
+  /**
+   * A stray prefix flag must not hide a different failure.
+   *
+   * @covers ::evaluate
+   * @dataProvider strayPrefixFlagProvider
+   */
+  #[DataProvider('strayPrefixFlagProvider')]
+  public function testStrayPrefixFlagStaysCritical(array $last): void {
+    $last['time'] = \Drupal::time()->getRequestTime();
+    \Drupal::state()->set('mcp_sentinel.last_verify', $last);
+    $conditions = $this->evaluate();
+    $keys = array_column($conditions, 'key');
+    $this->assertContains('chain_broken', $keys);
+    $this->assertNotContains('unsigned_prefix', $keys);
+    $crit = array_filter($conditions, fn($c) => $c['key'] === 'chain_broken');
+    $this->assertSame('critical', reset($crit)['severity']);
+  }
+
+  /**
+   * Stored results that are not the documented prefix.
+   *
+   * @return array<string, array{0: array<string, mixed>}>
+   *   Named last-verify values. Each one is a critical failure.
+   */
+  public static function strayPrefixFlagProvider(): array {
+    return [
+      'flag without reason' => [[
+        'ok' => FALSE,
+        'broken_at' => NULL,
+        'rows' => 4,
+        'unsigned_prefix' => TRUE,
+      ],
+      ],
+      'flag with tampered reason' => [[
+        'ok' => FALSE,
+        'broken_at' => 2,
+        'rows' => 4,
+        'reason' => 'tampered',
+        'unsigned_prefix' => TRUE,
+      ],
+      ],
+      'non-boolean flag' => [[
+        'ok' => FALSE,
+        'broken_at' => NULL,
+        'rows' => 4,
+        'reason' => 'written_unkeyed',
+        'unsigned_prefix' => 1,
+      ],
+      ],
+      'missing flag' => [[
+        'ok' => FALSE,
+        'broken_at' => 7,
+        'rows' => 4,
+        'reason' => 'written_unkeyed',
+      ],
+      ],
+    ];
   }
 
   /**

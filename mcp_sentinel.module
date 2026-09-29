@@ -104,7 +104,8 @@ function mcp_sentinel_theme(): array {
  *
  * Surfaces CRITICAL urgent conditions (only) site-wide on admin pages so a
  * broken hash chain or unresolvable signing key is seen even off the governance
- * dashboard. Warning/info severities are dashboard-only. Gated to users with
+ * dashboard. A documented unsigned prefix is a dashboard warning and is not
+ * shown here. Warning/info severities are dashboard-only. Gated to users with
  * 'view mcp sentinel audit log'; the dashboard route is skipped to avoid a
  * duplicate banner. Per-user dismissals (private tempstore) are subtracted, and
  * the banner reappears while the condition still holds.

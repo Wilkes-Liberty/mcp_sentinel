@@ -372,6 +372,7 @@ final class McpEvidenceRequiredVetoTest extends KernelTestBase {
           'verified_from' => NULL,
           'sealed_through' => NULL,
           'seal_intact' => NULL,
+          'unsigned_prefix' => FALSE,
         ];
       }
 

@@ -15,13 +15,17 @@ use Drupal\encrypt\EncryptionProfileInterface;
 use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Value\McpLastVerify;
 
 /**
  * Evaluates critical/warning/info governance conditions for the dashboard.
  *
  * Pure read; no side effects. Returns a list of
  * `['severity', 'key', 'message', 'url']` entries for:
- *  - chain_broken (critical): the stored last-verify result is FALSE.
+ *  - chain_broken (critical): the stored last-verify result failed and is
+ *    not the documented unsigned prefix.
+ *  - unsigned_prefix (warning): verification failed because of a leading
+ *    unsigned prefix followed by signed rows. The rows stay in the log.
  *  - chain_unverified (warning): evidence has never been verified.
  *  - chain_stale (warning): a prior verify is older than 24h or grew.
  *  - chain_degraded (warning): last-verify metadata is incomplete.
@@ -244,7 +248,11 @@ final class McpUrgentConditions {
   }
 
   /**
-   * Adds the chain_broken critical condition when the last verify failed.
+   * Adds the chain condition for the stored last-verify result.
+   *
+   * A documented unsigned prefix is a warning. Every other failure is
+   * the critical chain_broken condition. A stored result that does not
+   * carry the prefix flag stays critical.
    *
    * @param array $conditions
    *   The condition list, modified by reference.
@@ -259,6 +267,19 @@ final class McpUrgentConditions {
     $url = $this->routeUrl('mcp_sentinel.audit_log');
     switch ($state) {
       case McpEvidenceState::Failed:
+        if (McpLastVerify::isDocumentedUnsignedPrefix($last)) {
+          $prefix = 'Audit hash chain has a documented unsigned prefix. '
+            . 'Leading rows were hashed with unkeyed SHA-256, stay in the log, '
+            . 'and are not re-signed or deleted. '
+            . 'Whole-history verification stays unsuccessful.';
+          $conditions[] = [
+            'severity' => 'warning',
+            'key' => 'unsigned_prefix',
+            'message' => $prefix,
+            'url' => $url,
+          ];
+          return;
+        }
         $brokenAt = isset($last['broken_at']) ? (int) $last['broken_at'] : NULL;
         $conditions[] = [
           'severity' => 'critical',
