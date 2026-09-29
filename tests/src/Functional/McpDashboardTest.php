@@ -199,6 +199,32 @@ final class McpDashboardTest extends BrowserTestBase {
   }
 
   /**
+   * A documented unsigned prefix warns and does not call the chain tampered.
+   *
+   * The evidence state stays failed, so the posture hero is not all-clear.
+   */
+  public function testUnsignedPrefixWarnsAndIsNotAllClear(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => FALSE,
+      'broken_at' => NULL,
+      'rows' => 4,
+      'time' => \Drupal::time()->getRequestTime(),
+      'reason' => 'written_unkeyed',
+      'unsigned_prefix' => TRUE,
+    ]);
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->elementExists('css', '.mcp-banner--warning');
+    $this->assertSession()->elementNotExists('css', '.mcp-banner--critical');
+    $this->assertSession()->pageTextContains('Unsigned prefix');
+    $this->assertSession()->pageTextContains('unkeyed SHA-256');
+    $this->assertSession()->pageTextNotContains('Tampering');
+    $this->assertSession()->pageTextNotContains('All clear');
+    $this->assertSession()->pageTextContains('Evidence verification failed — posture is not clear.');
+    $this->assertSession()->elementAttributeContains('css', '.mcp-hero', 'data-evidence', 'failed');
+  }
+
+  /**
    * First-run never reports all-clear while the chain is unverified.
    */
   public function testFirstRunIsNotAllClear(): void {

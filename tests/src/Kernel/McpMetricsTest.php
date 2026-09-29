@@ -366,6 +366,34 @@ class McpMetricsTest extends KernelTestBase {
     $this->assertNull($chain['broken_at']);
     $this->assertSame(1, $chain['rows']);
     $this->assertSame($now - 10, $chain['verified_at']);
+    $this->assertFalse($chain['unsigned_prefix']);
+  }
+
+  /**
+   * A documented unsigned prefix stays a failed verify, with the flag set.
+   *
+   * @covers ::chainIntegrity
+   * @covers ::evidenceState
+   */
+  public function testDocumentedUnsignedPrefixStaysFailed(): void {
+    $now = \Drupal::time()->getRequestTime();
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => FALSE,
+      'broken_at' => NULL,
+      'rows' => 0,
+      'time' => $now,
+      'reason' => 'written_unkeyed',
+      'unsigned_prefix' => TRUE,
+    ]);
+    /** @var \Drupal\mcp_sentinel\Service\McpMetrics $m */
+    $m = \Drupal::service('mcp_sentinel.metrics');
+    $chain = $m->chainIntegrity();
+    $this->assertFalse($chain['ok']);
+    $this->assertTrue($chain['unsigned_prefix']);
+    $evidence = $m->evidenceState();
+    $this->assertSame('failed', $evidence['state']->value);
+    $this->assertTrue($evidence['unsigned_prefix']);
+    $this->assertFalse($evidence['state']->allowsClear());
   }
 
   /**

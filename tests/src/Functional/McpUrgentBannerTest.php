@@ -60,6 +60,27 @@ final class McpUrgentBannerTest extends BrowserTestBase {
   }
 
   /**
+   * A documented unsigned prefix is a dashboard warning, not a site-wide alarm.
+   */
+  public function testUnsignedPrefixIsNotShownSiteWide(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => FALSE,
+      'broken_at' => NULL,
+      'rows' => 4,
+      'time' => \Drupal::time()->getRequestTime(),
+      'reason' => 'written_unkeyed',
+      'unsigned_prefix' => TRUE,
+    ]);
+    $this->drupalLogin($this->drupalCreateUser([
+      'view mcp sentinel audit log',
+      'access administration pages',
+    ]));
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
+    $this->assertSession()->elementNotExists('css', '.mcp-banner--critical');
+    $this->assertSession()->elementNotExists('css', '.mcp-banner--warning');
+  }
+
+  /**
    * The site-wide banner is not shown to an unprivileged user.
    */
   public function testBannerNotShownToUnprivilegedUser(): void {

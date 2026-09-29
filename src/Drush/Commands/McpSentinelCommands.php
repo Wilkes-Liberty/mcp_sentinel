@@ -16,6 +16,7 @@ use Drupal\mcp_sentinel\Service\McpInstallVerifier;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
+use Drupal\mcp_sentinel\Value\McpLastVerify;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -28,8 +29,10 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * manual triggers for work that also runs on cron; running them by hand simply
  * performs the same cleanup immediately. The inspection commands (status,
  * verify, audit-verify) report state and use their exit code to signal
- * health: a non-zero exit from audit-verify indicates a tampered audit log,
- * and verify fails on a skipped check as well as a finding.
+ * health: a non-zero exit from audit-verify means whole-history
+ * verification was unsuccessful, which includes a tampered row and the
+ * documented unsigned prefix. verify fails on a skipped check as well
+ * as a finding.
  */
 final class McpSentinelCommands extends DrushCommands {
 
@@ -336,8 +339,9 @@ final class McpSentinelCommands extends DrushCommands {
    *
    * Walks all audit rows in insertion order, recomputing each row's SHA-256
    * hash from its stored prev_hash and canonical content. Prints OK if the
-   * chain is intact, or the id of the first broken link if not. Exits non-zero
-   * when the chain is broken so the command can drive monitoring/alerting.
+   * chain is intact. A documented unsigned prefix is a warning. Any other
+   * failure names the first broken link. Exits non-zero whenever
+   * whole-history verification is unsuccessful, including that prefix.
    *
    * The outcome is also persisted to the 'mcp_sentinel.last_verify' state key
    * so the dashboard chain-integrity widget reflects this run without having to
@@ -349,28 +353,33 @@ final class McpSentinelCommands extends DrushCommands {
     $result = $this->auditLogger->verifyChain();
 
     // Persist the verification outcome so the dashboard chain-integrity widget
-    // (McpMetrics::chainIntegrity()) and the McpUrgentConditions chain_broken
-    // alert reflect this run without re-running the full walk on every request.
+    // (McpMetrics::chainIntegrity()) and the urgent-conditions alert reflect
+    // this run without re-running the full walk on every request.
     //
-    // NOTE (Task C/D implementer): the dashboard "Verify now" action must also
-    // write this same state key with the same shape so the widget stays live.
-    // Shape read by chainIntegrity(): ok, broken_at, time (-> verified_at).
+    // The dashboard "Verify now" action writes this same state key with the
+    // same shape so the widget stays live.
+    // Shape read by chainIntegrity(): ok, broken_at, time (-> verified_at),
+    // and unsigned_prefix.
     $rowCount = (int) $this->database
       ->select('audit_chain_log', 'l')
       ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->countQuery()
       ->execute()
       ->fetchField();
-    $this->state->set('mcp_sentinel.last_verify', [
-      'ok'        => (bool) $result['ok'],
-      'broken_at' => isset($result['broken_at']) ? (int) $result['broken_at'] : NULL,
-      'rows'      => $rowCount,
-      'time'      => $this->time->getRequestTime(),
-    ]);
+    $stored = McpLastVerify::fromVerifyResult($result, $rowCount, $this->time->getRequestTime());
+    $this->state->set('mcp_sentinel.last_verify', $stored);
 
-    if ($result['ok']) {
+    if ($stored['ok']) {
       $this->logger()->success('Audit log hash chain OK — no tampering detected.');
       return self::EXIT_SUCCESS;
+    }
+    if (McpLastVerify::isDocumentedUnsignedPrefix($stored)) {
+      $this->logger()->warning(sprintf(
+        'Audit log documented unsigned prefix — %d entries through row id %d were hashed with unkeyed SHA-256 and are not cryptographically verifiable. Those rows stay in the log. Do not re-sign them and do not delete them. Whole-history verification stays unsuccessful.',
+        (int) $result['unkeyed_rows'],
+        (int) ($result['unkeyed_through'] ?? 0),
+      ));
+      return self::EXIT_FAILURE;
     }
     $this->logger()->error(sprintf(
       'Audit log hash chain BROKEN at row id %d. One or more rows have been tampered with.',
