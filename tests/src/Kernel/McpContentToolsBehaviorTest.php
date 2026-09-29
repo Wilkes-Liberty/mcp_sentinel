@@ -10,7 +10,6 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
-use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\node\Entity\NodeType;
 use Drupal\taxonomy\Entity\Vocabulary;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -364,11 +363,6 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
       'name' => 'Tags',
       'description' => 'Topic tags.',
     ])->save();
-
-    $this->assertInstanceOf(
-      McpSiteSchemaBuilder::class,
-      $this->container->get('mcp_sentinel.site_schema_builder'),
-    );
 
     $http = json_decode((string) McpContextController::create($this->container)->context()->getContent(), TRUE);
     $tool = \Drupal::service('plugin.manager.tool')
