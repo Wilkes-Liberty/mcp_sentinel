@@ -7,8 +7,10 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\node\Entity\NodeType;
 use Drupal\taxonomy\Entity\Vocabulary;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -312,6 +314,8 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
       'Response must contain a content_types key.');
     $this->assertArrayHasKey('page', $data['content_types'] ?? [],
       'The "page" content type must appear in the schema.');
+    $this->assertArrayHasKey('description', $data['content_types']['page'] ?? [],
+      'Content types must include description so the tool matches HTTP.');
 
     // No version leak: the Drupal core version string must not appear.
     $json = json_encode($data);
@@ -328,7 +332,11 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
   public function testSiteContextToolIncludesVocabularies(): void {
     $this->createGovernedAccount();
 
-    Vocabulary::create(['vid' => 'tags', 'name' => 'Tags'])->save();
+    Vocabulary::create([
+      'vid' => 'tags',
+      'name' => 'Tags',
+      'description' => 'Topic tags.',
+    ])->save();
 
     $tool = \Drupal::service('plugin.manager.tool')
       ->createInstance('mcp_sentinel_site_context');
@@ -339,6 +347,72 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
       'Response must contain a vocabularies key.');
     $this->assertArrayHasKey('tags', $data['vocabularies'] ?? [],
       'The "tags" vocabulary must appear in the schema.');
+    $this->assertSame('Topic tags.', $data['vocabularies']['tags']['description'] ?? NULL,
+      'Vocabularies must include description so the tool matches HTTP.');
+  }
+
+  /**
+   * HTTP context and the site-context tool share one schema builder payload.
+   */
+  public function testSiteContextToolMatchesHttpSchemaSections(): void {
+    $this->createGovernedAccount();
+    $page = NodeType::load('page');
+    $this->assertNotNull($page);
+    $page->set('description', 'A basic page.')->save();
+    Vocabulary::create([
+      'vid' => 'tags',
+      'name' => 'Tags',
+      'description' => 'Topic tags.',
+    ])->save();
+
+    $this->assertInstanceOf(
+      McpSiteSchemaBuilder::class,
+      $this->container->get('mcp_sentinel.site_schema_builder'),
+    );
+
+    $http = json_decode((string) McpContextController::create($this->container)->context()->getContent(), TRUE);
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertTrue($tool->getResultStatus());
+    $toolData = $tool->getResult()->getContextValues();
+
+    $this->assertSame($http['content_types'], $toolData['content_types']);
+    $this->assertSame($http['vocabularies'], $toolData['vocabularies']);
+    $this->assertSame($http['media_types'], $toolData['media_types']);
+    $this->assertSame('A basic page.', $toolData['content_types']['page']['description']);
+    $this->assertSame('Topic tags.', $toolData['vocabularies']['tags']['description']);
+  }
+
+  /**
+   * Shared builder still applies Context vs Tool ceilings independently.
+   */
+  public function testHttpAndToolKeepSurfaceSpecificCeilings(): void {
+    $this->createGovernedAccount();
+    NodeType::create(['type' => 'memo', 'name' => 'Memo'])->save();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('classification_map', [
+        ['entity_type' => 'node', 'bundle' => 'memo', 'field' => '', 'label' => 'restricted'],
+      ])
+      ->save();
+    \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', [
+        'context' => 'internal',
+        'tool' => 'restricted',
+      ])
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $http = json_decode((string) McpContextController::create($this->container)->context()->getContent(), TRUE);
+    $this->assertArrayNotHasKey('memo', $http['content_types'] ?? [],
+      'Context ceiling must still omit a restricted bundle.');
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_site_context');
+    $tool->execute();
+    $this->assertTrue($tool->getResultStatus());
+    $this->assertArrayHasKey('memo', $tool->getResult()->getContextValues()['content_types'] ?? [],
+      'Tool ceiling must stay independent of the Context ceiling.');
   }
 
   /**

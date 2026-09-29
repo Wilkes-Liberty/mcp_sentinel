@@ -321,6 +321,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |
 | `mcp_sentinel.raw_sql_guard` | `McpRawSqlGuard` | `check($sql, $profile, $surface = Drush)` → refusal reasons (`[]` = permitted). Resolves `denied_entity_types`, `redacted_fields` and classification ceilings down to physical tables and columns via the entity table mapping; fail-closed on anything it cannot resolve |
 | `mcp_sentinel.classification` | `McpClassificationResolver` | classification labels and egress ceilings (#3616540 part 2): `labels()`, `labelForEntity()` / `labelForField()`, `currentSurface()`, `effectiveCeiling($profile, $surface)` (min of profile and declared), `exceeds($label, $ceiling)`, `denies()`, bounded `evidence()`, `refusalResponse()` |
+| `mcp_sentinel.site_schema_builder` | `McpSiteSchemaBuilder` | `build($describes)` → content types (label, description, fields), vocabularies (label, description, term_count), and media types. Shared by `/drupal-mcp/context` and `McpSiteContextTool`; the caller supplies the per-surface bundle filter |
 | `mcp_sentinel.anomaly_detector` | `McpAnomalyDetector` | evaluate anomaly rules over the audit stream |
 | `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks; when contrib Content Lock is installed, `conflictsForActor()` / `isLocked()` also honour a human's entity-form lock |
