@@ -26,6 +26,7 @@ dblink
 defence
 desync
 drupalcode
+dorny
 drush
 eccdeac
 endcode

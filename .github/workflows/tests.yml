@@ -1,6 +1,7 @@
 name: Tests
 
-# Runs the PHPUnit suite on every PR and on push to 1.x.
+# Runs the PHPUnit suite on pull requests and on push to 1.x. A docs-only
+# change skips the heavy jobs below (DEV-735); see the `changes` job.
 #
 # Until this existed, nothing ran the tests: a PR could go green, merge, and
 # ship while the suite was broken, and the only thing between a regression and a
@@ -27,8 +28,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect whether this PR/push touches anything other than documentation. The
+  # heavy jobs below are gated on this so a docs-only change doesn't burn CI
+  # minutes (DEV-735). Gating is job-level `if:` — a skipped required job is
+  # treated as a passing status check — not workflow-level `paths-ignore`,
+  # which would leave a required check pending and block merges.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          # `predicate-quantifier: every` is required. The action defaults to
+          # `some`, so a file matches if it matches any pattern. With `- '**'`
+          # first, every file matches that one pattern, the `!` exclusions are
+          # dead, and `code` is always true. `every` requires a file to match
+          # all patterns, which is what "everything except docs" means.
+          predicate-quantifier: every
+          filters: |
+            code:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!LICENSE'
+
   phpunit:
     name: PHPUnit (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       # Report every combination: a failure on one core version is a real
@@ -324,6 +357,8 @@ jobs:
   # on the 2.15.1 PR (#169).
   phpunit-functional:
     name: PHPUnit — Functional (Drupal 11, PHP 8.4)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -490,6 +525,8 @@ jobs:
   # not a second copy of the whole functional suite.
   phpunit-functional-pgsql-draft:
     name: PHPUnit — Functional PostgreSQL draft (Drupal 11, PHP 8.4)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -655,6 +692,8 @@ jobs:
   # PostgreSQL acceptance of the same file is phpunit-functional-pgsql-draft.
   phpunit-functional-d10:
     name: PHPUnit — Functional draft translation (Drupal 10.6, PHP 8.3)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -800,6 +839,8 @@ jobs:
 
   phpcs:
     name: Drupal coding standards
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -849,6 +890,8 @@ jobs:
   # check the same thing rather than two similar things.
   phpstan:
     name: PHPStan
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -964,6 +1007,8 @@ jobs:
             --no-progress \
             --memory-limit=2G
 
+  # Stays on for docs-only changes. Spellcheck is the cheap check that still
+  # applies once the matrix is skipped.
   cspell:
     name: cspell
     runs-on: ubuntu-latest
