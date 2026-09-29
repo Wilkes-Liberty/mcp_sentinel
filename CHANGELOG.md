@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The site-context tool now includes content-type and vocabulary
+  `description` so its payload matches `/drupal-mcp/context`. Both
+  surfaces share `McpSiteSchemaBuilder` and still apply their own
+  egress ceilings.
+
 ## [2.25.0] - 2026-09-28
 
 ### Fixed

@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
-use Drupal\Core\Entity\EntityFieldManagerInterface;
-use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolOperation;
@@ -31,14 +30,9 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpSiteContextTool extends McpGovernedToolBase {
 
   /**
-   * The entity type manager.
+   * Shared site-schema builder (content types, vocabularies, media types).
    */
-  protected EntityTypeManagerInterface $entityTypeManager;
-
-  /**
-   * The entity field manager.
-   */
-  protected EntityFieldManagerInterface $entityFieldManager;
+  protected McpSiteSchemaBuilder $schemaBuilder;
 
   /**
    * The policy resolver.
@@ -55,8 +49,7 @@ final class McpSiteContextTool extends McpGovernedToolBase {
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
-    $instance->entityTypeManager = $container->get('entity_type.manager');
-    $instance->entityFieldManager = $container->get('entity_field.manager');
+    $instance->schemaBuilder = $container->get('mcp_sentinel.site_schema_builder');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->classification = $container->has('mcp_sentinel.classification')
       ? $container->get('mcp_sentinel.classification')
@@ -84,54 +77,14 @@ final class McpSiteContextTool extends McpGovernedToolBase {
       ]));
     }
 
-    $skip = ['vid', 'langcode', 'default_langcode', 'revision_translation_affected'];
-    $data = ['content_types' => [], 'vocabularies' => [], 'media_types' => []];
-
-    foreach ($this->entityTypeManager->getStorage('node_type')->loadMultiple() as $type_id => $type) {
-      if (!$this->describes($profile, $ceiling, 'node', (string) $type_id)) {
-        continue;
-      }
-      $field_schemas = [];
-      foreach ($this->entityFieldManager->getFieldDefinitions('node', $type_id) as $name => $field) {
-        if (in_array($name, $skip, TRUE)) {
-          continue;
-        }
-        $field_schemas[$name] = [
-          'label' => (string) $field->getLabel(),
-          'type' => $field->getType(),
-          'required' => $field->isRequired(),
-          'multiple' => $field->getFieldStorageDefinition()->isMultiple(),
-        ];
-      }
-      $data['content_types'][$type_id] = [
-        'label' => (string) $type->label(),
-        'fields' => $field_schemas,
-      ];
-    }
-
-    foreach ($this->entityTypeManager->getStorage('taxonomy_vocabulary')->loadMultiple() as $vid => $vocab) {
-      if (!$this->describes($profile, $ceiling, 'taxonomy_term', (string) $vid)) {
-        continue;
-      }
-      $count = (int) $this->entityTypeManager->getStorage('taxonomy_term')
-        ->getQuery()->accessCheck(FALSE)->condition('vid', $vid)->count()->execute();
-      $data['vocabularies'][$vid] = [
-        'label' => (string) $vocab->label(),
-        'term_count' => $count,
-      ];
-    }
-
-    if ($this->entityTypeManager->hasDefinition('media_type')) {
-      foreach ($this->entityTypeManager->getStorage('media_type')->loadMultiple() as $type_id => $type) {
-        if (!$this->describes($profile, $ceiling, 'media', (string) $type_id)) {
-          continue;
-        }
-        $data['media_types'][$type_id] = [
-          'label' => (string) $type->label(),
-          'source' => $type->getSource()->getPluginId(),
-        ];
-      }
-    }
+    $data = $this->schemaBuilder->build(
+      fn (string $entity_type_id, string $bundle): bool => $this->describes(
+        $profile,
+        $ceiling,
+        $entity_type_id,
+        $bundle,
+      ),
+    );
 
     return ExecutableResult::success($this->t('Site schema retrieved.'), $data);
   }
