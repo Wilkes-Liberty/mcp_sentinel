@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.25.3] - 2026-09-29
+
+### Changed
+- DEV-735: Docs-only pull requests skip the PHPUnit, Functional, phpcs,
+  and PHPStan matrix; cspell still runs. Same path-filter pattern as
+  webcms and ui.
+
 ## [2.25.2] - 2026-09-29
 
 ### Fixed
