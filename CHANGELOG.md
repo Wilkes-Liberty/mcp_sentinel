@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- Unused dark-shipped typed decision types: `McpDecision`,
+  `McpDecisionOutcome`, and unused `McpDecisionReason` cases
+  (`always_gated`, `approval_required`, `not_gated`,
+  `superuser_refused`, `manifest_unsealed`,
+  `postcondition_discrepancy`). Live reason codes used as strings
+  by `McpManifestBinder` and `McpApprovalExecutor` stay. The
+  approval gate remains boolean `requiresApproval()`; `decide()`
+  is not added.
+
 ## [2.25.3] - 2026-09-29
 
 ### Changed
@@ -588,10 +599,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   following `McpGovernanceReadinessReason`. Outcomes are `deny`,
   `allow`, `require_approval`, and `allow_with_obligations`.
   Obligations are valid only on `allow_with_obligations`. The
-  approval gate can return the typed form (`decide()`) without
-  changing who is gated: `requiresApproval()` and every existing
-  call site keep today's allow/hold behaviour. No production path
-  requires a sealed manifest.
+  approval gate stays boolean (`requiresApproval()`); existing
+  call sites keep today's allow/hold behaviour. No production path
+  requires a sealed manifest. `McpApprovalGate::decide()` was not
+  wired.
 - **Sealed action manifest (#111 / d.o. #3616538, slice 2).** When a
   gated operation is queued, the source may mint an HMAC-sealed
   `McpActionManifest` binding actor, OAuth delegation, normalized
