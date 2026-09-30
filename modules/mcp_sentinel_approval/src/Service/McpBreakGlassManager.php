@@ -44,7 +44,7 @@ final class McpBreakGlassManager {
   /**
    * The break-glass admin role id.
    */
-  public const string ROLE_ID = 'mcp_admin';
+  public const ROLE_ID = 'mcp_admin';
 
   /**
    * Permissions the break-glass role may hold (least-privilege ceiling).
@@ -58,7 +58,7 @@ final class McpBreakGlassManager {
    * (separation of duties); escape-hatch perms; administer site configuration;
    * administer modules.
    */
-  public const array ALLOWED_PERMISSIONS = [
+  public const ALLOWED_PERMISSIONS = [
     'access administration pages',
     'view the administration theme',
     'access site reports',
@@ -74,7 +74,7 @@ final class McpBreakGlassManager {
   /**
    * Request id stored when consuming a grant-issued seal (not an approval).
    */
-  public const int GRANT_CONSUME_REQUEST_ID = 0;
+  public const GRANT_CONSUME_REQUEST_ID = 0;
 
   /**
    * The stored 'revoked' value for a live grant, as an int rather than FALSE.

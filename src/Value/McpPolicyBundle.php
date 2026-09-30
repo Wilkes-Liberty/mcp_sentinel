@@ -16,12 +16,12 @@ final class McpPolicyBundle {
   /**
    * Schema version.
    */
-  public const int VERSION = 1;
+  public const VERSION = 1;
 
   /**
    * Seal prefix.
    */
-  public const string SEAL_PREFIX = 'hmac-sha256:';
+  public const SEAL_PREFIX = 'hmac-sha256:';
 
   /**
    * Constructs a verified bundle.

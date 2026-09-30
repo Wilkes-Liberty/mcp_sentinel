@@ -27,7 +27,7 @@ final class McpDestructiveOpEvent extends Event {
   /**
    * The event name used for dispatch and subscription.
    */
-  public const string NAME = 'mcp_sentinel.destructive_op';
+  public const NAME = 'mcp_sentinel.destructive_op';
 
   /**
    * The veto reason, or NULL when the operation has not been vetoed.

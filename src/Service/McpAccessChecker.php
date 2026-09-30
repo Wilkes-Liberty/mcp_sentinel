@@ -33,7 +33,7 @@ final class McpAccessChecker {
    * The bare code is the reason on purpose: JSON:API repeats access reasons
    * to the client in meta.omitted, so the digest must not travel there.
    */
-  public const string BUNDLE_DENIAL_CODE = 'policy_bundle_denied';
+  public const BUNDLE_DENIAL_CODE = 'policy_bundle_denied';
 
   /**
    * Constructs an McpAccessChecker.

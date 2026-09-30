@@ -16,7 +16,7 @@ final class McpActionManifest {
   /**
    * Schema version of the claims document.
    */
-  public const int VERSION = 1;
+  public const VERSION = 1;
 
   /**
    * Claim keys in canonical (sorted) order.

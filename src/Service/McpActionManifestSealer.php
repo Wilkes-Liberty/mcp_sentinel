@@ -26,12 +26,12 @@ final class McpActionManifestSealer {
   /**
    * Default manifest lifetime, in seconds.
    */
-  public const int DEFAULT_TTL = 86400;
+  public const DEFAULT_TTL = 86400;
 
   /**
    * Seal prefix. The hex HMAC follows.
    */
-  public const string SEAL_PREFIX = 'hmac-sha256:';
+  public const SEAL_PREFIX = 'hmac-sha256:';
 
   /**
    * Constructs the sealer.

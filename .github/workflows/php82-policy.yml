@@ -1,0 +1,90 @@
+name: PHP 8.2 policy compatibility
+
+on:
+  push:
+    branches: ['1.x']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  base-module:
+    name: Sentinel policy core ${{ matrix.core }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { core: '~10.6.0', php: '8.2' }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: mcp_sentinel_src
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: gd, pdo_sqlite, sqlite3
+          tools: composer:v2
+          coverage: none
+      - name: Install candidate and exact dependency lock
+        env:
+          CORE_CONSTRAINT: ${{ matrix.core }}
+        run: |
+          mkdir drupal
+          cd drupal
+          python3 - <<'PY'
+          import json, os
+          core = os.environ['CORE_CONSTRAINT']
+          package = {
+              'name': 'mcp-sentinel/core-qualification', 'type': 'project',
+              'repositories': [
+                  {'type': 'path', 'url': '../mcp_sentinel_src',
+                   'options': {'symlink': False, 'versions': {'drupal/mcp_sentinel': '2.25.4'}}},
+                  {'type': 'composer', 'url': 'https://packages.drupal.org/8'},
+              ],
+              'require': {'composer/installers': '^2.3',
+                          'drupal/core-recommended': core, 'drupal/core-dev': core,
+                          'drupal/mcp_sentinel': '2.25.4'},
+              'minimum-stability': 'beta', 'prefer-stable': True,
+              'config': {'allow-plugins': {'composer/installers': True,
+                  'phpstan/extension-installer': True,
+                  'dealerdirect/phpcodesniffer-composer-installer': True,
+                  'php-http/discovery': True, 'drupal/core-composer-scaffold': False,
+                  'tbachert/spi': True, 'symfony/runtime': True}},
+              'extra': {'installer-paths': {'web/core': ['type:drupal-core'],
+                  'web/modules/contrib/{$name}': ['type:drupal-module']}},
+          }
+          if core == '11.4.7':
+              package['require']['twig/twig'] = '3.29.0'
+          with open('composer.json', 'w') as out:
+              json.dump(package, out, indent=2)
+          PY
+          composer update --no-interaction --no-scripts --prefer-dist --no-progress
+          mkdir -p web/sites/default web/sites/simpletest/browser_output web/profiles web/themes
+          cp web/core/assets/scaffold/files/default.settings.php web/sites/default/
+          cp web/core/assets/scaffold/files/default.services.yml web/sites/default/
+          cp ../mcp_sentinel_src/tests/fixtures/drupal-autoload.php web/autoload.php
+      - name: Run policy and approval compatibility regressions
+        env:
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
+        run: |
+          cd drupal
+          find web/modules/contrib/mcp_sentinel -name '*.php' -print0 | xargs -0 -n1 php -l
+          php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
+            --filter 'McpActionManifestTest|McpPolicyBundleTest|McpActionManifestSealerTest' \
+            --log-junit unit.xml web/modules/contrib/mcp_sentinel/tests/src/Unit
+          php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
+            --filter 'McpAccessCheckerTest|McpDestructiveActionEventTest|McpDestructiveOpEventTest' \
+            --log-junit kernel.xml web/modules/contrib/mcp_sentinel/tests/src/Kernel
+          php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
+            --filter 'McpActionManifestTest|McpBreakGlassTest|McpBreakGlassConductTest' \
+            --log-junit approval.xml web/modules/contrib/mcp_sentinel/modules/mcp_sentinel_approval/tests/src/Kernel
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mcp-sentinel-${{ strategy.job-index }}
+          path: |
+            drupal/composer.json
+            drupal/composer.lock
+            drupal/*.xml
