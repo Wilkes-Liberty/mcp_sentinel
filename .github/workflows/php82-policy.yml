@@ -73,13 +73,13 @@ jobs:
           find web/modules/contrib/mcp_sentinel -name '*.php' -print0 | xargs -0 -n1 php -l
           php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
             --filter 'McpActionManifestTest|McpPolicyBundleTest|McpActionManifestSealerTest' \
-            --log-junit unit.xml web/modules/contrib/mcp_sentinel/tests/src/Unit
+            --log-junit "$PWD/unit.xml" "$PWD/web/modules/contrib/mcp_sentinel/tests/src/Unit"
           php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
             --filter 'McpAccessCheckerTest|McpDestructiveActionEventTest|McpDestructiveOpEventTest' \
-            --log-junit kernel.xml web/modules/contrib/mcp_sentinel/tests/src/Kernel
+            --log-junit "$PWD/kernel.xml" "$PWD/web/modules/contrib/mcp_sentinel/tests/src/Kernel"
           php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
             --filter 'McpActionManifestTest|McpBreakGlassTest|McpBreakGlassConductTest' \
-            --log-junit approval.xml web/modules/contrib/mcp_sentinel/modules/mcp_sentinel_approval/tests/src/Kernel
+            --log-junit "$PWD/approval.xml" "$PWD/web/modules/contrib/mcp_sentinel/modules/mcp_sentinel_approval/tests/src/Kernel"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
