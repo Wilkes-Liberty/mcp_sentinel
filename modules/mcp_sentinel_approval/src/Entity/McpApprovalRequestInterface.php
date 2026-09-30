@@ -14,17 +14,17 @@ interface McpApprovalRequestInterface extends ContentEntityInterface {
   /**
    * Status: awaiting a human decision.
    */
-  public const string STATUS_PENDING = 'pending';
+  public const STATUS_PENDING = 'pending';
 
   /**
    * Status: approved and the operation executed (or attempted).
    */
-  public const string STATUS_APPROVED = 'approved';
+  public const STATUS_APPROVED = 'approved';
 
   /**
    * Status: denied; the operation will not run.
    */
-  public const string STATUS_DENIED = 'denied';
+  public const STATUS_DENIED = 'denied';
 
   /**
    * Gets the requested operation identifier (e.g. 'delete').

@@ -24,27 +24,27 @@ final class McpPolicyBundleRegistry {
   /**
    * State key for the active attestation.
    */
-  public const string STATE_ACTIVE = 'mcp_sentinel.policy_bundle.active';
+  public const STATE_ACTIVE = 'mcp_sentinel.policy_bundle.active';
 
   /**
    * State key for revoked digests.
    */
-  public const string STATE_REVOKED = 'mcp_sentinel.policy_bundle.revoked';
+  public const STATE_REVOKED = 'mcp_sentinel.policy_bundle.revoked';
 
   /**
    * State key for last-known-good attestation.
    */
-  public const string STATE_LAST_GOOD = 'mcp_sentinel.policy_bundle.last_good';
+  public const STATE_LAST_GOOD = 'mcp_sentinel.policy_bundle.last_good';
 
   /**
    * Default bundle lifetime.
    */
-  public const int DEFAULT_TTL = 86400 * 30;
+  public const DEFAULT_TTL = 86400 * 30;
 
   /**
    * Emergency-deny operation token used by simulate().
    */
-  public const string EMERGENCY_DENY = '*';
+  public const EMERGENCY_DENY = '*';
 
   /**
    * Cache tag on every live access result that consulted this registry.
@@ -52,7 +52,7 @@ final class McpPolicyBundleRegistry {
    * Invalidated on activate, revoke, rollback and emergency deny so a
    * previously cached allow cannot outlive a newly armed floor.
    */
-  public const string CACHE_TAG = 'mcp_sentinel.policy_bundle';
+  public const CACHE_TAG = 'mcp_sentinel.policy_bundle';
 
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
