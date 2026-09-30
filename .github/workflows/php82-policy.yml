@@ -40,7 +40,7 @@ jobs:
               'name': 'mcp-sentinel/core-qualification', 'type': 'project',
               'repositories': [
                   {'type': 'path', 'url': '../mcp_sentinel_src',
-                   'options': {'symlink': False, 'versions': {'drupal/mcp_sentinel': '2.25.4'}}},
+                   'options': {'symlink': True, 'versions': {'drupal/mcp_sentinel': '2.25.4'}}},
                   {'type': 'composer', 'url': 'https://packages.drupal.org/8'},
               ],
               'require': {'composer/installers': '^2.3',
@@ -61,6 +61,8 @@ jobs:
               json.dump(package, out, indent=2)
           PY
           composer update --no-interaction --no-scripts --prefer-dist --no-progress
+          test -L web/modules/contrib/mcp_sentinel
+          test -f web/modules/contrib/mcp_sentinel/tests/src/Unit/McpActionManifestTest.php
           mkdir -p web/sites/default web/sites/simpletest/browser_output web/profiles web/themes
           cp web/core/assets/scaffold/files/default.settings.php web/sites/default/
           cp web/core/assets/scaffold/files/default.services.yml web/sites/default/
