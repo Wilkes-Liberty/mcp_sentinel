@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.25.5] - 2026-09-30
+
 ### Changed
 - Support PHP 8.2 for the base module and approval services by retaining
   constant values without PHP 8.3-only type declarations. Optional transport
