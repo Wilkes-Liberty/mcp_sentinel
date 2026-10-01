@@ -290,7 +290,6 @@ final class McpDraftResource extends EntityResource {
     $this->mergeDefaultTranslations($base, $live);
     $source = $base->getUntranslated();
     $translation = $base->addTranslation($langcode, $source->toArray());
-    $translation->setRevisionTranslationAffected(NULL);
     $translation->setUnpublished();
     if ($translation->hasField('moderation_state')) {
       $translation->set('moderation_state', 'draft');
@@ -307,6 +306,11 @@ final class McpDraftResource extends EntityResource {
     $this->applySubmittedDraftFields($resource_type, $parsed, $translation, $live, $data, TRUE);
     $this->applySubmittedRevisionLog($resource_type, $translation, $data);
     $this->assertDraftRemainsUnpublished($translation);
+    // Drupal 10 recomputes an unenforced affected flag on a new revision, so
+    // a carried default-language draft stays affected and continue will not
+    // repair the published moderation core stores on it. Enforce the same
+    // split revise uses: only the language being saved is affected.
+    $this->markOtherLanguagesUnaffected($translation);
     static::validate($translation);
     $save_versions = [
       1 => (string) $live->getRevisionId(),
@@ -1175,9 +1179,10 @@ final class McpDraftResource extends EntityResource {
   /**
    * Marks every language except the one being saved as not-affected.
    *
-   * Continue must keep the same per-language latest-affected pointers as
-   * revise-over-working: the other language's draft stays on its own
-   * revision so editors and publishing still find it.
+   * Create and continue must keep the same per-language latest-affected
+   * pointers as revise-over-working: the other language's draft stays on
+   * its own revision so editors and publishing still find it. The flag is
+   * enforced so Drupal 10 does not recompute it during the new revision.
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $draft
    *   The translation about to be saved.

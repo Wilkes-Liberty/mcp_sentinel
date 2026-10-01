@@ -201,6 +201,11 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertInstanceOf(NodeInterface::class, $working);
     $this->assertSame('English pending', $working->getUntranslated()->label());
     $this->assertSame('Artículos', $working->getTranslation('es')->label());
+    // The Spanish save must not claim the English draft. Drupal 10 otherwise
+    // leaves English affected, and continue then 409s on published moderation.
+    $this->assertFalse((bool) $working->getUntranslated()->isRevisionTranslationAffected());
+    $this->assertTrue((bool) $working->getTranslation('es')->isRevisionTranslationAffected());
+    $this->assertSame($english_working, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'en'));
 
     $continued = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'English updated'], '"' . $live_vid . ':' . $new_working . '"', FALSE, 'en');
     $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
@@ -208,7 +213,11 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $updated = $storage->loadRevision($latest_working);
     $this->assertInstanceOf(NodeInterface::class, $updated);
     $this->assertSame('English updated', $updated->getUntranslated()->label());
+    $this->assertSame('draft', $updated->getUntranslated()->get('moderation_state')->value);
+    $this->assertFalse($updated->getUntranslated()->isPublished());
+    $this->assertTrue((bool) $updated->getUntranslated()->isRevisionTranslationAffected());
     $this->assertSame('Artículos', $updated->getTranslation('es')->label());
+    $this->assertFalse((bool) $updated->getTranslation('es')->isRevisionTranslationAffected());
     $this->config('mcp_sentinel.mcp_policy_profile.default')->set('allow_write', FALSE)->save();
     $this->assertSame(403, $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Forbidden'], '"' . $live_vid . ':' . $latest_working . '"', TRUE, 'es')->getStatusCode());
   }

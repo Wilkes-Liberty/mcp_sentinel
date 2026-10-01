@@ -14,6 +14,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   translation-affected revision (`working_vid`), not only from the tip
   working revision. After revise-over-working, a language whose draft sits
   on an earlier revision is no longer shown as `moderation_state: published`.
+  Adding a translation onto a working draft enforces that same not-affected
+  split, so Drupal 10 does not leave the carried draft affected and then
+  refuse to continue it.
 - #3626919: The default language can be drafted when the working copy holds
   only a translation draft. Revise accepts `X-MCP-Draft-Langcode` for the
   default language with `If-Match: "live:working"`, using the same stale-id
