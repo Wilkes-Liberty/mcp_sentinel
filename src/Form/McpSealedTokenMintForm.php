@@ -21,23 +21,29 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpSealedTokenMintForm extends FormBase {
 
   /**
-   * Constructs the form.
+   * Sealed token manager.
    */
-  public function __construct(
-    private readonly McpSealedTokenManager $tokens,
-    private readonly McpAdminStatus $adminStatus,
-    private readonly PrivateTempStoreFactory $tempStoreFactory,
-  ) {}
+  protected McpSealedTokenManager $tokens;
+
+  /**
+   * Admin status strip assembler.
+   */
+  protected McpAdminStatus $adminStatus;
+
+  /**
+   * Private tempstore factory for the copy-once reveal payload.
+   */
+  protected PrivateTempStoreFactory $tempStoreFactory;
 
   /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
-    return new static(
-      $container->get('mcp_sentinel.sealed_token_manager'),
-      $container->get('mcp_sentinel.admin_status'),
-      $container->get('tempstore.private'),
-    );
+    $instance = parent::create($container);
+    $instance->tokens = $container->get('mcp_sentinel.sealed_token_manager');
+    $instance->adminStatus = $container->get('mcp_sentinel.admin_status');
+    $instance->tempStoreFactory = $container->get('tempstore.private');
+    return $instance;
   }
 
   /**

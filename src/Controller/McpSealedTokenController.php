@@ -6,7 +6,6 @@ namespace Drupal\mcp_sentinel\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Datetime\DateFormatterInterface;
-use Drupal\Core\Form\FormBuilderInterface;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Url;
 use Drupal\mcp_sentinel\Form\McpSealedTokenMintForm;
@@ -22,12 +21,20 @@ final class McpSealedTokenController extends ControllerBase {
 
   /**
    * Constructs the controller.
+   *
+   * @param \Drupal\mcp_sentinel\Service\McpSealedTokenManager $tokens
+   *   Sealed token manager.
+   * @param \Drupal\mcp_sentinel\Service\McpAdminStatus $adminStatus
+   *   Admin status strip assembler.
+   * @param \Drupal\Core\TempStore\PrivateTempStoreFactory $tempStoreFactory
+   *   Private tempstore factory for the copy-once reveal payload.
+   * @param \Drupal\Core\Datetime\DateFormatterInterface $dateFormatter
+   *   Date formatter for the listing table.
    */
   public function __construct(
     private readonly McpSealedTokenManager $tokens,
     private readonly McpAdminStatus $adminStatus,
     private readonly PrivateTempStoreFactory $tempStoreFactory,
-    private readonly FormBuilderInterface $formBuilder,
     private readonly DateFormatterInterface $dateFormatter,
   ) {}
 
@@ -39,7 +46,6 @@ final class McpSealedTokenController extends ControllerBase {
       $container->get('mcp_sentinel.sealed_token_manager'),
       $container->get('mcp_sentinel.admin_status'),
       $container->get('tempstore.private'),
-      $container->get('form_builder'),
       $container->get('date.formatter'),
     );
   }
@@ -88,7 +94,7 @@ final class McpSealedTokenController extends ControllerBase {
       'help' => [
         '#markup' => '<p>' . $this->t('Mint a short-lived sealed token bound to a designated agent client. The secret is shown once, then forgotten. Revoke immediately if it leaks. This is not an OAuth login flow.') . '</p>',
       ],
-      'form' => $this->formBuilder->getForm(McpSealedTokenMintForm::class),
+      'form' => $this->formBuilder()->getForm(McpSealedTokenMintForm::class),
       'table' => [
         '#type' => 'table',
         '#header' => [

@@ -45,7 +45,7 @@ trait McpEntityToolTrait {
       : 'denied by policy';
     if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
       $profileId = NULL;
-      if (isset($this->governancePolicyResolver) && is_object($this->governancePolicyResolver)) {
+      if (isset($this->governancePolicyResolver)) {
         $profile = $this->governancePolicyResolver->resolve();
         $profileId = $profile?->id();
       }

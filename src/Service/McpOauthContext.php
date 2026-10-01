@@ -52,6 +52,9 @@ class McpOauthContext {
    *   The current-user account proxy.
    * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
    *   The config factory.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   Request stack used to read sealed-token claims. Optional so existing
+   *   two-argument constructions in tests keep working.
    */
   public function __construct(
     private readonly AccountProxyInterface $currentUser,

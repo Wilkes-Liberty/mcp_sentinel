@@ -113,7 +113,8 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `discoveryAccess()` gates, and the protected `governance*` properties
 (`$governancePolicyResolver`, `$governanceAccessChecker`,
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
-`$governanceDlp`, `$governanceClassification`). Each one carries `@api` in its
+`$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`).
+Each one carries `@api` in its
 docblock, except `checkAccess()`, whose docblock is inherited from the Tool
 API. A tool that operates on configuration also implements
 `Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface`.

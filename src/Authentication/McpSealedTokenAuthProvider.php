@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Authentication;
 
 use Drupal\Core\Authentication\AuthenticationProviderInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\user\UserInterface;
@@ -37,7 +38,7 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
   /**
    * {@inheritdoc}
    */
-  public function authenticate(Request $request): ?UserInterface {
+  public function authenticate(Request $request): ?AccountInterface {
     $header = (string) $request->headers->get('Authorization');
     $token = trim(substr($header, strlen('Bearer ')));
     $claims = $this->tokens->verify($token);

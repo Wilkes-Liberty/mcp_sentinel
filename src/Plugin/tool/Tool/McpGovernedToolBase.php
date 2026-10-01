@@ -10,6 +10,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
@@ -95,6 +96,13 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpPolicyResolver $governancePolicyResolver = NULL;
 
   /**
+   * Deny-path explainer (NULL in unit tests or before the container rebuilds).
+   *
+   * @api
+   */
+  protected ?McpDenyExplainer $governanceDenyExplainer = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -111,6 +119,9 @@ abstract class McpGovernedToolBase extends ToolBase {
       : NULL;
     $instance->governancePolicyResolver = $container->has('mcp_sentinel.policy_resolver')
       ? $container->get('mcp_sentinel.policy_resolver')
+      : NULL;
+    $instance->governanceDenyExplainer = $container->has('mcp_sentinel.deny_explainer')
+      ? $container->get('mcp_sentinel.deny_explainer')
       : NULL;
     return $instance;
   }
@@ -219,8 +230,8 @@ abstract class McpGovernedToolBase extends ToolBase {
     if (!$readiness->isReady()) {
       $reason = $readiness->reason()->value;
       $message = 'MCP Sentinel source governance is not ready: ' . $reason . '.';
-      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
-        $message = \Drupal::service('mcp_sentinel.deny_explainer')->annotate(
+      if ($this->governanceDenyExplainer !== NULL) {
+        $message = $this->governanceDenyExplainer->annotate(
           $message,
           $readiness->profile()?->id(),
         );

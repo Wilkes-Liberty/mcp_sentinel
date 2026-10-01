@@ -13,7 +13,7 @@ use Drupal\Tests\BrowserTestBase;
  * Covers gap G14: verifies that uninstalling mcp_sentinel removes:
  *  - the mcp_api role,
  *  - all mcp_sentinel_* database tables (audit_log, content_locks,
- *    webhook_delivery),
+ *    webhook_delivery, sealed_token),
  *  - all mcp_sentinel.* config (settings + every policy profile),
  * leaving nothing orphaned.
  *
@@ -45,7 +45,7 @@ final class McpUninstallTest extends BrowserTestBase {
   }
 
   /**
-   * Uninstalling removes all three mcp_sentinel_* database tables.
+   * Uninstalling removes mcp_sentinel_* database tables owned by this module.
    *
    * The module creates these tables via hook_schema() and Drupal's module
    * installer drops them on uninstall. Verifying this prevents an upgrade path
@@ -54,11 +54,11 @@ final class McpUninstallTest extends BrowserTestBase {
   public function testUninstallDropsDatabaseTables(): void {
     $schema = $this->container->get('database')->schema();
 
-    // All three tables must exist after install.
     foreach ([
       'audit_chain_log',
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
+      'mcp_sentinel_sealed_token',
     ] as $table) {
       $this->assertTrue(
         $schema->tableExists($table),
@@ -74,6 +74,7 @@ final class McpUninstallTest extends BrowserTestBase {
     foreach ([
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
+      'mcp_sentinel_sealed_token',
     ] as $table) {
       $this->assertFalse(
         $schema->tableExists($table),
@@ -172,6 +173,7 @@ final class McpUninstallTest extends BrowserTestBase {
     foreach ([
       'mcp_sentinel_content_locks',
       'mcp_sentinel_webhook_delivery',
+      'mcp_sentinel_sealed_token',
     ] as $table) {
       $this->assertFalse(
         $schema->tableExists($table),

@@ -42,9 +42,10 @@ final class McpDenyExplanation {
       ? 'Widening may be appropriate after a human review; it is never automatic.'
       : 'Widening is not appropriate; this deny must stay.';
     return sprintf(
-      '[rule:%s %s] %s Next: %s',
+      '[rule:%s %s] %s %s Next: %s',
       $this->ruleId,
       $this->ruleName,
+      $this->summary,
       $widen,
       $this->nextStep,
     );

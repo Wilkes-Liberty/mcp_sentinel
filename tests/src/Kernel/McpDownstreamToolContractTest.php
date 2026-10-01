@@ -72,6 +72,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
   private const BASE_PROPERTIES = [
     'governanceAccessChecker',
     'governanceClassification',
+    'governanceDenyExplainer',
     'governanceDlp',
     'governancePolicyResolver',
     'governanceReadiness',

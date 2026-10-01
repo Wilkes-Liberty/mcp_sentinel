@@ -876,9 +876,6 @@ function mcp_sentinel_cron(): void {
  * Routes that already accept oauth2 also accept a Sentinel sealed token so
  * a minted bearer works on mcp_server and JSON:API. Applies() still
  * ignores anything that is not the mcs1. prefix.
- *
- * @param \Symfony\Component\Routing\RouteCollection $collection
- *   The route collection to alter.
  */
 function mcp_sentinel_route_alter(RouteCollection $collection): void {
   foreach ($collection as $route) {
