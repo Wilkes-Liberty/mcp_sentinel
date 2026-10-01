@@ -515,8 +515,8 @@ both are listed here for completeness):
 ## Translation inventory (JSON:API)
 
 Governed draft translation lives on `/jsonapi/{type}/{bundle}/{uuid}/mcp-draft`
-and is documented in `docs/draft-continuation.md`. Two inventory fields were
-added fields for per-language pending drafts (#3626610, #3626879, #3626919):
+and is documented in `docs/draft-continuation.md`. Per-language pending
+drafts add these inventory fields (#3626610, #3626879, #3626919):
 
 - `GET .../mcp-translations` `meta.working.translations[]` includes
   `working_vid` (that language's latest translation-affected revision),

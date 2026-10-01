@@ -17,9 +17,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - #3626919: The default language can be drafted when the working copy holds
   only a translation draft. Revise accepts `X-MCP-Draft-Langcode` for the
   default language with `If-Match: "live:working"`, using the same stale-id
-  and live-text guards as translation revise-over-working. Continue also
-  restores draft moderation when the default language was carried onto the
-  tip as unpublished with published moderation.
+  and live-text guards as translation revise-over-working. Continue restores
+  draft moderation only when that carried translation is not affected and
+  its moderation state is published. Other default-revision states stay
+  refused.
+- #3626610: Translation inventory checks view access on the requested
+  translation. A caller who can view the default language does not receive
+  another language's title or moderation metadata.
+- #3626879: The status report selects at most 200 forward revisions in SQL,
+  newest revision first, instead of loading every node and media row.
 
 ### Added
 

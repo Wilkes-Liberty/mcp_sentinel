@@ -260,7 +260,7 @@ final class McpTranslationDraftReporter {
    * @param string $default
    *   Default langcode.
    * @param \Drupal\Core\Session\AccountInterface|null $account
-   *   When set, refuse to replace the row with an unreadable revision.
+   *   When set, refuse to replace the row with an unreadable translation.
    *
    * @return array<string, mixed>|null
    *   Row including working_vid and pending, or NULL when the language is
@@ -282,7 +282,7 @@ final class McpTranslationDraftReporter {
       return NULL;
     }
     $translation = $source->getTranslation($langcode);
-    $readable = $account === NULL || $source->access('view', $account);
+    $readable = $account === NULL || $translation->access('view', $account);
     if (!$readable) {
       return NULL;
     }
@@ -441,23 +441,27 @@ final class McpTranslationDraftReporter {
       || !$this->database->schema()->tableExists($base_table)) {
       return [];
     }
+    // Aggregate in SQL, then keep the newest mismatched revisions. Loading
+    // both tables into PHP scans every node and media row on the site.
     $latest = $this->database->select($revision_table, 'r');
     $latest->addField('r', $id_key, 'id');
     $latest->addExpression('MAX(r.' . $revision_key . ')', 'latest_vid');
     $latest->groupBy('r.' . $id_key);
-    $latest_map = $latest->execute()->fetchAllKeyed();
-    $defaults = $this->database->select($base_table, 'b')
-      ->fields('b', [$id_key, $revision_key])
-      ->execute()
-      ->fetchAllKeyed();
-    $mismatched = [];
-    foreach ($latest_map as $id => $latest_vid) {
-      if ((string) $latest_vid !== (string) ($defaults[$id] ?? '')) {
-        $mismatched[] = (string) $id;
-      }
+    $query = $this->database->select($base_table, 'b');
+    $query->join($latest, 'latest', 'latest.id = b.' . $id_key);
+    $query->addField('b', $id_key, 'id');
+    $query->where('latest.latest_vid <> b.' . $revision_key);
+    $query->orderBy('latest.latest_vid', 'DESC');
+    $query->range(0, self::SCAN_CAP);
+    $executed = $query->execute();
+    if ($executed === NULL) {
+      return [];
     }
-    rsort($mismatched, SORT_NUMERIC);
-    return array_slice($mismatched, 0, self::SCAN_CAP);
+    $ids = [];
+    foreach ($executed->fetchCol() as $id) {
+      $ids[] = (string) $id;
+    }
+    return $ids;
   }
 
 }

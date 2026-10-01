@@ -1136,18 +1136,23 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Sets draft moderation on an unpublished language carried as published.
+   * Sets draft moderation on a carried unpublished published state.
    *
    * Revise-over-working copies other languages onto the new tip with
    * revision_translation_affected FALSE. Those languages keep their pending
    * text and unpublished status but can store moderation_state published
-   * from live. Continue must treat that as a draft, not refuse it.
+   * from live. Continue must treat that published state as a draft.
+   * An affected translation, or any other default-revision state such as
+   * archived, is left for assertTranslationNotDefaultRevisionState().
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $draft
    *   The translation about to be continued.
    */
   private function restoreCarriedDraftModeration(ContentEntityInterface $draft): void {
     if ($draft instanceof EntityPublishedInterface && $draft->isPublished()) {
+      return;
+    }
+    if ((bool) $draft->isRevisionTranslationAffected()) {
       return;
     }
     if (!$draft->hasField('moderation_state')) {
@@ -1162,7 +1167,7 @@ final class McpDraftResource extends EntityResource {
       return;
     }
     $state = $moderation->getWorkflowForEntity($draft)->getTypePlugin()->getState($state_id);
-    if ($state instanceof ContentModerationState && $state->isDefaultRevisionState()) {
+    if ($state instanceof ContentModerationState && $state->isPublishedState()) {
       $draft->set('moderation_state', 'draft');
     }
   }
