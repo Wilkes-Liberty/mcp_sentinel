@@ -511,3 +511,17 @@ both are listed here for completeness):
   prune action on the webhook delivery log
   (`McpWebhookDeliveryController::prune()`), equivalent to
   `drush mcp-sentinel:webhook-prune`.
+
+## Translation inventory (JSON:API)
+
+Governed draft translation lives on `/jsonapi/{type}/{bundle}/{uuid}/mcp-draft`
+and is documented in `docs/draft-continuation.md`. Two inventory fields were
+added for per-language pending drafts (#3626610, #3626879, #3626919):
+
+- `GET .../mcp-translations` `meta.working.translations[]` includes
+  `working_vid` (that language's latest translation-affected revision),
+  `pending`, and `affected`. Title, status, and moderation come from
+  `working_vid`, not from the tip revision.
+- `meta.pending` / `meta.multi_pending` and `meta.notices[]` with code
+  `multi_pending_publish` warn that publishing one pending language in the
+  Drupal UI drops the others. The same listing appears on the status report.

@@ -15,6 +15,7 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\Core\Entity\RevisionLogInterface;
+use Drupal\Core\Entity\TranslatableRevisionableStorageInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\jsonapi\Controller\EntityResource;
@@ -24,6 +25,7 @@ use Drupal\jsonapi\JsonApiResource\ResourceObjectData;
 use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\jsonapi\ResourceResponse;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpTranslationDraftReporter;
 use Drupal\user\UserInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -41,8 +43,12 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  * Translation create/update uses the same revision pointers plus
  * X-MCP-Draft-Langcode so a Spanish draft can sit beside published English.
  * X-MCP-Draft-Mode: revise opens a forward draft over a translation that is
- * already published on the live default revision. Omitting the header keeps
- * create, including its 409 when that language already exists.
+ * already published on the live default revision, including the default
+ * language when a named working copy holds only another language's draft.
+ * Omitting the header keeps create, including its 409 when that language
+ * already exists. GET .../mcp-translations reports each language from its
+ * latest translation-affected revision (working_vid) so a draft that sits
+ * behind the tip is not shown as published.
  * Media items get the node contract: the translation lives on an unpublished
  * forward revision and the source file target must not change. Paragraph
  * field values use the same surface on the pinned paragraph revision; image
@@ -147,15 +153,29 @@ final class McpDraftResource extends EntityResource {
   protected ?EntityFieldManagerInterface $entityFieldManager = NULL;
 
   /**
+   * Per-language pending-draft inventory helper.
+   */
+  protected ?McpTranslationDraftReporter $draftReporter = NULL;
+
+  /**
    * Injects draft services without duplicating core's controller constructor.
    */
-  public function setDraftServices(Connection $database, McpPolicyResolver $policy, ?ModerationInformationInterface $moderation, LanguageManagerInterface $language_manager, mixed $translation_manager = NULL, ?EntityFieldManagerInterface $entity_field_manager = NULL): void {
+  public function setDraftServices(
+    Connection $database,
+    McpPolicyResolver $policy,
+    ?ModerationInformationInterface $moderation,
+    LanguageManagerInterface $language_manager,
+    mixed $translation_manager = NULL,
+    ?EntityFieldManagerInterface $entity_field_manager = NULL,
+    ?McpTranslationDraftReporter $draft_reporter = NULL,
+  ): void {
     $this->draftDatabase = $database;
     $this->draftPolicy = $policy;
     $this->draftModeration = $moderation;
     $this->languageManager = $language_manager;
     $this->translationManager = $translation_manager;
     $this->entityFieldManager = $entity_field_manager;
+    $this->draftReporter = $draft_reporter;
   }
 
   /**
@@ -193,6 +213,10 @@ final class McpDraftResource extends EntityResource {
     if (!$draft->access('update', $this->user)) {
       throw new AccessDeniedHttpException('Draft update access denied.');
     }
+    // A language carried forward as not-affected can be unpublished with
+    // published moderation (#3626610 / #3626919). Restore draft moderation
+    // so continue can correct that pending text.
+    $this->restoreCarriedDraftModeration($draft);
     $this->assertTranslationNotDefaultRevisionState($draft);
     // Core's deserialize() docblock says array, but this normalizer returns
     // the content entity. Keep the actual contract explicit here.
@@ -213,7 +237,7 @@ final class McpDraftResource extends EntityResource {
     // Include entity-level governance constraints, not only changed fields.
     static::validate($draft);
     if ($preflight === '1') {
-      return $this->preflightResponse($versions, $langcode);
+      return $this->preflightResponse($versions, $langcode, NULL, $live, $storage);
     }
     return $this->saveForwardRevision($storage, $entity, $draft, $resource_type, $request, $versions);
   }
@@ -289,7 +313,7 @@ final class McpDraftResource extends EntityResource {
       2 => $versions[2],
     ];
     if ($preflight === '1') {
-      return $this->preflightResponse($save_versions, $langcode);
+      return $this->preflightResponse($save_versions, $langcode, NULL, $live, $storage);
     }
     return $this->saveForwardRevision($storage, $entity, $translation, $resource_type, $request, $save_versions, 'create');
   }
@@ -301,9 +325,11 @@ final class McpDraftResource extends EntityResource {
    * revision, `"live:working"` when a working copy exists (for example an
    * English draft). With a working copy the new revision is built on it, so
    * its drafts in other languages carry forward unchanged; the target
-   * language must still match the published translation there. The live
-   * default revision, its other languages, and the alias stay put. Plain
-   * create is unchanged and still 409s when the language exists.
+   * language must still match the published translation there. The default
+   * language may be revised the same way when the working copy holds only
+   * a translation draft. The live default revision, its other languages,
+   * and the alias stay put. Plain create is unchanged and still 409s when
+   * the language exists.
    *
    * @return \Drupal\jsonapi\ResourceResponse|\Symfony\Component\HttpFoundation\JsonResponse
    *   The saved translation resource or preflight metadata.
@@ -318,7 +344,10 @@ final class McpDraftResource extends EntityResource {
     $latest_id = $storage->getLatestRevisionId($entity->id());
     $stored = $storage->loadUnchanged($entity->id());
     $live = $this->assertReviseRevisionPointers($stored, $latest_id, $versions);
-    if ($live->language()->getId() === $langcode) {
+    $is_default = $live->language()->getId() === $langcode;
+    // Revising the default language is the mirror of revise-over-working
+    // for translations (#3626919): only when a named working copy exists.
+    if ($is_default && $versions[2] === '') {
       throw new BadRequestHttpException('The target language is already the default language.');
     }
     $this->assertBundleTranslatable($live);
@@ -359,7 +388,7 @@ final class McpDraftResource extends EntityResource {
     if (($data['id'] ?? NULL) !== $base->uuid()) {
       throw new BadRequestHttpException('The selected entity does not match the ID in the payload.');
     }
-    $this->applySubmittedDraftFields($resource_type, $parsed, $translation, $live, $data, TRUE);
+    $this->applySubmittedDraftFields($resource_type, $parsed, $translation, $live, $data, !$is_default);
     $this->applySubmittedRevisionLog($resource_type, $translation, $data);
     $this->assertDraftRemainsUnpublished($translation);
     static::validate($translation);
@@ -368,7 +397,7 @@ final class McpDraftResource extends EntityResource {
       2 => $versions[2],
     ];
     if ($preflight === '1') {
-      return $this->preflightResponse($save_versions, $langcode, self::REVISE_OPERATION);
+      return $this->preflightResponse($save_versions, $langcode, self::REVISE_OPERATION, $live, $storage);
     }
     return $this->saveForwardRevision($storage, $entity, $translation, $resource_type, $request, $save_versions, 'revise');
   }
@@ -400,6 +429,8 @@ final class McpDraftResource extends EntityResource {
       'defaultLangcode' => $live->getUntranslated()->language()->getId(),
       'live' => $this->summarizeRevisionTranslations($live),
       'working' => NULL,
+      'pending' => [],
+      'multi_pending' => FALSE,
       'operations' => [
         'create_translation',
         self::REVISE_OPERATION,
@@ -409,7 +440,25 @@ final class McpDraftResource extends EntityResource {
     if ((string) $latest_id !== (string) $live->getRevisionId()) {
       $working = $storage->loadRevision($latest_id);
       if ($working instanceof ContentEntityInterface && $working->access('view', $this->user)) {
-        $payload['working'] = $this->summarizeRevisionTranslations($working);
+        $summary = $this->summarizeRevisionTranslations($working);
+        if ($this->draftReporter && $storage instanceof TranslatableRevisionableStorageInterface) {
+          $summary = $this->draftReporter->decorateWorkingInventory(
+            $summary,
+            $live,
+            $storage,
+            $working,
+            $this->user,
+          );
+          $pending = $this->draftReporter->pendingLanguages($live, $storage, $this->user);
+          $payload['pending'] = $pending;
+          $payload['multi_pending'] = count($pending) > 1;
+          if ($payload['multi_pending']) {
+            $payload['notices'] = [
+              $this->draftReporter->multiPendingPublishNotice(),
+            ];
+          }
+        }
+        $payload['working'] = $summary;
       }
     }
     return new JsonResponse(['meta' => $payload], 200, ['Cache-Control' => 'no-store']);
@@ -636,11 +685,21 @@ final class McpDraftResource extends EntityResource {
    *   The selected language, if any.
    * @param string|null $operation
    *   Optional operation name echoed so clients can tell revise from create.
+   * @param \Drupal\Core\Entity\ContentEntityInterface|null $live
+   *   Live revision used to attach a multi-pending notice.
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface|null $storage
+   *   Storage used to count pending languages.
    *
    * @return \Symfony\Component\HttpFoundation\JsonResponse
    *   Preflight metadata.
    */
-  private function preflightResponse(array $versions, ?string $langcode, ?string $operation = NULL): JsonResponse {
+  private function preflightResponse(
+    array $versions,
+    ?string $langcode,
+    ?string $operation = NULL,
+    ?ContentEntityInterface $live = NULL,
+    ?RevisionableStorageInterface $storage = NULL,
+  ): JsonResponse {
     $meta = [
       'draft_preflight' => TRUE,
       'live' => $versions[1],
@@ -652,6 +711,7 @@ final class McpDraftResource extends EntityResource {
     if ($operation !== NULL && $operation !== '') {
       $meta['operation'] = $operation;
     }
+    $meta = $this->withPendingNotice($meta, $live, $storage, $langcode);
     return new JsonResponse(['meta' => $meta], 200, ['Cache-Control' => 'no-store']);
   }
 
@@ -732,7 +792,8 @@ final class McpDraftResource extends EntityResource {
       $primary_data = new ResourceObjectData([ResourceObject::createFromEntity($resource_type, $draft)], 1);
       /** @var \Drupal\jsonapi\JsonApiResource\IncludedData $includes */
       $includes = $this->getIncludes($request, $primary_data);
-      return $this->buildWrappedResponse($primary_data, $request, $includes);
+      $meta = $this->withPendingNotice([], $stored_live, $storage, $langcode);
+      return $this->buildWrappedResponse($primary_data, $request, $includes, meta: $meta);
     }
     catch (\Throwable $exception) {
       $transaction->rollBack();
@@ -1071,6 +1132,78 @@ final class McpDraftResource extends EntityResource {
     if ($state instanceof ContentModerationState && $state->isDefaultRevisionState()) {
       throw new ConflictHttpException('The requested translation is not an unpublished working draft.');
     }
+  }
+
+  /**
+   * Sets draft moderation on an unpublished language carried as published.
+   *
+   * Revise-over-working copies other languages onto the new tip with
+   * revision_translation_affected FALSE. Those languages keep their pending
+   * text and unpublished status but can store moderation_state published
+   * from live. Continue must treat that as a draft, not refuse it.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
+   *   The translation about to be continued.
+   */
+  private function restoreCarriedDraftModeration(ContentEntityInterface $draft): void {
+    if ($draft instanceof EntityPublishedInterface && $draft->isPublished()) {
+      return;
+    }
+    if (!$draft->hasField('moderation_state')) {
+      return;
+    }
+    $moderation = $this->draftModeration;
+    if (!$moderation || !$moderation->isModeratedEntity($draft)) {
+      return;
+    }
+    $state_id = $draft->get('moderation_state')->value;
+    if (!is_string($state_id) || $state_id === '') {
+      return;
+    }
+    $state = $moderation->getWorkflowForEntity($draft)->getTypePlugin()->getState($state_id);
+    if ($state instanceof ContentModerationState && $state->isDefaultRevisionState()) {
+      $draft->set('moderation_state', 'draft');
+    }
+  }
+
+  /**
+   * Adds multi-pending publish notice fields when two languages are pending.
+   *
+   * @param array<string, mixed> $meta
+   *   Existing response meta.
+   * @param \Drupal\Core\Entity\ContentEntityInterface|null $live
+   *   The live default revision, if known.
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface|null $storage
+   *   Entity storage.
+   * @param string|null $incoming_langcode
+   *   Language this write is opening, counted even before save.
+   *
+   * @return array<string, mixed>
+   *   Meta, possibly with notices, pending, and multi_pending.
+   */
+  private function withPendingNotice(
+    array $meta,
+    ?ContentEntityInterface $live,
+    ?RevisionableStorageInterface $storage,
+    ?string $incoming_langcode,
+  ): array {
+    if (!$this->draftReporter || !$live instanceof ContentEntityInterface
+      || !$storage instanceof TranslatableRevisionableStorageInterface) {
+      return $meta;
+    }
+    $pending = $this->draftReporter->pendingLanguages($live, $storage, $this->user);
+    $codes = array_column($pending, 'langcode');
+    if ($incoming_langcode !== NULL && $incoming_langcode !== ''
+      && !in_array($incoming_langcode, $codes, TRUE)) {
+      $codes[] = $incoming_langcode;
+    }
+    if (count($codes) < 2) {
+      return $meta;
+    }
+    $meta['multi_pending'] = TRUE;
+    $meta['pending'] = $pending;
+    $meta['notices'] = [$this->draftReporter->multiPendingPublishNotice()];
+    return $meta;
   }
 
   /**

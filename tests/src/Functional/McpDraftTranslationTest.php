@@ -676,6 +676,294 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * Inventory reads each language from its latest-affected revision.
+   *
+   * After English draft then Spanish revise-over-working, the tip stores
+   * English as published moderation. The inventory must still report the
+   * English draft on the earlier revision (#3626610) and warn that
+   * publishing one language drops the other (#3626879).
+   */
+  public function testInventoryReportsPendingDraftFromLatestAffectedRevision(): void {
+    [$agent, $node, , $path_create, , $path_inventory] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    [$live_vid, $english_vid] = $this->publishSpanishThenDraftEnglish($node);
+    $revised = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'Acerca de nosotros',
+      'revision_log' => 'Revise es on working copy',
+    ], '"' . $live_vid . ':' . $english_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
+    $revised_meta = json_decode((string) $revised->getBody(), TRUE)['meta'] ?? [];
+    $this->assertTrue($revised_meta['multi_pending'] ?? FALSE);
+    $this->assertSame(
+      'multi_pending_publish',
+      $revised_meta['notices'][0]['code'] ?? NULL,
+    );
+    $spanish_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertSame($english_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'en'));
+    $this->assertSame($spanish_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'es'));
+
+    $meta = $this->inventoryMeta($path_inventory, $agent);
+    $this->assertSame($spanish_vid, $meta['working']['vid']);
+    $this->assertTrue($meta['multi_pending']);
+    $this->assertSame('multi_pending_publish', $meta['notices'][0]['code'] ?? NULL);
+    $by_lang = [];
+    foreach ($meta['working']['translations'] as $row) {
+      $by_lang[$row['langcode']] = $row;
+    }
+    $this->assertSame($english_vid, $by_lang['en']['working_vid']);
+    $this->assertSame('draft', $by_lang['en']['moderation_state']);
+    $this->assertFalse($by_lang['en']['status']);
+    $this->assertTrue($by_lang['en']['pending']);
+    $this->assertFalse($by_lang['en']['affected']);
+    $this->assertSame('English pending', $by_lang['en']['title']);
+    $this->assertSame($spanish_vid, $by_lang['es']['working_vid']);
+    $this->assertSame('draft', $by_lang['es']['moderation_state']);
+    $this->assertTrue($by_lang['es']['pending']);
+    $this->assertTrue($by_lang['es']['affected']);
+    $this->assertEqualsCanonicalizing(['en', 'es'], array_column($meta['pending'], 'langcode'));
+  }
+
+  /**
+   * Publishing one pending language drops the other (documented core outcome).
+   *
+   * #3626879: Sentinel surfaces the drop; it does not prevent it.
+   */
+  public function testPublishingOneLanguageDropsTheOtherPendingDraft(): void {
+    [$agent, $node, , $path_create, , $path_inventory] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    [$live_vid, $english_vid] = $this->publishSpanishThenDraftEnglish($node);
+    $revised = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'Acerca de nosotros',
+    ], '"' . $live_vid . ':' . $english_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
+    $this->assertTrue(json_decode((string) $revised->getBody(), TRUE)['meta']['multi_pending'] ?? FALSE);
+
+    require_once $this->root . '/core/includes/install.inc';
+    require_once $this->root . '/' . $this->container->get('extension.list.module')
+      ->getPath('mcp_sentinel') . '/mcp_sentinel.install';
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_multi_pending_translations', $requirements);
+    $listed = $requirements['mcp_sentinel_multi_pending_translations']['description']['#items'] ?? [];
+    $this->assertNotEmpty(array_filter(
+      $listed,
+      static fn(string $item): bool => str_contains($item, (string) $node->id()),
+    ));
+
+    $editor = $this->drupalCreateUser([
+      'access content',
+      'edit any page content',
+      'view any unpublished content',
+      'translate any entity',
+      'update content translations',
+      'use editorial transition create_new_draft',
+      'use editorial transition publish',
+    ]);
+    $this->drupalLogin($editor);
+    $spanish_vid = $storage->getLatestTranslationAffectedRevisionId($node->id(), 'es');
+    $spanish_rev = $storage->loadRevision($spanish_vid);
+    $this->assertInstanceOf(NodeInterface::class, $spanish_rev);
+    $spanish = $spanish_rev->getTranslation('es');
+    $spanish->setNewRevision(TRUE);
+    $spanish->set('moderation_state', 'published');
+    $spanish->save();
+    $storage->resetCache([$node->id()]);
+
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame('Acerca de nosotros', $live->getTranslation('es')->label());
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+    $this->assertSame('Articles', $live->label());
+    $this->assertTrue($live->isPublished());
+    $this->assertSame(
+      (string) $live->getRevisionId(),
+      (string) $storage->getLatestRevisionId($node->id()),
+    );
+    $meta = $this->inventoryMeta($path_inventory, $agent);
+    $this->assertNull($meta['working']);
+    $this->assertFalse($meta['multi_pending']);
+    $this->assertSame([], $meta['pending']);
+    $requirements = mcp_sentinel_requirements('runtime');
+    $after = $requirements['mcp_sentinel_multi_pending_translations']['description']['#items'] ?? [];
+    $this->assertEmpty(array_filter(
+      $after,
+      static fn(string $item): bool => str_contains($item, (string) $node->id()),
+    ));
+  }
+
+  /**
+   * Default language can be revised over a translation-only working copy.
+   *
+   * #3626919: Spanish draft survives; stale working id and diverged English
+   * on the working copy are 409.
+   */
+  public function testDefaultLanguageReviseOverTranslationDraft(): void {
+    [$agent, $node, , $path_create, $path_draft, $path_inventory] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $storage->resetCache([$node->id()]);
+    $node = $storage->load($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $node);
+    $node->addTranslation('es', [
+      'title' => 'Empresa',
+      'moderation_state' => 'published',
+    ]);
+    $node->getTranslation('es')->setPublished();
+    $node->save();
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $live_vid = (string) $live->getRevisionId();
+
+    $spanish = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'Acerca de nosotros',
+      'revision_log' => 'Revise es',
+    ], '"' . $live_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(200, $spanish->getStatusCode(), (string) $spanish->getBody());
+    $spanish_vid = (string) $storage->getLatestRevisionId($node->id());
+
+    $continue_en = $this->translationRequest('PATCH', $path_draft, $agent, $node, [
+      'title' => 'About us',
+    ], '"' . $live_vid . ':' . $spanish_vid . '"', FALSE, 'en');
+    $this->assertSame(409, $continue_en->getStatusCode(), (string) $continue_en->getBody());
+    $this->assertStringContainsString('X-MCP-Draft-Mode: revise', (string) $continue_en->getBody());
+
+    $stale = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'About us',
+    ], '"' . $live_vid . ':999999"', FALSE, 'en', [], 'revise');
+    $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
+    $this->assertStringContainsString('Reload before retrying', (string) $stale->getBody());
+    $this->assertSame($spanish_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $working = $storage->loadRevision($spanish_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $working->setSyncing(TRUE);
+    $working->setNewRevision(FALSE);
+    $working->isDefaultRevision(FALSE);
+    $working->getUntranslated()->setTitle('Diverged English');
+    $working->save();
+    $storage->resetCache([$node->id()]);
+    $this->assertSame($spanish_vid, (string) $storage->getLatestRevisionId($node->id()));
+    $diverged = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'About us',
+    ], '"' . $live_vid . ':' . $spanish_vid . '"', FALSE, 'en', [], 'revise');
+    $this->assertSame(409, $diverged->getStatusCode(), (string) $diverged->getBody());
+    $this->assertStringContainsString('differs from the published translation', (string) $diverged->getBody());
+
+    // Restore English on the working copy so revise can open a draft.
+    $working = $storage->loadRevision($spanish_vid);
+    $this->assertInstanceOf(NodeInterface::class, $working);
+    $working->setSyncing(TRUE);
+    $working->setNewRevision(FALSE);
+    $working->isDefaultRevision(FALSE);
+    $working->getUntranslated()->setTitle('Articles');
+    $working->save();
+    $storage->resetCache([$node->id()]);
+
+    $preflight = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'About us',
+    ], '"' . $live_vid . ':' . $spanish_vid . '"', TRUE, 'en', [], 'revise');
+    $this->assertSame(200, $preflight->getStatusCode(), (string) $preflight->getBody());
+    $this->assertSame($spanish_vid, (string) $storage->getLatestRevisionId($node->id()));
+
+    $named = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'About us',
+      'revision_log' => 'Draft English over Spanish working copy',
+    ], '"' . $live_vid . ':' . $spanish_vid . '"', FALSE, 'en', [], 'revise');
+    $this->assertSame(200, $named->getStatusCode(), (string) $named->getBody());
+    $english_vid = (string) $storage->getLatestRevisionId($node->id());
+    $this->assertNotSame($spanish_vid, $english_vid);
+
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertSame('Articles', $live->label());
+    $this->assertSame('Empresa', $live->getTranslation('es')->label());
+    $this->assertTrue($live->getTranslation('es')->isPublished());
+
+    $revised = $storage->loadRevision($english_vid);
+    $this->assertInstanceOf(NodeInterface::class, $revised);
+    $this->assertSame('About us', $revised->getUntranslated()->label());
+    $this->assertFalse($revised->getUntranslated()->isPublished());
+    $this->assertSame('draft', $revised->getUntranslated()->get('moderation_state')->value);
+    $this->assertSame('Acerca de nosotros', $revised->getTranslation('es')->label());
+    $this->assertFalse($revised->getTranslation('es')->isPublished());
+    $this->assertFalse((bool) $revised->getTranslation('es')->isRevisionTranslationAffected());
+    $this->assertSame($spanish_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'es'));
+    $this->assertSame($english_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'en'));
+
+    $meta = $this->inventoryMeta($path_inventory, $agent);
+    $this->assertTrue($meta['multi_pending']);
+    $by_lang = [];
+    foreach ($meta['working']['translations'] as $row) {
+      $by_lang[$row['langcode']] = $row;
+    }
+    $this->assertSame('draft', $by_lang['es']['moderation_state']);
+    $this->assertSame($spanish_vid, $by_lang['es']['working_vid']);
+    $this->assertSame('Acerca de nosotros', $by_lang['es']['title']);
+    $this->assertSame('draft', $by_lang['en']['moderation_state']);
+    $this->assertSame($english_vid, $by_lang['en']['working_vid']);
+  }
+
+  /**
+   * Continue can correct English after Spanish was revised over its draft.
+   *
+   * #3626919 follow-up: the tip stores English as published moderation with
+   * the pending title. Continue must open that draft; Spanish survives.
+   */
+  public function testDefaultLanguageContinueAfterReviseOverWorkingCopy(): void {
+    [$agent, $node, , $path_create, $path_draft] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    [$live_vid, $english_vid] = $this->publishSpanishThenDraftEnglish($node);
+    $revised = $this->translationRequest('POST', $path_create, $agent, $node, [
+      'title' => 'Acerca de nosotros',
+    ], '"' . $live_vid . ':' . $english_vid . '"', FALSE, 'es', [], 'revise');
+    $this->assertSame(200, $revised->getStatusCode(), (string) $revised->getBody());
+    $spanish_vid = (string) $storage->getLatestRevisionId($node->id());
+    $tip = $storage->loadRevision($spanish_vid);
+    $this->assertInstanceOf(NodeInterface::class, $tip);
+    $this->assertSame('published', $tip->getUntranslated()->get('moderation_state')->value);
+    $this->assertFalse($tip->getUntranslated()->isPublished());
+
+    $continued = $this->translationRequest('PATCH', $path_draft, $agent, $node, [
+      'title' => 'English pending two',
+      'revision_log' => 'Correct English on tip',
+    ], '"' . $live_vid . ':' . $spanish_vid . '"', FALSE, 'en');
+    $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
+    $new_vid = (string) $storage->getLatestRevisionId($node->id());
+    $latest = $storage->loadRevision($new_vid);
+    $this->assertInstanceOf(NodeInterface::class, $latest);
+    $this->assertSame('English pending two', $latest->getUntranslated()->label());
+    $this->assertSame('draft', $latest->getUntranslated()->get('moderation_state')->value);
+    $this->assertFalse($latest->getUntranslated()->isPublished());
+    $this->assertSame('Acerca de nosotros', $latest->getTranslation('es')->label());
+    $this->assertFalse($latest->getTranslation('es')->isPublished());
+    $this->assertSame($spanish_vid, (string) $storage->getLatestTranslationAffectedRevisionId($node->id(), 'es'));
+  }
+
+  /**
+   * GET .../mcp-translations meta for a governed agent.
+   *
+   * @param string $path_inventory
+   *   Absolute inventory URL.
+   * @param \Drupal\user\UserInterface $agent
+   *   The governed agent.
+   *
+   * @return array<string, mixed>
+   *   Decoded meta object.
+   */
+  private function inventoryMeta(string $path_inventory, UserInterface $agent): array {
+    $inventory = $this->getHttpClient()->request('GET', $path_inventory, [
+      'http_errors' => FALSE,
+      // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
+      'auth' => [$agent->getAccountName(), $agent->passRaw],
+      'headers' => ['Accept' => 'application/vnd.api+json'],
+    ]);
+    $this->assertSame(200, $inventory->getStatusCode(), (string) $inventory->getBody());
+    $meta = json_decode((string) $inventory->getBody(), TRUE)['meta'] ?? [];
+    $this->assertIsArray($meta);
+    return $meta;
+  }
+
+  /**
    * Builds a translatable published page and a governed agent.
    *
    * @return array{0: \Drupal\user\UserInterface, 1: \Drupal\node\NodeInterface, 2: string, 3: string, 4: string, 5: string}

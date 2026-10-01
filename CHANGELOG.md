@@ -11,6 +11,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The site-wide urgent banner is inset by the admin navigation sidebar,
   so its message is not hidden under the sidebar. Dismiss is a labeled
   button on each condition.
+- #3626610: `GET .../mcp-translations` reports each language from its latest
+  translation-affected revision (`working_vid`), not only from the tip
+  working revision. After revise-over-working, a language whose draft sits
+  on an earlier revision is no longer shown as `moderation_state: published`.
+- #3626919: The default language can be drafted when the working copy holds
+  only a translation draft. Revise accepts `X-MCP-Draft-Langcode` for the
+  default language with `If-Match: "live:working"`, using the same stale-id
+  and live-text guards as translation revise-over-working. Continue also
+  restores draft moderation when the default language was carried onto the
+  tip as unpublished with published moderation.
+
+### Added
+
+- #3626879: When more than one language is pending, draft writes, preflight,
+  and the translation inventory return `meta.multi_pending` and a
+  `multi_pending_publish` notice that publishing one language in the UI
+  drops the others. The status report lists those nodes. This is core
+  revision behavior; Sentinel surfaces it rather than hiding it.
 
 ## [2.25.5] - 2026-09-30
 
