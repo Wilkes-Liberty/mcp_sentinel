@@ -6,26 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-10-01
+
 ### Added
-- DEV-761: Admin MCP status strip on the governance dashboard and settings
-  form. Shows master-switch on/off, designated agent clients / consumers,
-  source-governance readiness with the failing gate in plain language, the
-  last whoami/readiness signal, and a deep link to add an agent client.
-- DEV-762: Sealed-token mint UI at Configuration → MCP Sentinel → Sealed
-  tokens. Tokens are short-TTL, bound to a designated client, shown
-  copy-once, and revocable. The secret is never stored or echoed after
-  leaving the reveal page.
-- DEV-764: Tool and readiness denials name the policy/rule and whether
-  widening is appropriate. Widening is never automatic. README shows a
-  good vs bad deny message. Secrets are not included.
+- Admin MCP status strip on the governance dashboard and settings form.
+  Shows whether the master switch is on, which agent clients are
+  designated, source-governance readiness with the failing gate in plain
+  language, the last whoami or readiness signal, and a link to add an
+  agent client.
+- Sealed-token mint form at Configuration → MCP Sentinel → Sealed tokens.
+  Tokens are short-lived, bound to a designated client, shown once, and
+  revocable. The secret is not stored and is not shown again after the
+  reveal page.
+- Tool and readiness denials name the policy or rule and say whether
+  widening access would change the result. Widening is never automatic.
+  The README shows a specific denial beside one that only says denied.
+  Denial text does not include secrets.
 
 ### Fixed
-- DEV-761/762/764 follow-up: the sealed-token mint form uses serializable
-  FormBase services, deny explain includes the Stay denied verdict, and
-  update 10026 is covered. Sealed tokens are limited to MCP/JSON:API/GraphQL
-  routes, reveal is `private, no-store`, verify re-checks the Consumer, and
-  admin strip links require route access.
-- #3627189: Creating a Spanish draft on a node that already has a pending
+- The sealed-token mint form uses serializable form services. Denial text
+  includes the stay-denied verdict. Update 10026 is covered. Sealed tokens
+  are limited to MCP, JSON:API, and GraphQL routes. The reveal response is
+  `private, no-store`. Verification re-checks the consumer. Status-strip
+  links require access to the target route.
+- [#3627189](https://www.drupal.org/project/mcp_sentinel/issues/3627189): Creating a Spanish draft on a node that already has a pending
   English working copy no longer returns a false HTTP 409 claiming the
   translation already exists. The save lock re-reads the stored working
   revision instead of the in-memory object that `addTranslation()` already
@@ -2584,7 +2588,18 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.27.0...1.x
+[2.27.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.26.0...2.27.0
+[2.26.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.5...2.26.0
+[2.25.5]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.4...2.25.5
+[2.25.4]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.3...2.25.4
+[2.25.3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.2...2.25.3
+[2.25.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.1...2.25.2
+[2.25.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.0...2.25.1
+[2.25.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.4...2.25.0
+[2.24.4]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.3...2.24.4
+[2.24.3]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.2...2.24.3
+[2.24.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.1...2.24.2
 [2.24.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.24.0...2.24.1
 [2.24.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.2...2.24.0
 [2.23.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.23.1...2.23.2
