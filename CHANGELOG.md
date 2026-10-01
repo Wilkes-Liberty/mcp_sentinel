@@ -10,7 +10,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Dashboard charts no longer fill the page when a row holds one chart.
   Chart grids use fixed-width tracks, the audit log chart strip is a grid,
   Charts API elements set a 200px height, and canvas and SVG charts are
-  capped at 200px tall.
+  capped at 200px tall. The grid and caps are in a new
+  `mcp_sentinel/charts` library, which the dashboard library depends on
+  and the audit log attaches.
 
 ## [2.25.5] - 2026-09-30
 

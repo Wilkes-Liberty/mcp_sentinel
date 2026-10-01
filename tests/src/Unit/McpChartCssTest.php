@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\Component\Serialization\Yaml;
 use Drupal\mcp_sentinel\Service\McpChartRenderer;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
- * Locks the chart size caps in the dashboard stylesheet.
+ * Locks the chart size caps in the shared chart stylesheet.
  *
  * A grid with auto-fit and a 1fr maximum stretches a single chart across
  * the whole row, and Chart.js then draws a canvas as tall as it is wide.
@@ -21,7 +22,7 @@ use PHPUnit\Framework\Attributes\Group;
 final class McpChartCssTest extends UnitTestCase {
 
   /**
-   * The dashboard stylesheet.
+   * The chart stylesheet.
    */
   private string $css;
 
@@ -30,9 +31,9 @@ final class McpChartCssTest extends UnitTestCase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $css = file_get_contents(dirname(__DIR__, 3) . '/css/dashboard.css');
+    $css = file_get_contents(dirname(__DIR__, 3) . '/css/charts.css');
     if (!is_string($css)) {
-      $this->fail('dashboard.css is not readable.');
+      $this->fail('charts.css is not readable.');
     }
     $this->css = $css;
   }
@@ -58,6 +59,26 @@ final class McpChartCssTest extends UnitTestCase {
       . preg_quote($height, '/') . '/s';
     $this->assertMatchesRegularExpression($canvas, $this->css);
     $this->assertMatchesRegularExpression($svg, $this->css);
+  }
+
+  /**
+   * The dashboard library pulls in the chart stylesheet.
+   *
+   * The audit log attaches the charts library directly; that page is
+   * covered by McpAuditFilterExportTest::testChartStylesheetIsLoaded().
+   */
+  public function testDashboardLibraryDependsOnCharts(): void {
+    $libraries = Yaml::decode((string) file_get_contents(
+      dirname(__DIR__, 3) . '/mcp_sentinel.libraries.yml',
+    ));
+    $this->assertArrayHasKey(
+      'css/charts.css',
+      $libraries['charts']['css']['theme'],
+    );
+    $this->assertContains(
+      'mcp_sentinel/charts',
+      $libraries['dashboard']['dependencies'],
+    );
   }
 
 }

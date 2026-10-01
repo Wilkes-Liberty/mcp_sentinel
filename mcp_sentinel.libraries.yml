@@ -4,6 +4,12 @@ admin:
     theme:
       css/admin.css: {}
 
+charts:
+  version: 2.x
+  css:
+    theme:
+      css/charts.css: {}
+
 dashboard:
   version: 2.x
   css:
@@ -12,6 +18,7 @@ dashboard:
   js:
     js/dashboard.js: {}
   dependencies:
+    - mcp_sentinel/charts
     - core/drupal
     - core/once
     - core/drupalSettings
