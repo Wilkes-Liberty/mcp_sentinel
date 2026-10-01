@@ -72,12 +72,12 @@ final class McpTranslationDraftReporter {
     return [
       'code' => self::NOTICE_CODE,
       'detail' => 'This entity has pending drafts in more than one language. '
-      . 'Publishing one language in the Drupal UI drops the other pending '
-      . 'drafts: core builds the new default revision from the published '
-      . 'language and takes every other language from the previous default. '
-      . 'The dropped draft remains in revision history. Re-draft it from that '
-      . 'language\'s last draft revision (working_vid on GET '
-      . '.../mcp-translations). Sentinel does not hide this core behavior.',
+        . 'Publishing one language in the Drupal UI drops the other pending '
+        . 'drafts: core builds the new default revision from the published '
+        . 'language and takes every other language from the previous default. '
+        . 'The dropped draft remains in revision history. Re-draft it from that '
+        . 'language\'s last draft revision (working_vid on GET '
+        . '.../mcp-translations). Sentinel does not hide this core behavior.',
     ];
   }
 
@@ -150,7 +150,7 @@ final class McpTranslationDraftReporter {
     $seen = [];
     $translations = [];
     foreach ($working['translations'] as $row) {
-      if (!is_array($row) || !is_string($row['langcode'] ?? NULL)) {
+      if (!is_string($row['langcode'] ?? NULL)) {
         continue;
       }
       $seen[] = $row['langcode'];
@@ -182,9 +182,11 @@ final class McpTranslationDraftReporter {
         continue;
       }
       $storage = $this->entityTypeManager->getStorage($entity_type_id);
-      if (!$storage instanceof TranslatableRevisionableStorageInterface) {
+      if (!method_exists($storage, 'getLatestTranslationAffectedRevisionId')) {
         continue;
       }
+      // Node and media storage implement the translatable-revision contract.
+      /** @var \Drupal\Core\Entity\TranslatableRevisionableStorageInterface $storage */
       foreach ($this->idsWithForwardRevision($entity_type_id) as $id) {
         $live = $storage->loadUnchanged($id);
         if (!$live instanceof ContentEntityInterface) {
@@ -198,10 +200,10 @@ final class McpTranslationDraftReporter {
           'entity_type' => $entity_type_id,
           'id' => (string) $live->id(),
           'label' => (string) $live->label(),
-          'languages' => array_values(array_map(
+          'languages' => array_map(
             static fn(array $row): string => (string) $row['langcode'],
             $pending,
-          )),
+          ),
         ];
         if (count($found) >= self::LIST_CAP) {
           return $found;
@@ -426,7 +428,7 @@ final class McpTranslationDraftReporter {
    * Entity ids whose latest revision is not the default revision.
    *
    * @param string $entity_type_id
-   *   node or media.
+   *   Node or media.
    *
    * @return list<string>
    *   A capped list of ids, newest first.
@@ -459,7 +461,7 @@ final class McpTranslationDraftReporter {
       }
     }
     rsort($mismatched, SORT_NUMERIC);
-    return array_values(array_slice($mismatched, 0, self::SCAN_CAP));
+    return array_slice($mismatched, 0, self::SCAN_CAP);
   }
 
 }

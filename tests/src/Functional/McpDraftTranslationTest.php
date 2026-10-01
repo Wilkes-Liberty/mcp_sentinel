@@ -202,9 +202,15 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertSame('English pending', $working->getUntranslated()->label());
     $this->assertSame('Artículos', $working->getTranslation('es')->label());
 
-    $this->assertSame(409, $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Clobber English'], '"' . $live_vid . ':' . $new_working . '"', FALSE, 'en')->getStatusCode());
+    $continued = $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'English updated'], '"' . $live_vid . ':' . $new_working . '"', FALSE, 'en');
+    $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
+    $latest_working = (string) $storage->getLatestRevisionId($node->id());
+    $updated = $storage->loadRevision($latest_working);
+    $this->assertInstanceOf(NodeInterface::class, $updated);
+    $this->assertSame('English updated', $updated->getUntranslated()->label());
+    $this->assertSame('Artículos', $updated->getTranslation('es')->label());
     $this->config('mcp_sentinel.mcp_policy_profile.default')->set('allow_write', FALSE)->save();
-    $this->assertSame(403, $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Forbidden'], '"' . $live_vid . ':' . $new_working . '"', TRUE, 'es')->getStatusCode());
+    $this->assertSame(403, $this->translationRequest('PATCH', $path_draft, $agent, $node, ['title' => 'Forbidden'], '"' . $live_vid . ':' . $latest_working . '"', TRUE, 'es')->getStatusCode());
   }
 
   /**
@@ -772,12 +778,16 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $this->assertInstanceOf(NodeInterface::class, $live);
     $this->assertSame('Acerca de nosotros', $live->getTranslation('es')->label());
     $this->assertTrue($live->getTranslation('es')->isPublished());
-    $this->assertSame('Articles', $live->label());
     $this->assertTrue($live->isPublished());
     $this->assertSame(
       (string) $live->getRevisionId(),
       (string) $storage->getLatestRevisionId($node->id()),
     );
+    $english_affected = $storage->loadRevision(
+      $storage->getLatestTranslationAffectedRevisionId($node->id(), 'en'),
+    );
+    $this->assertInstanceOf(NodeInterface::class, $english_affected);
+    $this->assertTrue($english_affected->getUntranslated()->isPublished());
     $meta = $this->inventoryMeta($path_inventory, $agent);
     $this->assertNull($meta['working']);
     $this->assertFalse($meta['multi_pending']);
@@ -839,9 +849,13 @@ final class McpDraftTranslationTest extends BrowserTestBase {
     $working->setNewRevision(FALSE);
     $working->isDefaultRevision(FALSE);
     $working->getUntranslated()->setTitle('Diverged English');
+    $working->getUntranslated()->setRevisionTranslationAffected(TRUE);
     $working->save();
     $storage->resetCache([$node->id()]);
     $this->assertSame($spanish_vid, (string) $storage->getLatestRevisionId($node->id()));
+    $mutated = $storage->loadRevision($spanish_vid);
+    $this->assertInstanceOf(NodeInterface::class, $mutated);
+    $this->assertSame('Diverged English', $mutated->getUntranslated()->label());
     $diverged = $this->translationRequest('POST', $path_create, $agent, $node, [
       'title' => 'About us',
     ], '"' . $live_vid . ':' . $spanish_vid . '"', FALSE, 'en', [], 'revise');

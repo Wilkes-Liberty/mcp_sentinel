@@ -218,6 +218,7 @@ final class McpDraftResource extends EntityResource {
     // so continue can correct that pending text.
     $this->restoreCarriedDraftModeration($draft);
     $this->assertTranslationNotDefaultRevisionState($draft);
+    $this->markOtherLanguagesUnaffected($draft);
     // Core's deserialize() docblock says array, but this normalizer returns
     // the content entity. Keep the actual contract explicit here.
     /** @var \Drupal\Core\Entity\ContentEntityInterface $parsed */
@@ -1164,6 +1165,29 @@ final class McpDraftResource extends EntityResource {
     if ($state instanceof ContentModerationState && $state->isDefaultRevisionState()) {
       $draft->set('moderation_state', 'draft');
     }
+  }
+
+  /**
+   * Marks every language except the one being saved as not-affected.
+   *
+   * Continue must keep the same per-language latest-affected pointers as
+   * revise-over-working: the other language's draft stays on its own
+   * revision so editors and publishing still find it.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
+   *   The translation about to be saved.
+   */
+  private function markOtherLanguagesUnaffected(ContentEntityInterface $draft): void {
+    $langcode = $draft->language()->getId();
+    $host = $draft->isDefaultTranslation() ? $draft : $draft->getUntranslated();
+    foreach ($host->getTranslationLanguages() as $language) {
+      $code = $language->getId();
+      if ($code === $langcode) {
+        continue;
+      }
+      $host->getTranslation($code)->setRevisionTranslationAffected(FALSE);
+    }
+    $draft->setRevisionTranslationAffected(TRUE);
   }
 
   /**
