@@ -162,6 +162,25 @@ class McpEvidenceGuard {
   }
 
   /**
+   * Policy digest for a resolved profile, or NULL when none resolved.
+   *
+   * Shared with the approval-queue subscribers so a sealed manifest and an
+   * evidence precommit cite the same hash of the same profile document.
+   *
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface|null $profile
+   *   The resolved profile, or NULL when none resolved.
+   *
+   * @return string|null
+   *   A sha256: digest, or NULL when $profile is NULL.
+   */
+  public static function policyDigest(?McpPolicyProfileInterface $profile): ?string {
+    if ($profile === NULL) {
+      return NULL;
+    }
+    return 'sha256:' . hash('sha256', (string) json_encode($profile->toArray()));
+  }
+
+  /**
    * Returns the veto reason when required evidence cannot commit, else NULL.
    *
    * The checks are preconditions for a durable *keyed* append, evaluated
@@ -244,7 +263,7 @@ class McpEvidenceGuard {
       'operation' => $operation,
       'decision' => 'allow',
       'profile' => $profile->id(),
-      'policy_digest' => 'sha256:' . hash('sha256', (string) json_encode($profile->toArray())),
+      'policy_digest' => self::policyDigest($profile),
       'principal_uid' => (int) $this->currentUser->id(),
       // The delegation binding: which validated OAuth consumer (if any) the
       // principal acted through. NULL on the role-fallback channel. The

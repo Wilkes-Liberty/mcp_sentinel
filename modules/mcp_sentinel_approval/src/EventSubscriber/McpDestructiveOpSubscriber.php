@@ -4,15 +4,13 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel_approval\EventSubscriber;
 
-use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\RevisionableInterface;
-use Drupal\Core\Logger\LoggerChannelInterface;
-use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Event\McpDestructiveOpEvent;
 use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
+use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
-use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\mcp_sentinel_approval\Service\McpApprovalGate;
+use Drupal\mcp_sentinel_approval\Service\McpApprovalRequestRecorder;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -29,10 +27,8 @@ final class McpDestructiveOpSubscriber implements EventSubscriberInterface {
    *
    * @param \Drupal\mcp_sentinel_approval\Service\McpApprovalGate $gate
    *   The approval gate.
-   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
-   *   The entity type manager.
-   * @param \Drupal\Core\Logger\LoggerChannelInterface $logger
-   *   The mcp_sentinel logger channel.
+   * @param \Drupal\mcp_sentinel_approval\Service\McpApprovalRequestRecorder $recorder
+   *   Writes the pending approval request.
    * @param \Drupal\mcp_sentinel\Service\McpActionManifestSealer $sealer
    *   Mints a sealed manifest when the signing key resolves. A NULL
    *   mint does not change who is gated.
@@ -41,8 +37,7 @@ final class McpDestructiveOpSubscriber implements EventSubscriberInterface {
    */
   public function __construct(
     private readonly McpApprovalGate $gate,
-    private readonly EntityTypeManagerInterface $entityTypeManager,
-    private readonly LoggerChannelInterface $logger,
+    private readonly McpApprovalRequestRecorder $recorder,
     private readonly McpActionManifestSealer $sealer,
     private readonly McpPolicyResolver $policyResolver,
   ) {}
@@ -91,54 +86,30 @@ final class McpDestructiveOpSubscriber implements EventSubscriberInterface {
         'revision' => $revision,
       ],
       $payload,
-      $this->policyDigest($event->getAccount()),
+      McpEvidenceGuard::policyDigest(
+        $this->policyResolver->resolve($event->getAccount()),
+      ),
     );
 
-    try {
-      $storage = $this->entityTypeManager->getStorage('mcp_approval_request');
-      $request = $storage->create([
-        'requested_by' => (int) $event->getAccount()->id(),
-        'operation'    => $event->getOperation(),
-        'entity_type'  => $entity->getEntityTypeId(),
-        'entity_id'    => (string) $entity->id(),
-        'payload'      => (string) json_encode($payload),
-        'status'       => McpApprovalRequestInterface::STATUS_PENDING,
-        'manifest'     => $manifest?->toJson() ?? '',
-      ]);
-      $request->save();
-    }
-    catch (\Throwable $e) {
-      // If we cannot record the request, veto anyway: a destructive op gated
-      // for approval must never silently proceed because bookkeeping failed.
-      // Not the message: a storage exception repeats the query arguments,
-      // and those are the payload and the manifest.
-      $this->logger->error(
-        'Failed to create approval request for @op on @type @id: @class at @file:@line.',
-        [
-          '@op'   => $event->getOperation(),
-          '@type' => $entity->getEntityTypeId(),
-          '@id'   => (string) $entity->id(),
-          '@class' => get_class($e),
-          '@file' => basename($e->getFile()),
-          '@line' => $e->getLine(),
-        ],
+    $request = $this->recorder->record(
+      $event->getAccount(),
+      $event->getOperation(),
+      $entity->getEntityTypeId(),
+      (string) $entity->id(),
+      $payload,
+      $manifest,
+    );
+    if ($request === NULL) {
+      $event->veto(
+        'Queued for approval (request could not be recorded; operation blocked).',
       );
-      $event->veto('Queued for approval (request could not be recorded; operation blocked).');
       return;
     }
 
-    $event->veto(sprintf('Queued for approval (request #%s).', (string) $request->id()));
-  }
-
-  /**
-   * Policy digest for the actor, or NULL when no profile resolved.
-   */
-  private function policyDigest(AccountInterface $account): ?string {
-    $profile = $this->policyResolver->resolve($account);
-    if ($profile === NULL) {
-      return NULL;
-    }
-    return 'sha256:' . hash('sha256', (string) json_encode($profile->toArray()));
+    $event->veto(sprintf(
+      'Queued for approval (request #%s).',
+      (string) $request->id(),
+    ));
   }
 
 }
