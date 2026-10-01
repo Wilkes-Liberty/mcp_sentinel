@@ -6,25 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.27.0] - 2026-10-01
+
 ### Added
-- DEV-761: Admin MCP status strip on the governance dashboard and settings
-  form. Shows master-switch on/off, designated agent clients / consumers,
-  source-governance readiness with the failing gate in plain language, the
-  last whoami/readiness signal, and a deep link to add an agent client.
-- DEV-762: Sealed-token mint UI at Configuration → MCP Sentinel → Sealed
-  tokens. Tokens are short-TTL, bound to a designated client, shown
-  copy-once, and revocable. The secret is never stored or echoed after
-  leaving the reveal page.
-- DEV-764: Tool and readiness denials name the policy/rule and whether
-  widening is appropriate. Widening is never automatic. README shows a
-  good vs bad deny message. Secrets are not included.
+- Admin MCP status strip on the governance dashboard and settings form.
+  Shows whether the master switch is on, which agent clients are
+  designated, source-governance readiness with the failing gate in plain
+  language, the last whoami or readiness signal, and a link to add an
+  agent client.
+- Sealed-token mint form at Configuration → MCP Sentinel → Sealed tokens.
+  Tokens are short-lived, bound to a designated client, shown once, and
+  revocable. The secret is not stored and is not shown again after the
+  reveal page.
+- Tool and readiness denials name the policy or rule and say whether
+  widening access would change the result. Widening is never automatic.
+  The README shows a specific denial beside one that only says denied.
+  Denial text does not include secrets.
 
 ### Fixed
-- DEV-761/762/764 follow-up: the sealed-token mint form uses serializable
-  FormBase services, deny explain includes the Stay denied verdict, and
-  update 10026 is covered. Sealed tokens are limited to MCP/JSON:API/GraphQL
-  routes, reveal is `private, no-store`, verify re-checks the Consumer, and
-  admin strip links require route access.
+- The sealed-token mint form uses serializable form services. Denial text
+  includes the stay-denied verdict. Update 10026 is covered. Sealed tokens
+  are limited to MCP, JSON:API, and GraphQL routes. The reveal response is
+  `private, no-store`. Verification re-checks the consumer. Status-strip
+  links require access to the target route.
 - #3627189: Creating a Spanish draft on a node that already has a pending
   English working copy no longer returns a false HTTP 409 claiming the
   translation already exists. The save lock re-reads the stored working
