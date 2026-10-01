@@ -92,6 +92,13 @@ services:
       - '@mcp_sentinel.content_lock'
       - '@entity_type.manager'
 
+  mcp_sentinel.translation_draft_reporter:
+    class: Drupal\mcp_sentinel\Service\McpTranslationDraftReporter
+    arguments:
+      - '@database'
+      - '@entity_type.manager'
+      - '@?content_moderation.moderation_information'
+
   # Evidence-required action veto (d.o #3616539). Both chain and key
   # references are optional for the same container-compilation reason as the
   # audit logger's: their absence is a veto condition the guard reports, not a

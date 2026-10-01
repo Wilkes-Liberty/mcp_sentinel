@@ -294,6 +294,36 @@ function mcp_sentinel_requirements(string $phase): array {
     ];
   }
 
+  // Multi-pending translation drafts (#3626879): revise-over-working can
+  // leave two languages pending on different revisions. Publishing one in
+  // the UI drops the other. Surface the nodes so the drop is not silent.
+  if (\Drupal::hasService('mcp_sentinel.translation_draft_reporter')) {
+    $multi = \Drupal::service('mcp_sentinel.translation_draft_reporter')
+      ->findMultiPendingEntities();
+    if ($multi !== []) {
+      $items = array_map(
+        static function (array $row): string {
+          return $row['entity_type'] . ':' . $row['id'] . ' (' . implode(', ', $row['languages']) . ')';
+        },
+        $multi,
+      );
+      $requirements['mcp_sentinel_multi_pending_translations'] = [
+        'title' => t('MCP Sentinel: multiple pending translation drafts'),
+        'value' => t('@count entities with more than one language pending', [
+          '@count' => count($multi),
+        ]),
+        'severity' => REQUIREMENT_WARNING,
+        'description' => [
+          '#theme' => 'item_list',
+          '#items' => $items,
+          '#prefix' => '<p>' . t(
+            'Publishing one pending language in the Drupal UI drops the other pending drafts. That is core revision behavior; Sentinel does not hide it. Publish or discard the remaining drafts deliberately, or re-draft a dropped language from its last draft revision (<code>working_vid</code> on GET .../mcp-translations).'
+          ) . '</p>',
+        ],
+      ];
+    }
+  }
+
   // Escape-hatch permissions on governed roles (#65). Reported at ERROR, not
   // WARNING, and deliberately before the governance early-return below: unlike
   // a misconfiguration, this is a control that *looks* configured while not

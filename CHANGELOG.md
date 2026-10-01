@@ -10,6 +10,33 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The site-wide urgent banner is inset by the admin navigation sidebar,
   so its message is not hidden under the sidebar. Dismiss is a labeled
   button on each condition.
+- #3626610: `GET .../mcp-translations` reports each language from its latest
+  translation-affected revision (`working_vid`), not only from the tip
+  working revision. After revise-over-working, a language whose draft sits
+  on an earlier revision is no longer shown as `moderation_state: published`.
+  Adding a translation onto a working draft enforces that same not-affected
+  split, so Drupal 10 does not leave the carried draft affected and then
+  refuse to continue it.
+- #3626919: The default language can be drafted when the working copy holds
+  only a translation draft. Revise accepts `X-MCP-Draft-Langcode` for the
+  default language with `If-Match: "live:working"`, using the same stale-id
+  and live-text guards as translation revise-over-working. Continue restores
+  draft moderation only when that carried translation is not affected and
+  its moderation state is published. Other default-revision states stay
+  refused.
+- #3626610: Translation inventory checks view access on the requested
+  translation. A caller who can view the default language does not receive
+  another language's title or moderation metadata.
+- #3626879: The status report selects at most 200 forward revisions in SQL,
+  newest revision first, instead of loading every node and media row.
+
+### Added
+
+- #3626879: When more than one language is pending, draft writes, preflight,
+  and the translation inventory return `meta.multi_pending` and a
+  `multi_pending_publish` notice that publishing one language in the UI
+  drops the others. The status report lists those nodes. This is core
+  revision behavior; Sentinel surfaces it rather than hiding it.
 - Dashboard charts no longer fill the page when a row holds one chart.
   Chart grids use fixed-width tracks, the audit log chart strip is a grid,
   Charts API elements set a 200px height, and canvas and SVG charts are

@@ -32,6 +32,7 @@ final class McpSentinelServiceProvider extends ServiceProviderBase {
         new Reference('language_manager'),
         new Reference('content_translation.manager', ContainerBuilder::NULL_ON_INVALID_REFERENCE),
         new Reference('entity_field.manager'),
+        new Reference('mcp_sentinel.translation_draft_reporter'),
       ]);
       $container->setDefinition('jsonapi.entity_resource.mcp_draft', $definition);
       $container->register('mcp_sentinel.draft_routes', McpDraftRoutes::class)

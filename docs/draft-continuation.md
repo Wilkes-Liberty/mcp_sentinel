@@ -39,18 +39,31 @@ used here. Translation writes are explicit:
   409, so older copy is never carried forward (translatable stored fields are
   compared; revision metadata, timestamps, status, and moderation state are
   not). If the language is already a draft on the working copy, continue it
-  instead. Omitting the header is still create, and create still returns the
+  instead. The default language uses the same named-working-copy revise path
+  when the working copy holds only a translation draft: stale working id is
+  409, and default-language text on the working copy that differs from live
+  is 409. Omitting the header is still create, and create still returns the
   existing 409 when the language already exists. `GET .../mcp-translations`
   lists `revise_published_translation` in `operations` on hosts that support
   revise, and `revise_over_working_copy` on hosts that accept a named working
   copy. Preflight echoes `meta.operation: revise_published_translation`.
 - `PATCH .../mcp-draft` with `X-MCP-Draft-Langcode` continues that translation
-  only. Omitting the header on a multilingual working revision is 409.
+  only. Omitting the header on a multilingual working revision is 409. When
+  the default language was carried onto the tip as unpublished with
+  published moderation (its pending text lives on an earlier revision),
+  continue restores draft moderation so that text can be corrected.
 - `GET .../mcp-translations` reports live and (when the principal can view the
   unpublished revision) working languages, titles, publication, and moderation
   state, plus core `content_translation_outdated` / `content_translation_source`
-  when those fields exist. `GET .../mcp-draft` with the same `If-Match` and
-  language header returns that working translation.
+  when those fields exist. Each working language includes `working_vid` (that
+  language's latest translation-affected revision), `pending` (TRUE when that
+  revision is an unpublished draft ahead of live), and `affected` (whether
+  the tip revision marks the language translation-affected). Title, status,
+  and moderation come from `working_vid`, not from the tip, so a language
+  whose draft sits on an earlier revision is not reported as published.
+  `meta.pending` lists those drafts; `meta.multi_pending` is TRUE when more
+  than one language is pending. `GET .../mcp-draft` with the same `If-Match`
+  and language header returns that working translation.
 - `moderation_state` on a langcode write is allowed only when that field is
   translatable on the bundle. A shared workflow state is changed by omitting
   `X-MCP-Draft-Langcode`.
@@ -62,6 +75,33 @@ summary, body, status, alias, and default revision ID — is left unchanged.
 Anonymous requests do not receive working-revision languages or the draft
 body. Shared aliases, file targets, and paragraph structure cannot be changed
 on a translation write.
+
+### Publishing order when more than one language is pending
+
+Revise over a working copy (or adding a translation onto an English draft)
+can leave pending drafts in more than one language, often on different
+revisions. That is a valid editorial state: each language's edit form opens
+its own latest translation-affected revision.
+
+Publishing one of those languages in the Drupal UI is core behavior, not a
+Sentinel save. Core builds a new default revision from the language being
+published and takes every other language from the *previous* default. The
+other pending drafts stop being pending. Their text remains in revision
+history but disappears from the working copy and from the editor's view.
+Sentinel does not hide or undo this.
+
+When a write leaves more than one language pending, the JSON:API response
+(including preflight) and `GET .../mcp-translations` include
+`meta.multi_pending: true` and `meta.notices[]` with code
+`multi_pending_publish`. The status report lists the same nodes as a
+warning.
+
+**Publish one language only after accepting that the others will drop.**
+To recover a dropped language, open its last draft revision (`working_vid`
+from the inventory taken *before* publish) and re-draft that text through
+revise or continue. Prefer publishing the language whose `working_vid` is
+the tip last, after the others have been published or discarded, or copy
+the other drafts out first.
 
 Paragraph *field values* use the same surface on the paragraph resource:
 `POST /jsonapi/paragraph/{bundle}/{uuid}/mcp-draft/translations` with

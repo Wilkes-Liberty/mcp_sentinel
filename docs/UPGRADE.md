@@ -4,6 +4,25 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Translation inventory reads each language from its latest-affected revision
+
+`GET .../mcp-translations` still returns `meta.working.vid` as the tip
+revision, but each `working.translations[]` row is now filled from that
+language's latest translation-affected revision (`working_vid`), not from
+the tip. After revise-over-working, a language whose draft sits on an
+earlier revision reports `moderation_state: draft` and `pending: true`
+instead of the tip's carried `published` moderation record.
+
+New additive keys: `working_vid`, `pending`, `affected` on each working
+language; `meta.pending`, `meta.multi_pending`, and `meta.notices` (code
+`multi_pending_publish`) when more than one language is pending. Clients
+that treated tip `moderation_state` as "no draft" should switch to
+`pending` / `working_vid`. See `draft-continuation.md`.
+
+The default language can now be revised over a named working copy the same
+way a translation can. Continue of the default language also works when
+the tip stores it as unpublished with published moderation.
+
 ## Config secrets are withheld, and secret-bearing names cannot be written
 
 Values under sensitive key names (`password`, `token`, `key_value` and the rest
