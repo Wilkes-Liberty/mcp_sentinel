@@ -47,6 +47,25 @@ final class McpChartRendererTest extends UnitTestCase {
   }
 
   /**
+   * Every Charts element carries a fixed height.
+   *
+   * Charts_chartjs only adds its sizing wrapper when #height or #width is
+   * set. Without one a lone pie is drawn as wide and as tall as the page.
+   *
+   * @covers ::render
+   */
+  public function testChartsElementHasFixedHeight(): void {
+    $renderer = $this->rendererWithChartsDefinitions(['chartjs' => []]);
+    foreach (['bar', 'line', 'donut', 'pie'] as $type) {
+      $build = $renderer->render($type, ['A' => 3, 'B' => 1]);
+      $this->assertSame(McpChartRenderer::CHART_HEIGHT, $build['#height']);
+      $this->assertSame('px', $build['#height_units']);
+      $this->assertSame(100, $build['#width']);
+      $this->assertSame('%', $build['#width_units']);
+    }
+  }
+
+  /**
    * Builds a renderer with the given Charts plugin definitions.
    *
    * @param array<string, mixed> $definitions

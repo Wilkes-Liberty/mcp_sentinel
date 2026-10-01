@@ -183,6 +183,25 @@ final class McpAuditFilterExportTest extends BrowserTestBase {
   }
 
   /**
+   * The audit log loads the chart grid and size caps.
+   *
+   * This route does not attach the dashboard library, so without the
+   * charts library its chart strip had no grid and no height cap.
+   */
+  public function testChartStylesheetIsLoaded(): void {
+    $this->config('system.performance')
+      ->set('css.preprocess', FALSE)
+      ->save();
+    $this->seedRow('entity_save');
+    $admin = $this->drupalCreateUser(['view mcp sentinel audit log']);
+    $this->drupalLogin($admin);
+
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
+    $this->assertSession()->elementExists('css', '.mcp-audit-chart-strip');
+    $this->assertSession()->responseContains('/css/charts.css');
+  }
+
+  /**
    * T3.2: CSV export contains headers and a seeded row.
    */
   public function testCsvExport(): void {
