@@ -181,12 +181,8 @@ final class McpTranslationDraftReporter {
       if (!$this->entityTypeManager->hasDefinition($entity_type_id)) {
         continue;
       }
-      $storage = $this->entityTypeManager->getStorage($entity_type_id);
-      if (!method_exists($storage, 'getLatestTranslationAffectedRevisionId')) {
-        continue;
-      }
-      // Node and media storage implement the translatable-revision contract.
       /** @var \Drupal\Core\Entity\TranslatableRevisionableStorageInterface $storage */
+      $storage = $this->entityTypeManager->getStorage($entity_type_id);
       foreach ($this->idsWithForwardRevision($entity_type_id) as $id) {
         $live = $storage->loadUnchanged($id);
         if (!$live instanceof ContentEntityInterface) {
