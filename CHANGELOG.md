@@ -25,6 +25,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   update 10026 is covered. Sealed tokens are limited to MCP/JSON:API/GraphQL
   routes, reveal is `private, no-store`, verify re-checks the Consumer, and
   admin strip links require route access.
+- #3627189: Creating a Spanish draft on a node that already has a pending
+  English working copy no longer returns a false HTTP 409 claiming the
+  translation already exists. The save lock re-reads the stored working
+  revision instead of the in-memory object that `addTranslation()` already
+  mutated. A language that is actually present on live or working is still
+  409. Stale If-Match and live/working preservation are unchanged.
 
 ## [2.26.0] - 2026-10-01
 

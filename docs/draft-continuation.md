@@ -151,7 +151,9 @@ changes, concurrent edits, or save-hook failures.
 Validation, including node-reference access queries, runs before the exclusive
 write transaction. Preflight never opens a transaction. The write still
 row-locks the node, re-checks both revision pointers, and rolls back if the
-live revision would change. That transaction scope is required on PostgreSQL:
+live revision would change. Create re-reads the stored working revision for
+the existing-translation check so an in-memory `addTranslation()` is not
+treated as a conflict. That transaction scope is required on PostgreSQL:
 holding a transaction across nested SELECTs hits core
 [#2920527](https://www.drupal.org/project/drupal/issues/2920527)
 (`mimic_implicit_commit` already in use). Sites may still want that core
