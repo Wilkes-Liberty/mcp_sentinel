@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The site-wide urgent banner is inset by the admin navigation sidebar,
+  so its message is not hidden under the sidebar. Dismiss is a labeled
+  button on each condition.
+
 ## [2.25.5] - 2026-09-30
 
 ### Changed

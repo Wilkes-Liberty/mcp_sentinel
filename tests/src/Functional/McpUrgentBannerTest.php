@@ -41,7 +41,11 @@ final class McpUrgentBannerTest extends BrowserTestBase {
     ]));
     // An admin page that is NOT the dashboard.
     $this->drupalGet('/admin/reports/mcp-sentinel/audit');
-    $this->assertSession()->elementExists('css', '.mcp-banner--critical');
+    $this->assertSession()->elementExists(
+      'css',
+      '.mcp-banner-stack--sitewide .mcp-banner--critical',
+    );
+    $this->assertSession()->buttonExists('Dismiss');
   }
 
   /**
@@ -108,8 +112,13 @@ final class McpUrgentBannerTest extends BrowserTestBase {
     $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
     $this->drupalGet('/admin/reports/mcp-sentinel');
     // Exactly one critical banner (the dashboard's own), not a second from
-    // hook_page_top().
+    // hook_page_top(). The dashboard banner is already inside the offset
+    // canvas, so it must not carry the site-wide inset.
     $this->assertSession()->elementsCount('css', '.mcp-banner--critical', 1);
+    $this->assertSession()->elementNotExists(
+      'css',
+      '.mcp-banner-stack--sitewide',
+    );
   }
 
   /**
