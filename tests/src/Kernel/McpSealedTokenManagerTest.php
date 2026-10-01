@@ -150,7 +150,9 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
 
     $consumer->set('status', 1);
     $consumer->save();
-    $this->assertIsArray($this->manager()->verify($issued['token']));
+    $reenabled = $this->manager()->verify($issued['token']);
+    $this->assertNotNull($reenabled);
+    $this->assertIsArray($reenabled);
 
     $other = User::create([
       'name' => 'mcp-reassigned-owner',

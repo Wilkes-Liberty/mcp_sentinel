@@ -55,11 +55,6 @@ final class McpDenyExplainerTest extends UnitTestCase {
   }
 
   /**
-   * Readiness codes stay denied until the named gate is fixed.
-   *
-   * @covers ::explain
-   */
-  /**
    * Response-size refusals name the cap rule and stay human-only.
    *
    * @covers ::explain
