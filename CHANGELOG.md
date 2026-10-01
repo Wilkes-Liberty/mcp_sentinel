@@ -22,7 +22,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - DEV-761/762/764 follow-up: the sealed-token mint form uses serializable
   FormBase services, deny explain includes the Stay denied verdict, and
-  update 10026 is covered.
+  update 10026 is covered. Sealed tokens are limited to MCP/JSON:API/GraphQL
+  routes, reveal is `private, no-store`, verify re-checks the Consumer, and
+  admin strip links require route access.
 
 ## [2.26.0] - 2026-10-01
 

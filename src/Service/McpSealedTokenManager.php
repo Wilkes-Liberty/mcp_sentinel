@@ -54,6 +54,14 @@ final class McpSealedTokenManager {
   public const TABLE = 'mcp_sentinel_sealed_token';
 
   /**
+   * Private tempstore TTL for the copy-once reveal handoff, in seconds.
+   *
+   * The table stores a hash only. Tempstore holds the plaintext until the
+   * reveal GET deletes it, or this TTL elapses. It is not durable storage.
+   */
+  public const REVEAL_STORE_TTL = 120;
+
+  /**
    * Constructs the manager.
    */
   public function __construct(
@@ -218,6 +226,13 @@ final class McpSealedTokenManager {
       return NULL;
     }
     if ((string) $row['client_id'] !== $body['cid'] || (int) $row['uid'] !== (int) $body['uid']) {
+      return NULL;
+    }
+    $consumer = $this->loadConsumer((string) $row['client_id']);
+    if (!$consumer instanceof ConsumerInterface || !$consumer->isPublished()) {
+      return NULL;
+    }
+    if ((int) $consumer->getOwnerId() !== (int) $row['uid']) {
       return NULL;
     }
 

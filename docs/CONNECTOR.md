@@ -76,8 +76,9 @@ Operators can mint a short-lived `mcs1.` bearer at **Configuration → MCP
 Sentinel → Sealed tokens** instead of pasting a consumer secret into a
 client. The token is bound to a designated `client_id`, shown once, and
 revocable. Use it as `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness`
-(whoami) and other oauth2-protected routes. This is not a public HTTPS Path B
-or an OAuth login wizard.
+(whoami), JSON:API, GraphQL, and `mcp_server` routes that already accept
+oauth2. Unrelated oauth2 routes do not accept this bearer. This is not a
+public HTTPS Path B or an OAuth login wizard.
 
 ### Access-token TTL
 

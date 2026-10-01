@@ -184,6 +184,7 @@ services:
       - '@mcp_sentinel.governance_readiness'
       - '@mcp_sentinel.whoami_recorder'
       - '@datetime.time'
+      - '@current_user'
 
   mcp_sentinel.sealed_token_manager:
     class: Drupal\mcp_sentinel\Service\McpSealedTokenManager

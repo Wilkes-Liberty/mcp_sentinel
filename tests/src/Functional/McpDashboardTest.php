@@ -78,6 +78,20 @@ final class McpDashboardTest extends BrowserTestBase {
   }
 
   /**
+   * A read-only dashboard viewer does not receive admin mint or settings links.
+   */
+  public function testReadOnlyViewerDoesNotSeeAdminLinks(): void {
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->elementExists('css', '[data-mcp-status-strip]');
+    $this->assertSession()->pageTextContains('Readiness');
+    $this->assertSession()->linkNotExists('Add agent client');
+    $this->assertSession()->linkNotExists('Mint sealed token');
+    $this->assertSession()->elementNotExists('css', '.mcp-status-strip__actions a');
+  }
+
+  /**
    * An unprivileged user is denied the dashboard.
    */
   public function testDashboardForbiddenForUnprivilegedUser(): void {

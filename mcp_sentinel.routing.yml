@@ -111,6 +111,8 @@ mcp_sentinel.sealed_token_reveal:
     _title: 'Copy sealed token'
   requirements:
     _permission: 'administer mcp sentinel'
+  options:
+    no_cache: TRUE
 
 mcp_sentinel.sealed_token_revoke:
   path: '/admin/config/services/mcp-sentinel/tokens/{jti}/revoke'

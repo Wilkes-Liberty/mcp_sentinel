@@ -118,7 +118,7 @@ final class McpSealedTokenMintForm extends FormBase {
       return;
     }
 
-    $this->tempStoreFactory->get('mcp_sentinel_sealed_token')->set('reveal', [
+    $this->tempStoreFactory->get('mcp_sentinel_sealed_token', McpSealedTokenManager::REVEAL_STORE_TTL)->set('reveal', [
       'jti' => $issued['jti'],
       'token' => $issued['token'],
       'client_id' => $issued['client_id'],

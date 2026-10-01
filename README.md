@@ -1256,8 +1256,9 @@ are not.
 2. Choose that client and a short TTL (15 minutes to 24 hours).
 3. Mint. Copy the bearer once. Leave the page — the secret is gone from
    the admin UI. Only a hash remains, so revoke still works.
-4. Use `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness` (whoami)
-   and other oauth2-protected routes. Revoke if it leaks.
+4. Use `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness` (whoami),
+   JSON:API, GraphQL, and `mcp_server` routes that already accept oauth2.
+   Unrelated oauth2 routes do not accept this bearer. Revoke if it leaks.
 
 This is not an OAuth login wizard. OAuth client-credentials remains the
 long-lived channel; sealed tokens are short-lived and client-bound.

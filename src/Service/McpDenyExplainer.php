@@ -161,6 +161,15 @@ final class McpDenyExplainer {
         'Human review only.',
       );
     }
+    if (str_contains($reason, 'exceeds the MCP Sentinel cap')) {
+      return new McpDenyExplanation(
+        'response_size_cap',
+        'response size cap',
+        TRUE,
+        'Narrow the query, or a human may raise the profile response_size_cap. Widening is never automatic.' . $profileHint,
+        'Human review only.',
+      );
+    }
     if (str_contains($reason, 'denied by policy') || str_contains($reason, 'Denied by MCP Sentinel') || str_contains($reason, 'Not in MCP Sentinel allowlist')) {
       return new McpDenyExplanation(
         'policy_default',

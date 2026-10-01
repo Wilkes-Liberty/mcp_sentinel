@@ -79,6 +79,7 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
       'ttl' => '900',
     ], 'Mint sealed token');
     $this->assertSession()->addressEquals('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->responseHeaderContains('Cache-Control', 'no-store');
     $this->assertSession()->pageTextContains('Copy this token now');
     $this->assertSession()->pageTextContains('TTL: 900 seconds');
     $this->assertSession()->pageTextContains('mcs1.');

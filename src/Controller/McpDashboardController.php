@@ -460,11 +460,11 @@ class McpDashboardController extends ControllerBase {
       'title' => (string) $this->t('Audit log'),
       'url' => Url::fromRoute('mcp_sentinel.audit_log')->toString(),
     ];
-    $actions[] = [
-      'title' => (string) $this->t('Settings'),
-      'url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
-    ];
     if ($this->currentUser()->hasPermission('administer mcp sentinel')) {
+      $actions[] = [
+        'title' => (string) $this->t('Settings'),
+        'url' => $this->safeRouteUrl('mcp_sentinel.settings'),
+      ];
       $actions[] = [
         'title' => (string) $this->t('Mint sealed token'),
         'url' => $this->safeRouteUrl('mcp_sentinel.sealed_token'),

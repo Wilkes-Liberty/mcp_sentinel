@@ -237,10 +237,13 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
 
     $over = $this->call('checkResponseSizeCap', str_repeat('a', 101));
     self::assertFalse($over->getResultStatus());
-    self::assertSame(
+    $overMessage = (string) $over->getResultMessage();
+    self::assertStringContainsString(
       'Response size 101 bytes exceeds the MCP Sentinel cap of 100 bytes for this profile. Narrow your query.',
-      (string) $over->getResultMessage(),
+      $overMessage,
     );
+    self::assertStringContainsString('[rule:response_size_cap', $overMessage);
+    self::assertStringContainsString('never automatic', $overMessage);
     self::assertEmpty($over->getResult()->getContextValues());
   }
 
@@ -279,7 +282,9 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     self::assertTrue($this->call('checkRateLimit')->getResultStatus());
     $second = $this->call('checkRateLimit');
     self::assertFalse($second->getResultStatus());
-    self::assertStringContainsString('Rate limit exceeded', (string) $second->getResultMessage());
+    $limited = (string) $second->getResultMessage();
+    self::assertStringContainsString('Rate limit exceeded', $limited);
+    self::assertStringContainsString('[rule:rate_limit', $limited);
     self::assertSame(1, $this->auditCount('rate_limit_exceeded'));
   }
 

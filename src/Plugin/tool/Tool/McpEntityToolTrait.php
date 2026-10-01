@@ -137,9 +137,11 @@ trait McpEntityToolTrait {
       \Drupal::service('mcp_sentinel.audit_logger')->log(
         'rate_limit_exceeded', ['tool' => $toolId],
       );
-      return ExecutableResult::failure(
-        $this->t('Rate limit exceeded. Retry after the current window expires.')
-      );
+      $message = (string) $this->t('Rate limit exceeded. Retry after the current window expires.');
+      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+        $message = \Drupal::service('mcp_sentinel.deny_explainer')->annotate($message);
+      }
+      return ExecutableResult::failure($message);
     }
     $limiter->register($profile, $uid, $toolId);
     return NULL;
@@ -206,15 +208,17 @@ trait McpEntityToolTrait {
     $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
     $bytes = strlen($serialized);
     if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
-      return ExecutableResult::failure(
-        $this->t(
-          'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
-          [
-            '@bytes' => $bytes,
-            '@cap'   => $guard->effectiveResponseSizeCap($profile),
-          ]
-        )
+      $message = (string) $this->t(
+        'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
+        [
+          '@bytes' => $bytes,
+          '@cap'   => $guard->effectiveResponseSizeCap($profile),
+        ]
       );
+      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+        $message = \Drupal::service('mcp_sentinel.deny_explainer')->annotate($message);
+      }
+      return ExecutableResult::failure($message);
     }
     return NULL;
   }

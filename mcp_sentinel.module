@@ -23,6 +23,7 @@ use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
 use Drupal\simple_oauth\Entities\AccessTokenEntity;
+use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
 
 /**
@@ -873,14 +874,18 @@ function mcp_sentinel_cron(): void {
 /**
  * Implements hook_route_alter().
  *
- * Routes that already accept oauth2 also accept a Sentinel sealed token so
- * a minted bearer works on mcp_server and JSON:API. Applies() still
- * ignores anything that is not the mcs1. prefix.
+ * Adds the sealed-token provider only on MCP, JSON:API, and GraphQL routes
+ * that already accept oauth2. Other oauth2 routes keep their provider set
+ * so an mcs1. bearer cannot authenticate as the Consumer owner there.
+ * Applies() still ignores anything that is not the mcs1. prefix.
  */
 function mcp_sentinel_route_alter(RouteCollection $collection): void {
-  foreach ($collection as $route) {
+  foreach ($collection as $name => $route) {
     $auth = $route->getOption('_auth');
     if (!is_array($auth) || !in_array('oauth2', $auth, TRUE)) {
+      continue;
+    }
+    if (!mcp_sentinel_route_accepts_sealed_token((string) $name, $route)) {
       continue;
     }
     if (!in_array('mcp_sealed_token', $auth, TRUE)) {
@@ -888,6 +893,32 @@ function mcp_sentinel_route_alter(RouteCollection $collection): void {
       $route->setOption('_auth', $auth);
     }
   }
+}
+
+/**
+ * Whether an oauth2 route may also accept a Sentinel sealed token.
+ *
+ * @param string $name
+ *   The route name.
+ * @param \Symfony\Component\Routing\Route $route
+ *   The route.
+ *
+ * @return bool
+ *   TRUE for MCP, JSON:API, and GraphQL surfaces only.
+ */
+function mcp_sentinel_route_accepts_sealed_token(string $name, Route $route): bool {
+  foreach (['mcp_sentinel.', 'mcp_server.', 'jsonapi.', 'graphql.'] as $prefix) {
+    if (str_starts_with($name, $prefix)) {
+      return TRUE;
+    }
+  }
+  $path = $route->getPath();
+  foreach (['/jsonapi', '/drupal-mcp', '/graphql'] as $prefix) {
+    if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+      return TRUE;
+    }
+  }
+  return FALSE;
 }
 
 /**

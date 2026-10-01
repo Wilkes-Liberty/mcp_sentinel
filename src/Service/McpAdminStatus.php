@@ -9,6 +9,7 @@ use Drupal\consumers\Entity\ConsumerInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Url;
 
 /**
@@ -29,6 +30,7 @@ final class McpAdminStatus {
     private readonly McpGovernanceReadiness $readiness,
     private readonly McpWhoamiRecorder $whoamiRecorder,
     private readonly TimeInterface $time,
+    private readonly AccountProxyInterface $currentUser,
   ) {}
 
   /**
@@ -150,11 +152,15 @@ final class McpAdminStatus {
   }
 
   /**
-   * Generates a route URL, or '' when the route is missing.
+   * Generates a route URL, or '' when the route is missing or forbidden.
    */
   private function safeUrl(string $routeName): string {
     try {
-      return Url::fromRoute($routeName)->toString();
+      $url = Url::fromRoute($routeName);
+      if (!$url->access($this->currentUser)) {
+        return '';
+      }
+      return $url->toString();
     }
     catch (\Throwable) {
       return '';

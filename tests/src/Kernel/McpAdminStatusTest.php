@@ -76,7 +76,9 @@ final class McpAdminStatusTest extends KernelTestBase {
     $this->assertFalse($strip['ready']);
     $this->assertSame('module_disabled', $strip['gate']);
     $this->assertStringContainsString('MCP API access is off', $strip['gate_message']);
-    $this->assertNotSame('', $strip['add_client_url']);
+    $this->assertSame('', $strip['add_client_url']);
+    $this->assertSame('', $strip['mint_url']);
+    $this->assertSame('', $strip['settings_url']);
     $this->assertStringNotContainsString('secret', strtolower(json_encode($strip) ?: ''));
   }
 

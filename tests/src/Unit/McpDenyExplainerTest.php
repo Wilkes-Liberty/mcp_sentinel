@@ -59,6 +59,25 @@ final class McpDenyExplainerTest extends UnitTestCase {
    *
    * @covers ::explain
    */
+  /**
+   * Response-size refusals name the cap rule and stay human-only.
+   *
+   * @covers ::explain
+   */
+  public function testResponseSizeCapIsNamed(): void {
+    $explained = (new McpDenyExplainer())->explain(
+      'Response size 101 bytes exceeds the MCP Sentinel cap of 100 bytes for this profile. Narrow your query.',
+    );
+    $this->assertSame('response_size_cap', $explained->ruleId);
+    $this->assertTrue($explained->widenAppropriate);
+    $this->assertStringContainsString('never automatic', $explained->format());
+  }
+
+  /**
+   * Readiness codes stay denied until the named gate is fixed.
+   *
+   * @covers ::explain
+   */
   public function testReadinessCodeDoesNotSuggestAllowlistWiden(): void {
     $explained = (new McpDenyExplainer())->explain(
       'MCP Sentinel source governance is not ready: designated_consumer_missing.',

@@ -133,6 +133,39 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
   }
 
   /**
+   * A disabled or reassigned Consumer cannot verify a previously minted token.
+   *
+   * @covers ::verify
+   */
+  public function testVerifyRechecksConsumerAndOwner(): void {
+    $owner = $this->createAgentOwner();
+    $consumer = $this->createDesignatedConsumer('mcp-agent-prod', $owner);
+    $operator = $this->createOperator();
+    $issued = $this->manager()->mint('mcp-agent-prod', 900, $operator);
+    $this->assertIsArray($this->manager()->verify($issued['token']));
+
+    $consumer->set('status', 0);
+    $consumer->save();
+    $this->assertNull($this->manager()->verify($issued['token']));
+
+    $consumer->set('status', 1);
+    $consumer->save();
+    $this->assertIsArray($this->manager()->verify($issued['token']));
+
+    $other = User::create([
+      'name' => 'mcp-reassigned-owner',
+      'status' => 1,
+    ]);
+    $other->save();
+    $consumer->set('owner_id', $other->id());
+    if ($consumer->hasField('user_id')) {
+      $consumer->set('user_id', $other->id());
+    }
+    $consumer->save();
+    $this->assertNull($this->manager()->verify($issued['token']));
+  }
+
+  /**
    * Returns the manager.
    */
   private function manager(): McpSealedTokenManager {

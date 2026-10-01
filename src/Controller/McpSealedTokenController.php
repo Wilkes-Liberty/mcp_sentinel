@@ -119,13 +119,19 @@ final class McpSealedTokenController extends ControllerBase {
    *   Render array. The secret is gone after this request.
    */
   public function reveal(): array {
-    $store = $this->tempStoreFactory->get('mcp_sentinel_sealed_token');
+    $store = $this->tempStoreFactory->get('mcp_sentinel_sealed_token', McpSealedTokenManager::REVEAL_STORE_TTL);
     $issued = $store->get('reveal');
     $store->delete('reveal');
 
     $build = [
+      '#cache' => [
+        'max-age' => 0,
+      ],
       '#attached' => [
         'library' => ['mcp_sentinel/sealed_token', 'mcp_sentinel/admin'],
+        'http_header' => [
+          ['Cache-Control', 'private, no-store', TRUE],
+        ],
       ],
       'status' => [
         '#theme' => 'mcp_sentinel_status_strip',
