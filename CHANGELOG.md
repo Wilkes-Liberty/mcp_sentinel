@@ -7,6 +7,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- The site-wide urgent banner is inset by the admin navigation sidebar,
+  so its message is not hidden under the sidebar. Dismiss is a labeled
+  button on each condition.
 - Dashboard charts no longer fill the page when a row holds one chart.
   Chart grids use fixed-width tracks, the audit log chart strip is a grid,
   Charts API elements set a 200px height, and canvas and SVG charts are

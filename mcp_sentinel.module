@@ -94,7 +94,10 @@ function mcp_sentinel_theme(): array {
       ],
     ],
     'mcp_sentinel_urgent_banner' => [
-      'variables' => ['conditions' => []],
+      'variables' => [
+        'conditions' => [],
+        'sitewide' => FALSE,
+      ],
     ],
   ];
 }
@@ -171,6 +174,8 @@ function mcp_sentinel_page_top(array &$page): void {
   $page['mcp_sentinel_urgent_banner'] = [
     '#theme' => 'mcp_sentinel_urgent_banner',
     '#conditions' => $critical,
+    // page_top sits outside the canvas Gin offsets for the sidebar.
+    '#sitewide' => TRUE,
     '#attached' => [
       'library' => ['mcp_sentinel/dashboard'],
       'drupalSettings' => [
