@@ -773,7 +773,13 @@ final class McpDraftResource extends EntityResource {
         $this->assertRevisionPointers($stored_live, $latest_id, $versions);
       }
       if ($write_mode === 'create') {
-        $current = $versions[2] === '' ? $stored_live : $storage->loadRevision($latest_id);
+        // The candidate working revision was already mutated with
+        // addTranslation() before this lock. loadRevision() can return that
+        // same in-memory object and 409 as if the language already existed
+        // (#3627189). Re-read from storage, as paragraph create does.
+        $current = $versions[2] === ''
+          ? $stored_live
+          : $this->loadStoredWorkingRevision($storage, $latest_id);
         if ($current instanceof ContentEntityInterface && $current->hasTranslation($langcode)) {
           throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
         }
@@ -942,6 +948,30 @@ final class McpDraftResource extends EntityResource {
       throw new ConflictHttpException('The requested translation is still published on the working copy. Open a draft of it with X-MCP-Draft-Mode: revise and both revision IDs in If-Match.');
     }
     return $translation;
+  }
+
+  /**
+   * Reloads a working revision from the database under the save lock.
+   *
+   * create-translation mutates the candidate with addTranslation() before
+   * save. loadRevision() can return that same object, so the existing-
+   * translation check would 409 on a language that exists only in memory
+   * (#3627189). Paragraph create already uses loadRevisionUnchanged().
+   *
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
+   * @param int|string|null $revision_id
+   *   The stored latest revision id.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface|null
+   *   The stored revision, or NULL if it is gone or not a content entity.
+   */
+  private function loadStoredWorkingRevision(RevisionableStorageInterface $storage, int|string|null $revision_id): ?ContentEntityInterface {
+    if ($revision_id === NULL || $revision_id === '') {
+      return NULL;
+    }
+    $revision = $storage->loadRevisionUnchanged((int) $revision_id);
+    return $revision instanceof ContentEntityInterface ? $revision : NULL;
   }
 
   /**
