@@ -33,7 +33,15 @@
                 credentials: 'same-origin',
               });
             }
-            banner.parentNode.removeChild(banner);
+            const stack = banner.parentNode;
+            stack.removeChild(banner);
+            if (
+              stack.classList
+              && stack.classList.contains('mcp-banner-stack')
+              && !stack.querySelector('[data-mcp-banner-key]')
+            ) {
+              stack.remove();
+            }
           });
         },
       );

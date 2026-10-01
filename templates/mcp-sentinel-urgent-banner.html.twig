@@ -9,14 +9,20 @@
  *   - key: the machine condition key (used for per-user dismissal).
  *   - message: the human-readable message (auto-escaped).
  *   - url: an optional internal path to investigate the condition.
+ * - sitewide: TRUE when printed in page_top, outside the canvas the admin
+ *   theme offsets for the navigation sidebar.
  */
 #}
+<div class="mcp-banner-stack{{ sitewide ? ' mcp-banner-stack--sitewide' }}">
 {% for condition in conditions %}
   <div class="mcp-banner mcp-banner--{{ condition.severity }}" data-mcp-banner-key="{{ condition.key }}" role="alert">
     <span class="mcp-banner__message">{{ condition.message }}</span>
     {% if condition.url %}
       <a class="mcp-banner__link" href="{{ condition.url }}">{{ 'Investigate'|t }}</a>
     {% endif %}
-    <button type="button" class="mcp-banner__dismiss" data-mcp-banner-dismiss aria-label="{{ 'Dismiss'|t }}">×</button>
+    <button type="button" class="mcp-banner__dismiss" data-mcp-banner-dismiss>
+      {{ 'Dismiss'|t }}
+    </button>
   </div>
 {% endfor %}
+</div>
