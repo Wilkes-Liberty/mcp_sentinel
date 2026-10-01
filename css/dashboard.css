@@ -258,14 +258,7 @@
   border-radius: 3px;
 }
 
-/* Charts grid. */
-.mcp-charts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1em;
-  margin: 0 0 1em;
-}
-
+/* Charts. Grid and size caps live in css/charts.css. */
 .mcp-chart-cell {
   padding: 0.75em;
   border: 1px solid var(--mcp-border);
@@ -276,11 +269,6 @@
 .mcp-chart__title {
   margin: 0 0 0.5em;
   font-size: 0.95em;
-}
-
-.mcp-chart__svg {
-  width: 100%;
-  height: auto;
 }
 
 .mcp-chart__link {

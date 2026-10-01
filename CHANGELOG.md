@@ -7,7 +7,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
-
 - The site-wide urgent banner is inset by the admin navigation sidebar,
   so its message is not hidden under the sidebar. Dismiss is a labeled
   button on each condition.
@@ -29,6 +28,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `multi_pending_publish` notice that publishing one language in the UI
   drops the others. The status report lists those nodes. This is core
   revision behavior; Sentinel surfaces it rather than hiding it.
+- Dashboard charts no longer fill the page when a row holds one chart.
+  Chart grids use fixed-width tracks, the audit log chart strip is a grid,
+  Charts API elements set a 200px height, and canvas and SVG charts are
+  capped at 200px tall. The grid and caps are in a new
+  `mcp_sentinel/charts` library, which the dashboard library depends on
+  and the audit log attaches.
 
 ## [2.25.5] - 2026-09-30
 

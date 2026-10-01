@@ -1,0 +1,31 @@
+/**
+ * @file
+ * Chart grid and size caps.
+ *
+ * Shared by the governance dashboard and the audit log chart strip. Without
+ * these rules a chart alone in its row fills the content area.
+ */
+
+/* Fixed-width tracks keep a lone chart a card, not a full-width canvas. */
+.mcp-charts,
+.mcp-audit-chart-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 400px));
+  gap: 1em;
+  margin: 0 0 1em;
+}
+
+.mcp-chart-cell {
+  min-width: 0;
+}
+
+.mcp-chart__svg {
+  width: 100%;
+  height: auto;
+  max-height: 200px;
+}
+
+/* Chart.js reads this cap when it first sizes the canvas. */
+.mcp-chart-cell canvas {
+  max-height: 200px;
+}

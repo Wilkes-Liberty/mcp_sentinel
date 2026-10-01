@@ -43,6 +43,15 @@ final class McpChartRenderer {
   private const SVG_HEIGHT = 160;
 
   /**
+   * Height in pixels of a Charts API (for example Chart.js) chart.
+   *
+   * Without #height or #width charts_chartjs adds no sizing wrapper, so the
+   * canvas takes its parent's width and a pie becomes a full-width square.
+   * Keep in step with the canvas max-height in css/dashboard.css.
+   */
+  public const CHART_HEIGHT = 200;
+
+  /**
    * Constructs an McpChartRenderer.
    *
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
@@ -149,6 +158,10 @@ final class McpChartRenderer {
       '#type' => 'chart',
       '#chart_type' => $chartType,
       '#title' => $title,
+      '#height' => self::CHART_HEIGHT,
+      '#height_units' => 'px',
+      '#width' => 100,
+      '#width_units' => '%',
       'series' => [
         '#type' => 'chart_data',
         '#title' => $title,

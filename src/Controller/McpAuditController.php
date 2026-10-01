@@ -241,6 +241,8 @@ class McpAuditController extends ControllerBase {
       return [
         '#type' => 'container',
         '#attributes' => ['class' => ['mcp-audit-chart-strip']],
+        // The grid and size caps; this route does not load the dashboard.
+        '#attached' => ['library' => ['mcp_sentinel/charts']],
         'volume' => [
           '#type' => 'container',
           '#attributes' => ['class' => ['mcp-chart-cell']],
