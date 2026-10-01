@@ -774,9 +774,10 @@ final class McpDraftResource extends EntityResource {
       }
       if ($write_mode === 'create') {
         // The candidate working revision was already mutated with
-        // addTranslation() before this lock. loadRevision() can return that
-        // same in-memory object and 409 as if the language already existed
-        // (#3627189). Re-read from storage, as paragraph create does.
+        // addTranslation() before this lock. Drupal 11.3+ caches revisions,
+        // so loadRevision() can return that same in-memory object and 409
+        // as if the language already existed (#3627189). Re-read stored
+        // languages; Drupal 10.6 has no loadRevisionUnchanged().
         $current = $versions[2] === ''
           ? $stored_live
           : $this->loadStoredWorkingRevision($storage, $latest_id);
@@ -953,10 +954,11 @@ final class McpDraftResource extends EntityResource {
   /**
    * Reloads a working revision from the database under the save lock.
    *
-   * create-translation mutates the candidate with addTranslation() before
-   * save. loadRevision() can return that same object, so the existing-
-   * translation check would 409 on a language that exists only in memory
-   * (#3627189). Paragraph create already uses loadRevisionUnchanged().
+   * Create-translation mutates the candidate with addTranslation() before
+   * save. Drupal 11.3+ caches revisions, so loadRevision() can return that
+   * same object and 409 on a language that exists only in memory
+   * (#3627189). loadRevisionUnchanged() is Drupal 11.3+; Drupal 10.6
+   * loadRevision() is not statically cached and returns stored languages.
    *
    * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
    *   Entity storage.
@@ -970,7 +972,13 @@ final class McpDraftResource extends EntityResource {
     if ($revision_id === NULL || $revision_id === '') {
       return NULL;
     }
-    $revision = $storage->loadRevisionUnchanged((int) $revision_id);
+    // @phpstan-ignore function.alreadyNarrowedType (Drupal 10.6 lacks this.)
+    if (method_exists($storage, 'loadRevisionUnchanged')) {
+      $revision = $storage->loadRevisionUnchanged((int) $revision_id);
+    }
+    else {
+      $revision = $storage->loadRevision($revision_id);
+    }
     return $revision instanceof ContentEntityInterface ? $revision : NULL;
   }
 
