@@ -230,14 +230,17 @@
 }
 
 /* Charts grid. */
-.mcp-charts {
+/* Fixed-width tracks keep a lone chart a card, not a full-width canvas. */
+.mcp-charts,
+.mcp-audit-chart-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 400px));
   gap: 1em;
   margin: 0 0 1em;
 }
 
 .mcp-chart-cell {
+  min-width: 0;
   padding: 0.75em;
   border: 1px solid var(--mcp-border);
   border-radius: 4px;
@@ -252,6 +255,12 @@
 .mcp-chart__svg {
   width: 100%;
   height: auto;
+  max-height: 200px;
+}
+
+/* Chart.js reads this cap when it first sizes the canvas. */
+.mcp-chart-cell canvas {
+  max-height: 200px;
 }
 
 .mcp-chart__link {

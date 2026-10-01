@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Dashboard charts no longer fill the page when a row holds one chart.
+  Chart grids use fixed-width tracks, the audit log chart strip is a grid,
+  Charts API elements set a 200px height, and canvas and SVG charts are
+  capped at 200px tall.
+
 ## [2.25.5] - 2026-09-30
 
 ### Changed
