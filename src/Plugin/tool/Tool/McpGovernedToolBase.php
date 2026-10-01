@@ -218,9 +218,14 @@ abstract class McpGovernedToolBase extends ToolBase {
     );
     if (!$readiness->isReady()) {
       $reason = $readiness->reason()->value;
-      $denied = AccessResult::forbidden(
-        'MCP Sentinel source governance is not ready: ' . $reason . '.',
-      )->addCacheableDependency($readiness);
+      $message = 'MCP Sentinel source governance is not ready: ' . $reason . '.';
+      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+        $message = \Drupal::service('mcp_sentinel.deny_explainer')->annotate(
+          $message,
+          $readiness->profile()?->id(),
+        );
+      }
+      $denied = AccessResult::forbidden($message)->addCacheableDependency($readiness);
       return $denied;
     }
 

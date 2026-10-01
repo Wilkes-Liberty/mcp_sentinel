@@ -313,7 +313,11 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.audit_logger` | `McpAuditLogger` | MCP policy in front of the shared chain: read-suppression, change diffs (`computeChangeDiff()` / `computeConfigDiff()`), redaction and DLP. Chain mechanics live in `audit_chain.logger`; write there directly if you want tamper-evident audit for something other than MCP traffic |
 | `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |
-| `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) |
+| `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) or a verified sealed token (`mcs1.` prefix) |
+| `mcp_sentinel.admin_status` | `McpAdminStatus` | admin status strip: MCP on/off, designated clients, readiness, last whoami |
+| `mcp_sentinel.whoami_recorder` | `McpWhoamiRecorder` | last `/drupal-mcp/readiness`, context, or governance-status signal (no secrets) |
+| `mcp_sentinel.sealed_token_manager` | `McpSealedTokenManager` | mint / verify / revoke short-lived client-bound sealed tokens; secret is copy-once |
+| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens) |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |

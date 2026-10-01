@@ -40,9 +40,18 @@ trait McpEntityToolTrait {
     if (!$result->isForbidden()) {
       return NULL;
     }
-    return $result instanceof AccessResultReasonInterface && $result->getReason()
+    $reason = $result instanceof AccessResultReasonInterface && $result->getReason()
       ? (string) $result->getReason()
       : 'denied by policy';
+    if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+      $profileId = NULL;
+      if (isset($this->governancePolicyResolver) && is_object($this->governancePolicyResolver)) {
+        $profile = $this->governancePolicyResolver->resolve();
+        $profileId = $profile?->id();
+      }
+      $reason = \Drupal::service('mcp_sentinel.deny_explainer')->annotate($reason, $profileId);
+    }
+    return $reason;
   }
 
   /**

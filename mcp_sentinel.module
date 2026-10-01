@@ -23,6 +23,7 @@ use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
 use Drupal\simple_oauth\Entities\AccessTokenEntity;
+use Symfony\Component\Routing\RouteCollection;
 
 /**
  * Implements hook_help().
@@ -63,7 +64,7 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
       $output .= '<ul>';
       $output .= '<li>' . t('<a href=":settings">MCP Sentinel settings</a> — settings are organized into vertical tabs: MCP Access, OAuth agent channel, Audit Logging, Data Loss Prevention, Anomaly detection, Reliable webhooks, and Dashboard broadcast. The Dashboard broadcast tab lets operators post a message (with info/warning/critical severity) that appears as a banner on the governance dashboard. The DLP patterns, anomaly rules, and webhook endpoints lists are now edited as dynamic add/remove rows instead of fixed slots or pipe-delimited textareas.', [':settings' => $settings_url]) . '</li>';
       $output .= '<li>' . t('Policy profiles are managed as configuration entities; create and edit them from the settings page. The profile edit form is organized into vertical tabs — Identity, Allowed operations, Entity scope, Redaction, Rate limits &amp; quotas, and Network / IP — and shows a live plain-language policy summary that updates when key fields change.') . '</li>';
-      $output .= '<li>' . t('<a href=":dashboard">MCP Sentinel governance dashboard</a> — the landing page at <code>/admin/reports/mcp-sentinel</code>. A read-only operations console showing an urgent-conditions banner, a posture rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy panels, six charts, quick actions, and an active-controls strip. A time-window toggle (24h/7d/30d) re-scopes the counts and charts, and charts/tiles click through to the filtered audit log. The <em>Verify chain now</em> quick action re-runs the audit hash-chain check on demand. Critical conditions (such as a broken hash chain) also appear as a dismissible banner on every admin page, so they are seen even off the dashboard. Local-task tabs lead to the audit log, webhook deliveries, and (when the approval submodule is enabled) approvals.', [':dashboard' => $dashboard_url]) . '</li>';
+      $output .= '<li>' . t('<a href=":dashboard">MCP Sentinel governance dashboard</a> — the landing page at <code>/admin/reports/mcp-sentinel</code>. A read-only operations console showing an urgent-conditions banner, the MCP admin status strip (on/off, designated clients, readiness, last whoami), a posture rollup, status tiles, a chain-integrity card, top-agents and denied-by-policy panels, six charts, quick actions, and an active-controls strip. A time-window toggle (24h/7d/30d) re-scopes the counts and charts, and charts/tiles click through to the filtered audit log. The <em>Verify chain now</em> quick action re-runs the audit hash-chain check on demand. Critical conditions (such as a broken hash chain) also appear as a dismissible banner on every admin page, so they are seen even off the dashboard. Local-task tabs lead to the audit log, webhook deliveries, and (when the approval submodule is enabled) approvals. Sealed tokens are minted at Configuration → MCP Sentinel → Sealed tokens.', [':dashboard' => $dashboard_url]) . '</li>';
       $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records (now at <code>/admin/reports/mcp-sentinel/audit</code>, reachable from the dashboard "Audit log" tab).', [':audit' => $audit_url]) . '</li>';
       $output .= '</ul>';
 
@@ -82,6 +83,7 @@ function mcp_sentinel_theme(): array {
     'mcp_sentinel_dashboard' => [
       'variables' => [
         'banner' => NULL,
+        'admin_strip' => [],
         'status' => [],
         'tiles' => [],
         'chain' => [],
@@ -91,6 +93,11 @@ function mcp_sentinel_theme(): array {
         'charts' => [],
         'window' => '24h',
         'windows' => [],
+      ],
+    ],
+    'mcp_sentinel_status_strip' => [
+      'variables' => [
+        'strip' => [],
       ],
     ],
     'mcp_sentinel_urgent_banner' => [
@@ -786,6 +793,16 @@ function mcp_sentinel_cron(): void {
   }
   \Drupal::service('mcp_sentinel.content_lock')->releaseExpired();
 
+  if (\Drupal::hasService('mcp_sentinel.sealed_token_manager')) {
+    $prunedTokens = \Drupal::service('mcp_sentinel.sealed_token_manager')->pruneExpired();
+    if ($prunedTokens > 0) {
+      \Drupal::logger('mcp_sentinel')->info(
+        'Pruned @count expired sealed-token rows (hash metadata only).',
+        ['@count' => $prunedTokens]
+      );
+    }
+  }
+
   $prunedWebhooks = \Drupal::service('mcp_sentinel.webhook_queue_manager')->pruneOldDeliveries();
   if ($prunedWebhooks > 0) {
     \Drupal::logger('mcp_sentinel')->info(
@@ -850,6 +867,29 @@ function mcp_sentinel_cron(): void {
       'Evidence reconciliation failed during cron: @message',
       ['@message' => $e->getMessage()]
     );
+  }
+}
+
+/**
+ * Implements hook_route_alter().
+ *
+ * Routes that already accept oauth2 also accept a Sentinel sealed token so
+ * a minted bearer works on mcp_server and JSON:API. Applies() still
+ * ignores anything that is not the mcs1. prefix.
+ *
+ * @param \Symfony\Component\Routing\RouteCollection $collection
+ *   The route collection to alter.
+ */
+function mcp_sentinel_route_alter(RouteCollection $collection): void {
+  foreach ($collection as $route) {
+    $auth = $route->getOption('_auth');
+    if (!is_array($auth) || !in_array('oauth2', $auth, TRUE)) {
+      continue;
+    }
+    if (!in_array('mcp_sealed_token', $auth, TRUE)) {
+      $auth[] = 'mcp_sealed_token';
+      $route->setOption('_auth', $auth);
+    }
   }
 }
 

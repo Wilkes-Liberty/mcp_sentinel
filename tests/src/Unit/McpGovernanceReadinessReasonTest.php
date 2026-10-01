@@ -34,4 +34,20 @@ final class McpGovernanceReadinessReasonTest extends UnitTestCase {
     );
   }
 
+  /**
+   * Every reason has operator prose and a next step, with no secret words.
+   *
+   * @covers ::operatorMessage
+   * @covers ::nextStep
+   */
+  public function testEveryReasonHasOperatorProse(): void {
+    foreach (McpGovernanceReadinessReason::cases() as $reason) {
+      $this->assertNotSame('', $reason->operatorMessage());
+      $this->assertNotSame('', $reason->nextStep());
+      $blob = $reason->operatorMessage() . ' ' . $reason->nextStep();
+      $this->assertStringNotContainsString('Bearer', $blob);
+      $this->assertStringNotContainsString('secret', strtolower($blob));
+    }
+  }
+
 }

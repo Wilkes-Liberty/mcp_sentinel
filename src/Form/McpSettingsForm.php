@@ -9,6 +9,7 @@ use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
+use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpDlp;
@@ -48,6 +49,11 @@ class McpSettingsForm extends ConfigFormBase {
   protected McpGovernanceReadiness $governanceReadiness;
 
   /**
+   * Admin status strip assembler.
+   */
+  protected ?McpAdminStatus $adminStatus = NULL;
+
+  /**
    * Classification vocabulary for the optional DLP pattern label.
    */
   protected ?McpClassificationResolver $classification = NULL;
@@ -61,6 +67,9 @@ class McpSettingsForm extends ConfigFormBase {
     $instance->encryptionProfileManager = $container->get('encrypt.encryption_profile.manager');
     $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
     $instance->governanceReadiness = $container->get('mcp_sentinel.governance_readiness');
+    $instance->adminStatus = $container->has('mcp_sentinel.admin_status')
+      ? $container->get('mcp_sentinel.admin_status')
+      : NULL;
     $instance->classification = $container->has('mcp_sentinel.classification')
       ? $container->get('mcp_sentinel.classification')
       : NULL;
@@ -99,6 +108,13 @@ class McpSettingsForm extends ConfigFormBase {
 
     $form['tabs'] = ['#type' => 'vertical_tabs', '#default_tab' => 'edit-status'];
     $form['#attached']['library'][] = 'mcp_sentinel/admin';
+    if ($this->adminStatus !== NULL) {
+      $form['admin_strip'] = [
+        '#theme' => 'mcp_sentinel_status_strip',
+        '#strip' => $this->adminStatus->build(),
+        '#weight' => -102,
+      ];
+    }
 
     // Cross-link to the operational views. Settings live under Configuration
     // and the governance dashboard under Reports, so without this an operator
@@ -120,6 +136,10 @@ class McpSettingsForm extends ConfigFormBase {
             'audit_log' => [
               'title' => $this->t('Audit log'),
               'url' => Url::fromRoute('mcp_sentinel.audit_log'),
+            ],
+            'tokens' => [
+              'title' => $this->t('Sealed tokens'),
+              'url' => Url::fromRoute('mcp_sentinel.sealed_token'),
             ],
           ],
           '#attributes' => ['class' => ['inline']],

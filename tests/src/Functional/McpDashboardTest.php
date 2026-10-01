@@ -51,6 +51,12 @@ final class McpDashboardTest extends BrowserTestBase {
     $this->drupalGet('/admin/reports/mcp-sentinel');
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->elementExists('css', '.mcp-dashboard');
+    $this->assertSession()->elementExists('css', '[data-mcp-status-strip]');
+    $this->assertSession()->pageTextContains('Agent clients');
+    $this->assertSession()->pageTextContains('Readiness');
+    $this->assertSession()->pageTextContains('Last whoami');
+    $this->assertSession()->linkExists('Add agent client');
+    $this->assertSession()->linkExists('Mint sealed token');
     // Posture hero + status tiles present.
     $this->assertSession()->pageTextContains('Governance');
     // Active-controls strip present.

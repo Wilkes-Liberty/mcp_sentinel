@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- DEV-761: Admin MCP status strip on the governance dashboard and settings
+  form. Shows master-switch on/off, designated agent clients / consumers,
+  source-governance readiness with the failing gate in plain language, the
+  last whoami/readiness signal, and a deep link to add an agent client.
+- DEV-762: Sealed-token mint UI at Configuration → MCP Sentinel → Sealed
+  tokens. Tokens are short-TTL, bound to a designated client, shown
+  copy-once, and revocable. The secret is never stored or echoed after
+  leaving the reveal page.
+- DEV-764: Tool and readiness denials name the policy/rule and whether
+  widening is appropriate. Widening is never automatic. README shows a
+  good vs bad deny message. Secrets are not included.
+
 ## [2.26.0] - 2026-10-01
 
 ### Added

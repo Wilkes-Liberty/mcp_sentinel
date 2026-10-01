@@ -11,9 +11,11 @@ use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
+use Drupal\mcp_sentinel\Service\McpWhoamiRecorder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 
@@ -43,6 +45,10 @@ class McpContextController extends ControllerBase {
    *   Classification egress ceilings (d.o #3616540 part 2): the schema
    *   document has a label, and over-ceiling bundles are not described.
    *   NULL only in the deploy window before the container rebuilds.
+   * @param \Drupal\mcp_sentinel\Service\McpWhoamiRecorder|null $whoamiRecorder
+   *   Last whoami recorder. NULL only in the deploy window.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Deny-path explainer. NULL only in the deploy window.
    */
   public function __construct(
     private readonly McpSiteSchemaBuilder $schemaBuilder,
@@ -51,6 +57,8 @@ class McpContextController extends ControllerBase {
     private readonly McpRateLimiter $rateLimiter,
     private readonly McpAuditLogger $auditLogger,
     private readonly ?McpClassificationResolver $classification = NULL,
+    private readonly ?McpWhoamiRecorder $whoamiRecorder = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -64,6 +72,8 @@ class McpContextController extends ControllerBase {
       $container->get('mcp_sentinel.rate_limiter'),
       $container->get('mcp_sentinel.audit_logger'),
       $container->has('mcp_sentinel.classification') ? $container->get('mcp_sentinel.classification') : NULL,
+      $container->has('mcp_sentinel.whoami_recorder') ? $container->get('mcp_sentinel.whoami_recorder') : NULL,
+      $container->has('mcp_sentinel.deny_explainer') ? $container->get('mcp_sentinel.deny_explainer') : NULL,
     );
   }
 
@@ -86,6 +96,7 @@ class McpContextController extends ControllerBase {
       $this->currentUser(),
       'mcp_read',
     );
+    $this->whoamiRecorder?->record($readiness, 'context');
     if (!$readiness->isReady()) {
       return $this->notReadyResponse($readiness->reason());
     }
@@ -194,6 +205,7 @@ class McpContextController extends ControllerBase {
     }
 
     $result = $this->readiness->contractStatus();
+    $this->whoamiRecorder?->record($result, 'readiness');
     return new JsonResponse([
       'contract_ready' => $result->isReady(),
       'reason' => $result->reason()?->value,
@@ -214,10 +226,22 @@ class McpContextController extends ControllerBase {
    */
   private function notReadyResponse(McpGovernanceReadinessReason $reason): JsonResponse {
     $status = $reason->isAuthorizationFailure() ? 403 : 503;
-    return new JsonResponse([
-      'error' => $status === 403 ? 'MCP access is denied.' : 'MCP source governance is not ready.',
+    $error = $status === 403 ? 'MCP access is denied.' : 'MCP source governance is not ready.';
+    $payload = [
+      'error' => $error,
       'reason' => $reason->value,
-    ], $status, [
+      'rule' => $reason->value,
+      'rule_name' => 'source-governance contract',
+      'widen_appropriate' => FALSE,
+      'next_step' => $reason->nextStep(),
+      'explain' => $reason->operatorMessage(),
+    ];
+    if ($this->denyExplainer !== NULL) {
+      $explained = $this->denyExplainer->explain($reason->value);
+      $payload['rule_name'] = $explained->ruleName;
+      $payload['widen_appropriate'] = $explained->widenAppropriate;
+    }
+    return new JsonResponse($payload, $status, [
       'Cache-Control' => 'private, no-store',
       'X-Content-Type-Options' => 'nosniff',
     ]);

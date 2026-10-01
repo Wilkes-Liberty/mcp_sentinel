@@ -27,3 +27,57 @@
   color: #721c24;
   background: #f8d7da;
 }
+
+.mcp-status-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75em 1em;
+  margin: 0 0 1em;
+  padding: 0.85em 1em;
+  border: 1px solid #dee2e6;
+  border-left: 4px solid #ffc107;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.mcp-status-strip--ok {
+  border-left-color: #28a745;
+}
+
+.mcp-status-strip__label {
+  display: block;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6c757d;
+  font-size: 0.75em;
+}
+
+.mcp-status-strip__value {
+  display: block;
+  font-weight: 700;
+}
+
+.mcp-status-strip__sub,
+.mcp-status-strip__next {
+  display: block;
+  color: #6c757d;
+  font-size: 0.85em;
+}
+
+.mcp-status-strip__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+.mcp-status-strip__link {
+  display: inline-block;
+  padding: 0.2em 0.7em;
+  text-decoration: none;
+  border: 1px solid #dee2e6;
+  border-radius: 3px;
+}
+
+.mcp-sealed-token__secret {
+  font-family: monospace;
+}

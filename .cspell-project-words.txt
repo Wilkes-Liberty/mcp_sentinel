@@ -72,7 +72,9 @@ lookback
 ltrim
 materialised
 materialising
+mcs
 mcps
+whoami
 memoise
 memoises
 mimic_implicit_commit

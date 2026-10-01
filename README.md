@@ -988,6 +988,9 @@ Admin routes:
 - `/admin/config/services/mcp-sentinel` — settings form (master switch,
   governance model, audit, encryption, DLP, rate limits, anomaly rules, IP
   allowlists, webhook endpoints). Linked from **Configuration → Web services**.
+- `/admin/config/services/mcp-sentinel/tokens` — sealed-token mint and revoke
+  (DEV-762). Short TTL, bound to a designated agent client, copy-once, no
+  secret echo after you leave the reveal page.
 - `/admin/reports/mcp-sentinel` — **governance dashboard** (landing page; see
   below), linked from the **Reports** menu. Local-task tabs lead to the audit
   log, webhook deliveries, and (when the approval submodule is enabled)
@@ -1007,6 +1010,10 @@ stores — it performs no writes and re-verifies nothing on load. It surfaces:
 - an **urgent-conditions banner** (broken hash chain, unresolvable encryption
   profile or webhook signing key, governance switched off while traffic flows,
   and the operator broadcast message);
+- an **MCP admin status strip** (DEV-761): master switch on/off, designated
+  agent clients vs Consumer count, source-governance readiness with the
+  failing gate in plain language, last whoami/readiness signal, and a deep
+  link to add an agent client;
 - a **posture hero** rolling up how many items need attention (urgent
   conditions + pending approvals + anomaly alerts + webhook failures).
   All-clear also requires a successful, non-stale audit-chain verification —
@@ -1207,6 +1214,53 @@ default rather than merely guarded.
 | `drush mcp-sentinel:teardown` | (submodule) Unregister all Sentinel tools from mcp_server. |
 | `drush mcp-sentinel:agent-provision <tier> --env=<env>` | (submodule) Provision an agent tier — `content`, `content-auditor`, `auditor`, `developer`, or `admin` — as a role + service account + OAuth consumer (`<tier>-<env>`). Never creates or rotates secrets. |
 | `drush mcp-sentinel:break-glass <uid>` | (approval submodule) Request the time-boxed `mcp_admin` break-glass role for a user; always approval-gated, auto-revoked at the configured TTL. |
+
+### Deny-path explain (DEV-764)
+
+When a tool is denied, the failure names the **rule** and whether a human
+may consider widening. Sentinel never auto-widens an allowlist.
+
+Good deny (agent-visible):
+
+```
+Entity type 'taxonomy_term' is not in the MCP Sentinel allowlist.
+[rule:entity_type_allowlist entity-type allowlist]
+Widening may be appropriate after a human review; it is never automatic.
+Next: A human may add "taxonomy_term" to allowed_entity_types if that type is editorial.
+```
+
+Good deny that must stay denied:
+
+```
+Entity type 'user' is denied by MCP Sentinel.
+[rule:entity_type_denied entity-type denylist]
+Widening is not appropriate; this deny must stay.
+Next: Keep "user" on the denylist. Credential-bearing types must stay denied.
+```
+
+Bad deny (do not ship this shape):
+
+```
+denied
+```
+
+or any message that echoes a bearer token, consumer secret, signing key,
+or hashed material. Rule ids and next-step prose are the contract; secrets
+are not.
+
+### Sealed-token mint (DEV-762)
+
+**Configuration → Web services → MCP Sentinel → Sealed tokens**.
+
+1. Designate at least one Consumer `client_id` under **OAuth agent channel**.
+2. Choose that client and a short TTL (15 minutes to 24 hours).
+3. Mint. Copy the bearer once. Leave the page — the secret is gone from
+   the admin UI. Only a hash remains, so revoke still works.
+4. Use `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness` (whoami)
+   and other oauth2-protected routes. Revoke if it leaks.
+
+This is not an OAuth login wizard. OAuth client-credentials remains the
+long-lived channel; sealed tokens are short-lived and client-bound.
 
 ## Companion Node.js Connector
 

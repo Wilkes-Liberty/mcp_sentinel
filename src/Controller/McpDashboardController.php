@@ -10,8 +10,10 @@ use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\State\StateInterface;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpChartRenderer;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpMetrics;
 use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpUrgentConditions;
@@ -68,6 +70,10 @@ class McpDashboardController extends ControllerBase {
    *   The time service (Verify-now timestamps the last-verify result).
    * @param \Psr\Log\LoggerInterface $logger
    *   The mcp_sentinel logger channel.
+   * @param \Drupal\mcp_sentinel\Service\McpAdminStatus|null $adminStatus
+   *   Admin status strip assembler. NULL only in the deploy window.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Deny-path explainer. NULL only in the deploy window.
    */
   public function __construct(
     private readonly McpMetrics $metrics,
@@ -78,6 +84,8 @@ class McpDashboardController extends ControllerBase {
     private readonly Connection $database,
     private readonly TimeInterface $time,
     private readonly LoggerInterface $logger,
+    private readonly ?McpAdminStatus $adminStatus = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -93,6 +101,8 @@ class McpDashboardController extends ControllerBase {
       $container->get('database'),
       $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
+      $container->get('mcp_sentinel.admin_status'),
+      $container->get('mcp_sentinel.deny_explainer'),
     );
   }
 
@@ -111,6 +121,7 @@ class McpDashboardController extends ControllerBase {
     $build = [
       '#theme' => 'mcp_sentinel_dashboard',
       '#banner' => $this->widget('banner', fn() => $this->buildBanner()),
+      '#admin_strip' => $this->widget('admin_strip', fn() => $this->buildAdminStrip(), []),
       '#status' => $this->widget('status', fn() => $this->buildStatus(), []),
       '#tiles' => $this->widget('tiles', fn() => $this->buildTiles($window), []),
       '#chain' => $this->widget('chain', fn() => $this->buildChain(), []),
@@ -409,9 +420,13 @@ class McpDashboardController extends ControllerBase {
 
     $reasons = [];
     foreach ($this->metrics->deniedReasons($window) as $reason => $count) {
+      $label = (string) $reason;
+      if ($this->denyExplainer !== NULL && $label !== '') {
+        $label = $this->denyExplainer->annotate($label);
+      }
       $reasons[] = [
         // Reason labels are operator/agent-sourced — escape for safety.
-        'label' => Html::escape((string) $reason),
+        'label' => Html::escape($label),
         'count' => (int) $count,
       ];
     }
@@ -449,7 +464,57 @@ class McpDashboardController extends ControllerBase {
       'title' => (string) $this->t('Settings'),
       'url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
     ];
+    if ($this->currentUser()->hasPermission('administer mcp sentinel')) {
+      $actions[] = [
+        'title' => (string) $this->t('Mint sealed token'),
+        'url' => $this->safeRouteUrl('mcp_sentinel.sealed_token'),
+      ];
+      $actions[] = [
+        'title' => (string) $this->t('Add agent client'),
+        'url' => $this->addClientUrl(),
+      ];
+    }
     return array_values(array_filter($actions, static fn(array $a): bool => $a['url'] !== ''));
+  }
+
+  /**
+   * Builds the connector-facing admin status strip.
+   *
+   * @return array<string, mixed>
+   *   Strip data, or empty when the service is unavailable.
+   */
+  private function buildAdminStrip(): array {
+    $strip = $this->adminStatus?->build();
+    if (!is_array($strip) || $strip === []) {
+      return [];
+    }
+    return [
+      '#theme' => 'mcp_sentinel_status_strip',
+      '#strip' => $strip,
+    ];
+  }
+
+  /**
+   * Deep link to add a Consumer, else settings.
+   */
+  private function addClientUrl(): string {
+    $strip = $this->adminStatus?->build();
+    if (is_array($strip) && isset($strip['add_client_url']) && is_string($strip['add_client_url'])) {
+      return $strip['add_client_url'];
+    }
+    return $this->safeRouteUrl('mcp_sentinel.settings');
+  }
+
+  /**
+   * Generates a route URL, or '' when the route cannot be built.
+   */
+  private function safeRouteUrl(string $routeName): string {
+    try {
+      return Url::fromRoute($routeName)->toString();
+    }
+    catch (\Throwable) {
+      return '';
+    }
   }
 
   /**

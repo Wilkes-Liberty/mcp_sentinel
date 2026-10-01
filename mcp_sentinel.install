@@ -78,6 +78,27 @@ function mcp_sentinel_schema(): array {
     'indexes' => ['expires_at' => ['expires_at']],
   ];
 
+  $schema['mcp_sentinel_sealed_token'] = [
+    'description' => 'Metadata for short-lived sealed tokens. The secret is never stored.',
+    'fields' => [
+      'jti' => ['type' => 'varchar', 'length' => 36, 'not null' => TRUE],
+      'client_id' => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
+      'uid' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'scopes' => ['type' => 'varchar', 'length' => 512, 'not null' => TRUE, 'default' => ''],
+      'token_hash' => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'expires' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'revoked' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+      'minted_by' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'minted_at' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+    ],
+    'primary key' => ['jti'],
+    'indexes' => [
+      'client_id' => ['client_id'],
+      'expires' => ['expires'],
+      'revoked' => ['revoked'],
+    ],
+  ];
+
   return $schema;
 }
 
@@ -1314,4 +1335,17 @@ function mcp_sentinel_update_10025(): string {
   }
   $settings->save();
   return 'Added ' . implode(', ', $added) . ' (empty) to mcp_sentinel.settings. The built-in secret names and prefixes apply regardless.';
+}
+
+/**
+ * Create the sealed-token metadata table. Secrets are never stored.
+ */
+function mcp_sentinel_update_10026(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->tableExists('mcp_sentinel_sealed_token')) {
+    return 'mcp_sentinel_sealed_token already exists.';
+  }
+  $spec = mcp_sentinel_schema()['mcp_sentinel_sealed_token'];
+  $schema->createTable('mcp_sentinel_sealed_token', $spec);
+  return 'Created mcp_sentinel_sealed_token for copy-once sealed-token mint metadata.';
 }

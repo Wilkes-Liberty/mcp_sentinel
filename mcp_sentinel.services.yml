@@ -162,6 +162,48 @@ services:
     arguments:
       - '@current_user'
       - '@config.factory'
+      - '@request_stack'
+
+  mcp_sentinel.deny_explainer:
+    class: Drupal\mcp_sentinel\Service\McpDenyExplainer
+
+  mcp_sentinel.whoami_recorder:
+    class: Drupal\mcp_sentinel\Service\McpWhoamiRecorder
+    arguments:
+      - '@state'
+      - '@datetime.time'
+      - '@current_user'
+      - '@mcp_sentinel.oauth_context'
+
+  mcp_sentinel.admin_status:
+    class: Drupal\mcp_sentinel\Service\McpAdminStatus
+    arguments:
+      - '@config.factory'
+      - '@entity_type.manager'
+      - '@module_handler'
+      - '@mcp_sentinel.governance_readiness'
+      - '@mcp_sentinel.whoami_recorder'
+      - '@datetime.time'
+
+  mcp_sentinel.sealed_token_manager:
+    class: Drupal\mcp_sentinel\Service\McpSealedTokenManager
+    arguments:
+      - '@database'
+      - '@config.factory'
+      - '@entity_type.manager'
+      - '@datetime.time'
+      - '@uuid'
+      - '@private_key'
+      - '@settings'
+      - '@mcp_sentinel.audit_logger'
+
+  mcp_sentinel.sealed_token_auth:
+    class: Drupal\mcp_sentinel\Authentication\McpSealedTokenAuthProvider
+    arguments:
+      - '@mcp_sentinel.sealed_token_manager'
+      - '@entity_type.manager'
+    tags:
+      - { name: authentication_provider, provider_id: mcp_sealed_token, priority: 180 }
 
   mcp_sentinel.install_verifier:
     class: Drupal\mcp_sentinel\Service\McpInstallVerifier
