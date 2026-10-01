@@ -8,6 +8,7 @@ use Drupal\consumers\Entity\Consumer;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Symfony\Component\HttpFoundation\Request;
 use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
 use Drupal\simple_oauth\Entity\Oauth2TokenInterface;
 use Drupal\simple_oauth\Oauth2ScopeInterface;
@@ -196,6 +197,32 @@ final class McpOauthContextTest extends KernelTestBase {
     $this->assertTrue($ctx->isAgentChannel());
     $ctx->setVerificationChannel(FALSE);
     $this->assertFalse($ctx->isAgentChannel());
+  }
+
+  /**
+   * A verified sealed token on the request is the agent channel.
+   *
+   * @covers ::clientId
+   * @covers ::scopes
+   * @covers ::isAgentChannel
+   */
+  public function testSealedTokenClaimsAreTheAgentChannel(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('agent_oauth_clients', ['mcp-agent-prod'])
+      ->save();
+    $request = Request::create('/drupal-mcp/readiness');
+    $request->attributes->set(McpOauthContext::SEALED_ATTRIBUTE, [
+      'client_id' => 'mcp-agent-prod',
+      'scopes' => ['mcp_read'],
+      'jti' => '00000000-0000-0000-0000-000000000001',
+    ]);
+    $this->container->get('request_stack')->push($request);
+
+    $ctx = $this->container->get('mcp_sentinel.oauth_context');
+    $this->assertSame('mcp-agent-prod', $ctx->clientId());
+    $this->assertSame(['mcp_read'], $ctx->scopes());
+    $this->assertTrue($ctx->isAgentChannel());
+    $this->assertTrue($ctx->isOauthRequest());
   }
 
 }

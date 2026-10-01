@@ -1,0 +1,61 @@
+{#
+/**
+ * @file
+ * Admin MCP status strip: on/off, clients, readiness, last whoami.
+ *
+ * Available variables:
+ * - strip: assembled by McpAdminStatus::build().
+ */
+#}
+{% if strip %}
+<div class="mcp-status-strip mcp-status-strip--{{ strip.enabled and strip.ready ? 'ok' : 'warn' }}" data-mcp-status-strip>
+  <div class="mcp-status-strip__item">
+    <span class="mcp-status-strip__label">{{ 'MCP'|t }}</span>
+    <span class="mcp-status-strip__value">{{ strip.enabled_label }}</span>
+  </div>
+  <div class="mcp-status-strip__item">
+    <span class="mcp-status-strip__label">{{ 'Agent clients'|t }}</span>
+    <span class="mcp-status-strip__value">{{ strip.client_count }} {{ 'designated'|t }}{% if strip.consumer_count %} / {{ strip.consumer_count }} {{ 'consumers'|t }}{% endif %}</span>
+    {% if strip.clients %}
+      <span class="mcp-status-strip__sub">
+        {% for client in strip.clients %}
+          {{ client.id }}{% if not client.present %} ({{ 'missing'|t }}){% elseif not client.enabled %} ({{ 'disabled'|t }}){% endif %}{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </span>
+    {% endif %}
+  </div>
+  <div class="mcp-status-strip__item mcp-status-strip__item--gate">
+    <span class="mcp-status-strip__label">{{ 'Readiness'|t }}</span>
+    <span class="mcp-status-strip__value">{{ strip.ready ? 'Ready'|t : 'Not ready'|t }}{% if strip.gate %} ({{ strip.gate }}){% endif %}</span>
+    <span class="mcp-status-strip__sub">{{ strip.gate_message }}</span>
+    {% if strip.next_step %}
+      <span class="mcp-status-strip__next">{{ strip.next_step }}</span>
+    {% endif %}
+  </div>
+  <div class="mcp-status-strip__item">
+    <span class="mcp-status-strip__label">{{ 'Last whoami'|t }}</span>
+    {% if strip.last_whoami %}
+      <span class="mcp-status-strip__value">{{ strip.last_whoami.ready ? 'Ready'|t : 'Not ready'|t }} · {{ strip.last_whoami.age }}</span>
+      <span class="mcp-status-strip__sub">
+        {{ 'UID @uid'|t({'@uid': strip.last_whoami.uid}) }}
+        {% if strip.last_whoami.client_id %} · {{ strip.last_whoami.client_id }}{% endif %}
+        {% if strip.last_whoami.reason %} · {{ strip.last_whoami.reason }}{% endif %}
+      </span>
+    {% else %}
+      <span class="mcp-status-strip__value">{{ 'None yet'|t }}</span>
+      <span class="mcp-status-strip__sub">{{ 'No connector whoami or readiness call has been recorded.'|t }}</span>
+    {% endif %}
+  </div>
+  <div class="mcp-status-strip__actions">
+    {% if strip.add_client_url %}
+      <a class="mcp-status-strip__link" href="{{ strip.add_client_url }}">{{ 'Add agent client'|t }}</a>
+    {% endif %}
+    {% if strip.mint_url %}
+      <a class="mcp-status-strip__link" href="{{ strip.mint_url }}">{{ 'Mint sealed token'|t }}</a>
+    {% endif %}
+    {% if strip.settings_url %}
+      <a class="mcp-status-strip__link" href="{{ strip.settings_url }}">{{ 'Settings'|t }}</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}

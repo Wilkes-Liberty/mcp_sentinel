@@ -8,6 +8,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
 use Drupal\simple_oauth\Oauth2ScopeInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Reads the validated OAuth channel (consumer + scopes) for the current req.
@@ -29,6 +30,11 @@ use Drupal\simple_oauth\Oauth2ScopeInterface;
 class McpOauthContext {
 
   /**
+   * Request attribute set by the sealed-token auth provider.
+   */
+  public const SEALED_ATTRIBUTE = 'mcp_sentinel.sealed_token';
+
+  /**
    * Process-scoped override used by the install verifier.
    *
    * The publish-gate constraint consults isAgentChannel() and otherwise
@@ -46,10 +52,14 @@ class McpOauthContext {
    *   The current-user account proxy.
    * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
    *   The config factory.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   Request stack used to read sealed-token claims. Optional so existing
+   *   two-argument constructions in tests keep working.
    */
   public function __construct(
     private readonly AccountProxyInterface $currentUser,
     private readonly ConfigFactoryInterface $configFactory,
+    private readonly ?RequestStack $requestStack = NULL,
   ) {}
 
   /**
@@ -72,6 +82,11 @@ class McpOauthContext {
    *   The scope names, or an empty array when the request is not OAuth.
    */
   public function scopes(): array {
+    $sealed = $this->sealedClaims();
+    if ($sealed !== NULL) {
+      $scopes = $sealed['scopes'] ?? [];
+      return is_array($scopes) ? array_values(array_filter($scopes, 'is_string')) : [];
+    }
     $user = $this->tokenAuthUser();
     if ($user === NULL) {
       return [];
@@ -94,6 +109,10 @@ class McpOauthContext {
    *   The consumer client_id string, or NULL.
    */
   public function clientId(): ?string {
+    $sealed = $this->sealedClaims();
+    if ($sealed !== NULL && isset($sealed['client_id']) && is_string($sealed['client_id']) && $sealed['client_id'] !== '') {
+      return $sealed['client_id'];
+    }
     $user = $this->tokenAuthUser();
     return $user?->getConsumer()->getClientId();
   }
@@ -102,7 +121,7 @@ class McpOauthContext {
    * Whether the current account came from a validated OAuth access token.
    */
   public function isOauthRequest(): bool {
-    return $this->tokenAuthUser() !== NULL;
+    return $this->tokenAuthUser() !== NULL || $this->sealedClaims() !== NULL;
   }
 
   /**
@@ -170,6 +189,18 @@ class McpOauthContext {
   private function tokenAuthUser(): ?TokenAuthUserInterface {
     $account = $this->currentUser->getAccount();
     return $account instanceof TokenAuthUserInterface ? $account : NULL;
+  }
+
+  /**
+   * Claims from a verified sealed token on this request, if any.
+   *
+   * @return array<string, mixed>|null
+   *   client_id, scopes, jti — or NULL when this is not a sealed-token request.
+   */
+  private function sealedClaims(): ?array {
+    $request = $this->requestStack?->getCurrentRequest();
+    $claims = $request?->attributes->get(self::SEALED_ATTRIBUTE);
+    return is_array($claims) ? $claims : NULL;
   }
 
 }

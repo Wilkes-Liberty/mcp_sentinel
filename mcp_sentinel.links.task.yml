@@ -12,3 +12,14 @@ mcp_sentinel.webhooks_tab:
   title: 'Webhook deliveries'
   route_name: mcp_sentinel.webhook_delivery
   base_route: mcp_sentinel.dashboard
+
+mcp_sentinel.settings_tab:
+  title: 'Settings'
+  route_name: mcp_sentinel.settings
+  base_route: mcp_sentinel.settings
+
+mcp_sentinel.tokens_tab:
+  title: 'Sealed tokens'
+  route_name: mcp_sentinel.sealed_token
+  base_route: mcp_sentinel.settings
+  weight: 10

@@ -85,6 +85,7 @@ mcp_sentinel.context:
   options:
     _auth:
       - oauth2
+      - mcp_sealed_token
 
 mcp_sentinel.health:
   path: '/drupal-mcp/health'
@@ -94,6 +95,34 @@ mcp_sentinel.health:
     # Public, unauthenticated uptime probe: returns only an ok/disabled status
     # and the module name (no data), so it is intentionally left unrestricted.
     _access: 'TRUE'
+
+mcp_sentinel.sealed_token:
+  path: '/admin/config/services/mcp-sentinel/tokens'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::listing'
+    _title: 'MCP sealed tokens'
+  requirements:
+    _permission: 'administer mcp sentinel'
+
+mcp_sentinel.sealed_token_reveal:
+  path: '/admin/config/services/mcp-sentinel/tokens/reveal'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::reveal'
+    _title: 'Copy sealed token'
+  requirements:
+    _permission: 'administer mcp sentinel'
+  options:
+    no_cache: TRUE
+
+mcp_sentinel.sealed_token_revoke:
+  path: '/admin/config/services/mcp-sentinel/tokens/{jti}/revoke'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::revoke'
+    _title: 'Revoke sealed token'
+  requirements:
+    _permission: 'administer mcp sentinel'
+    _csrf_token: 'TRUE'
+    jti: '[0-9a-fA-F-]{36}'
 
 mcp_sentinel.readiness:
   path: '/drupal-mcp/readiness'
@@ -108,4 +137,5 @@ mcp_sentinel.readiness:
   options:
     _auth:
       - oauth2
+      - mcp_sealed_token
   methods: [GET]

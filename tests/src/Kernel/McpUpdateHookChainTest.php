@@ -849,6 +849,21 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10026 creates the sealed-token metadata table and is idempotent.
+   */
+  public function testUpdate10026CreatesSealedTokenTable(): void {
+    $schema = $this->container->get('database')->schema();
+    $this->assertFalse($schema->tableExists('mcp_sentinel_sealed_token'));
+
+    $message = mcp_sentinel_update_10026();
+    $this->assertStringContainsString('Created mcp_sentinel_sealed_token', $message);
+    $this->assertTrue($schema->tableExists('mcp_sentinel_sealed_token'));
+
+    $again = mcp_sentinel_update_10026();
+    $this->assertStringContainsString('already exists', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

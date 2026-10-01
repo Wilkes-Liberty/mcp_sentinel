@@ -5,6 +5,7 @@
  *
  * Available variables:
  * - banner: a themed urgent-conditions banner render array (may be empty).
+ * - admin_strip: MCP on/off, clients, readiness, last whoami.
  * - status: posture rollup with attention/all_clear/headline/evidence.
  * - tiles: a list of status tiles (label, value, sub, state, url).
  * - chain: chain-integrity card (state, label, detail).
@@ -20,6 +21,10 @@
 
   {% if banner %}
     {{ banner }}
+  {% endif %}
+
+  {% if admin_strip %}
+    {{ admin_strip }}
   {% endif %}
 
   {% if status %}

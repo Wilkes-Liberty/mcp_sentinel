@@ -953,7 +953,7 @@ final class McpDraftResource extends EntityResource {
   /**
    * Reloads a working revision from the database under the save lock.
    *
-   * create-translation mutates the candidate with addTranslation() before
+   * Create-translation mutates the candidate with addTranslation() before
    * save. loadRevision() can return that same object, so the existing-
    * translation check would 409 on a language that exists only in memory
    * (#3627189). Paragraph create already uses loadRevisionUnchanged().
@@ -970,7 +970,7 @@ final class McpDraftResource extends EntityResource {
     if ($revision_id === NULL || $revision_id === '') {
       return NULL;
     }
-    $revision = $storage->loadRevisionUnchanged((int) $revision_id);
+    $revision = $this->loadRevisionFresh($storage, (int) $revision_id);
     return $revision instanceof ContentEntityInterface ? $revision : NULL;
   }
 
@@ -1689,11 +1689,36 @@ final class McpDraftResource extends EntityResource {
    *   The addressed revision.
    */
   private function loadParagraphRevision(RevisionableStorageInterface $storage, EntityInterface $entity, string $revision_id): ContentEntityInterface {
-    $revision = $storage->loadRevisionUnchanged((int) $revision_id);
+    $revision = $this->loadRevisionFresh($storage, (int) $revision_id);
     if (!$revision instanceof ContentEntityInterface || $revision->uuid() !== $entity->uuid()) {
       throw new ConflictHttpException('The paragraph revision is no longer available.');
     }
     return $revision;
+  }
+
+  /**
+   * Loads a revision from storage, bypassing a mutated static-cache hit.
+   *
+   * Drupal 11.1+ exposes loadRevisionUnchanged(). On Drupal 10.6 the method is
+   * missing, so reset the entity static cache then reload the revision.
+   *
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
+   * @param int $revision_id
+   *   Revision id.
+   *
+   * @return \Drupal\Core\Entity\EntityInterface|null
+   *   Fresh revision or NULL.
+   */
+  private function loadRevisionFresh(RevisionableStorageInterface $storage, int $revision_id): ?EntityInterface {
+    if (method_exists($storage, 'loadRevisionUnchanged')) {
+      return $storage->loadRevisionUnchanged($revision_id);
+    }
+    $cached = $storage->loadRevision($revision_id);
+    if ($cached instanceof EntityInterface) {
+      $storage->resetCache([(string) $cached->id()]);
+    }
+    return $storage->loadRevision($revision_id);
   }
 
   /**

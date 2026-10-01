@@ -70,6 +70,16 @@ POST <INTERNAL_BASE_URL>/oauth/token
 Replace `<INTERNAL_BASE_URL>` with the environment-specific internal hostname
 (§3). The token endpoint must **not** be exposed on the public-facing hostname.
 
+### Sealed tokens (admin mint UI)
+
+Operators can mint a short-lived `mcs1.` bearer at **Configuration → MCP
+Sentinel → Sealed tokens** instead of pasting a consumer secret into a
+client. The token is bound to a designated `client_id`, shown once, and
+revocable. Use it as `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness`
+(whoami), JSON:API, GraphQL, and `mcp_server` routes that already accept
+oauth2. Unrelated oauth2 routes do not accept this bearer. This is not a
+public HTTPS Path B or an OAuth login wizard.
+
 ### Access-token TTL
 
 `simple_oauth.settings` must be configured with:

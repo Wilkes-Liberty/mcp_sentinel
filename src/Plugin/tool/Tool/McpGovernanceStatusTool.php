@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpWhoamiRecorder;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Tool\ToolOperation;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -34,11 +35,19 @@ final class McpGovernanceStatusTool extends McpStatusToolBase {
   protected McpGovernanceReadiness $readiness;
 
   /**
+   * Last whoami recorder.
+   */
+  protected ?McpWhoamiRecorder $whoamiRecorder = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->readiness = $container->get('mcp_sentinel.governance_readiness');
+    $instance->whoamiRecorder = $container->has('mcp_sentinel.whoami_recorder')
+      ? $container->get('mcp_sentinel.whoami_recorder')
+      : NULL;
     return $instance;
   }
 
@@ -47,6 +56,7 @@ final class McpGovernanceStatusTool extends McpStatusToolBase {
    */
   protected function run(array $values): array {
     $status = $this->readiness->contractStatus();
+    $this->whoamiRecorder?->record($status, 'tool');
     return [
       'ready' => $status->isReady(),
       'reason' => $status->reason()?->value,

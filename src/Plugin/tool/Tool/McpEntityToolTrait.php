@@ -40,9 +40,18 @@ trait McpEntityToolTrait {
     if (!$result->isForbidden()) {
       return NULL;
     }
-    return $result instanceof AccessResultReasonInterface && $result->getReason()
+    $reason = $result instanceof AccessResultReasonInterface && $result->getReason()
       ? (string) $result->getReason()
       : 'denied by policy';
+    if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+      $profileId = NULL;
+      if (isset($this->governancePolicyResolver)) {
+        $profile = $this->governancePolicyResolver->resolve();
+        $profileId = $profile?->id();
+      }
+      $reason = \Drupal::service('mcp_sentinel.deny_explainer')->annotate($reason, $profileId);
+    }
+    return $reason;
   }
 
   /**
@@ -128,9 +137,12 @@ trait McpEntityToolTrait {
       \Drupal::service('mcp_sentinel.audit_logger')->log(
         'rate_limit_exceeded', ['tool' => $toolId],
       );
-      return ExecutableResult::failure(
-        $this->t('Rate limit exceeded. Retry after the current window expires.')
-      );
+      $message = $this->t('Rate limit exceeded. Retry after the current window expires.');
+      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+        $annotated = \Drupal::service('mcp_sentinel.deny_explainer')->annotate((string) $message);
+        $message = $this->t('@message', ['@message' => $annotated]);
+      }
+      return ExecutableResult::failure($message);
     }
     $limiter->register($profile, $uid, $toolId);
     return NULL;
@@ -197,15 +209,18 @@ trait McpEntityToolTrait {
     $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
     $bytes = strlen($serialized);
     if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
-      return ExecutableResult::failure(
-        $this->t(
-          'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
-          [
-            '@bytes' => $bytes,
-            '@cap'   => $guard->effectiveResponseSizeCap($profile),
-          ]
-        )
+      $message = $this->t(
+        'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
+        [
+          '@bytes' => $bytes,
+          '@cap'   => $guard->effectiveResponseSizeCap($profile),
+        ]
       );
+      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+        $annotated = \Drupal::service('mcp_sentinel.deny_explainer')->annotate((string) $message);
+        $message = $this->t('@message', ['@message' => $annotated]);
+      }
+      return ExecutableResult::failure($message);
     }
     return NULL;
   }

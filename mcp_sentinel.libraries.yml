@@ -22,3 +22,11 @@ dashboard:
     - core/drupal
     - core/once
     - core/drupalSettings
+
+sealed_token:
+  version: 2.x
+  js:
+    js/sealed-token.js: {}
+  dependencies:
+    - core/drupal
+    - core/once

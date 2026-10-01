@@ -378,3 +378,63 @@
   color: var(--mcp-color-muted);
   background: var(--gin-bg-layer3, #e9ecef);
 }
+
+/* Connector admin status strip (DEV-761). */
+.mcp-status-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75em 1em;
+  margin: 0 0 1em;
+  padding: 0.85em 1em;
+  border: 1px solid var(--mcp-border);
+  border-left: 4px solid var(--mcp-color-warning);
+  border-radius: 4px;
+  background: var(--mcp-bg);
+}
+
+.mcp-status-strip--ok {
+  border-left-color: var(--mcp-color-ok);
+}
+
+.mcp-status-strip__label {
+  display: block;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--mcp-color-muted);
+  font-size: 0.75em;
+}
+
+.mcp-status-strip__value {
+  display: block;
+  font-weight: 700;
+}
+
+.mcp-status-strip__sub,
+.mcp-status-strip__next {
+  display: block;
+  color: var(--mcp-color-muted);
+  font-size: 0.85em;
+}
+
+.mcp-status-strip__next {
+  margin-top: 0.25em;
+}
+
+.mcp-status-strip__item--gate {
+  grid-column: span 2;
+}
+
+.mcp-status-strip__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.mcp-status-strip__link {
+  display: inline-block;
+  padding: 0.2em 0.7em;
+  text-decoration: none;
+  border: 1px solid var(--mcp-border);
+  border-radius: 3px;
+}
