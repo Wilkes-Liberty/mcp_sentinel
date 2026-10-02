@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.28.1] - 2026-10-02
+
 ### Changed
 - Drupal.org GitLab CI: cspell is a required job. The previous-major
   composer lane stays off (`OPT_IN_TEST_PREVIOUS_MAJOR=0`) because the
@@ -14,6 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in, the job is pinned to PHP 8.3 and allowed to fail so it cannot
   send Pipeline Failed mail. The Drupal 10.6 floor stays on GitHub
   Actions.
+- The sealed-token kernel test pins the reveal-store expiry to the
+  120 second collection lifetime. Runtime behavior is unchanged.
 
 ## [2.28.0] - 2026-10-01
 
@@ -2633,7 +2637,9 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.27.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.1...1.x
+[2.28.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.0...2.28.1
+[2.28.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.27.0...2.28.0
 [2.27.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.26.0...2.27.0
 [2.26.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.5...2.26.0
 [2.25.5]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.25.4...2.25.5
