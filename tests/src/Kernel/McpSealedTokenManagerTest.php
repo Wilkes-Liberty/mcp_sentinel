@@ -195,8 +195,8 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
       ->condition('collection', 'tempstore.private.mcp_sentinel_sealed_token')
       ->execute()
       ->fetchField();
-    $this->assertGreaterThan($now, $expire);
-    $this->assertLessThanOrEqual($now + McpSealedTokenManager::REVEAL_STORE_TTL, $expire);
+    // DatabaseStorageExpirable adds the factory expiry to the request time.
+    $this->assertSame($now + McpSealedTokenManager::REVEAL_STORE_TTL, $expire);
   }
 
   /**
