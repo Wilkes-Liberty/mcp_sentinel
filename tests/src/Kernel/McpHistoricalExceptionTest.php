@@ -288,6 +288,38 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
   }
 
   /**
+   * Governed rows written after the adopted scheduled run make it stale.
+   *
+   * The row is inserted directly with a later timestamp to stand for a
+   * later request. Only the staleness boundary is under test here.
+   */
+  public function testRowsAfterAdoptedScheduledRunMakeItStale(): void {
+    $this->activateSuccessor();
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $this->assertSame('warning', $this->conditionKeys()['historical_exception'] ?? NULL);
+
+    $this->container->get('database')->insert('audit_chain_log')
+      ->fields([
+        'timestamp' => (int) $run['time'] + 1,
+        'uid' => 0,
+        'channel' => 'mcp_sentinel',
+        'operation' => 'entity_save',
+        'entity_type' => 'node',
+        'bundle' => '',
+        'entity_id' => 'later',
+        'entity_label' => '',
+        'ip_address' => '',
+        'user_agent' => '',
+        'metadata' => '{}',
+      ])
+      ->execute();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['chain_stale'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
    * A stale or failing scheduled verdict is not adopted.
    */
   public function testStaleOrFailingScheduledVerdictIsNotAdopted(): void {

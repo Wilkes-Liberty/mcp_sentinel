@@ -266,6 +266,10 @@ final class McpUrgentConditions {
       is_array($last) ? $last : NULL,
       $this->state->get(McpLastVerify::SCHEDULED_STATE_KEY),
       $this->time->getRequestTime(),
+      fn(int $time): int => (int) $this->database->select('audit_chain_log', 'l')
+        ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
+        ->condition('l.timestamp', $time, '<=')
+        ->countQuery()->execute()->fetchField(),
     );
     $rows = (int) $this->database->select('audit_chain_log', 'l')
       ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')

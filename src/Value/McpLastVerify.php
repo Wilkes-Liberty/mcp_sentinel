@@ -123,7 +123,9 @@ final class McpLastVerify {
    * classifies as the disclosed historical exception is adopted, so the
    * dashboard does not report the chain as never verified. No other
    * scheduled verdict is adopted, and a scheduled run older than a day is
-   * ignored.
+   * ignored. The adopted value's row baseline is the governed rows stamped
+   * at or before the run, so later rows make it stale. A row written later
+   * in the same second as the run is caught by the next row after it.
    *
    * @param array<string, mixed>|null $last
    *   The mcp_sentinel.last_verify value, or NULL.
@@ -131,11 +133,14 @@ final class McpLastVerify {
    *   The Audit Chain scheduled-verification state value.
    * @param int $now
    *   Request time.
+   * @param \Closure(int): int $governedRowsThrough
+   *   Counts governed-channel audit rows stamped at or before a time.
+   *   Called only when a scheduled run is adopted.
    *
    * @return array<string, mixed>|null
    *   The state value to classify, or NULL when there is none.
    */
-  public static function effective(?array $last, mixed $scheduled, int $now): ?array {
+  public static function effective(?array $last, mixed $scheduled, int $now, \Closure $governedRowsThrough): ?array {
     if ($last !== NULL && $last !== []) {
       if (self::isDocumentedHistoricalException($last)
         && is_array($scheduled)
@@ -168,6 +173,7 @@ final class McpLastVerify {
     return [
       'ok' => FALSE,
       'broken_at' => isset($verdict['broken_at']) ? (int) $verdict['broken_at'] : NULL,
+      'rows' => $governedRowsThrough($time),
       'time' => $time,
       'reason' => self::REASON_TAMPERED,
       'unsigned_prefix' => FALSE,
