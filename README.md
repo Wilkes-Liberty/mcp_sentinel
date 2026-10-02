@@ -283,9 +283,11 @@ MCP policy profiles → Configuration governance**.
     audit log as `scheduled_transition`. SCMI's update-access check does not
     lock the agent out of content it was allowed to schedule.
   - Immediate publishing is unchanged: *Deny publishing* still refuses a
-    go-live, so an agent may schedule a publish it cannot perform now. Under
-    *Deny publishing* a scheduled publish date must be in the future, because
-    Scheduler publishes a past date at once or on the next cron run.
+    go-live, so an agent may schedule a publish it cannot perform now. A
+    scheduled publish or unpublish date must be in the future, because
+    Scheduler acts on a past date in the same save. Under *Deny publishing* a
+    governed save also never lets Scheduler publish an overdue schedule; cron
+    publishes it.
   - When on, the agent may also edit content a human already scheduled; those
     edits go live when the schedule runs. Use *Deny publishing* with a
     moderation ceiling, or leave the setting off, if that is not wanted.
