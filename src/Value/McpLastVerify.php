@@ -42,6 +42,11 @@ final class McpLastVerify {
   public const SCHEDULED_STATE_KEY = 'audit_chain.scheduled_verification';
 
   /**
+   * Successor reason Audit Chain stores when a segment is first activated.
+   */
+  private const REASON_AWAITING_VERIFICATION = 'awaiting_verification';
+
+  /**
    * Builds the last-verify state written by Drush and Verify now.
    *
    * @param array<string, mixed> $result
@@ -107,11 +112,18 @@ final class McpLastVerify {
   /**
    * Returns the last-verify state readers should classify.
    *
-   * Sentinel's own verify always wins. Before the first one, a fresh Audit
-   * Chain scheduled run that Audit Chain classifies as the disclosed
-   * historical exception is adopted, so the dashboard does not report the
-   * chain as never verified. No other scheduled verdict is adopted, and a
-   * scheduled run older than a day is ignored.
+   * Sentinel's own verify wins, with one exception: a stored historical
+   * exception does not survive a newer Audit Chain scheduled run that finds
+   * tampering it does not classify as that exception. Tampering adds no
+   * rows, so the stored verify would otherwise keep explaining a new break
+   * until it aged out. The placeholder Audit Chain writes when a segment is
+   * activated is not such a run: it carries no successor verdict yet.
+   *
+   * Before the first Sentinel verify, a fresh scheduled run that Audit Chain
+   * classifies as the disclosed historical exception is adopted, so the
+   * dashboard does not report the chain as never verified. No other
+   * scheduled verdict is adopted, and a scheduled run older than a day is
+   * ignored.
    *
    * @param array<string, mixed>|null $last
    *   The mcp_sentinel.last_verify value, or NULL.
@@ -125,6 +137,24 @@ final class McpLastVerify {
    */
   public static function effective(?array $last, mixed $scheduled, int $now): ?array {
     if ($last !== NULL && $last !== []) {
+      if (self::isDocumentedHistoricalException($last)
+        && is_array($scheduled)
+        && (int) ($scheduled['time'] ?? 0) > (int) ($last['time'] ?? 0)
+        && ($scheduled['ok'] ?? NULL) === FALSE
+        && ($scheduled['reason'] ?? NULL) === self::REASON_TAMPERED
+        && !self::awaitsSuccessorVerification($scheduled)
+        && !self::auditChainClassifiesHistoricalException($scheduled)) {
+        $verdict = is_array($scheduled['verdict'] ?? NULL) ? $scheduled['verdict'] : [];
+        return [
+          'ok' => FALSE,
+          'broken_at' => isset($verdict['broken_at']) ? (int) $verdict['broken_at'] : NULL,
+          'time' => (int) $scheduled['time'],
+          'reason' => self::REASON_TAMPERED,
+          'unsigned_prefix' => FALSE,
+          'historical_exception' => FALSE,
+          'source' => 'audit_chain_scheduled',
+        ];
+      }
       return $last;
     }
     if (!is_array($scheduled) || !self::auditChainClassifiesHistoricalException($scheduled)) {
@@ -144,6 +174,21 @@ final class McpLastVerify {
       'historical_exception' => TRUE,
       'source' => 'audit_chain_scheduled',
     ];
+  }
+
+  /**
+   * Whether a scheduled run is Audit Chain's post-activation placeholder.
+   *
+   * @param array<string, mixed> $run
+   *   The Audit Chain scheduled-verification state value.
+   *
+   * @return bool
+   *   TRUE when the successor has not been verified by a scheduled run yet.
+   */
+  private static function awaitsSuccessorVerification(array $run): bool {
+    $successor = $run['successor'] ?? NULL;
+    return is_array($successor)
+      && ($successor['reason'] ?? NULL) === self::REASON_AWAITING_VERIFICATION;
   }
 
   /**

@@ -15,7 +15,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   successor, `segment_ok` FALSE, or a different break stays critical.
   Whole-history verification stays unsuccessful, so posture is never clear
   and the verify command still exits non-zero. A verify older than a day, or
-  one that predates new audit rows, reads as stale. Before the first
+  one that predates new audit rows, reads as stale. A newer Audit Chain
+  scheduled run that finds tampering outside the exception overrides a
+  stored exception and is critical. Before the first
   Sentinel verify, a fresh Audit Chain scheduled run with that
   classification replaces `chain_unverified`. Audit Chain versions without
   recovery segments are unchanged.

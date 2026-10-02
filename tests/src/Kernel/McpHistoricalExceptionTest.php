@@ -208,6 +208,35 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
   }
 
   /**
+   * A newer scheduled run that finds a new break overrides the warning.
+   *
+   * Tampering adds no rows, so the stored verify would not go stale on its
+   * own. A later Audit Chain run that is not the documented exception wins.
+   */
+  public function testNewerScheduledBreakOverridesStoredException(): void {
+    $this->activateSuccessor();
+    $this->governedRow();
+    $this->commands->auditVerify();
+    $this->assertSame('warning', $this->conditionKeys()['historical_exception'] ?? NULL);
+
+    $last = (int) $this->container->get('database')
+      ->query('SELECT MAX(id) FROM {audit_chain_log}')->fetchField();
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['row_hash' => str_repeat('0', 64)])
+      ->condition('id', $last)
+      ->execute();
+    $stored = \Drupal::state()->get('mcp_sentinel.last_verify');
+    $stored['time'] -= 60;
+    \Drupal::state()->set('mcp_sentinel.last_verify', $stored);
+    $this->container->get('audit_chain.scheduled_verifier')->runNow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('critical', $keys['chain_broken'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+    $this->assertFalse(\Drupal::service('mcp_sentinel.metrics')->evidenceState()['historical_exception']);
+  }
+
+  /**
    * A documented-exception verify that has aged out reads as stale.
    *
    * A new break may have landed after it, so it cannot keep explaining the
