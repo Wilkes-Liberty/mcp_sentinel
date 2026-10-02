@@ -27,7 +27,7 @@ final class McpSealedTokenController extends ControllerBase {
    * @param \Drupal\mcp_sentinel\Service\McpAdminStatus $adminStatus
    *   Admin status strip assembler.
    * @param \Drupal\Core\TempStore\PrivateTempStoreFactory $tempStoreFactory
-   *   Private tempstore factory for the copy-once reveal payload.
+   *   Reveal tempstore. Its expire is McpSealedTokenManager::REVEAL_STORE_TTL.
    * @param \Drupal\Core\Datetime\DateFormatterInterface $dateFormatter
    *   Date formatter for the listing table.
    */
@@ -45,7 +45,7 @@ final class McpSealedTokenController extends ControllerBase {
     return new static(
       $container->get('mcp_sentinel.sealed_token_manager'),
       $container->get('mcp_sentinel.admin_status'),
-      $container->get('tempstore.private'),
+      $container->get('mcp_sentinel.sealed_token_reveal_store'),
       $container->get('date.formatter'),
     );
   }
@@ -119,7 +119,7 @@ final class McpSealedTokenController extends ControllerBase {
    *   Render array. The secret is gone after this request.
    */
   public function reveal(): array {
-    $store = $this->tempStoreFactory->get('mcp_sentinel_sealed_token', McpSealedTokenManager::REVEAL_STORE_TTL);
+    $store = $this->tempStoreFactory->get('mcp_sentinel_sealed_token');
     $issued = $store->get('reveal');
     $store->delete('reveal');
 

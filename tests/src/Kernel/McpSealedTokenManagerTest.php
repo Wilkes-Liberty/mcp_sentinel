@@ -60,6 +60,8 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installEntitySchema('consumer');
+    // simple_oauth queries oauth2_token when a consumer is saved.
+    $this->installEntitySchema('oauth2_token');
     $this->installConfig(['mcp_sentinel']);
     $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_sealed_token']);
@@ -151,7 +153,10 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
     $consumer->set('status', 1);
     $consumer->save();
     $reenabled = $this->manager()->verify($issued['token']);
+    // bleedingEdge remembers verify() as null after assertNull() above.
+    // @phpstan-ignore-next-line
     $this->assertNotNull($reenabled);
+    // @phpstan-ignore-next-line
     $this->assertIsArray($reenabled);
 
     $other = User::create([

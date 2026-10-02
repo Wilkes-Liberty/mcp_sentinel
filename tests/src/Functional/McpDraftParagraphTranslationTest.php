@@ -312,7 +312,10 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
       $stale = $this->paragraphTranslationRequest('PATCH', $agent, $paragraph, ['field_text' => 'Lost update'], $match, $preflight, state: $state);
       $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
     }
-    $stored = $this->paragraphStorage()->loadRevisionUnchanged($paragraph->getRevisionId());
+    // Reset before loading: Drupal 10 has no loadRevisionUnchanged() API.
+    $storage = $this->paragraphStorage();
+    $storage->resetCache([$paragraph->id()]);
+    $stored = $storage->loadRevision($paragraph->getRevisionId());
     $this->assertInstanceOf(Paragraph::class, $stored);
     $this->assertSame('Dos', $stored->getTranslation('es')->get('field_text')->value);
     $this->assertSame('Hero', $stored->getUntranslated()->get('field_text')->value);
@@ -355,10 +358,13 @@ final class McpDraftParagraphTranslationTest extends BrowserTestBase {
     }
     $this->assertEnglishHostUnchanged($node, $live_vid, $paragraph->id(), $live_paragraph_vid, 'Hero');
     $this->assertSame($working_vid, (string) $node_storage->getLatestRevisionId($node->id()));
-    $host_working = $node_storage->loadRevisionUnchanged((int) $working_vid);
+    $node_storage->resetCache([$node->id()]);
+    $host_working = $node_storage->loadRevision((int) $working_vid);
     $this->assertInstanceOf(NodeInterface::class, $host_working);
     $this->assertSame($working_pin, (string) $host_working->getTranslation('es')->get('field_components')->target_revision_id);
-    $original = $this->paragraphStorage()->loadRevisionUnchanged((int) $working_pin);
+    $paragraph_storage = $this->paragraphStorage();
+    $paragraph_storage->resetCache([$paragraph->id()]);
+    $original = $paragraph_storage->loadRevision((int) $working_pin);
     $this->assertInstanceOf(Paragraph::class, $original);
     $this->assertTrue($original->getUntranslated()->isPublished());
     $this->assertFalse($original->hasTranslation('es'));
