@@ -510,7 +510,7 @@ final class McpScheduledPublishGateTest extends KernelTestBase {
     $node = $this->createDraft();
     $this->schedule($node);
     $node->save();
-    $node->addTranslation('es', ['title' => 'Artículo', 'moderation_state' => 'draft'])->save();
+    $node->addTranslation('es', ['title' => 'Spanish article', 'moderation_state' => 'draft'])->save();
     $source = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
     $this->assertTrue($source->getTranslation('es')->get('publish_state')->isEmpty(),
       'The Spanish translation must start without its own scheduled state.');
