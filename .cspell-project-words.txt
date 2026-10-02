@@ -154,3 +154,5 @@ wilkesliberty
 working_vid
 xaxis
 yaxis
+SCMI
+unregistered

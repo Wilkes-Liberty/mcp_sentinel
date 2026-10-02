@@ -73,6 +73,8 @@ final class McpInstallVerifierShippedConfigTest extends UnitTestCase {
     $this->assertFalse($profile['allow_schemaless_config_write']);
     $this->assertFalse((bool) $profile['allow_delete']);
     $this->assertFalse((bool) $profile['allow_raw_sql']);
+    $this->assertArrayHasKey('allow_scheduled_publish', $profile);
+    $this->assertFalse($profile['allow_scheduled_publish']);
   }
 
   /**

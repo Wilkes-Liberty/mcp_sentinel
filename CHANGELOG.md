@@ -6,6 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- [#3627557](https://www.drupal.org/project/mcp_sentinel/issues/3627557): A
+  policy profile can let agents schedule publishing without being allowed to
+  publish now. With Scheduler Content Moderation Integration installed, the
+  new *Allow scheduled publishing* setting (`allow_scheduled_publish`, off by
+  default, per-type override `entity_rules.<type>.allow_scheduled_publish`)
+  decides governed scheduled publish and unpublish states instead of the
+  role's transition permissions. When on, the state must be a workflow
+  transition from the current state and at or below the maximum moderation
+  state, and its date must be in the future, since Scheduler acts on a past
+  date in the same save; each one is audited as `scheduled_transition`.
+  *Deny publishing* still refuses an immediate publish, and under it a
+  governed save no longer lets Scheduler publish an overdue schedule in the
+  same save; cron publishes it. Human traffic keeps SCMI's behaviour.
+  New `McpPolicyProfileInterface::allowsScheduledPublishForEntityType()`.
+  Update 10027 adds the setting, off, to existing profiles.
+
+### Changed
+- With Scheduler Content Moderation Integration installed, a governed write
+  that sets or changes a scheduled state is now refused unless the profile
+  turns on *Allow scheduled publishing*, even when the agent's role holds the
+  transition. Sites that relied on agents scheduling through role permissions
+  must turn the setting on.
+
 ### Fixed
 - Sealed-token reveal stores the copy-once secret in a private tempstore
   that expires after 120 seconds. `PrivateTempStoreFactory::get()` accepts

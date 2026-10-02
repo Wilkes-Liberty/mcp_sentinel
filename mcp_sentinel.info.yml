@@ -22,8 +22,13 @@ dependencies:
 # drupal/content_lock: optional. When present, a human's entity-form lock is a
 # governed write conflict. Listed as a test dependency so that consult is
 # covered on the d.o pipeline.
+# drupal/scheduler_content_moderation_integration: optional. When present, the
+# policy profile decides governed scheduled publishing. Test dependency for the
+# same reason.
 
 test_dependencies:
   - content_lock:content_lock
+  - scheduler:scheduler
+  - scheduler_content_moderation_integration:scheduler_content_moderation_integration
 
 configure: mcp_sentinel.settings

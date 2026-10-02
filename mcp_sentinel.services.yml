@@ -65,6 +65,17 @@ services:
       # Optional: NULL when the Content Moderation module is not installed.
       - '@?content_moderation.moderation_information'
 
+  mcp_sentinel.scheduled_publish_gate:
+    class: Drupal\mcp_sentinel\Service\McpScheduledPublishGate
+    arguments:
+      - '@mcp_sentinel.policy_resolver'
+      - '@entity_type.manager'
+      - '@module_handler'
+      - '@mcp_sentinel.audit_logger'
+      - '@datetime.time'
+      # Optional: NULL when the Content Moderation module is not installed.
+      - '@?content_moderation.moderation_information'
+
   mcp_sentinel.pinned_composite_locator:
     class: Drupal\mcp_sentinel\Service\McpPinnedCompositeLocator
     arguments:

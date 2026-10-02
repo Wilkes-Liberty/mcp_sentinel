@@ -219,6 +219,12 @@ final class McpPolicyProfileForm extends EntityForm {
       '#description' => $this->t('Optional ceiling state ID (e.g. draft, needs_review). Transitions to a higher-weight workflow state are denied. Leave empty for no ceiling.'),
       '#default_value' => $profile->getMaxModerationState(),
     ];
+    $form['config_governance']['allow_scheduled_publish'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Allow scheduled publishing'),
+      '#description' => $this->t('Off by default. Applies when Scheduler Content Moderation Integration is installed. When on, an agent may schedule a publish or unpublish state that the workflow allows from the current state and that respects the maximum moderation state, without the role holding the transition permission. When off, an agent write that schedules a state is refused. Immediate publishing is still controlled by "Deny publishing". Override per entity type with <code>entity_rules.TYPE.allow_scheduled_publish</code> in configuration.'),
+      '#default_value' => (bool) $profile->get('allow_scheduled_publish'),
+    ];
     $form['config_governance']['deny_external_redirects'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Deny off-domain redirects (open-redirect guard)'),
@@ -637,6 +643,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'denied_config_types',
       'deny_publish',
       'max_moderation_state',
+      'allow_scheduled_publish',
       'deny_external_redirects',
       'allowed_redirect_hosts',
       'forbidden_role_permissions',
@@ -701,6 +708,7 @@ final class McpPolicyProfileForm extends EntityForm {
       'allow_config_write',
       'allow_schemaless_config_write',
       'deny_publish',
+      'allow_scheduled_publish',
       'deny_external_redirects',
       'allow_raw_sql',
     ] as $key) {
