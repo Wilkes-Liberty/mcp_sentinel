@@ -21,7 +21,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 /**
  * Scheduled publishing under a policy profile (d.o #3627557).
  *
- * Scheduler Content Moderation Integration (SCMI) authorises a scheduled
+ * Scheduler Content Moderation Integration (SCMI) authorizes a scheduled
  * state with the role's transition permissions, so a governed agent that is
  * deliberately not granted the publish transition cannot schedule a publish.
  * The profile's allow_scheduled_publish setting decides instead, for governed
@@ -377,6 +377,38 @@ final class McpScheduledPublishGateTest extends KernelTestBase {
     $stored->set('moderation_state', 'published');
     $this->assertTrue($this->contains($this->messages($stored), self::PUBLISH_DENY_MESSAGE),
       'Allowing scheduled publishing must not allow an immediate publish under deny_publish.');
+  }
+
+  /**
+   * On: a publish date that is not in the future is an immediate publish.
+   *
+   * With the bundle's past-date setting at "publish", Scheduler publishes in
+   * the same save, so under deny_publish such a "schedule" must be refused on
+   * both the validated and the unvalidated seam.
+   */
+  public function testOnRefusesPastPublishDateUnderDenyPublish(): void {
+    $this->configureProfile(['allow_scheduled_publish' => TRUE]);
+    $type = NodeType::load('article');
+    $type->setThirdPartySetting('scheduler', 'publish_past_date', 'publish');
+    $type->save();
+    $node = $this->createDraft();
+    $this->actAs('mcp_api');
+
+    $node->set('publish_on', \Drupal::time()->getRequestTime() - 60);
+    $node->set('publish_state', 'published');
+    $this->assertTrue($this->contains($this->messages($node), 'scheduled publish date must be in the future'),
+      'A past publish date must be refused under deny_publish.');
+
+    try {
+      $node->save();
+      $this->fail('An unvalidated save with a past publish date must abort.');
+    }
+    catch (EntityStorageException) {
+      // Expected.
+    }
+    $stored = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
+    $this->assertFalse($stored->isPublished(), 'The node must not have gone live.');
+    $this->assertSame('draft', $stored->get('moderation_state')->value);
   }
 
   /**

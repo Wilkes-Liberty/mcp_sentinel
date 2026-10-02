@@ -16,7 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role's transition permissions. When on, the state must be a workflow
   transition from the current state and at or below the maximum moderation
   state; each one is audited as `scheduled_transition`. *Deny publishing*
-  still refuses an immediate publish. Human traffic keeps SCMI's behaviour.
+  still refuses an immediate publish, including a scheduled publish date
+  that is not in the future. Human traffic keeps SCMI's behaviour.
   New `McpPolicyProfileInterface::allowsScheduledPublishForEntityType()`.
   Update 10027 adds the setting, off, to existing profiles.
 

@@ -72,6 +72,7 @@ services:
       - '@entity_type.manager'
       - '@module_handler'
       - '@mcp_sentinel.audit_logger'
+      - '@datetime.time'
       # Optional: NULL when the Content Moderation module is not installed.
       - '@?content_moderation.moderation_information'
 

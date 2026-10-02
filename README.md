@@ -283,7 +283,12 @@ MCP policy profiles → Configuration governance**.
     audit log as `scheduled_transition`. SCMI's update-access check does not
     lock the agent out of content it was allowed to schedule.
   - Immediate publishing is unchanged: *Deny publishing* still refuses a
-    go-live, so an agent may schedule a publish it cannot perform now.
+    go-live, so an agent may schedule a publish it cannot perform now. Under
+    *Deny publishing* a scheduled publish date must be in the future, because
+    Scheduler publishes a past date at once or on the next cron run.
+  - When on, the agent may also edit content a human already scheduled; those
+    edits go live when the schedule runs. Use *Deny publishing* with a
+    moderation ceiling, or leave the setting off, if that is not wanted.
   - `entity_rules.<type>.allow_scheduled_publish` overrides the profile value
     for one entity type, in either direction (configuration only).
   - Human (ungoverned) traffic keeps SCMI's behaviour. Validated writes get a

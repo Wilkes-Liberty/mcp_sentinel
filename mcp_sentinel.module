@@ -972,7 +972,7 @@ function mcp_sentinel_simple_oauth_private_claims_alter(array &$private_claims, 
 /**
  * Implements hook_entity_base_field_info_alter().
  *
- * Scheduler Content Moderation Integration authorises a scheduled state with
+ * Scheduler Content Moderation Integration authorizes a scheduled state with
  * the current user's transition permissions, on publish_state and
  * unpublish_state. Swap its permission constraint and allowed-values function
  * for Sentinel wrappers that call the originals for every request Sentinel
@@ -1046,6 +1046,24 @@ function _mcp_sentinel_scheduled_publish_gate(): ?McpScheduledPublishGate {
   if (!\Drupal::hasService('mcp_sentinel.scheduled_publish_gate')) {
     return NULL;
   }
-  $gate = \Drupal::service('mcp_sentinel.scheduled_publish_gate');
-  return $gate instanceof McpScheduledPublishGate ? $gate : NULL;
+  return \Drupal::service('mcp_sentinel.scheduled_publish_gate');
+}
+
+/**
+ * Implements hook_scheduler_publishing_allowed().
+ *
+ * Scheduler asks this in its own presave before it publishes a past
+ * publish_on date in the same save, then clears the date. Depending on hook
+ * order that can happen before mcp_sentinel_entity_presave() sees the
+ * schedule, so the scheduled-publish gate runs here as well and aborts a
+ * governed save it refuses (d.o #3627557). Returns NULL, which leaves
+ * Scheduler's decision unchanged: ungoverned saves and cron runs are not
+ * affected.
+ */
+function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bool {
+  $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
+  if ($resolver->isGoverned()) {
+    _mcp_sentinel_scheduled_publish_gate()?->enforceOnSave($entity);
+  }
+  return NULL;
 }

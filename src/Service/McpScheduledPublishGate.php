@@ -7,10 +7,13 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\content_moderation\ContentModerationState;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\Core\Access\AccessResult;
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Entity\RevisionableInterface;
+use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
@@ -19,7 +22,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  * Decides scheduled publishing for governed requests (d.o #3627557).
  *
  * Scheduler Content Moderation Integration (SCMI) adds publish_state and
- * unpublish_state to moderated entity types and authorises a scheduled state
+ * unpublish_state to moderated entity types and authorizes a scheduled state
  * with the account's workflow transition permissions, in three places:
  *
  * 1. The SchedulerModerationTransitionAccess constraint on both fields.
@@ -79,6 +82,11 @@ final class McpScheduledPublishGate {
   public const DENY_MESSAGE = 'Scheduled publishing is denied by MCP Sentinel for this profile.';
 
   /**
+   * Refusal when a scheduled publish is not in the future under deny_publish.
+   */
+  public const NOT_FUTURE_MESSAGE = 'Publishing is denied by MCP Sentinel: a scheduled publish date must be in the future.';
+
+  /**
    * Constructs the gate.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPolicyResolver $policyResolver
@@ -89,6 +97,8 @@ final class McpScheduledPublishGate {
    *   Tells whether SCMI is installed.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Records allowed scheduled transitions and refused unvalidated saves.
+   * @param \Drupal\Component\Datetime\TimeInterface $time
+   *   The request time, to tell a schedule from an immediate publish.
    * @param \Drupal\content_moderation\ModerationInformationInterface|null $moderationInformation
    *   The moderation information service, or NULL when Content Moderation is
    *   not installed.
@@ -98,6 +108,7 @@ final class McpScheduledPublishGate {
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly McpAuditLogger $auditLogger,
+    private readonly TimeInterface $time,
     private readonly ?ModerationInformationInterface $moderationInformation = NULL,
   ) {}
 
@@ -178,12 +189,26 @@ final class McpScheduledPublishGate {
    *   The stored entity, or NULL when the entity is new.
    */
   public function storedOriginal(ContentEntityInterface $entity): ?ContentEntityInterface {
-    if ($entity->isNew() || $entity->id() === NULL) {
+    if ($entity->isNew()) {
       return NULL;
     }
-    $stored = $this->entityTypeManager
-      ->getStorage($entity->getEntityTypeId())
-      ->loadUnchanged($entity->id());
+    // Compare with the revision the write was loaded from, as core's presave
+    // does, so a forward draft is compared with itself and not with the
+    // default revision.
+    $storage = $this->entityTypeManager->getStorage($entity->getEntityTypeId());
+    $revision_id = $entity instanceof RevisionableInterface ? $entity->getLoadedRevisionId() : NULL;
+    if ($revision_id !== NULL && $storage instanceof RevisionableStorageInterface) {
+      if (method_exists($storage, 'loadRevisionUnchanged')) {
+        $stored = $storage->loadRevisionUnchanged($revision_id);
+      }
+      else {
+        $storage->resetCache([$entity->id()]);
+        $stored = $storage->loadRevision($revision_id);
+      }
+    }
+    else {
+      $stored = $storage->loadUnchanged($entity->id());
+    }
     if (!$stored instanceof ContentEntityInterface) {
       return NULL;
     }
@@ -212,7 +237,11 @@ final class McpScheduledPublishGate {
       return [self::DENY_MESSAGE];
     }
     $messages = [];
-    foreach ($changes as $pair) {
+    foreach ($changes as $field => $pair) {
+      if ($field === 'publish_state' && $this->publishesNow($entity, $profile, $pair)) {
+        $messages[] = self::NOT_FUTURE_MESSAGE;
+        continue;
+      }
       $reason = $this->stateRefusal($entity, $profile, $pair['from'], $pair['state']);
       if ($reason !== NULL) {
         $messages[] = $reason;
@@ -424,6 +453,26 @@ final class McpScheduledPublishGate {
       return sprintf('Scheduled state "%s" exceeds the maximum permitted state "%s".', $to, $max);
     }
     return NULL;
+  }
+
+  /**
+   * Whether a scheduled publish would make the content live now.
+   *
+   * Scheduler publishes in the same save when publish_on is not in the future
+   * and the bundle's past-date setting is "publish", and on the next cron run
+   * when it is "schedule". Either way the agent would publish without a
+   * human, so under deny_publish only a future date counts as a schedule.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The entity.
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved profile.
+   * @param array{state: string, on: int, from: string} $pair
+   *   The scheduled publish pair.
+   */
+  private function publishesNow(ContentEntityInterface $entity, McpPolicyProfileInterface $profile, array $pair): bool {
+    return $profile->deniesPublishForEntityType($entity->getEntityTypeId())
+      && $pair['on'] <= $this->time->getRequestTime();
   }
 
   /**
