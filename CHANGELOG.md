@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.28.1] - 2026-10-02
+
 ### Changed
 - Drupal.org GitLab CI: cspell is a required job. The previous-major
   composer lane stays off (`OPT_IN_TEST_PREVIOUS_MAJOR=0`) because the
@@ -14,6 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in, the job is pinned to PHP 8.3 and allowed to fail so it cannot
   send Pipeline Failed mail. The Drupal 10.6 floor stays on GitHub
   Actions.
+- The sealed-token kernel test pins the reveal-store expiry to the
+  120 second collection lifetime. Runtime behavior is unchanged.
 
 ## [2.28.0] - 2026-10-01
 
