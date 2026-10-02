@@ -31,7 +31,7 @@ final class McpSealedTokenMintForm extends FormBase {
   protected McpAdminStatus $adminStatus;
 
   /**
-   * Private tempstore factory for the copy-once reveal payload.
+   * Reveal tempstore. Its expire is McpSealedTokenManager::REVEAL_STORE_TTL.
    */
   protected PrivateTempStoreFactory $tempStoreFactory;
 
@@ -42,7 +42,7 @@ final class McpSealedTokenMintForm extends FormBase {
     $instance = parent::create($container);
     $instance->tokens = $container->get('mcp_sentinel.sealed_token_manager');
     $instance->adminStatus = $container->get('mcp_sentinel.admin_status');
-    $instance->tempStoreFactory = $container->get('tempstore.private');
+    $instance->tempStoreFactory = $container->get('mcp_sentinel.sealed_token_reveal_store');
     return $instance;
   }
 
@@ -118,7 +118,7 @@ final class McpSealedTokenMintForm extends FormBase {
       return;
     }
 
-    $this->tempStoreFactory->get('mcp_sentinel_sealed_token', McpSealedTokenManager::REVEAL_STORE_TTL)->set('reveal', [
+    $this->tempStoreFactory->get('mcp_sentinel_sealed_token')->set('reveal', [
       'jti' => $issued['jti'],
       'token' => $issued['token'],
       'client_id' => $issued['client_id'],

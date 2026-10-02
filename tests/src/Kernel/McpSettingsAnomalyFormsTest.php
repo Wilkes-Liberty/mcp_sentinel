@@ -44,6 +44,9 @@ final class McpSettingsAnomalyFormsTest extends KernelTestBase {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installEntitySchema('path_alias');
+    // Settings form build counts consumers. The module is enabled, so the
+    // count queries the storage; KernelTestBase does not install it.
+    $this->installEntitySchema('consumer');
     $this->installSchema('system', ['sequences']);
     $this->installAuditChainSchema();
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks', 'mcp_sentinel_webhook_delivery']);

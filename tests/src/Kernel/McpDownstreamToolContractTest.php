@@ -293,7 +293,10 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
    */
   public function testDenialHelpers(): void {
     $reasons = $this->call('denyReason')->getResult()->getContextValues()['returned'];
-    self::assertSame('contract reason', $reasons['forbidden']);
+    // denyReason() appends the explainer suffix when the service exists.
+    self::assertIsString($reasons['forbidden']);
+    self::assertStringStartsWith('contract reason', $reasons['forbidden']);
+    self::assertStringContainsString('[rule:unspecified', $reasons['forbidden']);
     self::assertNull($reasons['allowed']);
 
     self::assertSame(0, $this->auditCount('denied_access'));

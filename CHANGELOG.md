@@ -30,6 +30,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transition. Sites that relied on agents scheduling through role permissions
   must turn the setting on.
 
+### Fixed
+- Sealed-token reveal stores the copy-once secret in a private tempstore
+  that expires after 120 seconds. `PrivateTempStoreFactory::get()` accepts
+  only the collection name, so the lifetime is set on that factory.
+- The reveal page sends `Cache-Control: private, no-store` after core's
+  finish-response subscriber, which otherwise replaces that header on
+  cacheable HTML.
+- Cron skips sealed-token pruning when the table is not installed yet, so
+  a cron run between deploy and the database update does not fail.
+
 ## [2.27.0] - 2026-10-01
 
 ### Added

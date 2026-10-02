@@ -10,10 +10,15 @@ use Drupal\consumers\Entity\ConsumerInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\KeyValueStore\KeyValueExpirableFactoryInterface;
+use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\PrivateKey;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Site\Settings;
+use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\user\UserInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Mints, verifies, and revokes short-lived client-bound sealed tokens.
@@ -58,8 +63,44 @@ final class McpSealedTokenManager {
    *
    * The table stores a hash only. Tempstore holds the plaintext until the
    * reveal GET deletes it, or this TTL elapses. It is not durable storage.
+   * Core's PrivateTempStoreFactory::get() takes only the collection name, so
+   * this value is the factory's expire (see revealTempStore()), not a second
+   * argument to get().
    */
   public const REVEAL_STORE_TTL = 120;
+
+  /**
+   * Builds the copy-once reveal tempstore.
+   *
+   * The site-wide private tempstore lives for days. This factory uses
+   * REVEAL_STORE_TTL so a secret left unread is gone after two minutes.
+   *
+   * @param \Drupal\Core\KeyValueStore\KeyValueExpirableFactoryInterface $storage_factory
+   *   The key/value factory.
+   * @param \Drupal\Core\Lock\LockBackendInterface $lock_backend
+   *   The lock backend.
+   * @param \Drupal\Core\Session\AccountProxyInterface $current_user
+   *   The current user. Private tempstore keys are per account.
+   * @param \Symfony\Component\HttpFoundation\RequestStack $request_stack
+   *   The request stack.
+   *
+   * @return \Drupal\Core\TempStore\PrivateTempStoreFactory
+   *   A factory whose stores expire after REVEAL_STORE_TTL seconds.
+   */
+  public static function revealTempStore(
+    KeyValueExpirableFactoryInterface $storage_factory,
+    LockBackendInterface $lock_backend,
+    AccountProxyInterface $current_user,
+    RequestStack $request_stack,
+  ): PrivateTempStoreFactory {
+    return new PrivateTempStoreFactory(
+      $storage_factory,
+      $lock_backend,
+      $current_user,
+      $request_stack,
+      self::REVEAL_STORE_TTL,
+    );
+  }
 
   /**
    * Constructs the manager.
@@ -303,9 +344,18 @@ final class McpSealedTokenManager {
   }
 
   /**
-   * Deletes expired revoked or expired rows. Live unexpired tokens stay.
+   * Deletes expired rows. Live unexpired tokens stay.
+   *
+   * Returns 0 when the table is missing. Cron can run after this code is
+   * deployed and before update.php has created the table.
+   *
+   * @return int
+   *   The number of rows deleted.
    */
   public function pruneExpired(): int {
+    if (!$this->database->schema()->tableExists(self::TABLE)) {
+      return 0;
+    }
     return (int) $this->database->delete(self::TABLE)
       ->condition('expires', $this->time->getRequestTime(), '<')
       ->execute();

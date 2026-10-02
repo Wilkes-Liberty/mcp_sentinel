@@ -216,7 +216,14 @@ final class McpOauthContextTest extends KernelTestBase {
       'scopes' => ['mcp_read'],
       'jti' => '00000000-0000-0000-0000-000000000001',
     ]);
-    $this->container->get('request_stack')->push($request);
+    // Drupal 11.3 KernelTestBase::tearDown calls getSession() on the current
+    // request. A request pushed without the master session makes that throw.
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
 
     $ctx = $this->container->get('mcp_sentinel.oauth_context');
     $this->assertSame('mcp-agent-prod', $ctx->clientId());
