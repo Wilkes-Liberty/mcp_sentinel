@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Drupal.org GitLab CI: cspell is a required job. The previous-major
+  composer lane stays off (`OPT_IN_TEST_PREVIOUS_MAJOR=0`) because the
+  Drupal 10 image is PHP 8.1 and this module's runtime chain needs
+  php>=8.2/8.3 plus ext-sodium. If a schedule or UI form opts the lane
+  in, the job is pinned to PHP 8.3 and allowed to fail so it cannot
+  send Pipeline Failed mail. The Drupal 10.6 floor stays on GitHub
+  Actions.
+
 ## [2.28.0] - 2026-10-01
 
 ### Added

@@ -38,7 +38,6 @@ parameters:
     # PHPStan 2.2 truncates a quoted constant longer than 20 characters and
     # appends an ellipsis, so this pattern matches the shared prefix. The full
     # method name is 22 characters and would not match a pattern that requires it.
-    # cspell:ignore loadRevisionUnchang
     -
       identifier: function.alreadyNarrowedType
       message: "#method_exists\\(\\) with .* and '((get|set)Original|loadRevisionUnchang)#"
