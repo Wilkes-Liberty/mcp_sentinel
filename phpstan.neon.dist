@@ -30,13 +30,18 @@ parameters:
     # passes there. Reassess when the supported floor rises above Drupal 10.
     - "#Attribute class PHPUnit.*Attributes.* does not exist#"
     # getOriginal()/setOriginal() arrived in Drupal 11.2; on the Drupal 10.6
-    # floor the original entity is reached through the ->original property. The
-    # method_exists() guards are that fallback, so they are only "always true"
-    # when analysed against 11 -- on 10.6 they are the branch that runs. They
-    # go when the floor rises above Drupal 10, not before.
+    # floor the original entity is reached through the ->original property.
+    # loadRevisionUnchanged() arrived in Drupal 11.1 and is missing on 10.6.
+    # The method_exists() guards are that fallback, so they are only "always
+    # true" when analysed against 11 -- on 10.6 they are the branch that runs.
+    # They go when the floor rises above Drupal 10, not before.
+    # PHPStan 2.2 truncates a quoted constant longer than 20 characters and
+    # appends an ellipsis, so this pattern matches the shared prefix. The full
+    # method name is 22 characters and would not match a pattern that requires it.
+    # cspell:ignore loadRevisionUnchang
     -
       identifier: function.alreadyNarrowedType
-      message: "#method_exists\\(\\) with .* and '((get|set)Original|loadRevisionUnchanged)' will always evaluate to true#"
+      message: "#method_exists\\(\\) with .* and '((get|set)Original|loadRevisionUnchang)#"
     # Drupal 11 replaced fetchAll()'s int $mode with a FetchAs enum that Drupal
     # 10.6 does not have. \PDO::FETCH_ASSOC is accepted at runtime on both, so
     # it is the only spelling valid across the range this module supports; the
