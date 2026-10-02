@@ -68,6 +68,7 @@ retarget
 revisioned
 lcobucci
 libsodium
+loadRevisionUnchang
 lookback
 ltrim
 materialised

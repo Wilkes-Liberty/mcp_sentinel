@@ -62,18 +62,25 @@ variables:
   #
   # Missing ext-sodium is filed upstream against project/gitlab_templates. Turn
   # this lane back on once the image carries it.
-  # OPT_IN_TEST_PREVIOUS_MAJOR: '1'
-  # _AUTORUN_PREVIOUS_MAJOR: 'all'
+  #
+  # Set explicitly to 0 (do not leave unset). A Drupal.org schedule or
+  # "Run pipeline" form can otherwise opt the lane in; composer then fails
+  # on PHP 8.1 vs php >=8.2/8.3 and the pipeline emails fire again.
+  OPT_IN_TEST_PREVIOUS_MAJOR: '0'
+  _AUTORUN_PREVIOUS_MAJOR: 'none'
+  # CSpell is already clean on 1.x. Keep it a required job so a new
+  # project word fails the pipeline instead of mailing a warning.
+  _CSPELL_ALLOW_FAILURE: '0'
 
 ################
 # Project overrides
 ################
 
-# Nothing overridden. The `composer (previous major)` PHP_VERSION: '8.3' pin
-# that used to live here worked -- it did get the lane onto PHP 8.3 instead of
-# Drupal 10's minimum 8.1 (#3613940) -- and then the lane failed one layer
-# down, on the missing extension described above. With the lane off, the pin
-# has nothing to pin.
+# composer (previous major) is skipped by OPT_IN_TEST_PREVIOUS_MAJOR=0.
+# If a schedule or UI form opts the lane back in, do not fail the pipeline:
+# pin PHP 8.3 (the template uses Drupal 10's minimum 8.1, #3613940) and
+# allow_failure. The pin gets past php>=8.2/8.3 deps; ext-sodium is still
+# missing, so the job stays red and allowed. Do not --ignore-platform-req.
 #
 # On the PHP floor, which an earlier version of this comment got wrong: >=8.3
 # is not a CI convenience, it is what the code requires. Two independent
@@ -93,3 +100,14 @@ variables:
 # One limit stays recorded rather than hidden: drupal/mcp_server sits in
 # require-dev and needs PHP ^8.3, so the mcp_sentinel_server tests could not
 # run below 8.3 on any venue even if the rest of the module could.
+
+composer (previous major):
+  allow_failure: true
+  variables:
+    PHP_VERSION: '8.3'
+
+phpunit (previous major):
+  allow_failure: true
+
+cspell:
+  allow_failure: false
