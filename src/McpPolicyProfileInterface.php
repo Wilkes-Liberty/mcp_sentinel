@@ -188,11 +188,12 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    * Per-entity-type destructive overrides.
    *
    * A map of entity_type ID => rule. Each rule may carry an 'allow_delete',
-   * 'allow_write' and/or 'allow_publish' boolean that overrides the
+   * 'allow_write', 'allow_publish' and/or 'allow_scheduled_publish' boolean
+   * that overrides the
    * corresponding global flag for that entity type only. Empty means every type
    * follows the global flags.
    *
-   * @return array<string, array{allow_delete?: bool, allow_write?: bool, allow_publish?: bool}>
+   * @return array<string, array{allow_delete?: bool, allow_write?: bool, allow_publish?: bool, allow_scheduled_publish?: bool}>
    *   The per-entity-type rule map.
    */
   public function getEntityRules(): array;
@@ -238,6 +239,25 @@ interface McpPolicyProfileInterface extends ConfigEntityInterface {
    *   The entity type ID being published.
    */
   public function deniesPublishForEntityType(string $entity_type): bool;
+
+  /**
+   * Whether this profile lets an agent schedule publishing for the type.
+   *
+   * Resolves entity_rules[type]['allow_scheduled_publish'] first and falls
+   * back to the global allow_scheduled_publish flag, which is FALSE unless an
+   * operator turns it on. One setting covers both scheduled states: the
+   * publish_state and the unpublish_state that Scheduler Content Moderation
+   * Integration adds. When TRUE, the scheduled state must still be a valid
+   * transition in the entity's workflow and respect max_moderation_state; the
+   * role's transition permissions are not consulted. Immediate publishing is
+   * unaffected and stays with deniesPublishForEntityType().
+   *
+   * @param string $entity_type
+   *   The entity type ID being scheduled.
+   *
+   * @see \Drupal\mcp_sentinel\Service\McpScheduledPublishGate
+   */
+  public function allowsScheduledPublishForEntityType(string $entity_type): bool;
 
   /**
    * Permissions a role governed by this profile must not hold.

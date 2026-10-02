@@ -11,14 +11,19 @@
 use Drupal\mcp_sentinel\Controller\McpBannerController;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
+use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpEvidenceGuard;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\Core\Field\BaseFieldDefinition;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Field\FieldStorageDefinitionInterface;
+use Drupal\Core\Hook\Attribute\LegacyModuleImplementsAlter;
+use Drupal\mcp_sentinel\Service\McpScheduledPublishGate;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
@@ -238,6 +243,11 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
       ]);
       throw new \RuntimeException($preconditions->messageFor($conflict));
     }
+    // Scheduled-publish gate (d.o #3627557): the unvalidated seam for a
+    // scheduled state the profile does not allow. Validated seams were
+    // already refused by the McpScheduledPublish constraint.
+    _mcp_sentinel_scheduled_publish_gate()?->enforceOnSave($entity);
+
     // The write may proceed: stash the checked precondition so the post-save
     // audit row can record it together with the final target revision.
     $preconditions->stashReceipt($entity);
@@ -508,6 +518,7 @@ function _mcp_sentinel_evidence_gate(ContentEntityInterface $entity, string $act
 function mcp_sentinel_entity_insert(EntityInterface $entity): void {
   \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
   _mcp_sentinel_log_entity_save($entity, 'create');
+  _mcp_sentinel_scheduled_publish_gate()?->auditSaved($entity);
 }
 
 /**
@@ -522,6 +533,7 @@ function mcp_sentinel_entity_update(EntityInterface $entity): void {
   \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
   \Drupal::service('mcp_sentinel.unmoderated_redirect')->onPostSave($entity);
   _mcp_sentinel_log_entity_save($entity, 'update');
+  _mcp_sentinel_scheduled_publish_gate()?->auditSaved($entity);
 }
 
 /**
@@ -576,20 +588,31 @@ function mcp_sentinel_entity_delete(EntityInterface $entity): void {
  * profile invalidates cached decisions. The neutral (ungoverned) branch carries
  * the same contexts/tag so a profile becoming applicable later cannot serve a
  * stale neutral result.
+ *
+ * Also stands in for scheduler_content_moderation_integration_entity_access(),
+ * which mcp_sentinel_module_implements_alter() and the RemoveHook attribute on
+ * McpScheduledPublishHooks unregister (d.o #3627557). The scheduled-publish
+ * gate calls SCMI's original for every request Sentinel does not take over,
+ * and the two results combine with orIf() exactly as two hook results would.
  */
 function mcp_sentinel_entity_access(
   EntityInterface $entity,
   string $operation,
   AccountInterface $account,
-): AccessResult {
+): AccessResultInterface {
+  $scheduled = _mcp_sentinel_scheduled_publish_gate()?->entityAccess($entity, $operation, $account)
+    ?? AccessResult::neutral();
+
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
   $profile = $resolver->resolve($account);
   if ($profile === NULL) {
-    return AccessResult::neutral()->addCacheContexts(['user.roles', 'oauth2_scopes'])->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list']);
+    return AccessResult::neutral()->addCacheContexts(['user.roles', 'oauth2_scopes'])->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list'])
+      ->orIf($scheduled);
   }
   /** @var \Drupal\mcp_sentinel\Service\McpAccessChecker $checker */
   $checker = \Drupal::service('mcp_sentinel.access_checker');
-  return $checker->checkEntityAccess($entity, $operation, $profile)->addCacheContexts(['user.roles', 'oauth2_scopes']);
+  return $checker->checkEntityAccess($entity, $operation, $profile)->addCacheContexts(['user.roles', 'oauth2_scopes'])
+    ->orIf($scheduled);
 }
 
 /**
@@ -735,6 +758,9 @@ function mcp_sentinel_entity_type_alter(array &$entity_types): void {
       // content locks and stale-default-version refusal on the validated
       // seams, for every content entity type and every write channel.
       $entity_type->addConstraint('McpWriteConflict');
+      // Scheduled publishing under the policy profile (d.o #3627557). Inert
+      // unless Scheduler Content Moderation Integration is installed.
+      $entity_type->addConstraint('McpScheduledPublish');
     }
   }
 
@@ -941,4 +967,85 @@ function mcp_sentinel_simple_oauth_private_claims_alter(array &$private_claims, 
     'client_id' => $client_id,
     'azp' => $client_id,
   ];
+}
+
+/**
+ * Implements hook_entity_base_field_info_alter().
+ *
+ * Scheduler Content Moderation Integration authorises a scheduled state with
+ * the current user's transition permissions, on publish_state and
+ * unpublish_state. Swap its permission constraint and allowed-values function
+ * for Sentinel wrappers that call the originals for every request Sentinel
+ * does not take over (d.o #3627557). Only fields SCMI itself defines are
+ * touched, so the alter is a no-op without SCMI.
+ */
+function mcp_sentinel_entity_base_field_info_alter(array &$fields, EntityTypeInterface $entity_type): void {
+  foreach (array_keys(McpScheduledPublishGate::FIELDS) as $name) {
+    $field = $fields[$name] ?? NULL;
+    if (!$field instanceof BaseFieldDefinition || $field->getProvider() !== McpScheduledPublishGate::SCMI_MODULE) {
+      continue;
+    }
+    $constraints = $field->getConstraints();
+    if (array_key_exists(McpScheduledPublishGate::SCMI_TRANSITION_CONSTRAINT, $constraints)) {
+      unset($constraints[McpScheduledPublishGate::SCMI_TRANSITION_CONSTRAINT]);
+      $constraints['McpScheduledTransitionAccess'] = [];
+      $field->setConstraints($constraints);
+    }
+    if ($field->getSetting('allowed_values_function') === McpScheduledPublishGate::SCMI_ALLOWED_VALUES) {
+      $field->setSetting('allowed_values_function', '_mcp_sentinel_scheduled_states_values');
+    }
+  }
+}
+
+/**
+ * Allowed values for SCMI's publish_state and unpublish_state fields.
+ *
+ * Replaces _scheduler_content_moderation_integration_states_values(), which
+ * builds the options from the current user's transitions. Requests Sentinel
+ * does not take over get SCMI's options unchanged, including its handling of
+ * $cacheable. A taken-over request gets the workflow's transitions and is not
+ * statically cached, since the options depend on the account.
+ *
+ * @see \Drupal\mcp_sentinel\Service\McpScheduledPublishGate::allowedValues()
+ */
+function _mcp_sentinel_scheduled_states_values(FieldStorageDefinitionInterface $definition, ?FieldableEntityInterface $entity = NULL, bool &$cacheable = FALSE): array {
+  $gate = _mcp_sentinel_scheduled_publish_gate();
+  if ($gate !== NULL && $entity instanceof ContentEntityInterface && $gate->takesOver($entity->getEntityTypeId())) {
+    $cacheable = FALSE;
+    return $gate->allowedValues($definition->getName(), $entity);
+  }
+  $original = McpScheduledPublishGate::SCMI_ALLOWED_VALUES;
+  return function_exists($original) ? $original($definition, $entity, $cacheable) : [];
+}
+
+/**
+ * Implements hook_module_implements_alter().
+ *
+ * Drupal 10.6 only: unregisters SCMI's entity access hook, which
+ * mcp_sentinel_entity_access() calls through the scheduled-publish gate for
+ * every request Sentinel does not take over (d.o #3627557). Drupal 11.2 and
+ * later skip this function and read the RemoveHook attribute on
+ * \Drupal\mcp_sentinel\Hook\McpScheduledPublishHooks instead.
+ */
+#[LegacyModuleImplementsAlter]
+function mcp_sentinel_module_implements_alter(array &$implementations, string $hook): void {
+  if ($hook === 'entity_access') {
+    unset($implementations[McpScheduledPublishGate::SCMI_MODULE]);
+  }
+}
+
+/**
+ * The scheduled-publish gate, or NULL while the container predates it.
+ *
+ * After a code deploy and before the container is rebuilt, the cached
+ * container has no such service, and every entity access would fatal. The
+ * hook implementation list is cached the same way, so SCMI's own hook still
+ * runs in that window and nothing is left ungated.
+ */
+function _mcp_sentinel_scheduled_publish_gate(): ?McpScheduledPublishGate {
+  if (!\Drupal::hasService('mcp_sentinel.scheduled_publish_gate')) {
+    return NULL;
+  }
+  $gate = \Drupal::service('mcp_sentinel.scheduled_publish_gate');
+  return $gate instanceof McpScheduledPublishGate ? $gate : NULL;
 }

@@ -333,6 +333,9 @@ mcp_sentinel.mcp_policy_profile.*:
     max_moderation_state:
       type: string
       label: 'Maximum moderation state an agent may set (empty = unrestricted)'
+    allow_scheduled_publish:
+      type: boolean
+      label: 'Allow scheduled publishing and unpublishing (off by default)'
     deny_external_redirects:
       type: boolean
       label: 'Deny off-domain redirect targets (open-redirect guard)'
@@ -358,6 +361,9 @@ mcp_sentinel.mcp_policy_profile.*:
           allow_publish:
             type: boolean
             label: 'Allow publishing for this entity type (overrides deny_publish)'
+          allow_scheduled_publish:
+            type: boolean
+            label: 'Allow scheduled publishing for this entity type (overrides allow_scheduled_publish)'
     forbidden_role_permissions:
       type: sequence
       label: 'Permissions a governed role must not hold'

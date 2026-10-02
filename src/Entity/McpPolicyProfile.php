@@ -78,6 +78,7 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  *     "denied_config_types",
  *     "deny_publish",
  *     "max_moderation_state",
+ *     "allow_scheduled_publish",
  *     "deny_external_redirects",
  *     "allowed_redirect_hosts",
  *     "entity_rules",
@@ -244,6 +245,19 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   protected string $max_moderation_state = '';
 
   /**
+   * Whether the agent may schedule publishing and unpublishing.
+   *
+   * Applies only when Scheduler Content Moderation Integration is installed.
+   * When TRUE, a governed agent may set a scheduled publish_state or
+   * unpublish_state that the entity's workflow allows from its current state
+   * and that respects max_moderation_state, whatever its role's transition
+   * permissions. When FALSE (the default, and on every profile that predates
+   * the knob) a governed write that schedules a state is refused. Immediate
+   * publishing is still decided by deny_publish.
+   */
+  protected bool $allow_scheduled_publish = FALSE;
+
+  /**
    * Whether the agent is forbidden from creating off-domain redirects.
    *
    * When TRUE (the safe default), a governed agent may not create or update a
@@ -270,17 +284,18 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
    * Per-entity-type destructive overrides.
    *
    * A map of entity_type ID => rule, where a rule is an associative array that
-   * may carry 'allow_delete', 'allow_write' and/or 'allow_publish' booleans. A
+   * may carry 'allow_delete', 'allow_write', 'allow_publish' and/or
+   * 'allow_scheduled_publish' booleans. A
    * present override supersedes the corresponding global flag for that entity
    * type only; an absent override (or absent key) falls back to the global
    * flag. Empty means every type follows the global allow_delete / allow_write
-   * / deny_publish flags.
+   * / deny_publish / allow_scheduled_publish flags.
    *
    * Note that 'allow_publish' is stated the positive way round while the global
    * flag it overrides (deny_publish) is negative, so
    * deniesPublishForEntityType() inverts it.
    *
-   * @var array<string, array{allow_delete?: bool, allow_write?: bool, allow_publish?: bool}>
+   * @var array<string, array{allow_delete?: bool, allow_write?: bool, allow_publish?: bool, allow_scheduled_publish?: bool}>
    */
   protected array $entity_rules = [];
 
@@ -523,6 +538,14 @@ final class McpPolicyProfile extends ConfigEntityBase implements McpPolicyProfil
   public function deniesPublishForEntityType(string $entity_type): bool {
     $override = $this->entity_rules[$entity_type]['allow_publish'] ?? NULL;
     return $override === NULL ? $this->deniesPublish() : !(bool) $override;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function allowsScheduledPublishForEntityType(string $entity_type): bool {
+    $override = $this->entity_rules[$entity_type]['allow_scheduled_publish'] ?? NULL;
+    return $override === NULL ? (bool) $this->allow_scheduled_publish : (bool) $override;
   }
 
   /**

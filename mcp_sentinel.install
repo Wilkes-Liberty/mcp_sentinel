@@ -1349,3 +1349,29 @@ function mcp_sentinel_update_10026(): string {
   $schema->createTable('mcp_sentinel_sealed_token', $spec);
   return 'Created mcp_sentinel_sealed_token for copy-once sealed-token mint metadata.';
 }
+
+/**
+ * Add the scheduled-publish permission to existing policy profiles, off.
+ *
+ * Backfills allow_scheduled_publish = FALSE on every profile saved before the
+ * knob existed (d.o #3627557). An upgrade must not let an existing profile
+ * schedule publishing it never asked for, so this is written at FALSE.
+ */
+function mcp_sentinel_update_10027(): string {
+  $profiles = \Drupal::entityTypeManager()
+    ->getStorage('mcp_policy_profile')
+    ->loadMultiple();
+  $count = 0;
+  foreach ($profiles as $profile) {
+    $e = \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.' . $profile->id());
+    if ($e->get('allow_scheduled_publish') === NULL) {
+      $e->set('allow_scheduled_publish', FALSE)->save();
+      $count++;
+    }
+  }
+  return "Added allow_scheduled_publish (FALSE) to {$count} policy profile(s). "
+    . 'With Scheduler Content Moderation Integration installed, a governed write '
+    . 'that schedules a publish or unpublish state is refused unless a profile '
+    . 'turns this on.';
+}

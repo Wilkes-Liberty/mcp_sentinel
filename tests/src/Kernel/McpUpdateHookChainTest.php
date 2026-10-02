@@ -828,6 +828,35 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10027 backfills the scheduled-publish permission, off.
+   *
+   * An upgrade must not let an existing profile schedule publishing it never
+   * asked for, and must not overwrite a profile already opted in.
+   */
+  public function testUpdate10027BackfillsScheduledPublishOff(): void {
+    McpPolicyProfile::create([
+      'id' => 'scheduler',
+      'label' => 'Scheduler',
+      'allow_scheduled_publish' => TRUE,
+    ])->save();
+    $storage = $this->container->get('config.storage');
+    $data = $storage->read('mcp_sentinel.mcp_policy_profile.default');
+    unset($data['allow_scheduled_publish']);
+    $storage->write('mcp_sentinel.mcp_policy_profile.default', $data);
+    $this->container->get('config.factory')->reset('mcp_sentinel.mcp_policy_profile.default');
+
+    $message = mcp_sentinel_update_10027();
+    $this->assertStringContainsString('1 policy profile(s)', $message);
+
+    $this->container->get('config.factory')->reset();
+    $this->assertFalse($this->config('mcp_sentinel.mcp_policy_profile.default')->get('allow_scheduled_publish'));
+    $this->assertTrue($this->config('mcp_sentinel.mcp_policy_profile.scheduler')->get('allow_scheduled_publish'));
+
+    $again = mcp_sentinel_update_10027();
+    $this->assertStringContainsString('0 policy profile(s)', $again);
+  }
+
+  /**
    * Update 10025 seeds the two config secret lists, empty, and keeps additions.
    */
   public function testUpdate10025SeedsConfigSecretLists(): void {

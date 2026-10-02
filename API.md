@@ -162,6 +162,7 @@ governance the resolver selects per request. Read its gates and limits via:
 | `getDeniedConfigTypes()` | config name-prefix denylist (deny always wins, e.g. `system.`) |
 | `deniesPublish()` | publish gate — when `TRUE` (default) the agent cannot publish content |
 | `getMaxModerationState()` | ceiling moderation state ID the agent may set (empty = no ceiling) |
+| `allowsScheduledPublishForEntityType($type)` | whether the agent may schedule a publish or unpublish state (Scheduler Content Moderation Integration) for the type; `entity_rules.<type>.allow_scheduled_publish` overrides `allow_scheduled_publish` (default off) (#3627557) |
 | `getForbiddenRolePermissions()` | permissions a governed role must not hold (escape hatches; ships populated) |
 | `getAcknowledgedRolePermissions()` | `role_id:permission` grants deliberately accepted, recorded in config |
 | `allowsRawSql()` | raw-SQL gate for `mcp-sentinel:sql-query` (default off; see README → Raw SQL) |
@@ -288,6 +289,29 @@ content **publishing**. Both layers are additive and default to the safe value
   are allowed. `hook_entity_field_access` does not enforce the publish gate on
   `edit`. `hook_entity_presave` keeps a `status=0` backstop for unvalidated
   saves (custom code, Drush). A human publisher publishes.
+- **Scheduled publishing (#3627557).** With Scheduler Content Moderation
+  Integration (SCMI) installed, `mcp_sentinel.scheduled_publish_gate`
+  (`McpScheduledPublishGate`) replaces SCMI's three permission checks with
+  wrappers that call SCMI's originals for every request it does not take over:
+  - `McpScheduledTransitionAccess` replaces the `SchedulerModerationTransitionAccess`
+    constraint on `publish_state` / `unpublish_state`
+    (`hook_entity_base_field_info_alter`).
+  - `_mcp_sentinel_scheduled_states_values()` replaces the fields'
+    allowed-values function.
+  - `mcp_sentinel_entity_access()` calls
+    `scheduler_content_moderation_integration_entity_access()`, which is
+    unregistered by `#[RemoveHook]` on `McpScheduledPublishHooks` (Drupal 11)
+    and `hook_module_implements_alter()` (Drupal 10.6).
+
+  The gate takes over a governed request whose profile returns `TRUE` from
+  `allowsScheduledPublishForEntityType()`: the scheduled state must be a
+  workflow transition from the state it is scheduled from and at or below
+  `getMaxModerationState()`; the role's transition permissions are not read.
+  The entity-level `McpScheduledPublish` constraint refuses a governed
+  scheduled change the profile does not allow (off, or over the ceiling), and
+  `hook_entity_presave` aborts the same change on unvalidated saves. Allowed
+  changes are audited as `scheduled_transition`. Immediate publishing stays
+  with `McpDenyPublish`.
 
 ## Drush commands
 
@@ -324,6 +348,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |
+| `mcp_sentinel.scheduled_publish_gate` | `McpScheduledPublishGate` | governed scheduled publishing with Scheduler Content Moderation Integration: `takesOver($entityTypeId, ?$account)`, `scheduledChanges($entity, $original)`, `refusals($entity, $profile, $changes)`, `entityAccess()` (#3627557) |
 | `mcp_sentinel.raw_sql_guard` | `McpRawSqlGuard` | `check($sql, $profile, $surface = Drush)` → refusal reasons (`[]` = permitted). Resolves `denied_entity_types`, `redacted_fields` and classification ceilings down to physical tables and columns via the entity table mapping; fail-closed on anything it cannot resolve |
 | `mcp_sentinel.classification` | `McpClassificationResolver` | classification labels and egress ceilings (#3616540 part 2): `labels()`, `labelForEntity()` / `labelForField()`, `currentSurface()`, `effectiveCeiling($profile, $surface)` (min of profile and declared), `exceeds($label, $ceiling)`, `denies()`, bounded `evidence()`, `refusalResponse()` |
 | `mcp_sentinel.site_schema_builder` | `McpSiteSchemaBuilder` | `build($describes)` → content types (label, description, fields), vocabularies (label, description, term_count), and media types. Shared by `/drupal-mcp/context` and `McpSiteContextTool`; the caller supplies the per-surface bundle filter |
@@ -495,7 +520,9 @@ always treat `NULL` as "not governed, do nothing", never as "deny".
 For reference, MCP Sentinel governs the request stack through these core hooks
 (in `mcp_sentinel.module`): `hook_entity_presave`, `hook_entity_delete`,
 `hook_entity_access`, `hook_entity_create_access`, `hook_entity_field_access`
-(redaction), `hook_jsonapi_entity_filter_access`, `hook_cron` (prune + anomaly),
+(redaction), `hook_entity_base_field_info_alter` and
+`hook_module_implements_alter` (scheduled publishing, Drupal 10.6 for the
+latter), `hook_jsonapi_entity_filter_access`, `hook_cron` (prune + anomaly),
 `hook_mail` (anomaly email), `hook_help`, `hook_theme` (the dashboard and
 urgent-banner templates), and `hook_page_top` (the site-wide critical urgent
 banner). The `mcp_sentinel_graphql` submodule adds a

@@ -266,6 +266,29 @@ MCP policy profiles → Configuration governance**.
   human to review, and types that cannot carry a forward revision are refused
   (unpublishing — takedown — remains allowed in place). A human `publisher`
   publishes.
+- **Scheduled publishing.** Applies when
+  [Scheduler Content Moderation Integration](https://www.drupal.org/project/scheduler_content_moderation_integration)
+  (SCMI) is installed. SCMI lets an account schedule a publish or unpublish
+  state only if its role holds that workflow transition, so an agent without
+  the publish transition cannot schedule a publish. For governed requests the
+  profile decides instead, with *Allow scheduled publishing*
+  (`allow_scheduled_publish`, off by default):
+  - Off: a governed write that sets or changes `publish_state` or
+    `unpublish_state` (with its date) is refused with *Scheduled publishing is
+    denied by MCP Sentinel for this profile.* A schedule a human already set is
+    not the agent's change and is left alone.
+  - On: the agent may schedule a state the workflow allows from the current
+    state, at or below the maximum moderation state, without the role holding
+    the transition permission. Each scheduled transition is written to the
+    audit log as `scheduled_transition`. SCMI's update-access check does not
+    lock the agent out of content it was allowed to schedule.
+  - Immediate publishing is unchanged: *Deny publishing* still refuses a
+    go-live, so an agent may schedule a publish it cannot perform now.
+  - `entity_rules.<type>.allow_scheduled_publish` overrides the profile value
+    for one entity type, in either direction (configuration only).
+  - Human (ungoverned) traffic keeps SCMI's behaviour. Validated writes get a
+    422; an unvalidated save (custom code, Drush) aborts and leaves a
+    `scheduled_publish_refused` audit row.
 - **Write preconditions.** Every governed mutation of an existing entity —
   including relationship-only writes, translations, and deletes — runs one
   shared precondition contract before anything changes: an active content lock
