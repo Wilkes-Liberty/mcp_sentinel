@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.28.0] - 2026-10-01
+
 ### Added
 - [#3627557](https://www.drupal.org/project/mcp_sentinel/issues/3627557): A
   policy profile can let agents schedule publishing without being allowed to
