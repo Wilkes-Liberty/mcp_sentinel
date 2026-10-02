@@ -1081,3 +1081,34 @@ jobs:
             --no-progress --show-suggestions --show-context \
             --exclude '.cspell-ci/**' --exclude '.cspell-ci.json' \
             .
+
+  # The single required check for the suite (#255). A matrix job skipped by a
+  # job-level `if:` reports under its unexpanded name, so the per-leg PHPUnit
+  # names cannot be required without blocking every docs-only pull request.
+  # This job always runs and passes only when each test job passed or was
+  # skipped by the docs-only filter. Add new test jobs to `needs`.
+  tests-gate:
+    name: Tests gate
+    if: always()
+    needs:
+      - changes
+      - phpunit
+      - phpunit-functional
+      - phpunit-functional-pgsql-draft
+      - phpunit-functional-d10
+      - phpcs
+      - phpstan
+      - cspell
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every test job to pass or be skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: ${RESULTS}"
+          for result in ${RESULTS}; do
+            case "${result}" in
+              success|skipped) ;;
+              *) echo "::error::A test job ended with '${result}'."; exit 1 ;;
+            esac
+          done
