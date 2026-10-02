@@ -8,6 +8,7 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityStorageException;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\node\NodeInterface;
@@ -78,6 +79,8 @@ final class McpScheduledPublishGateTest extends KernelTestBase {
     'encrypt',
     'workflows',
     'content_moderation',
+    'language',
+    'content_translation',
     'scheduler',
     'scheduler_content_moderation_integration',
     'audit_chain',
@@ -396,7 +399,7 @@ final class McpScheduledPublishGateTest extends KernelTestBase {
 
     $node->set('publish_on', \Drupal::time()->getRequestTime() - 60);
     $node->set('publish_state', 'published');
-    $this->assertTrue($this->contains($this->messages($node), 'scheduled publish date must be in the future'),
+    $this->assertTrue($this->contains($this->messages($node), 'must be in the future'),
       'A past publish date must be refused under deny_publish.');
 
     try {
@@ -409,6 +412,120 @@ final class McpScheduledPublishGateTest extends KernelTestBase {
     $stored = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
     $this->assertFalse($stored->isPublished(), 'The node must not have gone live.');
     $this->assertSame('draft', $stored->get('moderation_state')->value);
+  }
+
+  /**
+   * On: a past publish date is refused even when the profile allows publish.
+   *
+   * Scheduler publishes a past date in the same save, so accepting it would
+   * be an immediate publish without the role's transition permission.
+   */
+  public function testOnRefusesPastPublishDateWithoutDenyPublish(): void {
+    $this->configureProfile(['allow_scheduled_publish' => TRUE, 'deny_publish' => FALSE]);
+    $type = NodeType::load('article');
+    $type->setThirdPartySetting('scheduler', 'publish_past_date', 'publish');
+    $type->save();
+    $node = $this->createDraft();
+    $this->actAs('mcp_api');
+
+    $node->set('publish_on', \Drupal::time()->getRequestTime() - 60);
+    $node->set('publish_state', 'published');
+    $this->assertTrue($this->contains($this->messages($node), 'must be in the future'),
+      'A past publish date must be refused for a governed schedule.');
+
+    try {
+      $node->save();
+      $this->fail('An unvalidated save with a past publish date must abort.');
+    }
+    catch (EntityStorageException) {
+      // Expected.
+    }
+    $stored = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
+    $this->assertFalse($stored->isPublished(), 'The node must not have gone live.');
+  }
+
+  /**
+   * On: a past unpublish date is refused as well.
+   */
+  public function testOnRefusesPastUnpublishDate(): void {
+    $this->configureProfile(['allow_scheduled_publish' => TRUE]);
+    $node = $this->createDraft();
+    $this->actAs('mcp_api');
+
+    $now = \Drupal::time()->getRequestTime();
+    $node->set('publish_on', $now + 86400);
+    $node->set('publish_state', 'published');
+    $node->set('unpublish_on', $now - 60);
+    $node->set('unpublish_state', 'archived');
+    $this->assertTrue($this->contains($this->messages($node), 'must be in the future'),
+      'A past unpublish date must be refused for a governed schedule.');
+
+    // The unvalidated seam refuses it too: Sentinel's own check, not only
+    // Scheduler's constraint.
+    try {
+      $node->save();
+      $this->fail('An unvalidated save with a past unpublish date must abort.');
+    }
+    catch (EntityStorageException $e) {
+      $this->assertStringContainsString('MCP Sentinel', $e->getMessage());
+    }
+  }
+
+  /**
+   * A governed save never triggers an overdue publish under deny_publish.
+   *
+   * A human scheduled the publish; cron has not run yet. An agent's unrelated
+   * edit must not take the page live in the same save; cron publishes it.
+   */
+  public function testGovernedSaveDoesNotTriggerOverduePublishUnderDenyPublish(): void {
+    $this->configureProfile(['allow_scheduled_publish' => TRUE]);
+    $type = NodeType::load('article');
+    $type->setThirdPartySetting('scheduler', 'publish_past_date', 'schedule');
+    $type->save();
+    $node = $this->createDraft();
+    $node->set('publish_on', \Drupal::time()->getRequestTime() - 60);
+    $node->set('publish_state', 'published');
+    $node->save();
+    $this->assertFalse($node->isPublished(), 'The human schedule must still be pending.');
+    $type->setThirdPartySetting('scheduler', 'publish_past_date', 'publish');
+    $type->save();
+
+    $this->actAs('mcp_api');
+    $node = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
+    $node->set('title', 'Edited by an agent');
+    $node->save();
+
+    $stored = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
+    $this->assertFalse($stored->isPublished(), 'The governed save must not publish the overdue schedule.');
+    $this->assertSame('Edited by an agent', $stored->label());
+  }
+
+  /**
+   * Off: an unvalidated save cannot copy a source schedule into a translation.
+   */
+  public function testOffAbortsUnvalidatedTranslationSchedule(): void {
+    ConfigurableLanguage::createFromLangcode('es')->save();
+    \Drupal::service('content_translation.manager')->setEnabled('node', 'article', TRUE);
+    \Drupal::service('entity_field.manager')->clearCachedFieldDefinitions();
+    $node = $this->createDraft();
+    $this->schedule($node);
+    $node->save();
+    $node->addTranslation('es', ['title' => 'Artículo', 'moderation_state' => 'draft'])->save();
+    $source = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id());
+    $this->assertTrue($source->getTranslation('es')->get('publish_state')->isEmpty(),
+      'The Spanish translation must start without its own scheduled state.');
+
+    $this->actAs('mcp_api');
+    $spanish = \Drupal::entityTypeManager()->getStorage('node')->loadUnchanged($node->id())->getTranslation('es');
+    $spanish->set('publish_on', $source->get('publish_on')->value);
+    $spanish->set('publish_state', 'published');
+    try {
+      $spanish->save();
+      $this->fail('A governed save that schedules the translation must abort.');
+    }
+    catch (EntityStorageException) {
+      // Expected.
+    }
   }
 
   /**

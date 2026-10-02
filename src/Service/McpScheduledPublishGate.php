@@ -83,7 +83,7 @@ final class McpScheduledPublishGate {
   /**
    * Refusal when a scheduled publish is not in the future under deny_publish.
    */
-  public const NOT_FUTURE_MESSAGE = 'Publishing is denied by MCP Sentinel: a scheduled publish date must be in the future.';
+  public const NOT_FUTURE_MESSAGE = 'Scheduling is denied by MCP Sentinel: a scheduled publish or unpublish date must be in the future.';
 
   /**
    * Constructs the gate.
@@ -239,8 +239,11 @@ final class McpScheduledPublishGate {
       return [self::DENY_MESSAGE];
     }
     $messages = [];
-    foreach ($changes as $field => $pair) {
-      if ($field === 'publish_state' && $this->publishesNow($entity, $profile, $pair)) {
+    foreach ($changes as $pair) {
+      // Scheduler acts on a past date in the same save, which would be an
+      // immediate transition the role may not hold. Only future dates are
+      // schedules.
+      if ($pair['on'] <= $this->time->getRequestTime()) {
         $messages[] = self::NOT_FUTURE_MESSAGE;
         continue;
       }
@@ -273,8 +276,7 @@ final class McpScheduledPublishGate {
     if ($profile === NULL) {
       return;
     }
-    $original = $this->auditLogger->originalOf($entity);
-    $changes = $this->scheduledChanges($entity, $original instanceof ContentEntityInterface ? $original : NULL);
+    $changes = $this->scheduledChanges($entity, $this->originalTranslation($entity));
     $refusals = $this->refusals($entity, $profile, $changes);
     if ($refusals === []) {
       return;
@@ -307,8 +309,7 @@ final class McpScheduledPublishGate {
     if ($profile === NULL) {
       return;
     }
-    $original = $this->auditLogger->originalOf($entity);
-    $changes = $this->scheduledChanges($entity, $original instanceof ContentEntityInterface ? $original : NULL);
+    $changes = $this->scheduledChanges($entity, $this->originalTranslation($entity));
     foreach ($changes as $field => $pair) {
       $this->auditLogger->log('scheduled_transition', [
         'entity_type' => $entity->getEntityTypeId(),
@@ -322,6 +323,48 @@ final class McpScheduledPublishGate {
         'profile' => $profile->id(),
       ] + $this->auditLogger->translationMetadata($entity));
     }
+  }
+
+  /**
+   * Whether a governed save may let Scheduler publish an overdue schedule now.
+   *
+   * Scheduler publishes a past publish_on date during any save. Under
+   * deny_publish a governed save must not take content live, so the publish
+   * waits for cron, which runs ungoverned.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The entity being saved.
+   *
+   * @return bool
+   *   FALSE when this governed save must not publish now.
+   */
+  public function allowsPublishInSave(EntityInterface $entity): bool {
+    if (!$entity instanceof ContentEntityInterface || !$this->appliesTo($entity)) {
+      return TRUE;
+    }
+    $profile = $this->policyResolver->resolve();
+    return $profile === NULL || !$profile->deniesPublishForEntityType($entity->getEntityTypeId());
+  }
+
+  /**
+   * The saved entity's original in the same translation, if it had one.
+   *
+   * Core sets the original to the stored default translation, so a
+   * translation's schedule would be compared with the source language's.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The entity being saved.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface|null
+   *   The original translation, or NULL when the entity or translation is new.
+   */
+  private function originalTranslation(ContentEntityInterface $entity): ?ContentEntityInterface {
+    $original = $this->auditLogger->originalOf($entity);
+    if (!$original instanceof ContentEntityInterface) {
+      return NULL;
+    }
+    $langcode = $entity->language()->getId();
+    return $original->hasTranslation($langcode) ? $original->getTranslation($langcode) : NULL;
   }
 
   /**
@@ -455,26 +498,6 @@ final class McpScheduledPublishGate {
       return sprintf('Scheduled state "%s" exceeds the maximum permitted state "%s".', $to, $max);
     }
     return NULL;
-  }
-
-  /**
-   * Whether a scheduled publish would make the content live now.
-   *
-   * Scheduler publishes in the same save when publish_on is not in the future
-   * and the bundle's past-date setting is "publish", and on the next cron run
-   * when it is "schedule". Either way the agent would publish without a
-   * human, so under deny_publish only a future date counts as a schedule.
-   *
-   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
-   *   The entity.
-   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
-   *   The resolved profile.
-   * @param array{state: string, on: int, from: string} $pair
-   *   The scheduled publish pair.
-   */
-  private function publishesNow(ContentEntityInterface $entity, McpPolicyProfileInterface $profile, array $pair): bool {
-    return $profile->deniesPublishForEntityType($entity->getEntityTypeId())
-      && $pair['on'] <= $this->time->getRequestTime();
   }
 
   /**

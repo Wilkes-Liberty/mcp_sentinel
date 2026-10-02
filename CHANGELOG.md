@@ -15,9 +15,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   decides governed scheduled publish and unpublish states instead of the
   role's transition permissions. When on, the state must be a workflow
   transition from the current state and at or below the maximum moderation
-  state; each one is audited as `scheduled_transition`. *Deny publishing*
-  still refuses an immediate publish, including a scheduled publish date
-  that is not in the future. Human traffic keeps SCMI's behaviour.
+  state, and its date must be in the future, since Scheduler acts on a past
+  date in the same save; each one is audited as `scheduled_transition`.
+  *Deny publishing* still refuses an immediate publish, and under it a
+  governed save no longer lets Scheduler publish an overdue schedule in the
+  same save; cron publishes it. Human traffic keeps SCMI's behaviour.
   New `McpPolicyProfileInterface::allowsScheduledPublishForEntityType()`.
   Update 10027 adds the setting, off, to existing profiles.
 
