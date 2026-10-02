@@ -1,7 +1,10 @@
 name: Tests
 
 # Runs the PHPUnit suite on pull requests and on push to 1.x. A docs-only
-# change skips the heavy jobs below (DEV-735); see the `changes` job.
+# pull request skips the heavy jobs below (DEV-735); see the `changes` job.
+# A push to 1.x always runs them: that commit is what ships, and a release
+# commit usually touches only CHANGELOG.md, so skipping it reported a green
+# run that tested nothing while 1.x was red (#255).
 #
 # Until this existed, nothing ran the tests: a PR could go green, merge, and
 # ship while the suite was broken, and the only thing between a regression and a
@@ -39,7 +42,9 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      # Pushes to 1.x always count as code changes (#255); only pull requests
+      # may skip on docs-only changes.
+      code: ${{ github.event_name == 'push' || steps.filter.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
