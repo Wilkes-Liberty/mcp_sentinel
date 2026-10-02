@@ -36,7 +36,7 @@ parameters:
     # go when the floor rises above Drupal 10, not before.
     -
       identifier: function.alreadyNarrowedType
-      message: "#method_exists\\(\\) with .* and '(get|set)Original|loadRevisionUnchanged' will always evaluate to true#"
+      message: "#method_exists\\(\\) with .* and '((get|set)Original|loadRevisionUnchanged)' will always evaluate to true#"
     # Drupal 11 replaced fetchAll()'s int $mode with a FetchAs enum that Drupal
     # 10.6 does not have. \PDO::FETCH_ASSOC is accepted at runtime on both, so
     # it is the only spelling valid across the range this module supports; the
