@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\audit_chain\AuditChainLoggerInterface;
+use Drupal\audit_chain\RecoverySegments;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
@@ -128,6 +129,10 @@ class McpAuditLogger {
    * @param \Drupal\mcp_sentinel\Service\McpConfigSecretRedactor|null $configSecrets
    *   Withholds secrets from config diffs. NULL is accepted for the same
    *   reason; the logger then builds its own, so the built-in lists apply.
+   * @param \Drupal\audit_chain\RecoverySegments|null $recovery
+   *   Audit Chain's recovery successor workflow, read only to classify a
+   *   disclosed historical exception. NULL on Audit Chain versions without
+   *   recovery segments; such a failure then stays critical.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -137,6 +142,7 @@ class McpAuditLogger {
     private readonly ?Connection $database = NULL,
     private readonly ?McpPolicyBundleRegistry $policyBundles = NULL,
     private readonly ?McpConfigSecretRedactor $configSecrets = NULL,
+    private readonly ?RecoverySegments $recovery = NULL,
   ) {}
 
   /**
@@ -350,6 +356,21 @@ class McpAuditLogger {
     // Return type matches AuditChainLoggerInterface::verify() so PHPStan does
     // not treat the additive keys as a sealed-shape violation.
     return $this->requireChain()->verify();
+  }
+
+  /**
+   * Returns Audit Chain's recovery successor status, read live.
+   *
+   * Read alongside verifyChain() so Audit Chain can classify a disclosed
+   * historical exception. It never replaces the whole-history verdict.
+   *
+   * @return array<string, mixed>|null
+   *   The successor status (segment_ok, historical_ok, segment_id,
+   *   historical_verdict, reason), or NULL when no successor exists or the
+   *   installed Audit Chain has no recovery segments.
+   */
+  public function recoverySuccessor(): ?array {
+    return $this->recovery?->currentStatus();
   }
 
   /**

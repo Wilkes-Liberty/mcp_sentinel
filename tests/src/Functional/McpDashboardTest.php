@@ -245,6 +245,32 @@ final class McpDashboardTest extends BrowserTestBase {
   }
 
   /**
+   * A disclosed historical exception warns and is not called tampering.
+   *
+   * The evidence state stays failed, so the posture hero is not all-clear.
+   */
+  public function testHistoricalExceptionWarnsAndIsNotAllClear(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => FALSE,
+      'broken_at' => 3,
+      'rows' => 0,
+      'time' => \Drupal::time()->getRequestTime(),
+      'reason' => 'tampered',
+      'unsigned_prefix' => FALSE,
+      'historical_exception' => TRUE,
+    ]);
+    $this->drupalLogin($this->drupalCreateUser(['view mcp sentinel audit log']));
+    $this->drupalGet('/admin/reports/mcp-sentinel');
+    $this->assertSession()->elementExists('css', '.mcp-banner--warning');
+    $this->assertSession()->elementNotExists('css', '.mcp-banner--critical');
+    $this->assertSession()->pageTextContains('Historical exception');
+    $this->assertSession()->pageTextContains('recovery successor verifies');
+    $this->assertSession()->pageTextNotContains('Tampering');
+    $this->assertSession()->pageTextNotContains('All clear');
+    $this->assertSession()->elementAttributeContains('css', '.mcp-hero', 'data-evidence', 'failed');
+  }
+
+  /**
    * First-run never reports all-clear while the chain is unverified.
    */
   public function testFirstRunIsNotAllClear(): void {

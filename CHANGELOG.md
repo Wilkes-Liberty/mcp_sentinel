@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- [#3627731](https://www.drupal.org/project/mcp_sentinel/issues/3627731): A
+  disclosed Audit Chain historical exception is a documented warning
+  (`historical_exception`), not the critical `chain_broken` condition. It
+  applies only when Audit Chain classifies the failure as that exception: the
+  break is the disclosed row and the recovery successor verifies. A missing
+  successor, `segment_ok` FALSE, or a different break stays critical.
+  Whole-history verification stays unsuccessful, so posture is never clear
+  and the verify command still exits non-zero. A verify older than a day, or
+  one that predates new audit rows, reads as stale. Before the first
+  Sentinel verify, a fresh Audit Chain scheduled run with that
+  classification replaces `chain_unverified`. Audit Chain versions without
+  recovery segments are unchanged.
+
 ## [2.28.1] - 2026-10-02
 
 ### Changed

@@ -23,9 +23,12 @@ use Drupal\mcp_sentinel\Value\McpLastVerify;
  * Pure read; no side effects. Returns a list of
  * `['severity', 'key', 'message', 'url']` entries for:
  *  - chain_broken (critical): the stored last-verify result failed and is
- *    not the documented unsigned prefix.
+ *    neither documented exception below.
  *  - unsigned_prefix (warning): verification failed because of a leading
  *    unsigned prefix followed by signed rows. The rows stay in the log.
+ *  - historical_exception (warning): verification failed at a disclosed
+ *    historical break whose Audit Chain recovery successor verifies. A
+ *    missing or failing successor, or a different break, stays critical.
  *  - chain_unverified (warning): evidence has never been verified.
  *  - chain_stale (warning): a prior verify is older than 24h or grew.
  *  - chain_degraded (warning): last-verify metadata is incomplete.
@@ -250,16 +253,20 @@ final class McpUrgentConditions {
   /**
    * Adds the chain condition for the stored last-verify result.
    *
-   * A documented unsigned prefix is a warning. Every other failure is
-   * the critical chain_broken condition. A stored result that does not
-   * carry the prefix flag stays critical.
+   * A documented unsigned prefix or a disclosed historical exception is a
+   * warning. Every other failure is the critical chain_broken condition. A
+   * stored result that does not carry the matching flag stays critical.
    *
    * @param array $conditions
    *   The condition list, modified by reference.
    */
   private function evaluateChain(array &$conditions): void {
     $last = $this->state->get('mcp_sentinel.last_verify');
-    $last = is_array($last) ? $last : NULL;
+    $last = McpLastVerify::effective(
+      is_array($last) ? $last : NULL,
+      $this->state->get(McpLastVerify::SCHEDULED_STATE_KEY),
+      $this->time->getRequestTime(),
+    );
     $rows = (int) $this->database->select('audit_chain_log', 'l')
       ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->countQuery()->execute()->fetchField();
@@ -276,6 +283,20 @@ final class McpUrgentConditions {
             'severity' => 'warning',
             'key' => 'unsigned_prefix',
             'message' => $prefix,
+            'url' => $url,
+          ];
+          return;
+        }
+        if (McpLastVerify::isDocumentedHistoricalException($last)) {
+          $conditions[] = [
+            'severity' => 'warning',
+            'key' => 'historical_exception',
+            'message' => sprintf(
+              'Audit hash chain has a documented historical exception at row %d. '
+              . 'The preserved rows stay in the log and the recovery successor verifies. '
+              . 'This is not a new break. Whole-history verification stays unsuccessful.',
+              (int) ($last['broken_at'] ?? 0),
+            ),
             'url' => $url,
           ];
           return;
