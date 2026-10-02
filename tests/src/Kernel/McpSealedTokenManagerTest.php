@@ -173,6 +173,33 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
   }
 
   /**
+   * The plaintext reveal handoff expires after REVEAL_STORE_TTL, not a week.
+   *
+   * PrivateTempStoreFactory::get() takes only a collection; the expiry is a
+   * factory argument. A TTL passed to get() is dropped, and an unrevealed
+   * secret then sits in key_value_expire for the site-wide tempstore expiry.
+   *
+   * @covers ::revealTempStore
+   */
+  public function testRevealStoreExpiresWithinTheRevealTtl(): void {
+    $this->container->get('current_user')->setAccount($this->createOperator());
+    $now = $this->container->get('datetime.time')->getRequestTime();
+
+    $this->container->get('mcp_sentinel.sealed_token_reveal_store')
+      ->get('mcp_sentinel_sealed_token')
+      ->set('reveal', ['token' => 'mcs1.not-a-real-token']);
+
+    $expire = (int) $this->container->get('database')
+      ->select('key_value_expire', 'k')
+      ->fields('k', ['expire'])
+      ->condition('collection', 'tempstore.private.mcp_sentinel_sealed_token')
+      ->execute()
+      ->fetchField();
+    $this->assertGreaterThan($now, $expire);
+    $this->assertLessThanOrEqual($now + McpSealedTokenManager::REVEAL_STORE_TTL, $expire);
+  }
+
+  /**
    * Returns the manager.
    */
   private function manager(): McpSealedTokenManager {
