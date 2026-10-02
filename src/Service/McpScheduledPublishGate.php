@@ -12,7 +12,6 @@ use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\Core\Entity\RevisionableInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Session\AccountInterface;
@@ -196,8 +195,11 @@ final class McpScheduledPublishGate {
     // does, so a forward draft is compared with itself and not with the
     // default revision.
     $storage = $this->entityTypeManager->getStorage($entity->getEntityTypeId());
-    $revision_id = $entity instanceof RevisionableInterface ? $entity->getLoadedRevisionId() : NULL;
-    if ($revision_id !== NULL && $storage instanceof RevisionableStorageInterface) {
+    $revision_id = $entity->getLoadedRevisionId();
+    if (!empty($revision_id) && $storage instanceof RevisionableStorageInterface) {
+      // Drupal 10.6 has no loadRevisionUnchanged(); the else branch is its
+      // fallback.
+      // @phpstan-ignore function.alreadyNarrowedType
       if (method_exists($storage, 'loadRevisionUnchanged')) {
         $stored = $storage->loadRevisionUnchanged($revision_id);
       }

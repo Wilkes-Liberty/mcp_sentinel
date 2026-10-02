@@ -1056,14 +1056,13 @@ function _mcp_sentinel_scheduled_publish_gate(): ?McpScheduledPublishGate {
  * publish_on date in the same save, then clears the date. Depending on hook
  * order that can happen before mcp_sentinel_entity_presave() sees the
  * schedule, so the scheduled-publish gate runs here as well and aborts a
- * governed save it refuses (d.o #3627557). Returns NULL, which leaves
+ * governed save it refuses (d.o #3627557). Returns nothing, which leaves
  * Scheduler's decision unchanged: ungoverned saves and cron runs are not
  * affected.
  */
-function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bool {
+function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): void {
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
   if ($resolver->isGoverned()) {
     _mcp_sentinel_scheduled_publish_gate()?->enforceOnSave($entity);
   }
-  return NULL;
 }
