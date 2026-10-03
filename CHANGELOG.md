@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.28.2] - 2026-10-03
+
 ### Notes
 - Path B is not claimed. The 1.x tip is a prerequisite pin for Path B
   auth, not a public HTTPS cut. It already carries the sealed-token mint
@@ -2661,7 +2663,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.2...1.x
+[2.28.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.1...2.28.2
 [2.28.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.0...2.28.1
 [2.28.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.27.0...2.28.0
 [2.27.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.26.0...2.27.0
