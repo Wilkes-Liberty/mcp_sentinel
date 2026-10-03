@@ -78,7 +78,8 @@ client. The token is bound to a designated `client_id`, shown once, and
 revocable. Use it as `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness`
 (whoami), JSON:API, GraphQL, and `mcp_server` routes that already accept
 oauth2. Unrelated oauth2 routes do not accept this bearer. This is not a
-public HTTPS Path B or an OAuth login wizard.
+public HTTPS Path B or an OAuth login wizard. The 1.x tip is a
+prerequisite pin for Path B, not a public HTTPS cut.
 
 ### Access-token TTL
 

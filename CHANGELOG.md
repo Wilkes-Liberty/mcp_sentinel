@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Notes
+- Path B is not claimed. The 1.x tip is a prerequisite pin for Path B
+  auth, not a public HTTPS cut. It already carries the sealed-token mint
+  UI, admin status strip, and deny-path explain from
+  [#250](https://github.com/Wilkes-Liberty/mcp_sentinel/pull/250)
+  (2.27.0), plus later reveal-store and GitLab CI pins. Tag and
+  drupal.org publish stay with the operator.
+
 ### Fixed
 - [#3627731](https://www.drupal.org/project/mcp_sentinel/issues/3627731): A
   disclosed Audit Chain historical exception is a documented warning

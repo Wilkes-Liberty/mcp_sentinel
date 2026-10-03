@@ -1292,6 +1292,8 @@ are not.
 
 This is not an OAuth login wizard. OAuth client-credentials remains the
 long-lived channel; sealed tokens are short-lived and client-bound.
+Path B is not claimed: this is a prerequisite pin, not a public HTTPS
+cut.
 
 ## Companion Node.js Connector
 
