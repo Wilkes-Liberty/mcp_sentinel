@@ -12,8 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: module
       - uses: shivammathur/setup-php@v2
-        with: { php-version: '8.4' }
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
       - uses: actions/cache@v6
         with:
           path: ~/.composer/cache
@@ -21,7 +26,59 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-php8.4-composer
             ${{ runner.os }}-composer-
-      - run: composer install --no-interaction --no-progress
-        continue-on-error: true
-      - run: composer audit
-        continue-on-error: true
+      # The module root has no composer.lock. `composer install` there cannot
+      # produce the tree a site installs, and continue-on-error made both that
+      # install and `composer audit` unable to fail the job. Audit the lock
+      # Composer writes after requiring the working copy into a Drupal
+      # recommended-project scaffold — the same pattern as tests.yml.
+      - name: Scaffold a Drupal site
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:^11" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
+          cd drupal
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config repositories.mcp_sentinel path ../module
+      - name: Install the module into the scaffold
+        working-directory: drupal
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          # Runtime require only: this is the tree a site gets from
+          # `composer require drupal/mcp_sentinel`. require-dev (mcp_server)
+          # is not installed here. twig/twig <3.30: see tests.yml.
+          retry composer require -W --no-interaction --no-progress \
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
+      - name: Audit the installed scaffold
+        working-directory: drupal
+        run: composer audit

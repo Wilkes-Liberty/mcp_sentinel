@@ -179,7 +179,9 @@ them rather than replacing entity or field access.
 
 ## Requirements
 
-- Drupal 10.6+ or 11.3+, PHP 8.3+
+- Drupal 10.6+ or 11.3+, PHP 8.2+ (base module and approval). Optional MCP
+  transport modules inherit their transport dependencies' PHP requirements;
+  MCP Server currently requires PHP 8.3.
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
 - [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
   signing secret (and optional audit encryption key) outside exported config

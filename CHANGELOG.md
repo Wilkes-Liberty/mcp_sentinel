@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Docs and CI comments now match the PHP 8.2 floor already declared in
+  `composer.json`: the base module and approval services run on 8.2;
+  `mcp_server` / `mcp_sentinel_server` tests stay on 8.3. The GitHub
+  `composer audit` job installs the module into a Drupal scaffold and
+  can fail the gate.
 ### Added
 - [#3627742](https://www.drupal.org/project/mcp_sentinel/issues/3627742):
   A governed node draft can carry field changes for the paragraphs the node

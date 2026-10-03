@@ -42,8 +42,9 @@ Composer package; you do not need to interact with it to contribute.
 
 ## Coding standards & checks
 
-This module targets Drupal 10.6+/11.3+ and PHP 8.3+. Please run the same checks
-CI runs:
+This module targets Drupal 10.6+/11.3+ and PHP 8.2+ for the base module and
+approval services. `drupal/mcp_server` and the `mcp_sentinel_server` tests
+require PHP 8.3. Please run the same checks CI runs:
 
 ```bash
 # Drupal coding standards (use the committed ruleset)

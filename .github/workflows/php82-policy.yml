@@ -18,7 +18,7 @@ jobs:
         include:
           - { core: '~10.6.0', php: '8.2' }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: mcp_sentinel_src
       - uses: shivammathur/setup-php@v2
@@ -40,13 +40,13 @@ jobs:
               'name': 'mcp-sentinel/core-qualification', 'type': 'project',
               'repositories': [
                   {'type': 'path', 'url': '../mcp_sentinel_src',
-                   'options': {'symlink': True, 'versions': {'drupal/mcp_sentinel': '2.25.4'}}},
+                   'options': {'symlink': True}},
                   {'type': 'composer', 'url': 'https://packages.drupal.org/8'},
               ],
               'require': {'composer/installers': '^2.3',
                           'drupal/core-recommended': core, 'drupal/core-dev': core,
-                          'drupal/mcp_sentinel': '2.25.4'},
-              'minimum-stability': 'beta', 'prefer-stable': True,
+                          'drupal/mcp_sentinel': '*@dev'},
+              'minimum-stability': 'dev', 'prefer-stable': True,
               'config': {'allow-plugins': {'composer/installers': True,
                   'phpstan/extension-installer': True,
                   'dealerdirect/phpcodesniffer-composer-installer': True,
@@ -55,8 +55,6 @@ jobs:
               'extra': {'installer-paths': {'web/core': ['type:drupal-core'],
                   'web/modules/contrib/{$name}': ['type:drupal-module']}},
           }
-          if core == '11.4.7':
-              package['require']['twig/twig'] = '3.29.0'
           with open('composer.json', 'w') as out:
               json.dump(package, out, indent=2)
           PY

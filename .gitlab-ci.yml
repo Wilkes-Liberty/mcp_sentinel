@@ -79,27 +79,20 @@ variables:
 # composer (previous major) is skipped by OPT_IN_TEST_PREVIOUS_MAJOR=0.
 # If a schedule or UI form opts the lane back in, do not fail the pipeline:
 # pin PHP 8.3 (the template uses Drupal 10's minimum 8.1, #3613940) and
-# allow_failure. The pin gets past php>=8.2/8.3 deps; ext-sodium is still
+# allow_failure. The pin gets past php>=8.2 deps; ext-sodium is still
 # missing, so the job stays red and allowed. Do not --ignore-platform-req.
 #
-# On the PHP floor, which an earlier version of this comment got wrong: >=8.3
-# is not a CI convenience, it is what the code requires. Two independent
-# reasons, either one sufficient on its own:
+# PHP floor: composer.json is php >=8.2. The base module and approval
+# services run on 8.2. drupal/simple_oauth ^6.1 is a RUNTIME requirement
+# whose chain (league/oauth2-server, lcobucci/jwt) declares
+# php: ~8.2.0 || ~8.3.0 || ~8.4.0 || ~8.5.0, so PHP 8.1 does not resolve.
 #
-#  - drupal/simple_oauth ^6.1 is a RUNTIME requirement, not a test-only one. It
-#    pulls league/oauth2-server and lcobucci/jwt, both declaring
-#    php: ~8.2.0 || ~8.3.0 || ~8.4.0 || ~8.5.0. PHP 8.1 does not resolve.
-#  - The module uses typed class constants (public const string NAME = ...),
-#    which are PHP 8.3 syntax. Below 8.3 that is a parse error -- the module
-#    cannot load, never mind install.
-#
-# So the open question is 8.2 versus 8.3, not 8.1 versus 8.3. Reaching 8.2
-# would mean dropping those type declarations, while Drupal 11.3 -- this
-# module's D11 floor -- requires 8.3 regardless. Tracked, not settled here.
+# Drupal 11.3's own minimum is 8.3; that is core's floor, not this
+# module's. Do not raise composer.json to >=8.3 for that reason.
 #
 # One limit stays recorded rather than hidden: drupal/mcp_server sits in
-# require-dev and needs PHP ^8.3, so the mcp_sentinel_server tests could not
-# run below 8.3 on any venue even if the rest of the module could.
+# require-dev and needs PHP ^8.3, so the mcp_sentinel_server tests stay
+# on 8.3 even though the rest of the module supports 8.2.
 
 composer (previous major):
   allow_failure: true
