@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-10-03
+
 ### Changed
 - Docs and CI comments now match the PHP 8.2 floor already declared in
   `composer.json`: the base module and approval services run on 8.2;
