@@ -264,6 +264,60 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
   }
 
   /**
+   * A paragraph edit over a working copy lands in that working copy.
+   *
+   * Saving a host draft gives each paragraph a new revision, and that revision
+   * becomes the paragraph's default. The live host keeps pinning the old one.
+   * A direct paragraph write then edits the draft's revision: no second host
+   * draft is built from live, the working copy keeps its own edits, and the
+   * live render does not change.
+   */
+  public function testParagraphEditOverWorkingCopyLandsInDraft(): void {
+    ['node' => $node, 'paragraph' => $paragraph] = $this->createPageWithParagraph('original');
+    $storage = \Drupal::entityTypeManager()->getStorage('node');
+    /** @var \Drupal\node\NodeInterface $working */
+    $working = $storage->loadUnchanged($node->id());
+    $working->setNewRevision(TRUE);
+    $working->isDefaultRevision(FALSE);
+    $working->setTitle('Working copy title');
+    $working->set('moderation_state', 'draft');
+    $working->save();
+    $workingRevisionId = (string) $working->getRevisionId();
+
+    $response = $this->governedJsonApiRequest(
+      'PATCH',
+      '/jsonapi/paragraph/capability/' . $paragraph->uuid(),
+      [
+        'data' => [
+          'type' => 'paragraph--capability',
+          'id' => $paragraph->uuid(),
+          'attributes' => [self::PARA_FIELD => 'edited'],
+        ],
+      ],
+      NULL,
+      $this->agent,
+    );
+
+    $this->assertContains($response->getStatusCode(), [200, 204], (string) $response->getBody());
+    $this->assertSame('original', $this->pinnedText($node),
+      'The live render must be unchanged.');
+    $storage->resetCache([$node->id()]);
+    $this->assertSame($workingRevisionId, (string) $storage->getLatestRevisionId($node->id()),
+      'No second host draft may be built over the working copy.');
+    /** @var \Drupal\node\NodeInterface $latest */
+    $latest = $storage->loadRevision($workingRevisionId);
+    $this->assertSame('Working copy title', $latest->getTitle(),
+      'The working copy must keep its edits.');
+    /** @var \Drupal\Core\Entity\RevisionableStorageInterface $paraStorage */
+    $paraStorage = \Drupal::entityTypeManager()->getStorage('paragraph');
+    $paraStorage->resetCache();
+    /** @var \Drupal\paragraphs\Entity\Paragraph $draftPara */
+    $draftPara = $paraStorage->loadRevision((int) $latest->get(self::HOST_FIELD)->target_revision_id);
+    $this->assertSame('edited', $draftPara->get(self::PARA_FIELD)->value,
+      'The edit must land in the working copy.');
+  }
+
+  /**
    * A paragraph pinned by a published UNMODERATED host is denied with a 422.
    *
    * No safe draft state exists, so the edit cannot be redirected; it must be

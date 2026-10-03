@@ -91,6 +91,43 @@ final class McpDraftResource extends EntityResource {
   public const REVISE_OVER_WORKING_OPERATION = 'revise_over_working_copy';
 
   /**
+   * Operation name for opening a default-language draft from live.
+   *
+   * PATCH /mcp-draft with If-Match `"live"` builds the first unpublished
+   * forward revision when no working copy exists.
+   */
+  public const OPEN_OPERATION = 'open_draft';
+
+  /**
+   * Operation name for component paragraph changes inside a draft save.
+   */
+  public const COMPONENTS_OPERATION = 'draft_components';
+
+  /**
+   * Top-level meta key that carries component paragraph changes.
+   */
+  public const COMPONENTS_META_KEY = 'mcp_components';
+
+  /**
+   * Component fields that a draft save must never change.
+   *
+   * Status and language follow the host revision; the parent fields describe
+   * where the paragraph sits, which a component change cannot move.
+   */
+  private const COMPONENT_LOCKED_FIELDS = [
+    'status',
+    'langcode',
+    'default_langcode',
+    'parent_id',
+    'parent_type',
+    'parent_field_name',
+    'behavior_settings',
+    'revision_translation_affected',
+    'revision_default',
+    'created',
+  ];
+
+  /**
    * Bookkeeping fields that a translation write must never copy.
    */
   private const SKIP_FIELD_NAMES = [
@@ -200,24 +237,38 @@ final class McpDraftResource extends EntityResource {
       return $this->patchParagraphTranslation($resource_type, $entity, $request);
     }
     $this->assertGovernedForwardRevisionEntity($entity);
-    $versions = $this->parseRevisionMatch($request, FALSE);
+    $versions = $this->parseRevisionMatch($request, TRUE);
+    $opening = $versions[2] === '';
     $langcode = $this->requestLangcode($request, FALSE);
     $preflight = $this->parsePreflight($request);
+    $components = $this->requestComponents($request);
     $storage = $this->forwardRevisionStorage($entity);
-    $live = $this->assertRevisionPointers(
-      $storage->loadUnchanged($entity->id()),
-      $storage->getLatestRevisionId($entity->id()),
-      $versions,
-    );
-    $draft = $this->loadWorkingDraft($storage, $entity, $versions[2], $langcode);
+    if ($opening) {
+      $live = $this->assertOpenRevisionPointers(
+        $storage->loadUnchanged($entity->id()),
+        $storage->getLatestRevisionId($entity->id()),
+        $versions,
+      );
+      $draft = $this->loadOpenBase($storage, $live, $langcode);
+    }
+    else {
+      $live = $this->assertRevisionPointers(
+        $storage->loadUnchanged($entity->id()),
+        $storage->getLatestRevisionId($entity->id()),
+        $versions,
+      );
+      $draft = $this->loadWorkingDraft($storage, $entity, $versions[2], $langcode);
+    }
     if (!$draft->access('update', $this->user)) {
       throw new AccessDeniedHttpException('Draft update access denied.');
     }
-    // A language carried forward as not-affected can be unpublished with
-    // published moderation (#3626610 / #3626919). Restore draft moderation
-    // so continue can correct that pending text.
-    $this->restoreCarriedDraftModeration($draft);
-    $this->assertTranslationNotDefaultRevisionState($draft);
+    if (!$opening) {
+      // A language carried forward as not-affected can be unpublished with
+      // published moderation (#3626610 / #3626919). Restore draft moderation
+      // so continue can correct that pending text.
+      $this->restoreCarriedDraftModeration($draft);
+      $this->assertTranslationNotDefaultRevisionState($draft);
+    }
     $this->markOtherLanguagesUnaffected($draft);
     // Core's deserialize() docblock says array, but this normalizer returns
     // the content entity. Keep the actual contract explicit here.
@@ -232,15 +283,22 @@ final class McpDraftResource extends EntityResource {
     // editable exactly as on a single-language draft.
     $translation_write = $langcode !== NULL
       && $langcode !== $draft->getUntranslated()->language()->getId();
+    if ($components !== [] && $translation_write) {
+      throw new BadRequestHttpException('Component changes are supported on the default language only.');
+    }
     $this->applySubmittedDraftFields($resource_type, $parsed, $draft, $live, $data, $translation_write);
     $this->applySubmittedRevisionLog($resource_type, $draft, $data);
+    $changed = $this->applySubmittedComponents($resource_type, $draft, $components, $data);
+    if ($opening) {
+      $this->unpublishOpenedDraft($draft, $data, $resource_type);
+    }
     $this->assertDraftRemainsUnpublished($draft);
     // Include entity-level governance constraints, not only changed fields.
     static::validate($draft);
     if ($preflight === '1') {
-      return $this->preflightResponse($versions, $langcode, NULL, $live, $storage);
+      return $this->preflightResponse($versions, $langcode, $opening ? self::OPEN_OPERATION : NULL, $live, $storage);
     }
-    return $this->saveForwardRevision($storage, $entity, $draft, $resource_type, $request, $versions);
+    return $this->saveForwardRevision($storage, $entity, $draft, $resource_type, $request, $versions, $opening ? 'open' : 'continue', $changed);
   }
 
   /**
@@ -440,6 +498,8 @@ final class McpDraftResource extends EntityResource {
         'create_translation',
         self::REVISE_OPERATION,
         self::REVISE_OVER_WORKING_OPERATION,
+        self::OPEN_OPERATION,
+        self::COMPONENTS_OPERATION,
       ],
     ];
     if ((string) $latest_id !== (string) $live->getRevisionId()) {
@@ -568,7 +628,9 @@ final class McpDraftResource extends EntityResource {
       $versions[2] = '';
       return $versions;
     }
-    throw new BadRequestHttpException('If-Match must identify the live and working revision IDs as "live:working".');
+    throw new BadRequestHttpException($allow_live_only
+      ? 'If-Match must be "live" to open a draft from live, or "live:working" to continue one.'
+      : 'If-Match must identify the live and working revision IDs as "live:working".');
   }
 
   /**
@@ -736,14 +798,19 @@ final class McpDraftResource extends EntityResource {
    * @param array<int, string> $versions
    *   Live and working revision ids checked before save.
    * @param string $write_mode
-   *   One of continue, create, or revise. Continue updates a working draft.
-   *   Create adds a language and must leave the live revision without it.
-   *   Revise opens a draft over a language already published on live.
+   *   One of continue, create, revise, or open. Continue updates a working
+   *   draft. Create adds a language and must leave the live revision without
+   *   it. Revise opens a draft over a language already published on live.
+   *   Open builds the first working copy from live.
+   * @param list<array{entity: \Drupal\Core\Entity\ContentEntityInterface, revision_id: int, state: string}> $components
+   *   Component paragraphs changed for this save, with the revision and state
+   *   they were read at. The stored state is re-checked under the lock, and
+   *   their live pins are checked before and after the save.
    *
    * @return \Drupal\jsonapi\ResourceResponse
    *   The saved resource.
    */
-  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, string $write_mode = 'continue'): ResourceResponse {
+  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, string $write_mode = 'continue', array $components = []): ResourceResponse {
     $database = $this->draftDatabase;
     $transaction = $database->startTransaction();
     $langcode = $draft->language()->getId();
@@ -766,6 +833,9 @@ final class McpDraftResource extends EntityResource {
       if ($write_mode === 'revise') {
         $this->assertReviseRevisionPointers($stored_live, $latest_id, $versions);
       }
+      elseif ($write_mode === 'open') {
+        $this->assertOpenRevisionPointers($stored_live, $latest_id, $versions);
+      }
       elseif ($write_mode === 'create' && $versions[2] === '') {
         $this->assertCreateRevisionPointers($stored_live, $latest_id, $versions);
       }
@@ -784,6 +854,26 @@ final class McpDraftResource extends EntityResource {
           throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
         }
       }
+      $live_pins = [];
+      foreach ($components as $component) {
+        $paragraph_id = $component['entity']->id();
+        $paragraph_type = $component['entity']->getEntityType();
+        $paragraph_table = $paragraph_type->getBaseTable();
+        $paragraph_key = $paragraph_type->getKey('id');
+        if (is_string($paragraph_table) && is_string($paragraph_key)) {
+          $paragraph_lock = $database->select($paragraph_table, 'p');
+          $paragraph_lock->fields('p', [$paragraph_key]);
+          $paragraph_lock->condition($paragraph_key, $paragraph_id);
+          $paragraph_lock->forUpdate();
+          $paragraph_lock->execute()->fetchField();
+        }
+        $stored = $this->loadRevisionFresh($this->paragraphStorage(), $component['revision_id']);
+        if (!$stored instanceof ContentEntityInterface
+          || !hash_equals($component['state'], $this->paragraphDraftState($stored))) {
+          throw new ConflictHttpException(sprintf('Component %s changed while this request was prepared. Reload before retrying.', $component['entity']->uuid()));
+        }
+        $live_pins[$paragraph_id] = $this->snapshotDefaultErrPins($paragraph_id);
+      }
       $draft->setNewRevision(TRUE);
       $draft->isDefaultRevision(FALSE);
       if ($draft instanceof RevisionLogInterface) {
@@ -791,6 +881,11 @@ final class McpDraftResource extends EntityResource {
         $draft->setRevisionCreationTime($this->time->getRequestTime());
       }
       $draft->save();
+      foreach ($live_pins as $paragraph_id => $snapshot) {
+        if ($this->snapshotDefaultErrPins($paragraph_id) !== $snapshot) {
+          throw new ConflictHttpException('A component change reached a live paragraph pin; the save was rolled back.');
+        }
+      }
       $stored_live = $storage->loadUnchanged($entity->id());
       if (!self::isPublishableContent($stored_live)
         || (string) $stored_live->getRevisionId() !== $versions[1]
@@ -900,6 +995,278 @@ final class McpDraftResource extends EntityResource {
       throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
     }
     return $live;
+  }
+
+  /**
+   * Validates the pointers for opening the first working copy.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface|null $live
+   *   The stored default revision.
+   * @param int|string|null $latest_id
+   *   The stored latest revision id.
+   * @param array<int, string> $versions
+   *   Live id; the working id is empty.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
+   *   The stored default revision.
+   *
+   * @throws \Symfony\Component\HttpKernel\Exception\ConflictHttpException
+   *   When live moved or a working copy already exists.
+   */
+  private function assertOpenRevisionPointers(?EntityInterface $live, int|string|null $latest_id, array $versions): ContentEntityInterface&EntityPublishedInterface {
+    if (!self::isPublishableContent($live) || (string) $live->getRevisionId() !== $versions[1]) {
+      throw new ConflictHttpException('The live or working revision changed. Reload before retrying.');
+    }
+    if ((string) $latest_id !== $versions[1]) {
+      throw new ConflictHttpException('A working revision exists. Reload and send both revision IDs to continue it.');
+    }
+    return $live;
+  }
+
+  /**
+   * Loads a fresh copy of live to build the first working copy on.
+   *
+   * @param \Drupal\Core\Entity\RevisionableStorageInterface $storage
+   *   Entity storage.
+   * @param \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface $live
+   *   The live default revision.
+   * @param string|null $langcode
+   *   The requested language; only the default language can be opened here.
+   *
+   * @return \Drupal\Core\Entity\ContentEntityInterface&\Drupal\Core\Entity\EntityPublishedInterface
+   *   The default-language copy the request will change and save.
+   */
+  private function loadOpenBase(RevisionableStorageInterface $storage, ContentEntityInterface&EntityPublishedInterface $live, ?string $langcode): ContentEntityInterface&EntityPublishedInterface {
+    $default = $live->getUntranslated()->language()->getId();
+    if ($langcode !== NULL && $langcode !== $default) {
+      throw new BadRequestHttpException('Opening a draft from live covers the default language. Use the translations endpoint for another language.');
+    }
+    $base = $this->loadRevisionFresh($storage, (int) $live->getRevisionId());
+    if (!self::isPublishableContent($base) || !$base->isDefaultRevision()) {
+      throw new ConflictHttpException('The live revision is no longer available.');
+    }
+    // Validate as the pending revision it will be saved as. Core's
+    // untranslatable-fields constraint only applies to non-default revisions.
+    $base->setNewRevision(TRUE);
+    $base->isDefaultRevision(FALSE);
+    return $base->getUntranslated();
+  }
+
+  /**
+   * Unpublishes a draft opened from live once its moderation state is set.
+   *
+   * The copy of live is still published until content moderation applies the
+   * submitted state on save. Only moderated entities can be opened, and the
+   * request must name an unpublished state; the unpublished flag here only
+   * lets the pre-save checks see that state.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
+   *   The opened draft.
+   * @param array<string, mixed> $data
+   *   The JSON:API `data` document.
+   * @param \Drupal\jsonapi\ResourceType\ResourceType $resource_type
+   *   The resource type.
+   */
+  private function unpublishOpenedDraft(ContentEntityInterface $draft, array $data, ResourceType $resource_type): void {
+    if (!$draft instanceof EntityPublishedInterface) {
+      return;
+    }
+    $moderation = $this->draftModeration;
+    if (!$moderation || !$draft->hasField('moderation_state') || !$moderation->isModeratedEntity($draft)) {
+      throw new BadRequestHttpException('Opening a draft from live needs a content-moderated entity.');
+    }
+    $attributes = is_array($data['attributes'] ?? NULL) ? $data['attributes'] : [];
+    if (!array_key_exists($resource_type->getPublicName('moderation_state'), $attributes)) {
+      throw new BadRequestHttpException('Opening a draft requires attributes.moderation_state with an unpublished state.');
+    }
+    $state = $moderation->getWorkflowForEntity($draft)->getTypePlugin()
+      ->getState((string) $draft->get('moderation_state')->value);
+    if ($state instanceof ContentModerationState && !$state->isPublishedState() && !$state->isDefaultRevisionState()) {
+      $draft->setUnpublished();
+    }
+  }
+
+  /**
+   * Reads component changes from the request's top-level meta.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The request.
+   *
+   * @return list<array<string, mixed>>
+   *   Component entries, or an empty list when none were sent.
+   */
+  private function requestComponents(Request $request): array {
+    $document = Json::decode($request->getContent());
+    if (!is_array($document) || !isset($document['meta']) || !is_array($document['meta'])
+      || !array_key_exists(self::COMPONENTS_META_KEY, $document['meta'])) {
+      return [];
+    }
+    $components = $document['meta'][self::COMPONENTS_META_KEY];
+    if (!is_array($components) || !array_is_list($components)) {
+      throw new BadRequestHttpException('meta.mcp_components must be a list of component changes.');
+    }
+    foreach ($components as $component) {
+      if (!is_array($component)
+        || !is_string($component['type'] ?? NULL)
+        || !is_string($component['id'] ?? NULL)
+        || !is_array($component['attributes'] ?? NULL)
+        || $component['attributes'] === []) {
+        throw new BadRequestHttpException('Each component change needs a type, an id, and attributes.');
+      }
+      if (array_key_exists('relationships', $component)) {
+        throw new BadRequestHttpException('A component change cannot change references. Send attribute values only.');
+      }
+    }
+    return $components;
+  }
+
+  /**
+   * Applies component field changes to the paragraphs the draft references.
+   *
+   * Mirrors the node edit form: the referenced paragraph objects change in
+   * memory and the single host save stores each as a new revision through
+   * the entity_reference_revisions cascade. Only paragraphs referenced
+   * directly by the draft can change, so nothing is created and nested
+   * children are out of reach.
+   *
+   * @param \Drupal\jsonapi\ResourceType\ResourceType $host_resource_type
+   *   The host resource type, used to map relationship names.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $draft
+   *   The draft about to be saved.
+   * @param list<array<string, mixed>> $components
+   *   Entries from requestComponents().
+   * @param array<string, mixed> $data
+   *   The JSON:API `data` document, checked for paragraph field changes.
+   *
+   * @return list<array{entity: \Drupal\Core\Entity\ContentEntityInterface, revision_id: int, state: string}>
+   *   The changed paragraphs, with the revision and state they were read at.
+   */
+  private function applySubmittedComponents(ResourceType $host_resource_type, ContentEntityInterface $draft, array $components, array $data): array {
+    if ($components === []) {
+      return [];
+    }
+    $host = $draft->getUntranslated();
+    $host_fields = $this->directComponentFields($host);
+    foreach (array_keys(is_array($data['relationships'] ?? NULL) ? $data['relationships'] : []) as $public_name) {
+      if (in_array($host_resource_type->getInternalName($public_name), $host_fields, TRUE)) {
+        throw new BadRequestHttpException('A request cannot change a paragraph field and its components together.');
+      }
+    }
+    $langcode = $host->language()->getId();
+    $changed = [];
+    foreach ($components as $component) {
+      $uuid = $component['id'];
+      if (isset($changed[$uuid])) {
+        throw new BadRequestHttpException(sprintf('Component %s is listed more than once.', $uuid));
+      }
+      [$paragraph, $holding_field] = $this->findDirectComponent($host, $host_fields, $uuid);
+      // On a translatable reference field, Entity Reference Revisions does not
+      // treat a paragraph-only change as affecting the host. It then saves the
+      // pinned paragraph revision in place, which can be the live revision.
+      if ($host->getFieldDefinition($holding_field)->isTranslatable()) {
+        throw new BadRequestHttpException(sprintf('Component %s sits on a translatable paragraph field; component changes need an untranslatable reference field.', $uuid));
+      }
+      $resource_type = $this->resourceTypeRepository->getByTypeName($component['type']);
+      if ($resource_type === NULL
+        || $resource_type->getEntityTypeId() !== $paragraph->getEntityTypeId()
+        || $resource_type->getBundle() !== $paragraph->bundle()) {
+        throw new BadRequestHttpException(sprintf('Component %s is not of type %s.', $uuid, $component['type']));
+      }
+      // Fingerprint the stored revision before changing it, so the save can
+      // refuse a paragraph that changed underneath this request.
+      $stored = $this->loadRevisionFresh($this->paragraphStorage(), (int) $paragraph->getRevisionId());
+      if (!$stored instanceof ContentEntityInterface) {
+        throw new ConflictHttpException(sprintf('Component %s is no longer available. Reload before retrying.', $uuid));
+      }
+      $state = $this->paragraphDraftState($stored);
+      $target = $paragraph->hasTranslation($langcode) ? $paragraph->getTranslation($langcode) : $paragraph->getUntranslated();
+      if (!$target->access('update', $this->user)) {
+        throw new AccessDeniedHttpException(sprintf('Update access to component %s denied.', $uuid));
+      }
+      foreach (array_keys($component['attributes']) as $public_name) {
+        $name = $resource_type->getInternalName($public_name);
+        if (in_array($name, self::COMPONENT_LOCKED_FIELDS, TRUE) || in_array($name, self::SKIP_FIELD_NAMES, TRUE)) {
+          throw new BadRequestHttpException(sprintf('Component field %s cannot be changed in a draft.', $public_name));
+        }
+        if (!$target->hasField($name)) {
+          throw new BadRequestHttpException(sprintf('Component %s has no field %s.', $uuid, $public_name));
+        }
+        if (!$target->getFieldDefinition($name)->getFieldStorageDefinition()->isRevisionable()) {
+          throw new BadRequestHttpException(sprintf('Component field %s is not revisionable.', $public_name));
+        }
+      }
+      /** @var \Drupal\Core\Entity\ContentEntityInterface $parsed */
+      $parsed = $this->serializer->denormalize([
+        'data' => [
+          'type' => $component['type'],
+          'id' => $uuid,
+          'attributes' => $component['attributes'],
+        ],
+      ], JsonApiDocumentTopLevel::class, 'api_json', ['resource_type' => $resource_type]);
+      foreach (array_keys($component['attributes']) as $public_name) {
+        $this->updateEntityField($resource_type, $parsed, $target, $public_name);
+      }
+      if (method_exists($paragraph, 'setNeedsSave')) {
+        $paragraph->setNeedsSave(TRUE);
+      }
+      static::validate($target);
+      $changed[$uuid] = [
+        'entity' => $paragraph,
+        'revision_id' => (int) $paragraph->getRevisionId(),
+        'state' => $state,
+      ];
+    }
+    return array_values($changed);
+  }
+
+  /**
+   * Public names of the host's paragraph reference fields.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $host
+   *   The draft host.
+   *
+   * @return list<string>
+   *   Field names whose items reference paragraphs by revision.
+   */
+  private function directComponentFields(ContentEntityInterface $host): array {
+    $names = [];
+    foreach ($host->getFieldDefinitions() as $name => $definition) {
+      if ($definition->getType() === 'entity_reference_revisions'
+        && $definition->getFieldStorageDefinition()->getSetting('target_type') === 'paragraph') {
+        $names[] = $name;
+      }
+    }
+    return $names;
+  }
+
+  /**
+   * Finds a paragraph referenced directly by the draft.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $host
+   *   The draft host.
+   * @param list<string> $fields
+   *   Paragraph reference fields on the host.
+   * @param string $uuid
+   *   The component UUID.
+   *
+   * @return array{0: \Drupal\Core\Entity\ContentEntityInterface, 1: string}
+   *   The paragraph object the draft item holds, at its pinned revision, and
+   *   the host field that holds it.
+   */
+  private function findDirectComponent(ContentEntityInterface $host, array $fields, string $uuid): array {
+    $found = [];
+    foreach ($fields as $field_name) {
+      foreach ($host->get($field_name) as $item) {
+        $paragraph = $item->get('entity')->getValue();
+        if ($paragraph instanceof ContentEntityInterface && $paragraph->uuid() === $uuid) {
+          $found[] = [$paragraph, $field_name];
+        }
+      }
+    }
+    if (count($found) !== 1) {
+      throw new BadRequestHttpException(sprintf('Component %s is not a paragraph referenced directly by this draft.', $uuid));
+    }
+    return $found[0];
   }
 
   /**
