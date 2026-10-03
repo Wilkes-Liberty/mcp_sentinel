@@ -26,8 +26,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Notes
 - Component changes are refused for paragraphs the draft does not reference
   directly (nested or unrelated), for reference fields and paragraph
-  bookkeeping such as `status`, for translation drafts, and when the same
-  request changes the paragraph reference field itself.
+  bookkeeping such as `status`, for translation drafts, for paragraphs held by
+  a translatable reference field, and when the same request changes the
+  paragraph reference field itself.
 
 ## [2.28.2] - 2026-10-03
 

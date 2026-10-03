@@ -63,6 +63,8 @@ validation as the node. These are refused with 400 and nothing is written:
   paragraph reference field itself;
 - bookkeeping fields such as `status`, `langcode` and the parent fields;
 - a component listed twice;
+- a paragraph held by a translatable reference field (Entity Reference
+  Revisions would save that change in place, on the revision live pins);
 - a translation draft (`X-MCP-Draft-Langcode` other than the default
   language).
 

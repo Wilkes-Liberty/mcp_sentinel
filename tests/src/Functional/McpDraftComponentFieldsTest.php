@@ -303,6 +303,33 @@ final class McpDraftComponentFieldsTest extends BrowserTestBase {
   }
 
   /**
+   * Components on a translatable reference field are refused.
+   *
+   * Entity Reference Revisions would save a paragraph-only change on such a
+   * field in place, on the revision live pins.
+   */
+  public function testTranslatableReferenceFieldRefused(): void {
+    $page = $this->setUpPage();
+    $storage_config = FieldStorageConfig::loadByName('node', 'field_components');
+    $this->assertNotNull($storage_config);
+    $storage_config->setTranslatable(TRUE)->save();
+    $field_config = FieldConfig::loadByName('node', 'page', 'field_components');
+    $this->assertInstanceOf(FieldConfig::class, $field_config);
+    $field_config->setTranslatable(TRUE)->save();
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+
+    $response = $this->draftRequest($page['agent'], $page['node'], '"' . $page['live_vid'] . '"', [
+      'moderation_state' => 'draft',
+    ], [
+      $this->component('hero', $page['hero'], ['field_text' => 'New hero']),
+    ]);
+    $this->assertSame(400, $response->getStatusCode(), (string) $response->getBody());
+    $this->assertStringContainsString('translatable paragraph field', (string) $response->getBody());
+    $this->assertSame($page['live_vid'], (string) $this->latestRevision($page['node'])->getRevisionId());
+    $this->assertLiveUnchanged($page);
+  }
+
+  /**
    * The translation inventory advertises the new operations.
    */
   public function testInventoryAdvertisesComponentDrafts(): void {

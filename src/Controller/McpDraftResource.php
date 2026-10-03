@@ -288,7 +288,7 @@ final class McpDraftResource extends EntityResource {
     }
     $this->applySubmittedDraftFields($resource_type, $parsed, $draft, $live, $data, $translation_write);
     $this->applySubmittedRevisionLog($resource_type, $draft, $data);
-    $changed = $this->applySubmittedComponents($draft, $components, $data);
+    $changed = $this->applySubmittedComponents($resource_type, $draft, $components, $data);
     if ($opening) {
       $this->unpublishOpenedDraft($draft, $data, $resource_type);
     }
@@ -1026,6 +1026,10 @@ final class McpDraftResource extends EntityResource {
     if (!self::isPublishableContent($base) || !$base->isDefaultRevision()) {
       throw new ConflictHttpException('The live revision is no longer available.');
     }
+    // Validate as the pending revision it will be saved as. Core's
+    // untranslatable-fields constraint only applies to non-default revisions.
+    $base->setNewRevision(TRUE);
+    $base->isDefaultRevision(FALSE);
     return $base->getUntranslated();
   }
 
@@ -1106,6 +1110,8 @@ final class McpDraftResource extends EntityResource {
    * directly by the draft can change, so nothing is created and nested
    * children are out of reach.
    *
+   * @param \Drupal\jsonapi\ResourceType\ResourceType $host_resource_type
+   *   The host resource type, used to map relationship names.
    * @param \Drupal\Core\Entity\ContentEntityInterface $draft
    *   The draft about to be saved.
    * @param list<array<string, mixed>> $components
@@ -1116,14 +1122,14 @@ final class McpDraftResource extends EntityResource {
    * @return list<\Drupal\Core\Entity\ContentEntityInterface>
    *   The changed paragraphs.
    */
-  private function applySubmittedComponents(ContentEntityInterface $draft, array $components, array $data): array {
+  private function applySubmittedComponents(ResourceType $host_resource_type, ContentEntityInterface $draft, array $components, array $data): array {
     if ($components === []) {
       return [];
     }
     $host = $draft->getUntranslated();
     $host_fields = $this->directComponentFields($host);
     foreach (array_keys(is_array($data['relationships'] ?? NULL) ? $data['relationships'] : []) as $public_name) {
-      if (in_array($public_name, $host_fields, TRUE)) {
+      if (in_array($host_resource_type->getInternalName($public_name), $host_fields, TRUE)) {
         throw new BadRequestHttpException('A request cannot change a paragraph field and its components together.');
       }
     }
@@ -1134,7 +1140,13 @@ final class McpDraftResource extends EntityResource {
       if (isset($changed[$uuid])) {
         throw new BadRequestHttpException(sprintf('Component %s is listed more than once.', $uuid));
       }
-      $paragraph = $this->findDirectComponent($host, $host_fields, $uuid);
+      [$paragraph, $holding_field] = $this->findDirectComponent($host, $host_fields, $uuid);
+      // On a translatable reference field, Entity Reference Revisions does not
+      // treat a paragraph-only change as affecting the host. It then saves the
+      // pinned paragraph revision in place, which can be the live revision.
+      if ($host->getFieldDefinition($holding_field)->isTranslatable()) {
+        throw new BadRequestHttpException(sprintf('Component %s sits on a translatable paragraph field; component changes need an untranslatable reference field.', $uuid));
+      }
       $resource_type = $this->resourceTypeRepository->getByTypeName($component['type']);
       if ($resource_type === NULL
         || $resource_type->getEntityTypeId() !== $paragraph->getEntityTypeId()
@@ -1207,16 +1219,17 @@ final class McpDraftResource extends EntityResource {
    * @param string $uuid
    *   The component UUID.
    *
-   * @return \Drupal\Core\Entity\ContentEntityInterface
-   *   The paragraph object the draft item holds, at its pinned revision.
+   * @return array{0: \Drupal\Core\Entity\ContentEntityInterface, 1: string}
+   *   The paragraph object the draft item holds, at its pinned revision, and
+   *   the host field that holds it.
    */
-  private function findDirectComponent(ContentEntityInterface $host, array $fields, string $uuid): ContentEntityInterface {
+  private function findDirectComponent(ContentEntityInterface $host, array $fields, string $uuid): array {
     $found = [];
     foreach ($fields as $field_name) {
       foreach ($host->get($field_name) as $item) {
         $paragraph = $item->get('entity')->getValue();
         if ($paragraph instanceof ContentEntityInterface && $paragraph->uuid() === $uuid) {
-          $found[] = $paragraph;
+          $found[] = [$paragraph, $field_name];
         }
       }
     }
