@@ -189,6 +189,40 @@ final class McpDraftComponentFieldsTest extends BrowserTestBase {
       $this->assertSame($page['live_vid'], (string) $this->latestRevision($node)->getRevisionId(), $label);
     }
 
+    // Changing the reference field and its components together is refused.
+    $both = $this->getHttpClient()->request('PATCH', $this->buildUrl('/jsonapi/node/page/' . $node->uuid() . '/mcp-draft'), [
+      'http_errors' => FALSE,
+      // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
+      'auth' => [$agent->getAccountName(), $agent->passRaw],
+      'headers' => [
+        'Accept' => 'application/vnd.api+json',
+        'Content-Type' => 'application/vnd.api+json',
+        'If-Match' => $if_match,
+      ],
+      'json' => [
+        'data' => [
+          'type' => 'node--page',
+          'id' => $node->uuid(),
+          'attributes' => $attributes,
+          'relationships' => [
+            'field_components' => [
+              'data' => [
+                [
+                  'type' => 'paragraph--hero',
+                  'id' => $page['hero']->uuid(),
+                  'meta' => ['target_revision_id' => $page['hero_vid']],
+                ],
+              ],
+            ],
+          ],
+        ],
+        'meta' => ['mcp_components' => [$this->component('hero', $page['hero'], ['field_text' => 'x'])]],
+      ],
+    ]);
+    $this->assertSame(400, $both->getStatusCode(), (string) $both->getBody());
+    $this->assertStringContainsString('paragraph field and its components', (string) $both->getBody());
+    $this->assertSame($page['live_vid'], (string) $this->latestRevision($node)->getRevisionId());
+
     $malformed = $this->draftRequest($agent, $node, $if_match, $attributes, NULL, FALSE, NULL, ['mcp_components' => 'hero']);
     $this->assertSame(400, $malformed->getStatusCode(), (string) $malformed->getBody());
 
@@ -217,6 +251,44 @@ final class McpDraftComponentFieldsTest extends BrowserTestBase {
     $again = $this->draftRequest($agent, $node, '"' . $live_vid . '"', ['moderation_state' => 'draft']);
     $this->assertSame(409, $again->getStatusCode(), (string) $again->getBody());
 
+    $this->assertLiveUnchanged($page);
+  }
+
+  /**
+   * Opening from live needs a content-moderated entity.
+   */
+  public function testOpenRefusesUnmoderatedEntity(): void {
+    $page = $this->setUpPage();
+    $this->drupalCreateContentType(['type' => 'plain']);
+    $node = $this->drupalCreateNode(['type' => 'plain', 'title' => 'Plain', 'status' => 1]);
+    $agent = $this->createGovernedAgentAccount([
+      'access content', 'edit any plain content', 'view any unpublished content',
+    ]);
+    $this->container->get('router.builder')->rebuild();
+    $live_vid = (string) $node->getRevisionId();
+
+    $response = $this->getHttpClient()->request('PATCH', $this->buildUrl('/jsonapi/node/plain/' . $node->uuid() . '/mcp-draft'), [
+      'http_errors' => FALSE,
+      // @phpstan-ignore-next-line (drupalCreateUser sets this test-only property.)
+      'auth' => [$agent->getAccountName(), $agent->passRaw],
+      'headers' => [
+        'Accept' => 'application/vnd.api+json',
+        'Content-Type' => 'application/vnd.api+json',
+        'If-Match' => '"' . $live_vid . '"',
+      ],
+      'json' => [
+        'data' => [
+          'type' => 'node--plain',
+          'id' => $node->uuid(),
+          'attributes' => ['title' => 'Plain draft'],
+        ],
+      ],
+    ]);
+    $this->assertSame(400, $response->getStatusCode(), (string) $response->getBody());
+    $this->assertStringContainsString('content-moderated', (string) $response->getBody());
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $storage->resetCache([$node->id()]);
+    $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
     $this->assertLiveUnchanged($page);
   }
 

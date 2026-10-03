@@ -18,7 +18,7 @@ IDs return 400. No automatic retry or revision deletion takes place.
 
 When no working copy exists, send `If-Match: "<live revision ID>"`. Sentinel
 builds the first unpublished forward revision from a fresh copy of live, in the
-default language. The request must set an unpublished `moderation_state` (for
+default language. Only content-moderated entities can be opened this way. The request must set an unpublished `moderation_state` (for
 example `draft`); a published or default-revision state is refused. If a
 working copy already exists, or live moved, the response is 409. Another
 language is opened through `/mcp-draft/translations` instead.

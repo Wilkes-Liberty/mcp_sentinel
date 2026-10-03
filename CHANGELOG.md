@@ -13,12 +13,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `meta.mcp_components` on `PATCH .../mcp-draft`: a list of
   `{ type, id, attributes }`. Sentinel changes the referenced paragraph
   objects and saves the node once, so each changed paragraph becomes a new
-  revision that only the draft points at. This is what the node edit form
+  revision that only the draft points at. A paragraph that changed while the
+  request was prepared is a 409. This is what the node edit form
   does. The live revision keeps its pins, and the save rolls back if a live
   pin moves.
 - `PATCH .../mcp-draft` with `If-Match: "live"` opens the first working copy
-  from live when none exists. It covers the default language and needs an
-  unpublished `moderation_state`. A working copy that already exists is a
+  from live when none exists. It covers the default language of a
+  content-moderated entity and needs an unpublished `moderation_state`. A working copy that already exists is a
   409.
 - The translation inventory lists `open_draft` and `draft_components` under
   `operations`, so clients can detect both.

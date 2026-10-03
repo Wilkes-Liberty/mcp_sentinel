@@ -628,7 +628,9 @@ final class McpDraftResource extends EntityResource {
       $versions[2] = '';
       return $versions;
     }
-    throw new BadRequestHttpException('If-Match must identify the live and working revision IDs as "live:working".');
+    throw new BadRequestHttpException($allow_live_only
+      ? 'If-Match must be "live" to open a draft from live, or "live:working" to continue one.'
+      : 'If-Match must identify the live and working revision IDs as "live:working".');
   }
 
   /**
@@ -800,9 +802,10 @@ final class McpDraftResource extends EntityResource {
    *   draft. Create adds a language and must leave the live revision without
    *   it. Revise opens a draft over a language already published on live.
    *   Open builds the first working copy from live.
-   * @param list<\Drupal\Core\Entity\ContentEntityInterface> $components
-   *   Component paragraphs changed for this save. Their live pins are checked
-   *   before and after the save.
+   * @param list<array{entity: \Drupal\Core\Entity\ContentEntityInterface, revision_id: int, state: string}> $components
+   *   Component paragraphs changed for this save, with the revision and state
+   *   they were read at. The stored state is re-checked under the lock, and
+   *   their live pins are checked before and after the save.
    *
    * @return \Drupal\jsonapi\ResourceResponse
    *   The saved resource.
@@ -853,7 +856,23 @@ final class McpDraftResource extends EntityResource {
       }
       $live_pins = [];
       foreach ($components as $component) {
-        $live_pins[$component->id()] = $this->snapshotDefaultErrPins($component->id());
+        $paragraph_id = $component['entity']->id();
+        $paragraph_type = $component['entity']->getEntityType();
+        $paragraph_table = $paragraph_type->getBaseTable();
+        $paragraph_key = $paragraph_type->getKey('id');
+        if (is_string($paragraph_table) && is_string($paragraph_key)) {
+          $paragraph_lock = $database->select($paragraph_table, 'p');
+          $paragraph_lock->fields('p', [$paragraph_key]);
+          $paragraph_lock->condition($paragraph_key, $paragraph_id);
+          $paragraph_lock->forUpdate();
+          $paragraph_lock->execute()->fetchField();
+        }
+        $stored = $this->loadRevisionFresh($this->paragraphStorage(), $component['revision_id']);
+        if (!$stored instanceof ContentEntityInterface
+          || !hash_equals($component['state'], $this->paragraphDraftState($stored))) {
+          throw new ConflictHttpException(sprintf('Component %s changed while this request was prepared. Reload before retrying.', $component['entity']->uuid()));
+        }
+        $live_pins[$paragraph_id] = $this->snapshotDefaultErrPins($paragraph_id);
       }
       $draft->setNewRevision(TRUE);
       $draft->isDefaultRevision(FALSE);
@@ -1037,8 +1056,9 @@ final class McpDraftResource extends EntityResource {
    * Unpublishes a draft opened from live once its moderation state is set.
    *
    * The copy of live is still published until content moderation applies the
-   * submitted state on save. A moderated entity must name an unpublished state;
-   * the unpublished flag here only lets the pre-save checks see that state.
+   * submitted state on save. Only moderated entities can be opened, and the
+   * request must name an unpublished state; the unpublished flag here only
+   * lets the pre-save checks see that state.
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $draft
    *   The opened draft.
@@ -1053,8 +1073,7 @@ final class McpDraftResource extends EntityResource {
     }
     $moderation = $this->draftModeration;
     if (!$moderation || !$draft->hasField('moderation_state') || !$moderation->isModeratedEntity($draft)) {
-      $draft->setUnpublished();
-      return;
+      throw new BadRequestHttpException('Opening a draft from live needs a content-moderated entity.');
     }
     $attributes = is_array($data['attributes'] ?? NULL) ? $data['attributes'] : [];
     if (!array_key_exists($resource_type->getPublicName('moderation_state'), $attributes)) {
@@ -1119,8 +1138,8 @@ final class McpDraftResource extends EntityResource {
    * @param array<string, mixed> $data
    *   The JSON:API `data` document, checked for paragraph field changes.
    *
-   * @return list<\Drupal\Core\Entity\ContentEntityInterface>
-   *   The changed paragraphs.
+   * @return list<array{entity: \Drupal\Core\Entity\ContentEntityInterface, revision_id: int, state: string}>
+   *   The changed paragraphs, with the revision and state they were read at.
    */
   private function applySubmittedComponents(ResourceType $host_resource_type, ContentEntityInterface $draft, array $components, array $data): array {
     if ($components === []) {
@@ -1153,6 +1172,13 @@ final class McpDraftResource extends EntityResource {
         || $resource_type->getBundle() !== $paragraph->bundle()) {
         throw new BadRequestHttpException(sprintf('Component %s is not of type %s.', $uuid, $component['type']));
       }
+      // Fingerprint the stored revision before changing it, so the save can
+      // refuse a paragraph that changed underneath this request.
+      $stored = $this->loadRevisionFresh($this->paragraphStorage(), (int) $paragraph->getRevisionId());
+      if (!$stored instanceof ContentEntityInterface) {
+        throw new ConflictHttpException(sprintf('Component %s is no longer available. Reload before retrying.', $uuid));
+      }
+      $state = $this->paragraphDraftState($stored);
       $target = $paragraph->hasTranslation($langcode) ? $paragraph->getTranslation($langcode) : $paragraph->getUntranslated();
       if (!$target->access('update', $this->user)) {
         throw new AccessDeniedHttpException(sprintf('Update access to component %s denied.', $uuid));
@@ -1184,7 +1210,11 @@ final class McpDraftResource extends EntityResource {
         $paragraph->setNeedsSave(TRUE);
       }
       static::validate($target);
-      $changed[$uuid] = $paragraph;
+      $changed[$uuid] = [
+        'entity' => $paragraph,
+        'revision_id' => (int) $paragraph->getRevisionId(),
+        'state' => $state,
+      ];
     }
     return array_values($changed);
   }
