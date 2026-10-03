@@ -448,10 +448,15 @@ final class McpMetrics {
    * 'mcp_sentinel.last_verify' (written by the explicit "Verify now" action /
    * Drush). verifyChain() is intentionally never called on this hot path.
    *
-   * @return array{ok: bool|null, broken_at: int|null, verified_at: int|null, rows: int, unsigned_prefix: bool}
+   * Before the first verify, a fresh Audit Chain scheduled run that Audit
+   * Chain classifies as the disclosed historical exception stands in for it
+   * (McpLastVerify::effective()).
+   *
+   * @return array{ok: bool|null, broken_at: int|null, verified_at: int|null, rows: int, unsigned_prefix: bool, historical_exception: bool}
    *   The last-verify outcome (ok NULL when never verified) and the current
    *   audit row count. unsigned_prefix is true only for the documented
-   *   leading unsigned prefix.
+   *   leading unsigned prefix, historical_exception only for the disclosed
+   *   historical exception with a verifying successor.
    */
   public function chainIntegrity(): array {
     $empty = [
@@ -460,9 +465,10 @@ final class McpMetrics {
       'verified_at' => NULL,
       'rows' => 0,
       'unsigned_prefix' => FALSE,
+      'historical_exception' => FALSE,
     ];
     return $this->guard(__FUNCTION__, NULL, $empty, function (): array {
-      $last = $this->state->get('mcp_sentinel.last_verify');
+      $last = $this->lastVerify();
       $rows = (int) $this->database->select('audit_chain_log', 'l')
         ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
         ->countQuery()->execute()->fetchField();
@@ -473,6 +479,7 @@ final class McpMetrics {
           'verified_at' => NULL,
           'rows' => $rows,
           'unsigned_prefix' => FALSE,
+          'historical_exception' => FALSE,
         ];
       }
       return [
@@ -481,8 +488,29 @@ final class McpMetrics {
         'verified_at' => isset($last['time']) ? (int) $last['time'] : NULL,
         'rows' => $rows,
         'unsigned_prefix' => McpLastVerify::isDocumentedUnsignedPrefix($last),
+        'historical_exception' => McpLastVerify::isDocumentedHistoricalException($last),
       ];
     });
+  }
+
+  /**
+   * Returns the last-verify state to classify.
+   *
+   * @return array<string, mixed>|null
+   *   Sentinel's stored verify, or the adopted Audit Chain scheduled run, or
+   *   NULL when neither applies.
+   */
+  private function lastVerify(): ?array {
+    $last = $this->state->get('mcp_sentinel.last_verify');
+    return McpLastVerify::effective(
+      is_array($last) ? $last : NULL,
+      $this->state->get(McpLastVerify::SCHEDULED_STATE_KEY),
+      $this->time->getRequestTime(),
+      fn(int $time): int => (int) $this->database->select('audit_chain_log', 'l')
+        ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
+        ->condition('l.timestamp', $time, '<=')
+        ->countQuery()->execute()->fetchField(),
+    );
   }
 
   /**
@@ -492,10 +520,11 @@ final class McpMetrics {
    * against the live row count so an unverified, stale, failed or
    * unavailable chain cannot be reported as clear (d.o #3616611).
    *
-   * @return array{state: \Drupal\mcp_sentinel\Enum\McpEvidenceState, rows: int, verified_at: int|null, broken_at: int|null, unsigned_prefix: bool}
+   * @return array{state: \Drupal\mcp_sentinel\Enum\McpEvidenceState, rows: int, verified_at: int|null, broken_at: int|null, unsigned_prefix: bool, historical_exception: bool}
    *   The classified state plus the numbers the UI cites.
-   *   unsigned_prefix is true only for the documented leading prefix.
-   *   That result stays Failed: whole-history verification is unsuccessful.
+   *   unsigned_prefix is true only for the documented leading prefix, and
+   *   historical_exception only for the disclosed historical exception.
+   *   Both stay Failed: whole-history verification is unsuccessful.
    */
   public function evidenceState(): array {
     $empty = [
@@ -504,11 +533,11 @@ final class McpMetrics {
       'verified_at' => NULL,
       'broken_at' => NULL,
       'unsigned_prefix' => FALSE,
+      'historical_exception' => FALSE,
     ];
     return $this->guard(__FUNCTION__, NULL, $empty, function (): array {
       $chain = $this->chainIntegrity();
-      $last = $this->state->get('mcp_sentinel.last_verify');
-      $last = is_array($last) ? $last : NULL;
+      $last = $this->lastVerify();
       return [
         'state' => McpEvidenceState::fromLastVerify(
           $last,
@@ -519,6 +548,7 @@ final class McpMetrics {
         'verified_at' => $chain['verified_at'],
         'broken_at' => $chain['broken_at'],
         'unsigned_prefix' => $chain['unsigned_prefix'],
+        'historical_exception' => $chain['historical_exception'],
       ];
     });
   }

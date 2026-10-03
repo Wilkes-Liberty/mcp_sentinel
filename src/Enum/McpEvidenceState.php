@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Enum;
 
+use Drupal\mcp_sentinel\Value\McpLastVerify;
+
 /**
  * Evidence-verification states the dashboard must keep distinct (d.o #3616611).
  *
@@ -46,6 +48,13 @@ enum McpEvidenceState: string {
       return self::Degraded;
     }
     if ($last['ok'] === FALSE) {
+      // A disclosed historical exception explains only the chain it was
+      // verified against. Once it ages out or new rows land, a new break may
+      // sit behind it, so it reads as stale rather than as explained.
+      if (McpLastVerify::isDocumentedHistoricalException($last)
+        && self::isStale($last, $currentRows, $now)) {
+        return self::Stale;
+      }
       return self::Failed;
     }
     if ($last['ok'] !== TRUE) {
@@ -55,14 +64,26 @@ enum McpEvidenceState: string {
     if ($verifiedAt <= 0) {
       return self::Degraded;
     }
+    return self::isStale($last, $currentRows, $now) ? self::Stale : self::Verified;
+  }
+
+  /**
+   * Whether a stored verdict is too old, or predates new audit rows.
+   *
+   * @param array<string, mixed> $last
+   *   The mcp_sentinel.last_verify state value.
+   * @param int $currentRows
+   *   Current audit-chain row count on the governed channels.
+   * @param int $now
+   *   Request time.
+   */
+  private static function isStale(array $last, int $currentRows, int $now): bool {
+    $verifiedAt = isset($last['time']) ? (int) $last['time'] : 0;
+    if ($verifiedAt <= 0 || $now - $verifiedAt >= self::STALE_AFTER) {
+      return TRUE;
+    }
     $verifiedRows = array_key_exists('rows', $last) ? (int) $last['rows'] : -1;
-    if ($now - $verifiedAt >= self::STALE_AFTER) {
-      return self::Stale;
-    }
-    if ($verifiedRows >= 0 && $currentRows > $verifiedRows) {
-      return self::Stale;
-    }
-    return self::Verified;
+    return $verifiedRows >= 0 && $currentRows > $verifiedRows;
   }
 
   /**

@@ -26,6 +26,9 @@ services:
       # Optional for the same reason. Without it the logger builds its own, so
       # the built-in secret lists apply either way.
       - '@?mcp_sentinel.config_secret_redactor'
+      # Optional: Audit Chain versions before recovery segments have no such
+      # service. Without it a historical exception stays a critical failure.
+      - '@?audit_chain.recovery'
 
   mcp_sentinel.config_secret_redactor:
     class: Drupal\mcp_sentinel\Service\McpConfigSecretRedactor

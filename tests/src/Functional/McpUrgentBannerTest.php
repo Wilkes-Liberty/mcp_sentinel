@@ -85,6 +85,28 @@ final class McpUrgentBannerTest extends BrowserTestBase {
   }
 
   /**
+   * A disclosed historical exception is not a site-wide alarm.
+   */
+  public function testHistoricalExceptionIsNotShownSiteWide(): void {
+    \Drupal::state()->set('mcp_sentinel.last_verify', [
+      'ok' => FALSE,
+      'broken_at' => 3,
+      'rows' => 0,
+      'time' => \Drupal::time()->getRequestTime(),
+      'reason' => 'tampered',
+      'unsigned_prefix' => FALSE,
+      'historical_exception' => TRUE,
+    ]);
+    $this->drupalLogin($this->drupalCreateUser([
+      'view mcp sentinel audit log',
+      'access administration pages',
+    ]));
+    $this->drupalGet('/admin/reports/mcp-sentinel/audit');
+    $this->assertSession()->elementNotExists('css', '.mcp-banner--critical');
+    $this->assertSession()->elementNotExists('css', '.mcp-banner--warning');
+  }
+
+  /**
    * The site-wide banner is not shown to an unprivileged user.
    */
   public function testBannerNotShownToUnprivilegedUser(): void {

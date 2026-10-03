@@ -352,19 +352,25 @@ class McpDashboardController extends ControllerBase {
         'label' => (string) $this->t('Verified'),
         'detail' => (string) $this->t('@n rows verified.', ['@n' => $rows]),
       ],
-      McpEvidenceState::Failed => $evidence['unsigned_prefix'] === TRUE
-        ? [
+      McpEvidenceState::Failed => match (TRUE) {
+        $evidence['unsigned_prefix'] === TRUE => [
           'state' => 'warn',
           'label' => (string) $this->t('Unsigned prefix'),
           'detail' => (string) $this->t('Leading rows were hashed with unkeyed SHA-256. They stay in the log and are not re-signed or deleted.'),
-        ]
-        : [
+        ],
+        $evidence['historical_exception'] === TRUE => [
+          'state' => 'warn',
+          'label' => (string) $this->t('Historical exception'),
+          'detail' => (string) $this->t('A disclosed break at row @id is preserved, and its recovery successor verifies. This is not a new break.', ['@id' => (int) $brokenAt]),
+        ],
+        default => [
           'state' => 'crit',
           'label' => (string) $this->t('Failed'),
           'detail' => $brokenAt !== NULL
             ? (string) $this->t('Tampering indicated at row @id.', ['@id' => (int) $brokenAt])
             : (string) $this->t('Tampering indicated.'),
         ],
+      },
       McpEvidenceState::Stale => [
         'state' => 'warn',
         'label' => (string) $this->t('Stale'),
@@ -711,9 +717,9 @@ class McpDashboardController extends ControllerBase {
    * CSRF-protected (route requirement). Walks the audit chain via the audit
    * logger, writes the outcome to @state 'mcp_sentinel.last_verify' in the SAME
    * shape the `drush mcp-sentinel:audit-verify` command writes (ok, broken_at,
-   * rows, time, reason, unsigned_prefix) so the chain-integrity widget and
-   * the urgent-conditions alert stay live, then redirects back to the
-   * dashboard with a status message.
+   * rows, time, reason, unsigned_prefix, historical_exception) so the
+   * chain-integrity widget and the urgent-conditions alert stay live, then
+   * redirects back to the dashboard with a status message.
    *
    * @return \Symfony\Component\HttpFoundation\RedirectResponse
    *   A redirect back to the dashboard.
@@ -727,7 +733,8 @@ class McpDashboardController extends ControllerBase {
         ->countQuery()
         ->execute()
         ->fetchField();
-      $stored = McpLastVerify::fromVerifyResult($result, $rows, $this->time->getRequestTime());
+      $successor = $this->auditLogger->recoverySuccessor();
+      $stored = McpLastVerify::fromVerifyResult($result, $rows, $this->time->getRequestTime(), $successor);
       $this->state->set('mcp_sentinel.last_verify', $stored);
       if ($stored['ok']) {
         $this->messenger()->addStatus($this->t('Audit hash chain verified — @n rows intact.', [
@@ -737,6 +744,12 @@ class McpDashboardController extends ControllerBase {
       elseif (McpLastVerify::isDocumentedUnsignedPrefix($stored)) {
         $this->messenger()->addWarning($this->t('Audit hash chain has a documented unsigned prefix through row @id. Leading rows were hashed with unkeyed SHA-256, stay in the log, and are not re-signed or deleted. Whole-history verification stays unsuccessful.', [
           '@id' => (int) ($result['unkeyed_through'] ?? 0),
+        ]));
+      }
+      elseif (McpLastVerify::isDocumentedHistoricalException($stored)) {
+        $this->messenger()->addWarning($this->t('Audit hash chain has a documented historical exception at row @id. Recovery successor @segment verifies. The preserved rows stay in the log. This is not a new break. Whole-history verification stays unsuccessful.', [
+          '@id' => isset($result['broken_at']) ? (int) $result['broken_at'] : 0,
+          '@segment' => (string) ($successor['segment_id'] ?? ''),
         ]));
       }
       else {

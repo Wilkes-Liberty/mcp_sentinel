@@ -339,9 +339,10 @@ final class McpSentinelCommands extends DrushCommands {
    *
    * Walks all audit rows in insertion order, recomputing each row's SHA-256
    * hash from its stored prev_hash and canonical content. Prints OK if the
-   * chain is intact. A documented unsigned prefix is a warning. Any other
+   * chain is intact. A documented unsigned prefix, or a disclosed historical
+   * exception whose recovery successor verifies, is a warning. Any other
    * failure names the first broken link. Exits non-zero whenever
-   * whole-history verification is unsuccessful, including that prefix.
+   * whole-history verification is unsuccessful, including those two cases.
    *
    * The outcome is also persisted to the 'mcp_sentinel.last_verify' state key
    * so the dashboard chain-integrity widget reflects this run without having to
@@ -359,14 +360,15 @@ final class McpSentinelCommands extends DrushCommands {
     // The dashboard "Verify now" action writes this same state key with the
     // same shape so the widget stays live.
     // Shape read by chainIntegrity(): ok, broken_at, time (-> verified_at),
-    // and unsigned_prefix.
+    // unsigned_prefix and historical_exception.
     $rowCount = (int) $this->database
       ->select('audit_chain_log', 'l')
       ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->countQuery()
       ->execute()
       ->fetchField();
-    $stored = McpLastVerify::fromVerifyResult($result, $rowCount, $this->time->getRequestTime());
+    $successor = $this->auditLogger->recoverySuccessor();
+    $stored = McpLastVerify::fromVerifyResult($result, $rowCount, $this->time->getRequestTime(), $successor);
     $this->state->set('mcp_sentinel.last_verify', $stored);
 
     if ($stored['ok']) {
@@ -378,6 +380,14 @@ final class McpSentinelCommands extends DrushCommands {
         'Audit log documented unsigned prefix — %d entries through row id %d were hashed with unkeyed SHA-256 and are not cryptographically verifiable. Those rows stay in the log. Do not re-sign them and do not delete them. Whole-history verification stays unsuccessful.',
         (int) $result['unkeyed_rows'],
         (int) ($result['unkeyed_through'] ?? 0),
+      ));
+      return self::EXIT_FAILURE;
+    }
+    if (McpLastVerify::isDocumentedHistoricalException($stored)) {
+      $this->logger()->warning(sprintf(
+        'Audit log documented historical exception at row id %d. Recovery successor %s verifies. The preserved rows stay in the log. This is not a new break. Whole-history verification stays unsuccessful.',
+        (int) $result['broken_at'],
+        (string) ($successor['segment_id'] ?? ''),
       ));
       return self::EXIT_FAILURE;
     }
