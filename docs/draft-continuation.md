@@ -14,6 +14,62 @@ Both must match the stored pointers. The working revision must be an unpublished
 non-default node revision. A mismatch returns 409; missing or malformed revision
 IDs return 400. No automatic retry or revision deletion takes place.
 
+## Opening the first working copy
+
+When no working copy exists, send `If-Match: "<live revision ID>"`. Sentinel
+builds the first unpublished forward revision from a fresh copy of live, in the
+default language. The request must set an unpublished `moderation_state` (for
+example `draft`); a published or default-revision state is refused. If a
+working copy already exists, or live moved, the response is 409. Another
+language is opened through `/mcp-draft/translations` instead.
+
+## Component paragraphs in the same draft
+
+A draft save can also change the fields of paragraphs that the node references
+directly. Send them in the top-level `meta`:
+
+```json
+{
+  "data": {
+    "type": "node--page",
+    "id": "<node uuid>",
+    "attributes": { "moderation_state": "draft", "title": "New title" }
+  },
+  "meta": {
+    "mcp_components": [
+      {
+        "type": "paragraph--hero",
+        "id": "<paragraph uuid>",
+        "attributes": { "field_title": "New hero title" }
+      }
+    ]
+  }
+}
+```
+
+This follows the node edit form. Sentinel changes the paragraph objects the
+draft already references, then saves the node once. Entity Reference
+Revisions saves each changed paragraph as a new revision and points the draft
+at it. The live revision keeps its pins, and the save rolls back if any live
+pin moves. Publishing the draft makes the node and paragraph changes live
+together.
+
+Each component is checked with the same entity access, field access and
+validation as the node. These are refused with 400 and nothing is written:
+
+- a paragraph the draft does not reference directly (unrelated or nested);
+- a `type` that does not match the paragraph's bundle;
+- `relationships` in a component entry, or a request that also changes the
+  paragraph reference field itself;
+- bookkeeping fields such as `status`, `langcode` and the parent fields;
+- a component listed twice;
+- a translation draft (`X-MCP-Draft-Langcode` other than the default
+  language).
+
+The non-saving preflight (`X-MCP-Draft-Preflight: 1`) applies the same
+checks. `GET .../mcp-translations` lists `open_draft` and `draft_components`
+under `operations` on hosts that support both.
+
 ## Translations
 
 Core JSON:API PATCH of `langcode` does not call `addTranslation()` and is not
