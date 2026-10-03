@@ -165,18 +165,14 @@ final class McpDraftComponentFieldsTest extends BrowserTestBase {
     $stranger = Paragraph::create(['type' => 'text_block', 'field_text' => 'Elsewhere']);
     $stranger->save();
     $nested = $page['item'];
+    $with_relationships = $this->component('hero', $page['hero'], ['field_text' => 'x']);
+    $with_relationships['relationships'] = ['field_media' => ['data' => NULL]];
 
     $cases = [
       'not referenced' => [400, [$this->component('text_block', $stranger, ['field_text' => 'x'])]],
       'nested' => [400, [$this->component('text_block', $nested, ['field_text' => 'x'])]],
       'wrong bundle' => [400, [$this->component('text_block', $page['hero'], ['field_text' => 'x'])]],
-      'relationships' => [
-        400,
-        [
-          $this->component('hero', $page['hero'], ['field_text' => 'x'])
-          + ['relationships' => ['field_media' => ['data' => NULL]]],
-        ],
-      ],
+      'relationships' => [400, [$with_relationships]],
       'bookkeeping field' => [400, [$this->component('hero', $page['hero'], ['status' => FALSE])]],
       'unknown field' => [400, [$this->component('hero', $page['hero'], ['field_nope' => 'x'])]],
       'duplicate' => [
