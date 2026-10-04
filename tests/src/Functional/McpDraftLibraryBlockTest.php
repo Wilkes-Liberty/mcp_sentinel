@@ -165,6 +165,9 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
+    // The first read cached the latest revision id in this process. The
+    // continuation saved in the request process, so drop that entry first.
+    $library_storage->resetCache([$library->id()]);
     $second_library_vid = (string) $this->revisions($library_storage)->getLatestRevisionId($library->id());
     $this->assertNotSame($working_library_vid, $second_library_vid);
     $second_library = $this->revisions($library_storage)->loadRevision($second_library_vid);
@@ -182,6 +185,7 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
+    $library_storage->resetCache([$library->id()]);
     $this->assertSame($second_library_vid, (string) $this->revisions($library_storage)->getLatestRevisionId($library->id()));
     $library_storage->resetCache([$library->id()]);
     $published_library = $library_storage->loadUnchanged($library->id());
@@ -220,6 +224,8 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(200, $continued_block->getStatusCode(), (string) $continued_block->getBody());
+    // Same memory-cache drop as the library continuation above.
+    $block_storage->resetCache([$block->id()]);
     $second_block_vid = (string) $this->revisions($block_storage)->getLatestRevisionId($block->id());
     $this->assertNotSame($working_block_vid, $second_block_vid);
     $stale_block = $this->draft($agent, 'block_content', 'basic', $block, '"' . $block_vid . ':' . $working_block_vid . '"', [
@@ -227,6 +233,7 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(409, $stale_block->getStatusCode(), (string) $stale_block->getBody());
+    $block_storage->resetCache([$block->id()]);
     $this->assertSame($second_block_vid, (string) $this->revisions($block_storage)->getLatestRevisionId($block->id()));
     $block_storage->resetCache([$block->id()]);
     $published_block = $block_storage->loadUnchanged($block->id());
