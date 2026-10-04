@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.29.1] - 2026-10-04
+
 ### Fixed
 - [#3628233](https://www.drupal.org/project/mcp_sentinel/issues/3628233):
   A denial logged with `logSurvivingRollback()` keeps the caller who was
@@ -2710,7 +2712,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.29.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.29.1...1.x
+[2.29.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.29.0...2.29.1
 [2.29.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.2...2.29.0
 [2.28.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.1...2.28.2
 [2.28.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.0...2.28.1
