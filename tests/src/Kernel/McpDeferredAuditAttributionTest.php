@@ -38,6 +38,13 @@ final class McpDeferredAuditAttributionTest extends KernelTestBase {
   ];
 
   /**
+   * Requests removed from the stack, restored in tearDown().
+   *
+   * @var \Symfony\Component\HttpFoundation\Request[]
+   */
+  private array $poppedRequests = [];
+
+  /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
@@ -54,9 +61,7 @@ final class McpDeferredAuditAttributionTest extends KernelTestBase {
     $actor = $this->container->get('current_user');
     $actor->setAccount(new UserSession(['uid' => 42]));
     $stack = $this->container->get('request_stack');
-    while ($stack->getCurrentRequest() !== NULL) {
-      $stack->pop();
-    }
+    $this->emptyRequestStack();
     $chain = $this->createMock(AuditChainLoggerInterface::class);
     $chain->expects($this->once())->method('log')->willReturnCallback(function (string $channel, string $operation, array $metadata) use ($actor): void {
       $this->assertSame(42, (int) $actor->id());
@@ -105,9 +110,7 @@ final class McpDeferredAuditAttributionTest extends KernelTestBase {
   public function testDeferredRowWithoutRequestBehindTrustedProxy(): void {
     $this->container->get('current_user')->setAccount(new UserSession(['uid' => 42]));
     $stack = $this->container->get('request_stack');
-    while ($stack->getCurrentRequest() !== NULL) {
-      $stack->pop();
-    }
+    $this->emptyRequestStack();
     $proxies = Request::getTrustedProxies();
     $headers = Request::getTrustedHeaderSet();
     Request::setTrustedProxies(['192.0.2.1'], Request::HEADER_X_FORWARDED_FOR);
@@ -162,6 +165,29 @@ final class McpDeferredAuditAttributionTest extends KernelTestBase {
     $this->assertSame(43, (int) $actor->id());
     $switcher->switchBack();
     $this->assertSame(44, (int) $actor->id());
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    // KernelTestBase reads the session from the master request on teardown.
+    $stack = $this->container->get('request_stack');
+    foreach (array_reverse($this->poppedRequests) as $request) {
+      $stack->push($request);
+    }
+    $this->poppedRequests = [];
+    parent::tearDown();
+  }
+
+  /**
+   * Removes every request from the stack, keeping them for tearDown().
+   */
+  private function emptyRequestStack(): void {
+    $stack = $this->container->get('request_stack');
+    while (($request = $stack->pop()) !== NULL) {
+      $this->poppedRequests[] = $request;
+    }
   }
 
 }
