@@ -62,10 +62,17 @@ final class McpDraftResource extends EntityResource {
    * Entity types whose drafts are unpublished forward revisions.
    *
    * Paragraphs are handled separately on the revision their host pins.
+   * Reusable library items and custom blocks use the same forward revision
+   * as nodes and media.
    *
    * @var list<string>
    */
-  private const FORWARD_REVISION_ENTITY_TYPES = ['node', 'media'];
+  private const FORWARD_REVISION_ENTITY_TYPES = [
+    'node',
+    'media',
+    'paragraphs_library_item',
+    'block_content',
+  ];
 
   /**
    * Header that selects the translation to create, read, or continue.
@@ -561,7 +568,10 @@ final class McpDraftResource extends EntityResource {
   }
 
   /**
-   * Refuses traffic that is not a governed node or media update.
+   * Refuses traffic that is not a governed forward-revision update.
+   *
+   * Forward revisions cover nodes, media, reusable library items, and
+   * custom blocks. Paragraphs use their own pinned-revision routes.
    *
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The route entity.
@@ -572,7 +582,7 @@ final class McpDraftResource extends EntityResource {
     if (!self::isPublishableContent($entity)
       || !in_array($entity->getEntityTypeId(), self::FORWARD_REVISION_ENTITY_TYPES, TRUE)
       || !$this->draftPolicy->isGoverned()) {
-      throw new AccessDeniedHttpException('Draft continuation requires a governed node or media update.');
+      throw new AccessDeniedHttpException('Draft continuation requires a governed update of a node, media item, reusable library item, or custom block.');
     }
   }
 

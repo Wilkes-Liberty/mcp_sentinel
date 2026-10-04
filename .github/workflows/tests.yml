@@ -230,6 +230,7 @@ jobs:
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
             "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
+            "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
 
@@ -456,6 +457,7 @@ jobs:
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
             "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
+            "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
 
@@ -627,6 +629,7 @@ jobs:
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
             "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
+            "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
 
@@ -781,6 +784,7 @@ jobs:
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
             "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
+            "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
 
@@ -995,6 +999,7 @@ jobs:
             "drush/drush:^13" \
             "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
             "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
+            "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
 

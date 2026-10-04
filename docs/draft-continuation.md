@@ -1,8 +1,9 @@
 # Governed draft continuation
 
-With JSON:API enabled, Sentinel adds a PATCH endpoint at each mutable node
-and media resource's URL plus `/mcp-draft`. This is separate from core revision reads:
-core rejects PATCH requests carrying `resourceVersion`.
+With JSON:API enabled, Sentinel adds a PATCH endpoint at each mutable node,
+media item, reusable library item, and custom block resource's URL plus
+`/mcp-draft`. This is separate from core revision reads: core rejects PATCH
+requests carrying `resourceVersion`.
 
 The endpoint accepts the ordinary JSON:API `data` document, including attributes
 and relationships. Authentication must resolve to a governed principal. The
@@ -11,8 +12,12 @@ access, validation, content locks, and save-time governance remain active.
 
 Required header: `If-Match: "<live revision ID>:<working revision ID>"`.
 Both must match the stored pointers. The working revision must be an unpublished
-non-default node revision. A mismatch returns 409; missing or malformed revision
-IDs return 400. No automatic retry or revision deletion takes place.
+non-default revision. A mismatch returns 409; missing or malformed revision
+IDs return 400. No automatic retry or revision deletion takes place. The same
+contract covers a content-moderated reusable library item
+(`paragraphs_library_item`) and a content-moderated custom block
+(`block_content`). An entity that is not content-moderated cannot open a
+first draft this way.
 
 ## Opening the first working copy
 

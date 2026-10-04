@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- [#3628266](https://www.drupal.org/project/mcp_sentinel/issues/3628266):
+  Governed draft routes cover content-moderated reusable library items and
+  custom blocks. `PATCH .../mcp-draft` opens the first unpublished forward
+  revision with `If-Match: "<live>"` and continues one with
+  `If-Match: "<live>:<working>"`. The published default revision and its
+  paragraph pins stay unchanged. `GET .../mcp-translations` lists the same
+  draft operations as for nodes when the bundle is translatable.
 ## [2.29.1] - 2026-10-04
 
 ### Fixed
