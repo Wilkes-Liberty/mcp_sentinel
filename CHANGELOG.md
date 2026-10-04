@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.30.0] - 2026-10-04
+
 ### Added
 - [#3628266](https://www.drupal.org/project/mcp_sentinel/issues/3628266):
   Governed draft routes cover content-moderated reusable library items and
@@ -21,6 +23,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stays on the published parent and is not deleted. The published revision
   and its paragraph pins stay unchanged. `GET .../mcp-translations` lists
   `nested_replacement` on nodes.
+
 ## [2.29.1] - 2026-10-04
 
 ### Fixed
