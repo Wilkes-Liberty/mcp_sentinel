@@ -36,6 +36,7 @@
     "drupal/entity_reference_revisions": "^1.11",
     "drupal/graphql_compose": "^2.4",
     "drupal/mcp_server": "^2.0.0-beta3",
+    "drupal/entity_usage": "^2 || ^5",
     "drupal/paragraphs": "^1.18",
     "drupal/redirect": "^1.10",
     "drupal/scheduler": "^2.1",
