@@ -17,6 +17,7 @@
   --mcp-color-on-primary: var(--gin-color-button-text, #fff);
   --mcp-bg: var(--gin-bg-layer, #fff);
   --mcp-border: var(--gin-border-color, #dee2e6);
+
   margin: 1em 0;
 }
 
