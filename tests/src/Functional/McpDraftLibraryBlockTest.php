@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 use Drupal\block_content\Entity\BlockContent;
 use Drupal\block_content\Entity\BlockContentType;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
@@ -123,7 +124,7 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
     ], TRUE);
     $this->assertSame(200, $preflight->getStatusCode(), (string) $preflight->getBody());
     $this->assertTrue(json_decode((string) $preflight->getBody(), TRUE)['meta']['draft_preflight']);
-    $this->assertSame($library_vid, (string) $library_storage->getLatestRevisionId($library->id()));
+    $this->assertSame($library_vid, (string) $this->revisions($library_storage)->getLatestRevisionId($library->id()));
 
     $opened = $this->draft($agent, 'paragraphs_library_item', 'paragraphs_library_item', $library, '"' . $library_vid . '"', [
       'label' => 'Draft library',
@@ -138,9 +139,9 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
     $this->assertTrue($published_library->isPublished());
     $this->assertSame($paragraph_id, (string) $published_library->get('paragraphs')->target_id);
     $this->assertSame($paragraph_revision, (string) $published_library->get('paragraphs')->target_revision_id);
-    $working_library_vid = (string) $library_storage->getLatestRevisionId($library->id());
+    $working_library_vid = (string) $this->revisions($library_storage)->getLatestRevisionId($library->id());
     $this->assertNotSame($library_vid, $working_library_vid);
-    $working_library = $library_storage->loadRevision($working_library_vid);
+    $working_library = $this->revisions($library_storage)->loadRevision($working_library_vid);
     $this->assertInstanceOf(LibraryItem::class, $working_library);
     $this->assertFalse($working_library->isPublished());
     $this->assertFalse($working_library->isDefaultRevision());
@@ -153,9 +154,9 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(200, $continued->getStatusCode(), (string) $continued->getBody());
-    $second_library_vid = (string) $library_storage->getLatestRevisionId($library->id());
+    $second_library_vid = (string) $this->revisions($library_storage)->getLatestRevisionId($library->id());
     $this->assertNotSame($working_library_vid, $second_library_vid);
-    $second_library = $library_storage->loadRevision($second_library_vid);
+    $second_library = $this->revisions($library_storage)->loadRevision($second_library_vid);
     $this->assertInstanceOf(LibraryItem::class, $second_library);
     $this->assertSame('Second library draft', $second_library->label());
     $library_storage->resetCache([$library->id()]);
@@ -170,7 +171,7 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(409, $stale->getStatusCode(), (string) $stale->getBody());
-    $this->assertSame($second_library_vid, (string) $library_storage->getLatestRevisionId($library->id()));
+    $this->assertSame($second_library_vid, (string) $this->revisions($library_storage)->getLatestRevisionId($library->id()));
     $library_storage->resetCache([$library->id()]);
     $published_library = $library_storage->loadUnchanged($library->id());
     $this->assertInstanceOf(LibraryItem::class, $published_library);
@@ -195,9 +196,9 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
     $this->assertSame($block_vid, (string) $published_block->getRevisionId());
     $this->assertSame('Live block', $published_block->label());
     $this->assertTrue($published_block->isPublished());
-    $working_block_vid = (string) $block_storage->getLatestRevisionId($block->id());
+    $working_block_vid = (string) $this->revisions($block_storage)->getLatestRevisionId($block->id());
     $this->assertNotSame($block_vid, $working_block_vid);
-    $working_block = $block_storage->loadRevision($working_block_vid);
+    $working_block = $this->revisions($block_storage)->loadRevision($working_block_vid);
     $this->assertInstanceOf(BlockContent::class, $working_block);
     $this->assertFalse($working_block->isPublished());
     $this->assertFalse($working_block->isDefaultRevision());
@@ -208,14 +209,14 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(200, $continued_block->getStatusCode(), (string) $continued_block->getBody());
-    $second_block_vid = (string) $block_storage->getLatestRevisionId($block->id());
+    $second_block_vid = (string) $this->revisions($block_storage)->getLatestRevisionId($block->id());
     $this->assertNotSame($working_block_vid, $second_block_vid);
     $stale_block = $this->draft($agent, 'block_content', 'basic', $block, '"' . $block_vid . ':' . $working_block_vid . '"', [
       'info' => 'Stale block',
       'moderation_state' => 'draft',
     ]);
     $this->assertSame(409, $stale_block->getStatusCode(), (string) $stale_block->getBody());
-    $this->assertSame($second_block_vid, (string) $block_storage->getLatestRevisionId($block->id()));
+    $this->assertSame($second_block_vid, (string) $this->revisions($block_storage)->getLatestRevisionId($block->id()));
     $block_storage->resetCache([$block->id()]);
     $published_block = $block_storage->loadUnchanged($block->id());
     $this->assertInstanceOf(BlockContent::class, $published_block);
@@ -235,7 +236,7 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
     $unchanged_plain = $plain_storage->loadUnchanged($plain->id());
     $this->assertInstanceOf(BlockContent::class, $unchanged_plain);
     $this->assertSame($plain_vid, (string) $unchanged_plain->getRevisionId());
-    $this->assertSame($plain_vid, (string) $plain_storage->getLatestRevisionId($plain->id()));
+    $this->assertSame($plain_vid, (string) $this->revisions($plain_storage)->getLatestRevisionId($plain->id()));
     $this->assertSame('Plain block', $unchanged_plain->label());
     $this->assertTrue($unchanged_plain->isPublished());
   }
@@ -250,10 +251,22 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
   }
 
   /**
-   * Returns revisionable storage for an entity type.
+   * Returns storage for an entity type.
+   *
+   * The declared type stays EntityStorageInterface. phpstan-drupal maps
+   * loadUnchanged() on RevisionableStorageInterface to one arbitrary
+   * revisionable entity, which makes the library assertions impossible.
    */
-  private function storage(string $entity_type): RevisionableStorageInterface {
+  private function storage(string $entity_type): EntityStorageInterface {
     $storage = $this->container->get('entity_type.manager')->getStorage($entity_type);
+    $this->assertInstanceOf(RevisionableStorageInterface::class, $storage);
+    return $storage;
+  }
+
+  /**
+   * Narrows storage for revision reads.
+   */
+  private function revisions(EntityStorageInterface $storage): RevisionableStorageInterface {
     $this->assertInstanceOf(RevisionableStorageInterface::class, $storage);
     return $storage;
   }
