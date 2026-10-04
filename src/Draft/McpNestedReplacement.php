@@ -8,8 +8,10 @@ use Drupal\Component\Plugin\Exception\PluginNotFoundException;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
+use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\jsonapi\JsonApiResource\JsonApiDocumentTopLevel;
@@ -343,7 +345,9 @@ final class McpNestedReplacement {
    */
   private function assertPins(ContentEntityInterface $entity, string $field_name): void {
     foreach ($entity->get($field_name) as $item) {
-      if (!$this->isFiniteId($item->target_id) || !$this->isFiniteId($item->target_revision_id)) {
+      $target_id = self::pinValue($item, 'target_id');
+      $revision_id = self::pinValue($item, 'target_revision_id');
+      if (!$this->isFiniteId($target_id) || !$this->isFiniteId($revision_id)) {
         $this->deny('A paragraph pin is missing its revision.');
       }
     }
@@ -365,7 +369,7 @@ final class McpNestedReplacement {
   private function findPublishedParent(ContentEntityInterface $host, string $field_name, string $uuid): array {
     $found = [];
     foreach ($host->get($field_name) as $delta => $item) {
-      $paragraph = $this->loadParagraph((int) $item->target_revision_id);
+      $paragraph = $this->loadParagraph((int) self::pinValue($item, 'target_revision_id'));
       if (!$paragraph instanceof ContentEntityInterface) {
         $this->deny('A paragraph pin is missing its revision.');
       }
@@ -400,10 +404,11 @@ final class McpNestedReplacement {
    */
   private function assertSameSlot(ContentEntityInterface $draft, string $field_name, int $delta, string $uuid): void {
     $item = $draft->get($field_name)->get($delta);
-    if ($item === NULL || !$this->isFiniteId($item->target_revision_id)) {
+    $revision_id = $item instanceof FieldItemInterface ? self::pinValue($item, 'target_revision_id') : NULL;
+    if (!$this->isFiniteId($revision_id)) {
       $this->deny('A paragraph pin is missing its revision.');
     }
-    $paragraph = $this->loadParagraph((int) $item->target_revision_id);
+    $paragraph = $this->loadParagraph((int) $revision_id);
     if (!$paragraph instanceof ContentEntityInterface
       || strcasecmp((string) $paragraph->uuid(), $uuid) !== 0) {
       $this->deny('A forward draft already replaces this component. Reload before retrying.', 409, FALSE);
@@ -439,7 +444,7 @@ final class McpNestedReplacement {
   private function buildChildren(ContentEntityInterface $parent, string $child_field, array $requested): array {
     $known = [];
     foreach ($parent->get($child_field) as $item) {
-      $child = $this->loadParagraph((int) $item->target_revision_id);
+      $child = $this->loadParagraph((int) self::pinValue($item, 'target_revision_id'));
       if (!$child instanceof ContentEntityInterface) {
         $this->deny('A paragraph pin is missing its revision.');
       }
@@ -669,12 +674,14 @@ final class McpNestedReplacement {
     $values = [];
     foreach ($field as $item) {
       if ($type === 'entity_reference_revisions') {
-        if (!$this->isFiniteId($item->target_id) || !$this->isFiniteId($item->target_revision_id)) {
+        $target_id = self::pinValue($item, 'target_id');
+        $revision_id = self::pinValue($item, 'target_revision_id');
+        if (!$this->isFiniteId($target_id) || !$this->isFiniteId($revision_id)) {
           $this->deny('A paragraph pin is missing its revision.');
         }
         $values[] = [
-          'target_id' => (string) $item->target_id,
-          'target_revision_id' => (string) $item->target_revision_id,
+          'target_id' => (string) $target_id,
+          'target_revision_id' => (string) $revision_id,
         ];
         continue;
       }
@@ -906,10 +913,11 @@ final class McpNestedReplacement {
         continue;
       }
       foreach ($parent->get($name) as $item) {
-        if (!$this->isFiniteId($item->target_revision_id)) {
+        $revision_id = self::pinValue($item, 'target_revision_id');
+        if (!$this->isFiniteId($revision_id)) {
           $this->deny('A paragraph pin is missing its revision.');
         }
-        $target = $this->loadParagraph((int) $item->target_revision_id);
+        $target = $this->loadParagraph((int) $revision_id);
         if ($target instanceof ContentEntityInterface) {
           $add($target);
         }
@@ -932,9 +940,10 @@ final class McpNestedReplacement {
   private function pinKeys(ContentEntityInterface $host, string $field_name): array {
     $keys = [];
     foreach ($host->get($field_name) as $item) {
-      $paragraph = $this->loadParagraph((int) $item->target_revision_id);
+      $revision_id = self::pinValue($item, 'target_revision_id');
+      $paragraph = $this->loadParagraph((int) $revision_id);
       $uuid = $paragraph instanceof ContentEntityInterface ? (string) $paragraph->uuid() : '';
-      $keys[] = $uuid . '#' . $item->target_revision_id;
+      $keys[] = $uuid . '#' . $revision_id;
     }
     return $keys;
   }
@@ -1051,6 +1060,25 @@ final class McpNestedReplacement {
   }
 
   /**
+   * Reads one stored column from a field item.
+   *
+   * The item class is not known here, so the value comes from getValue()
+   * rather than a property.
+   *
+   * @param \Drupal\Core\Field\FieldItemInterface $item
+   *   The field item.
+   * @param string $key
+   *   The column name.
+   *
+   * @return mixed
+   *   The stored value, or NULL when the column is absent.
+   */
+  private static function pinValue(FieldItemInterface $item, string $key): mixed {
+    $value = $item->getValue();
+    return $value[$key] ?? NULL;
+  }
+
+  /**
    * Whether a pin id is a positive integer.
    *
    * @param mixed $value
@@ -1080,6 +1108,9 @@ final class McpNestedReplacement {
    */
   private function loadParagraph(int $revision_id): ?ContentEntityInterface {
     $storage = $this->paragraphStorage();
+    if (!$storage instanceof RevisionableStorageInterface) {
+      return NULL;
+    }
     if (method_exists($storage, 'loadRevisionUnchanged')) {
       $entity = $storage->loadRevisionUnchanged($revision_id);
     }
@@ -1096,10 +1127,14 @@ final class McpNestedReplacement {
   /**
    * Returns paragraph storage.
    *
-   * @return \Drupal\Core\Entity\RevisionableStorageInterface
+   * The declared type stays EntityStorageInterface. phpstan-drupal maps
+   * load() and create() on RevisionableStorageInterface to one arbitrary
+   * revisionable entity, which would hide the real paragraph type.
+   *
+   * @return \Drupal\Core\Entity\EntityStorageInterface
    *   Paragraph storage.
    */
-  private function paragraphStorage(): RevisionableStorageInterface {
+  private function paragraphStorage(): EntityStorageInterface {
     try {
       $storage = $this->entityTypeManager->getStorage('paragraph');
     }

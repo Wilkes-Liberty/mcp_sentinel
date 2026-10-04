@@ -928,7 +928,7 @@ final class McpDraftResource extends EntityResource {
       return $this->buildWrappedResponse($primary_data, $request, $includes, meta: $meta);
     }
     catch (\Throwable $exception) {
-      if ($nested_applied && $nested !== NULL) {
+      if ($nested_applied) {
         try {
           $transaction->rollBack();
         }

@@ -6,8 +6,10 @@ namespace Drupal\mcp_sentinel\Draft;
 
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Field\FieldItemInterface;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
@@ -142,8 +144,8 @@ final class McpNestedReplacementPlan {
     $values = [];
     foreach ($host->get($this->fieldName) as $item) {
       $values[] = [
-        'target_id' => $item->target_id,
-        'target_revision_id' => $item->target_revision_id,
+        'target_id' => self::pinValue($item, 'target_id'),
+        'target_revision_id' => self::pinValue($item, 'target_revision_id'),
       ];
     }
     $values[$this->delta] = ['entity' => $this->newParent];
@@ -204,9 +206,6 @@ final class McpNestedReplacementPlan {
    */
   public function publishedIsUnchanged(): bool {
     $storage = $this->entityTypeManager->getStorage('node');
-    if (!$storage instanceof RevisionableStorageInterface) {
-      return FALSE;
-    }
     $storage->resetCache([$this->hostId]);
     $host = $storage->loadUnchanged($this->hostId);
     if (!$host instanceof ContentEntityInterface) {
@@ -236,9 +235,11 @@ final class McpNestedReplacementPlan {
         $type = $field->getFieldDefinition()->getType();
         foreach ($field as $item) {
           if ($type === 'entity_reference_revisions') {
+            $target_id = self::pinValue($item, 'target_id');
+            $revision_id = self::pinValue($item, 'target_revision_id');
             $items[] = [
-              'target_id' => $item->target_id === NULL ? NULL : (string) $item->target_id,
-              'target_revision_id' => $item->target_revision_id === NULL ? NULL : (string) $item->target_revision_id,
+              'target_id' => $target_id === NULL ? NULL : (string) $target_id,
+              'target_revision_id' => $revision_id === NULL ? NULL : (string) $revision_id,
             ];
             continue;
           }
@@ -336,10 +337,10 @@ final class McpNestedReplacementPlan {
     if (!$host->hasField($this->fieldName)) {
       return [];
     }
-    $storage = $this->paragraphStorage();
+    $storage = $this->paragraphRevisions();
     $keys = [];
     foreach ($host->get($this->fieldName) as $item) {
-      $revision_id = $item->target_revision_id;
+      $revision_id = self::pinValue($item, 'target_revision_id');
       if (!is_numeric($revision_id) || (int) $revision_id <= 0) {
         $keys[] = 'missing';
         continue;
@@ -361,7 +362,7 @@ final class McpNestedReplacementPlan {
    *   The revision, or NULL.
    */
   private function loadParagraphRevision(int $revision_id): ?ContentEntityInterface {
-    $storage = $this->paragraphStorage();
+    $storage = $this->paragraphRevisions();
     if (method_exists($storage, 'loadRevisionUnchanged')) {
       $entity = $storage->loadRevisionUnchanged($revision_id);
     }
@@ -378,15 +379,52 @@ final class McpNestedReplacementPlan {
   /**
    * Returns paragraph storage.
    *
-   * @return \Drupal\Core\Entity\RevisionableStorageInterface
+   * The declared type stays EntityStorageInterface. phpstan-drupal maps
+   * load() and create() on RevisionableStorageInterface to one arbitrary
+   * revisionable entity, which would hide the real paragraph type.
+   *
+   * @return \Drupal\Core\Entity\EntityStorageInterface
    *   Paragraph storage.
    */
-  private function paragraphStorage(): RevisionableStorageInterface {
+  private function paragraphStorage(): EntityStorageInterface {
     $storage = $this->entityTypeManager->getStorage('paragraph');
     if (!$storage instanceof RevisionableStorageInterface) {
       throw new ConflictHttpException('Paragraph storage is not revisionable.');
     }
     return $storage;
+  }
+
+  /**
+   * Narrows paragraph storage for revision reads.
+   *
+   * @return \Drupal\Core\Entity\RevisionableStorageInterface
+   *   Paragraph storage.
+   */
+  private function paragraphRevisions(): RevisionableStorageInterface {
+    $storage = $this->paragraphStorage();
+    if (!$storage instanceof RevisionableStorageInterface) {
+      throw new ConflictHttpException('Paragraph storage is not revisionable.');
+    }
+    return $storage;
+  }
+
+  /**
+   * Reads one stored column from a field item.
+   *
+   * The item class is not known here, so the value comes from getValue()
+   * rather than a property.
+   *
+   * @param \Drupal\Core\Field\FieldItemInterface $item
+   *   The field item.
+   * @param string $key
+   *   The column name.
+   *
+   * @return mixed
+   *   The stored value, or NULL when the column is absent.
+   */
+  private static function pinValue(FieldItemInterface $item, string $key): mixed {
+    $value = $item->getValue();
+    return $value[$key] ?? NULL;
   }
 
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
@@ -122,6 +123,8 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
 
     $nodes = $this->storage('node');
     $paragraphs = $this->storage('paragraph');
+    $node_revisions = $this->revisions($nodes);
+    $paragraph_revisions = $this->revisions($paragraphs);
     $nodes->resetCache([$node->id()]);
     $published = $nodes->loadUnchanged($node->id());
     $this->assertInstanceOf(NodeInterface::class, $published);
@@ -154,7 +157,7 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     ]);
     $this->assertSame(400, $unknown->getStatusCode(), (string) $unknown->getBody());
     $this->assertSame(5, $this->paragraphCount());
-    $this->assertSame($live_vid, (string) $nodes->getLatestRevisionId($node->id()));
+    $this->assertSame($live_vid, (string) $node_revisions->getLatestRevisionId($node->id()));
 
     $library_refusal = $this->draft($agent, $node, '"' . $live_vid . '"', [
       'moderation_state' => 'draft',
@@ -206,7 +209,7 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $this->assertSame(400, $nested_only->getStatusCode(), (string) $nested_only->getBody());
     $this->assertStringContainsString('directly', (string) $nested_only->getBody());
     $this->assertSame(5, $this->paragraphCount());
-    $this->assertSame($live_vid, (string) $nodes->getLatestRevisionId($node->id()));
+    $this->assertSame($live_vid, (string) $node_revisions->getLatestRevisionId($node->id()));
 
     $preflight = $this->draft($agent, $node, '"' . $live_vid . '"', [
       'title' => 'Draft page',
@@ -235,17 +238,24 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $this->assertSame($live_vid, (string) $published->getRevisionId());
     $this->assertSame('Live page', $published->getTitle());
     $this->assertTrue($published->isPublished());
-    $this->assertSame($group_id, (string) $published->get('field_group')->get(0)->target_id);
-    $this->assertSame($group_revision, (string) $published->get('field_group')->get(0)->target_revision_id);
-    $this->assertSame($library_id, (string) $published->get('field_group')->get(1)->target_id);
-    $this->assertSame($library_revision, (string) $published->get('field_group')->get(1)->target_revision_id);
+    $published_pins = $published->get('field_group')->getValue();
+    $this->assertSame($group_id, (string) $published_pins[0]['target_id']);
+    $this->assertSame(
+      $group_revision,
+      (string) $published_pins[0]['target_revision_id'],
+    );
+    $this->assertSame($library_id, (string) $published_pins[1]['target_id']);
+    $this->assertSame(
+      $library_revision,
+      (string) $published_pins[1]['target_revision_id'],
+    );
 
-    $published_group = $paragraphs->loadRevision($group_revision);
+    $published_group = $paragraph_revisions->loadRevision($group_revision);
     $this->assertInstanceOf(Paragraph::class, $published_group);
     $this->assertCount(3, $published_group->get('field_items'));
     $this->assertSame('Questions', $published_group->get('field_heading')->value);
-    $kept_stored = $paragraphs->loadRevision($kept_revision);
-    $replaced_stored = $paragraphs->loadRevision($replaced_revision);
+    $kept_stored = $paragraph_revisions->loadRevision($kept_revision);
+    $replaced_stored = $paragraph_revisions->loadRevision($replaced_revision);
     $omitted_stored = $paragraphs->loadUnchanged($omitted_id);
     $this->assertInstanceOf(Paragraph::class, $kept_stored);
     $this->assertInstanceOf(Paragraph::class, $replaced_stored);
@@ -257,27 +267,32 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $this->assertSame($omitted_revision, (string) $omitted_stored->getRevisionId());
     $this->assertSame('Omit', $omitted_stored->get('field_title')->value);
 
-    $latest_id = (string) $nodes->getLatestRevisionId($node->id());
+    $latest_id = (string) $node_revisions->getLatestRevisionId($node->id());
     $this->assertNotSame($live_vid, $latest_id);
-    $draft = $nodes->loadRevision($latest_id);
+    $draft = $node_revisions->loadRevision($latest_id);
     $this->assertInstanceOf(NodeInterface::class, $draft);
     $this->assertFalse($draft->isPublished());
     $this->assertFalse($draft->isDefaultRevision());
     $this->assertSame('Draft page', $draft->getTitle());
-    $new_group_id = (string) $draft->get('field_group')->get(0)->target_id;
-    $new_group_revision = (string) $draft->get('field_group')->get(0)->target_revision_id;
+    $draft_pins = $draft->get('field_group')->getValue();
+    $new_group_id = (string) $draft_pins[0]['target_id'];
+    $new_group_revision = (string) $draft_pins[0]['target_revision_id'];
     $this->assertNotSame($group_id, $new_group_id);
-    $new_group = $paragraphs->loadRevision($new_group_revision);
+    $new_group = $paragraph_revisions->loadRevision($new_group_revision);
     $this->assertInstanceOf(Paragraph::class, $new_group);
     $this->assertFalse($new_group->isPublished());
     $this->assertSame('Questions', $new_group->get('field_heading')->value);
     $this->assertCount(2, $new_group->get('field_items'));
-    $this->assertSame($kept_id, (string) $new_group->get('field_items')->get(0)->target_id);
-    $this->assertSame($kept_revision, (string) $new_group->get('field_items')->get(0)->target_revision_id);
-    $new_child_id = (string) $new_group->get('field_items')->get(1)->target_id;
-    $new_child_revision = (string) $new_group->get('field_items')->get(1)->target_revision_id;
+    $child_pins = $new_group->get('field_items')->getValue();
+    $this->assertSame($kept_id, (string) $child_pins[0]['target_id']);
+    $this->assertSame(
+      $kept_revision,
+      (string) $child_pins[0]['target_revision_id'],
+    );
+    $new_child_id = (string) $child_pins[1]['target_id'];
+    $new_child_revision = (string) $child_pins[1]['target_revision_id'];
     $this->assertNotSame((string) $replaced->id(), $new_child_id);
-    $new_child = $paragraphs->loadRevision($new_child_revision);
+    $new_child = $paragraph_revisions->loadRevision($new_child_revision);
     $this->assertInstanceOf(Paragraph::class, $new_child);
     $this->assertFalse($new_child->isPublished());
     $this->assertSame('Replaced', $new_child->get('field_title')->value);
@@ -349,10 +364,22 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
   }
 
   /**
-   * Returns revisionable storage for an entity type.
+   * Returns storage for an entity type.
+   *
+   * The declared type stays EntityStorageInterface. phpstan-drupal maps
+   * loadUnchanged() on RevisionableStorageInterface to one arbitrary
+   * revisionable entity, which makes the paragraph assertions impossible.
    */
-  private function storage(string $entity_type): RevisionableStorageInterface {
+  private function storage(string $entity_type): EntityStorageInterface {
     $storage = $this->container->get('entity_type.manager')->getStorage($entity_type);
+    $this->assertInstanceOf(RevisionableStorageInterface::class, $storage);
+    return $storage;
+  }
+
+  /**
+   * Narrows storage for revision reads.
+   */
+  private function revisions(EntityStorageInterface $storage): RevisionableStorageInterface {
     $this->assertInstanceOf(RevisionableStorageInterface::class, $storage);
     return $storage;
   }
