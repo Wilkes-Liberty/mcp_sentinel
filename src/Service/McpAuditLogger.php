@@ -13,7 +13,11 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Entity\TranslatableInterface;
 use Drupal\Core\Language\LanguageInterface;
+use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\Core\Session\AccountSwitcherInterface;
+use Drupal\Core\Session\UserSession;
 use Drupal\mcp_sentinel\Controller\McpDraftResource;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -133,6 +137,10 @@ class McpAuditLogger {
    *   Audit Chain's recovery successor workflow, read only to classify a
    *   disclosed historical exception. NULL on Audit Chain versions without
    *   recovery segments; such a failure then stays critical.
+   * @param \Drupal\Core\Session\AccountProxyInterface|null $currentUser
+   *   The original audit actor, captured before a deferred write.
+   * @param \Drupal\Core\Session\AccountSwitcherInterface|null $accountSwitcher
+   *   Restores the captured actor only while appending deferred evidence.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -143,6 +151,8 @@ class McpAuditLogger {
     private readonly ?McpPolicyBundleRegistry $policyBundles = NULL,
     private readonly ?McpConfigSecretRedactor $configSecrets = NULL,
     private readonly ?RecoverySegments $recovery = NULL,
+    private readonly ?AccountProxyInterface $currentUser = NULL,
+    private readonly ?AccountSwitcherInterface $accountSwitcher = NULL,
   ) {}
 
   /**
@@ -168,9 +178,54 @@ class McpAuditLogger {
    */
   public function logSurvivingRollback(string $operation, array $metadata = [], bool $always = FALSE): void {
     if ($this->database !== NULL && $this->database->inTransaction()) {
+      // Retain forensic context, never credentials or the original request.
+      // The response may have left the request stack before a stream closes
+      // the transaction. A later actor or request must not own this evidence.
+      $source = $this->requestStack->getCurrentRequest();
+      $request_time = $source?->server->get('REQUEST_TIME_FLOAT') ?? microtime(TRUE);
+      $server = [
+        'REQUEST_TIME' => $source?->server->get('REQUEST_TIME') ?? (int) $request_time,
+        'REQUEST_TIME_FLOAT' => $request_time,
+        'HTTP_USER_AGENT' => substr((string) $source?->headers->get('User-Agent', ''), 0, 512),
+        'HTTP_X_MCP_CLIENT' => substr((string) $source?->headers->get('X-MCP-Client', ''), 0, 256),
+      ];
+      // Omit an unknown address: a NULL REMOTE_ADDR makes Symfony's
+      // trusted-proxy check throw a TypeError when the row is written.
+      $client_ip = $source?->getClientIp();
+      if ($client_ip !== NULL) {
+        $server['REMOTE_ADDR'] = $client_ip;
+      }
+      $request = new Request(server: $server);
+      $account = $this->currentUser !== NULL && $this->accountSwitcher !== NULL
+        ? new UserSession(['uid' => (int) $this->currentUser->id()])
+        : NULL;
+      if (!array_key_exists('policy_bundle_digest', $metadata)) {
+        // NULL deliberately records that no policy was attested at refusal.
+        $metadata['policy_bundle_digest'] = $this->policyBundles?->activeDigest();
+      }
       $this->database->transactionManager()->addPostTransactionCallback(
-        function () use ($operation, $metadata, $always): void {
-          $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
+        function () use ($operation, $metadata, $always, $request, $account): void {
+          $switched = FALSE;
+          try {
+            if ($account !== NULL) {
+              $this->accountSwitcher->switchTo($account);
+              $switched = TRUE;
+            }
+            $this->requestStack->push($request);
+            try {
+              $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
+            }
+            finally {
+              $this->requestStack->pop();
+            }
+          }
+          finally {
+            // AccountProxy dispatches account.set after assigning the account.
+            // Restore even when a listener throws during switch establishment.
+            if ($account !== NULL && ($switched || $this->currentUser->getAccount() === $account)) {
+              $this->accountSwitcher->switchBack();
+            }
+          }
         }
       );
       return;
@@ -277,7 +332,7 @@ class McpAuditLogger {
     // Cite the attested floor on every row. A caller that already named a
     // digest (activate/revoke/rollback of a specific bundle) keeps that
     // value; the logger never invents one when nothing is attested.
-    if (!isset($metadata['policy_bundle_digest']) && $this->policyBundles !== NULL) {
+    if (!array_key_exists('policy_bundle_digest', $metadata) && $this->policyBundles !== NULL) {
       $digest = $this->policyBundles->activeDigest();
       if ($digest !== NULL) {
         $metadata['policy_bundle_digest'] = $digest;

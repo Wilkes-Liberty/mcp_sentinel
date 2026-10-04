@@ -86,3 +86,11 @@ parameters:
     -
       identifier: phpunit.coversMethod
       path: tests/src/Kernel/McpMetricsTest.php
+    # MCP Server's authorization-denied event is not in an MCP Server release
+    # yet. Until it is, the subscriber is never called and the stream test
+    # skips. Remove this when the supported MCP Server ships the event.
+    -
+      message: '#McpAuthorizationDeniedEvent#'
+      paths:
+        - modules/mcp_sentinel_server/src/EventSubscriber/McpAuthorizationAuditSubscriber.php
+        - modules/mcp_sentinel_server/tests/src/Kernel/McpAuthorizationAuditTest.php

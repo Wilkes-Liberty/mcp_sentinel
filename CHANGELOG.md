@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- [#3628233](https://www.drupal.org/project/mcp_sentinel/issues/3628233):
+  A denial logged with `logSurvivingRollback()` keeps the caller who was
+  refused. The uid, client IP, user agent, `X-MCP-Client` value, request
+  time and policy digest are captured when the write is deferred, and the
+  row is written as that caller after the transaction ends. A streamed
+  response that ends the transaction later, under another account or with
+  no request on the stack, no longer changes who the row names. A refusal
+  with no attested policy records a NULL digest.
+- `mcp_sentinel_server` logs `denied_access` (HTTP status and reason only)
+  for MCP Server authorization refusals. It listens for MCP Server's
+  authorization-denied event, which no MCP Server release includes yet;
+  until one does, the listener never runs.
+
 ## [2.29.0] - 2026-10-03
 
 ### Changed

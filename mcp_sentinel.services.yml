@@ -29,6 +29,8 @@ services:
       # Optional: Audit Chain versions before recovery segments have no such
       # service. Without it a historical exception stays a critical failure.
       - '@?audit_chain.recovery'
+      - '@current_user'
+      - '@account_switcher'
 
   mcp_sentinel.config_secret_redactor:
     class: Drupal\mcp_sentinel\Service\McpConfigSecretRedactor
