@@ -183,13 +183,19 @@ class McpAuditLogger {
       // the transaction. A later actor or request must not own this evidence.
       $source = $this->requestStack->getCurrentRequest();
       $request_time = $source?->server->get('REQUEST_TIME_FLOAT') ?? microtime(TRUE);
-      $request = new Request(server: [
+      $server = [
         'REQUEST_TIME' => $source?->server->get('REQUEST_TIME') ?? (int) $request_time,
         'REQUEST_TIME_FLOAT' => $request_time,
-        'REMOTE_ADDR' => $source?->getClientIp(),
         'HTTP_USER_AGENT' => substr((string) $source?->headers->get('User-Agent', ''), 0, 512),
         'HTTP_X_MCP_CLIENT' => substr((string) $source?->headers->get('X-MCP-Client', ''), 0, 256),
-      ]);
+      ];
+      // Omit an unknown address: a NULL REMOTE_ADDR makes Symfony's
+      // trusted-proxy check throw a TypeError when the row is written.
+      $client_ip = $source?->getClientIp();
+      if ($client_ip !== NULL) {
+        $server['REMOTE_ADDR'] = $client_ip;
+      }
+      $request = new Request(server: $server);
       $account = $this->currentUser !== NULL && $this->accountSwitcher !== NULL
         ? new UserSession(['uid' => (int) $this->currentUser->id()])
         : NULL;

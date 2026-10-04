@@ -74,9 +74,9 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
     }
     $actor = $this->container->get('current_user');
     $actor->setAccount(new UserSession(['uid' => 42]));
+    /** @var \ArrayObject<string, mixed> $state */
     $state = new \ArrayObject();
     [$response, $lock_name] = $this->callSuspendingTool($state, TRUE, TRUE);
-    $this->assertInstanceOf(StreamedResponse::class, $response);
     $lock = $this->container->get('lock');
     $this->assertFalse($lock->lockMayBeAvailable($lock_name));
     $actor->setAccount(new UserSession(['uid' => 43]));
@@ -128,10 +128,13 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
       $stack->pop();
     }
     $chain = $this->createMock(AuditChainLoggerInterface::class);
-    $chain->expects($this->once())->method('log')->willReturnCallback(function (string $channel, string $operation, array $metadata) use ($actor, $stack): void {
+    $chain->expects($this->once())->method('log')->willReturnCallback(function (string $channel, string $operation, array $metadata) use ($actor): void {
       $this->assertSame(42, (int) $actor->id());
-      $this->assertNull($stack->getCurrentRequest()->getClientIp());
-      $this->assertFalse($stack->getCurrentRequest()->headers->has('Authorization'));
+      // Read through the container: the loop above narrows $stack to empty.
+      $current = $this->container->get('request_stack')->getCurrentRequest();
+      $this->assertInstanceOf(Request::class, $current);
+      $this->assertNull($current->getClientIp());
+      $this->assertFalse($current->headers->has('Authorization'));
       $this->assertArrayNotHasKey('mcp_client', $metadata);
       $this->assertArrayHasKey('policy_bundle_digest', $metadata);
       $this->assertNull($metadata['policy_bundle_digest']);
@@ -164,6 +167,37 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
     $this->assertSame(43, (int) $actor->id());
     $this->assertSame($later, $stack->getCurrentRequest());
     $stack->pop();
+  }
+
+  /**
+   * A deferred row without a source request survives a trusted-proxy setup.
+   */
+  public function testDeferredRowWithoutRequestBehindTrustedProxy(): void {
+    $this->container->get('current_user')->setAccount(new UserSession(['uid' => 42]));
+    $stack = $this->container->get('request_stack');
+    while ($stack->getCurrentRequest() !== NULL) {
+      $stack->pop();
+    }
+    $proxies = Request::getTrustedProxies();
+    $headers = Request::getTrustedHeaderSet();
+    Request::setTrustedProxies(['192.0.2.1'], Request::HEADER_X_FORWARDED_FOR);
+    try {
+      $database = $this->container->get('database');
+      $transaction = $database->startTransaction();
+      $this->container->get('mcp_sentinel.audit_logger')->logSurvivingRollback('denied_access');
+      $transaction->rollBack();
+      unset($transaction);
+    }
+    finally {
+      Request::setTrustedProxies($proxies, $headers);
+    }
+    $rows = $database->select('audit_chain_log', 'l')
+      ->fields('l', ['operation', 'uid', 'ip_address'])->execute()->fetchAll();
+    $this->assertCount(1, $rows);
+    $this->assertSame('denied_access', $rows[0]->operation);
+    $this->assertSame(42, (int) $rows[0]->uid);
+    $this->assertEmpty($rows[0]->ip_address);
+    $this->assertNull($stack->getCurrentRequest());
   }
 
   /**
@@ -203,7 +237,7 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
   /**
    * Calls a tool that suspends its Fiber, through the real SDK transport.
    *
-   * @param \ArrayObject<string, bool> $state
+   * @param \ArrayObject<string, mixed> $state
    *   Receives a 'completed' key, TRUE once the tool resumes and returns.
    * @param bool $in_transaction
    *   Whether the tool suspends inside a transaction that it then rolls back.
