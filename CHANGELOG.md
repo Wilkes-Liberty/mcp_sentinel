@@ -14,6 +14,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `If-Match: "<live>:<working>"`. The published default revision and its
   paragraph pins stay unchanged. `GET .../mcp-translations` lists the same
   draft operations as for nodes when the bundle is translatable.
+- [#3628267](https://www.drupal.org/project/mcp_sentinel/issues/3628267):
+  A node draft can replace one nested paragraph in the same save.
+  `meta.mcp_nested_replacement` names the published parent and the new
+  child list (`keep`, `replace`, or `insert`). A child left off that list
+  stays on the published parent and is not deleted. The published revision
+  and its paragraph pins stay unchanged. `GET .../mcp-translations` lists
+  `nested_replacement` on nodes.
 
 ### Fixed
 - [#3628233](https://www.drupal.org/project/mcp_sentinel/issues/3628233):

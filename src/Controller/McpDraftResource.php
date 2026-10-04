@@ -24,6 +24,8 @@ use Drupal\jsonapi\JsonApiResource\ResourceObject;
 use Drupal\jsonapi\JsonApiResource\ResourceObjectData;
 use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\jsonapi\ResourceResponse;
+use Drupal\mcp_sentinel\Draft\McpNestedReplacement;
+use Drupal\mcp_sentinel\Draft\McpNestedReplacementPlan;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Service\McpTranslationDraftReporter;
 use Drupal\user\UserInterface;
@@ -32,6 +34,8 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * Continues an unpublished draft without replacing its live revision.
@@ -293,6 +297,10 @@ final class McpDraftResource extends EntityResource {
     if ($components !== [] && $translation_write) {
       throw new BadRequestHttpException('Component changes are supported on the default language only.');
     }
+    // Nested planning validates new paragraphs and does not save them. The
+    // host is validated below, still pointing at its published pins. The new
+    // parent is attached only inside the save transaction.
+    $nested = $this->nestedReplacement()->plan($live, $draft, $components, $data, $resource_type, $translation_write, $request);
     $this->applySubmittedDraftFields($resource_type, $parsed, $draft, $live, $data, $translation_write);
     $this->applySubmittedRevisionLog($resource_type, $draft, $data);
     $changed = $this->applySubmittedComponents($resource_type, $draft, $components, $data);
@@ -302,10 +310,13 @@ final class McpDraftResource extends EntityResource {
     $this->assertDraftRemainsUnpublished($draft);
     // Include entity-level governance constraints, not only changed fields.
     static::validate($draft);
+    $operation = $nested instanceof McpNestedReplacementPlan
+      ? McpNestedReplacement::OPERATION
+      : ($opening ? self::OPEN_OPERATION : NULL);
     if ($preflight === '1') {
-      return $this->preflightResponse($versions, $langcode, $opening ? self::OPEN_OPERATION : NULL, $live, $storage);
+      return $this->preflightResponse($versions, $langcode, $operation, $live, $storage);
     }
-    return $this->saveForwardRevision($storage, $entity, $draft, $resource_type, $request, $versions, $opening ? 'open' : 'continue', $changed);
+    return $this->saveForwardRevision($storage, $entity, $draft, $resource_type, $request, $versions, $opening ? 'open' : 'continue', $changed, $nested);
   }
 
   /**
@@ -501,13 +512,7 @@ final class McpDraftResource extends EntityResource {
       'working' => NULL,
       'pending' => [],
       'multi_pending' => FALSE,
-      'operations' => [
-        'create_translation',
-        self::REVISE_OPERATION,
-        self::REVISE_OVER_WORKING_OPERATION,
-        self::OPEN_OPERATION,
-        self::COMPONENTS_OPERATION,
-      ],
+      'operations' => $this->draftOperations($entity),
     ];
     if ((string) $latest_id !== (string) $live->getRevisionId()) {
       $working = $storage->loadRevision($latest_id);
@@ -816,14 +821,17 @@ final class McpDraftResource extends EntityResource {
    *   Component paragraphs changed for this save, with the revision and state
    *   they were read at. The stored state is re-checked under the lock, and
    *   their live pins are checked before and after the save.
+   * @param \Drupal\mcp_sentinel\Draft\McpNestedReplacementPlan|null $nested
+   *   A nested replacement to attach after the lock, or NULL.
    *
    * @return \Drupal\jsonapi\ResourceResponse
    *   The saved resource.
    */
-  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, string $write_mode = 'continue', array $components = []): ResourceResponse {
+  private function saveForwardRevision(RevisionableStorageInterface $storage, EntityInterface $entity, ContentEntityInterface&EntityPublishedInterface $draft, ResourceType $resource_type, Request $request, array $versions, string $write_mode = 'continue', array $components = [], ?McpNestedReplacementPlan $nested = NULL): ResourceResponse {
     $database = $this->draftDatabase;
     $transaction = $database->startTransaction();
     $langcode = $draft->language()->getId();
+    $nested_applied = FALSE;
     try {
       // Serialize the save on the entity's base row, then re-read both
       // revision pointers. Validation already ran outside this lock.
@@ -884,6 +892,11 @@ final class McpDraftResource extends EntityResource {
         }
         $live_pins[$paragraph_id] = $this->snapshotDefaultErrPins($paragraph_id);
       }
+      if ($nested !== NULL) {
+        $nested->confirmBaseline();
+        $nested_applied = TRUE;
+        $nested->apply($draft);
+      }
       $draft->setNewRevision(TRUE);
       $draft->isDefaultRevision(FALSE);
       if ($draft instanceof RevisionLogInterface) {
@@ -891,6 +904,9 @@ final class McpDraftResource extends EntityResource {
         $draft->setRevisionCreationTime($this->time->getRequestTime());
       }
       $draft->save();
+      if ($nested !== NULL) {
+        $nested->assertPublishedUntouched();
+      }
       foreach ($live_pins as $paragraph_id => $snapshot) {
         if ($this->snapshotDefaultErrPins($paragraph_id) !== $snapshot) {
           throw new ConflictHttpException('A component change reached a live paragraph pin; the save was rolled back.');
@@ -912,9 +928,95 @@ final class McpDraftResource extends EntityResource {
       return $this->buildWrappedResponse($primary_data, $request, $includes, meta: $meta);
     }
     catch (\Throwable $exception) {
+      if ($nested_applied && $nested !== NULL) {
+        try {
+          $transaction->rollBack();
+        }
+        catch (\Throwable) {
+          throw $exception;
+        }
+        $intact = FALSE;
+        try {
+          $intact = $nested->publishedIsUnchanged();
+        }
+        catch (\Throwable) {
+          $intact = FALSE;
+        }
+        $suffix = $intact
+          ? ' The nested replacement was rolled back. The published revision was not saved.'
+          : ' The nested replacement outcome is uncertain. Re-read the published revision before retrying. Do not assume the published revision is unchanged.';
+        throw $this->withNestedOutcome($exception, $suffix);
+      }
       $transaction->rollBack();
       throw $exception;
     }
+  }
+
+  /**
+   * Re-throws an exception with a nested-replacement outcome suffix.
+   *
+   * The original status and headers stay. A non-HTTP throwable becomes a
+   * runtime exception so the suffix is still visible.
+   *
+   * @param \Throwable $exception
+   *   The exception from the save.
+   * @param string $suffix
+   *   The outcome sentence, including its leading space.
+   *
+   * @return \Throwable
+   *   The exception to throw.
+   */
+  private function withNestedOutcome(\Throwable $exception, string $suffix): \Throwable {
+    $message = $exception->getMessage() . $suffix;
+    if ($exception instanceof HttpExceptionInterface) {
+      return new HttpException($exception->getStatusCode(), $message, $exception, $exception->getHeaders());
+    }
+    return new \RuntimeException($message, 0, $exception);
+  }
+
+  /**
+   * Operations advertised for one governed forward-revision entity.
+   *
+   * Nested replacement is a node operation. Library items and custom blocks
+   * keep the same draft operations without it.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface $entity
+   *   The inventoried entity.
+   *
+   * @return list<string>
+   *   Operation names.
+   */
+  private function draftOperations(EntityInterface $entity): array {
+    $operations = [
+      'create_translation',
+      self::REVISE_OPERATION,
+      self::REVISE_OVER_WORKING_OPERATION,
+      self::OPEN_OPERATION,
+      self::COMPONENTS_OPERATION,
+    ];
+    if ($entity->getEntityTypeId() === 'node') {
+      $operations[] = McpNestedReplacement::OPERATION;
+    }
+    return $operations;
+  }
+
+  /**
+   * Builds the nested-replacement planner.
+   *
+   * The controller is not constructed with these services. The same objects
+   * the draft routes already use are passed in here.
+   *
+   * @return \Drupal\mcp_sentinel\Draft\McpNestedReplacement
+   *   The planner.
+   */
+  private function nestedReplacement(): McpNestedReplacement {
+    return new McpNestedReplacement(
+      $this->entityTypeManager,
+      $this->resourceTypeRepository,
+      $this->serializer,
+      $this->user,
+      $this->languageManager,
+    );
   }
 
   /**
