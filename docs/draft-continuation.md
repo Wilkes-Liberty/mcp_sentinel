@@ -77,6 +77,62 @@ The non-saving preflight (`X-MCP-Draft-Preflight: 1`) applies the same
 checks. `GET .../mcp-translations` lists `open_draft` and `draft_components`
 under `operations` on hosts that support both.
 
+## Nested paragraph replacement
+
+A node draft can replace one paragraph the published node references
+directly, and the children inside that paragraph, in the same save. Send
+one object in `meta.mcp_nested_replacement`. It is not a list, and it is
+not `mcp_components`. `mcp_components` still refuses a nested paragraph
+UUID. A request cannot send both.
+
+```json
+{
+  "data": {
+    "type": "node--page",
+    "id": "<node uuid>",
+    "attributes": { "moderation_state": "draft" }
+  },
+  "meta": {
+    "mcp_nested_replacement": {
+      "field": "field_group",
+      "parent": "<published paragraph uuid>",
+      "childField": "field_items",
+      "children": [
+        { "op": "keep", "id": "<child uuid>" },
+        {
+          "op": "replace",
+          "id": "<child uuid>",
+          "type": "paragraph--faq_item",
+          "attributes": { "field_title": "Updated" }
+        },
+        {
+          "op": "insert",
+          "type": "paragraph--faq_item",
+          "attributes": { "field_title": "Added" }
+        }
+      ]
+    }
+  }
+}
+```
+
+`field` and `childField` are field machine names. `parent` is the UUID of
+a paragraph the published node references directly, exactly once.
+`children` is the full new list for that nested field. `keep` copies an
+existing child pin. `replace` and `insert` create new unpublished
+paragraphs. A child left off the list stays on the published parent and is
+absent from the new parent only. It is not deleted.
+
+The published node revision and the paragraph pins it already holds stay
+unchanged. The new parent is pinned only from the unpublished node draft.
+Reusable `from_library` paragraphs are refused. Update a reusable library
+item through its library item draft route.
+
+`GET .../mcp-translations` lists `nested_replacement` on nodes. Library
+items, custom blocks, and paragraphs do not advertise it. The non-saving
+preflight echoes `meta.operation: nested_replacement` and does not create
+paragraphs.
+
 ## Translations
 
 Core JSON:API PATCH of `langcode` does not call `addTranslation()` and is not
