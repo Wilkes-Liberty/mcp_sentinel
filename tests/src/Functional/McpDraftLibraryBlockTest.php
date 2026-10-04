@@ -147,7 +147,18 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
     $this->assertFalse($working_library->isDefaultRevision());
     $this->assertSame('draft', $working_library->get('moderation_state')->value);
     $this->assertSame('Draft library', $working_library->label());
-    $this->assertSame($paragraph_revision, (string) $working_library->get('paragraphs')->target_revision_id);
+    // A new host revision asks Entity Reference Revisions for a new paragraph
+    // revision. That revision stays off the published library item.
+    $draft_paragraph_revision = (string) $working_library->get('paragraphs')->target_revision_id;
+    $this->assertNotSame($paragraph_revision, $draft_paragraph_revision);
+    $paragraph_storage = $this->storage('paragraph');
+    $published_paragraph = $paragraph_storage->loadUnchanged($paragraph_id);
+    $this->assertInstanceOf(Paragraph::class, $published_paragraph);
+    $this->assertSame($paragraph_revision, (string) $published_paragraph->getRevisionId());
+    $draft_paragraph = $this->revisions($paragraph_storage)->loadRevision($draft_paragraph_revision);
+    $this->assertInstanceOf(Paragraph::class, $draft_paragraph);
+    $this->assertSame($paragraph_id, (string) $draft_paragraph->id());
+    $this->assertFalse($draft_paragraph->isDefaultRevision());
 
     $continued = $this->draft($agent, 'paragraphs_library_item', 'paragraphs_library_item', $library, '"' . $library_vid . ':' . $working_library_vid . '"', [
       'label' => 'Second library draft',
