@@ -80,7 +80,7 @@ jobs:
           php vendor/bin/phpunit -c "$PWD/web/core/phpunit.xml.dist" --process-isolation \
             --filter 'McpActionManifestTest|McpBreakGlassTest|McpBreakGlassConductTest' \
             --log-junit "$PWD/approval.xml" "$PWD/web/modules/contrib/mcp_sentinel/modules/mcp_sentinel_approval/tests/src/Kernel"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: mcp-sentinel-${{ strategy.job-index }}
