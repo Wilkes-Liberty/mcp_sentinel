@@ -18,6 +18,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unchanged. The README documents the headers and the recommended receiver
   check.
 
+## [2.30.1] - 2026-10-05
+
+### Fixed
+- [#3628667](https://www.drupal.org/project/mcp_sentinel/issues/3628667):
+  After a manual verify reports the disclosed historical exception, a newer
+  Audit Chain scheduled run that classifies the same exception refreshes the
+  evidence. Governed writes after the manual verify no longer leave the chain
+  reported as `chain_stale` while Audit Chain keeps confirming it. A newer run
+  that finds a new break, a missing successor or a failing successor still
+  reports `chain_broken`. A stored critical verify is never downgraded.
+
 ## [2.30.0] - 2026-10-04
 
 ### Added
@@ -2742,7 +2753,9 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.29.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.30.1...1.x
+[2.30.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.30.0...2.30.1
+[2.30.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.29.1...2.30.0
 [2.29.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.29.0...2.29.1
 [2.29.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.2...2.29.0
 [2.28.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.28.1...2.28.2
