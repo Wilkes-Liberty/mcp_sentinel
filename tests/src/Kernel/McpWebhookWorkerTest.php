@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\Tests\mcp_sentinel\Support\McpSettableClock;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\key\Entity\Key;
 use GuzzleHttp\Client;
@@ -471,6 +472,223 @@ final class McpWebhookWorkerTest extends KernelTestBase {
     // HMAC is over the STORED payload ('{"a":1}'), not the queue item value.
     $expected = 'sha256=' . hash_hmac('sha256', '{"a":1}', 'topsecret');
     $this->assertSame($expected, $request->getHeaderLine('X-MCP-Signature'));
+  }
+
+  /**
+   * Installs a settable clock as the time service and returns it.
+   *
+   * @param int $now
+   *   The initial request and current time (unix seconds).
+   */
+  private function installClock(int $now): McpSettableClock {
+    $clock = new McpSettableClock($now);
+    $this->container->set('datetime.time', $clock);
+    return $clock;
+  }
+
+  /**
+   * Creates the config-provider Key entity used by the signing tests.
+   */
+  private function createSigningKey(): void {
+    Key::create([
+      'id' => 'mcp_wh_secret',
+      'label' => 'WH secret',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'topsecret'],
+    ])->save();
+  }
+
+  /**
+   * Builds a signed queue item for a delivery row.
+   */
+  private function signedItem(int $id): array {
+    return [
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => 'mcp_wh_secret',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ];
+  }
+
+  /**
+   * Checks a timestamped signature the way a receiver would.
+   *
+   * @param string $header
+   *   The X-MCP-Signature-256 header value.
+   * @param string $timestamp
+   *   The X-MCP-Timestamp header value.
+   * @param string $body
+   *   The raw request body.
+   * @param string $secret
+   *   The shared signing secret.
+   */
+  private static function receiverAccepts(string $header, string $timestamp, string $body, string $secret): bool {
+    $expected = 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, $secret);
+    return hash_equals($expected, $header);
+  }
+
+  /**
+   * A retry carries a fresh send timestamp while the body stays unchanged.
+   *
+   * The body timestamp is the event time and is stored with the payload, so a
+   * receiver that checks freshness on it rejects every late retry
+   * (#3628672). X-MCP-Timestamp is taken at send time on each attempt.
+   *
+   * @covers ::processItem
+   */
+  public function testRetryCarriesFreshSendTimestamp(): void {
+    $eventTime = 1_700_000_000;
+    $clock = $this->installClock($eventTime);
+    $this->createSigningKey();
+    $payload = '{"event":"mcp.entity.presave","timestamp":' . $eventTime . '}';
+    $id = $this->seedRow(0, $payload);
+
+    // First attempt, 10 minutes after the event: the receiver is down.
+    $clock->setNow($eventTime + 600);
+    $history = [];
+    $this->buildWorker([new Response(503)], $history)->processItem($this->signedItem($id));
+    $this->assertSame('pending', $this->loadRow($id)['status']);
+
+    // The retry runs once the 30-second backoff has passed.
+    $clock->setNow($eventTime + 900);
+    $retryHistory = [];
+    $this->buildWorker([new Response(200)], $retryHistory)->processItem($this->signedItem($id));
+    $this->assertSame('sent', $this->loadRow($id)['status']);
+
+    $this->assertCount(1, $history);
+    $this->assertCount(1, $retryHistory);
+    $first = $history[0]['request'];
+    $retry = $retryHistory[0]['request'];
+
+    $this->assertSame((string) ($eventTime + 600), $first->getHeaderLine('X-MCP-Timestamp'));
+    $this->assertSame((string) ($eventTime + 900), $retry->getHeaderLine('X-MCP-Timestamp'));
+
+    // Same delivery, same id on every attempt.
+    $this->assertSame((string) $id, $first->getHeaderLine('X-MCP-Delivery'));
+    $this->assertSame((string) $id, $retry->getHeaderLine('X-MCP-Delivery'));
+
+    // The body, its event timestamp and the stored row are untouched.
+    $this->assertSame($payload, (string) $first->getBody());
+    $this->assertSame($payload, (string) $retry->getBody());
+    $row = $this->loadRow($id);
+    $this->assertSame($payload, $row['payload']);
+    $this->assertSame(hash('sha256', $payload), $row['payload_hash']);
+
+    // Each attempt's timestamped signature verifies for that attempt only.
+    $this->assertTrue(self::receiverAccepts(
+      $retry->getHeaderLine('X-MCP-Signature-256'),
+      $retry->getHeaderLine('X-MCP-Timestamp'),
+      (string) $retry->getBody(),
+      'topsecret',
+    ));
+    $this->assertNotSame(
+      $first->getHeaderLine('X-MCP-Signature-256'),
+      $retry->getHeaderLine('X-MCP-Signature-256'),
+    );
+  }
+
+  /**
+   * X-MCP-Timestamp is the time of the send, not the start of the cron run.
+   *
+   * A long cron run can process a delivery minutes after its request began;
+   * the header must report when the request actually left.
+   *
+   * @covers ::processItem
+   */
+  public function testSendTimestampUsesCurrentTime(): void {
+    $clock = $this->installClock(1_700_000_000);
+    $this->createSigningKey();
+    $id = $this->seedRow(0, '{"a":1}');
+    $clock->current = 1_700_000_240;
+    $history = [];
+    $this->buildWorker([new Response(200)], $history)->processItem($this->signedItem($id));
+    $this->assertCount(1, $history);
+    $this->assertSame('1700000240', $history[0]['request']->getHeaderLine('X-MCP-Timestamp'));
+  }
+
+  /**
+   * X-MCP-Signature-256 covers the timestamp and the body.
+   *
+   * @covers ::processItem
+   */
+  public function testTimestampedSignatureCoversTimestampAndBody(): void {
+    $this->installClock(1_700_000_000);
+    $this->createSigningKey();
+    $body = '{"a":1}';
+    $id = $this->seedRow(0, $body);
+    $history = [];
+    $this->buildWorker([new Response(200)], $history)->processItem($this->signedItem($id));
+    $this->assertCount(1, $history);
+    $request = $history[0]['request'];
+    $header = $request->getHeaderLine('X-MCP-Signature-256');
+    $timestamp = $request->getHeaderLine('X-MCP-Timestamp');
+
+    $this->assertMatchesRegularExpression('/^sha256=[0-9a-f]{64}$/', $header);
+    $this->assertSame('1700000000', $timestamp);
+    $this->assertSame(
+      'sha256=' . hash_hmac('sha256', '1700000000.' . $body, 'topsecret'),
+      $header,
+    );
+    $this->assertTrue(self::receiverAccepts($header, $timestamp, $body, 'topsecret'));
+
+    // A changed timestamp or a changed body fails verification.
+    $this->assertFalse(self::receiverAccepts($header, '1700000001', $body, 'topsecret'));
+    $this->assertFalse(self::receiverAccepts($header, $timestamp, '{"a":2}', 'topsecret'));
+    $this->assertFalse(self::receiverAccepts($header, $timestamp, $body, 'wrong-secret'));
+  }
+
+  /**
+   * The body-only X-MCP-Signature is unchanged and identical on every attempt.
+   *
+   * @covers ::processItem
+   */
+  public function testLegacySignatureUnchangedAcrossAttempts(): void {
+    $clock = $this->installClock(1_700_000_000);
+    $this->createSigningKey();
+    $body = '{"a":1}';
+    $id = $this->seedRow(0, $body);
+    $history = [];
+    $this->buildWorker([new Response(500)], $history)->processItem($this->signedItem($id));
+    $clock->setNow(1_700_000_400);
+    $retryHistory = [];
+    $this->buildWorker([new Response(200)], $retryHistory)->processItem($this->signedItem($id));
+
+    $legacy = 'sha256=' . hash_hmac('sha256', $body, 'topsecret');
+    $this->assertSame($legacy, $history[0]['request']->getHeaderLine('X-MCP-Signature'));
+    $this->assertSame($legacy, $retryHistory[0]['request']->getHeaderLine('X-MCP-Signature'));
+  }
+
+  /**
+   * An unsigned endpoint gets the delivery headers but no signatures.
+   *
+   * @covers ::processItem
+   */
+  public function testUnsignedEndpointSendsDeliveryHeadersOnly(): void {
+    $this->installClock(1_700_000_000);
+    $id = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200)], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+    $this->assertCount(1, $history);
+    $request = $history[0]['request'];
+    $this->assertSame('1700000000', $request->getHeaderLine('X-MCP-Timestamp'));
+    $this->assertSame((string) $id, $request->getHeaderLine('X-MCP-Delivery'));
+    $this->assertFalse($request->hasHeader('X-MCP-Signature'));
+    $this->assertFalse($request->hasHeader('X-MCP-Signature-256'));
   }
 
   /**
