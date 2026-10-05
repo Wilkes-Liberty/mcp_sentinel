@@ -25,7 +25,8 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
  * guard, then pins the validated IP via CURLOPT_RESOLVE so the TCP connection
  * goes to the exact IP that passed the check (defeating DNS-rebind TOCTOU).
  * Payloads are stored in the delivery row at enqueue time and re-sent byte-
- * for-byte on replay.
+ * for-byte on replay. Each attempt adds a send-time X-MCP-Timestamp, the
+ * X-MCP-Delivery row id and an X-MCP-Signature-256 over both.
  */
 #[QueueWorker(
   id: 'mcp_sentinel_webhook_delivery',
@@ -56,6 +57,27 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   public static function backoffSeconds(int $attempt): int {
     $index = max(0, min($attempt - 1, count(self::BACKOFF) - 1));
     return self::BACKOFF[$index];
+  }
+
+  /**
+   * Computes the X-MCP-Signature-256 header value for one delivery attempt.
+   *
+   * HMAC-SHA256 over "{timestamp}.{body}", so a receiver can check the send
+   * time and the body with one comparison. Public and static so the format
+   * has a single definition that receivers and tests can match.
+   *
+   * @param string $secret
+   *   The endpoint's signing secret.
+   * @param string $timestamp
+   *   The X-MCP-Timestamp value (unix seconds at send time).
+   * @param string $body
+   *   The raw request body.
+   *
+   * @return string
+   *   "sha256=" followed by the lowercase hex digest.
+   */
+  public static function timestampedSignature(string $secret, string $timestamp, string $body): string {
+    return 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, $secret);
   }
 
   /**
@@ -330,12 +352,21 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       }
     }
     $payload = $storedPayload;
+    // The body keeps its event-time timestamp on every attempt, so a receiver
+    // that checks freshness on the body rejects every late retry (#3628672).
+    // X-MCP-Timestamp is the time this attempt leaves, read now rather than
+    // at the start of the cron run, and X-MCP-Signature-256 binds it to the
+    // body. X-MCP-Delivery is the row id, stable across retries and replays.
+    $sentAt = (string) $this->time->getCurrentTime();
     $headers = [
       'Content-Type' => 'application/json',
       'User-Agent'   => 'mcp-sentinel-webhook/1.0',
+      'X-MCP-Delivery' => (string) $deliveryId,
+      'X-MCP-Timestamp' => $sentAt,
     ];
     if ($secret !== '') {
       $headers['X-MCP-Signature'] = 'sha256=' . hash_hmac('sha256', $payload, $secret);
+      $headers['X-MCP-Signature-256'] = self::timestampedSignature($secret, $sentAt, $payload);
     }
 
     $newAttempts = $attempts + 1;

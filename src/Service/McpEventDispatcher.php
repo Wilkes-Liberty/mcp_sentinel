@@ -23,7 +23,12 @@ use Symfony\Component\EventDispatcher\EventDispatcherInterface;
  * retry/backoff, and an SSRF guard. The signing secret is resolved from a Key
  * entity per endpoint so it never lives in exported configuration.
  *
- * Verify signature:
+ * The payload "timestamp" is the event time and stays the same on every
+ * delivery attempt. Each attempt also carries X-MCP-Timestamp (send time),
+ * X-MCP-Delivery (row id) and X-MCP-Signature-256, an HMAC over
+ * "{timestamp}.{body}"; see the README "Reliable webhooks" section.
+ *
+ * Verify the body-only signature:
  *   hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
  */
 class McpEventDispatcher {

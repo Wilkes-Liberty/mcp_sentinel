@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- [#3628672](https://www.drupal.org/project/mcp_sentinel/issues/3628672):
+  Every webhook delivery attempt sends `X-MCP-Timestamp` (unix seconds at
+  send time), `X-MCP-Delivery` (the delivery log row id) and, when the
+  endpoint has a signing secret, `X-MCP-Signature-256`: `sha256=` and the
+  hex HMAC-SHA256 of `{timestamp}.{raw body}`. A receiver can check
+  freshness on the signed send time and dedupe on the delivery id, so a late
+  first attempt or a retry is no longer rejected for carrying the event
+  time. The stored payload, its body `timestamp` and `X-MCP-Signature` are
+  unchanged. The README documents the headers and the recommended receiver
+  check.
+
 ## [2.30.1] - 2026-10-05
 
 ### Fixed
