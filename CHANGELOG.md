@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.30.1] - 2026-10-05
+
 ### Fixed
 - [#3628667](https://www.drupal.org/project/mcp_sentinel/issues/3628667):
   After a manual verify reports the disclosed historical exception, a newer
