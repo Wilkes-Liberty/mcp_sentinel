@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- [#3628667](https://www.drupal.org/project/mcp_sentinel/issues/3628667):
+  After a manual verify reports the disclosed historical exception, a newer
+  Audit Chain scheduled run that classifies the same exception refreshes the
+  evidence. Governed writes after the manual verify no longer leave the chain
+  reported as `chain_stale` while Audit Chain keeps confirming it. A newer run
+  that finds a new break, a missing successor or a failing successor still
+  reports `chain_broken`. A stored critical verify is never downgraded.
+
 ## [2.30.0] - 2026-10-04
 
 ### Added
