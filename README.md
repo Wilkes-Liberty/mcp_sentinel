@@ -991,7 +991,12 @@ $valid = hash_equals($expected, $request->headers->get('X-MCP-Signature-256', ''
 `X-MCP-Delivery` is not covered by either signature. A captured request resent
 inside the skew window with a different id still verifies. To reject that, also
 keep the `X-MCP-Signature-256` values seen within the window and refuse a
-repeat.
+repeat. The trade-off: two distinct delivery rows with the same secret and a
+byte-identical body, sent in the same second, carry the same signature, so a
+signature cache treats the second as a replay. Their event content is
+identical, which is acceptable for a notification receiver. A receiver that
+must process every row should dedupe on `X-MCP-Delivery` alone and accept the
+unsigned-id gap above.
 
 A receiver that dedupes on `X-MCP-Delivery` also drops an operator replay of a
 row it already accepted. Replay a `sent` row only to a receiver that has lost
