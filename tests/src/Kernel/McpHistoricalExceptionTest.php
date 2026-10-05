@@ -340,6 +340,157 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
   }
 
   /**
+   * A newer scheduled run that agrees refreshes a stale stored exception.
+   *
+   * Governed traffic after a Sentinel verify makes it stale. When Audit
+   * Chain's later scheduled run classifies the same disclosed exception, the
+   * dashboard reports that exception again instead of chain_stale.
+   */
+  public function testNewerAgreeingScheduledRunRefreshesStaleVerify(): void {
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(60);
+    $this->governedRow();
+    $this->assertSame('warning', $this->conditionKeys()['chain_stale'] ?? NULL);
+
+    $this->container->get('audit_chain.scheduled_verifier')->runNow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['historical_exception'] ?? NULL);
+    $this->assertArrayNotHasKey('chain_stale', $keys);
+    $this->assertArrayNotHasKey('chain_broken', $keys);
+    $evidence = \Drupal::service('mcp_sentinel.metrics')->evidenceState();
+    $this->assertSame(McpEvidenceState::Failed, $evidence['state']);
+    $this->assertTrue($evidence['historical_exception']);
+  }
+
+  /**
+   * A scheduled run older than the stored verify does not refresh it.
+   */
+  public function testOlderAgreeingScheduledRunDoesNotRefresh(): void {
+    $this->activateSuccessor();
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $run['time'] -= 60;
+    \Drupal::state()->set('audit_chain.scheduled_verification', $run);
+    $this->commands->auditVerify();
+    $this->governedRow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['chain_stale'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * An agreeing scheduled run older than a day does not refresh.
+   */
+  public function testAgedAgreeingScheduledRunDoesNotRefresh(): void {
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(McpEvidenceState::STALE_AFTER + 120);
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $run['time'] -= McpEvidenceState::STALE_AFTER + 1;
+    \Drupal::state()->set('audit_chain.scheduled_verification', $run);
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['chain_stale'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * A newer scheduled run whose successor stopped verifying stays critical.
+   */
+  public function testNewerScheduledRunWithFailingSuccessorStaysCritical(): void {
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(60);
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['entity_label' => 'changed after review'])
+      ->condition('id', 1)
+      ->execute();
+    $this->assertFalse($this->container->get('audit_chain.recovery')->currentStatus()['segment_ok']);
+
+    $this->container->get('audit_chain.scheduled_verifier')->runNow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('critical', $keys['chain_broken'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * A newer scheduled run with no successor record stays critical.
+   */
+  public function testNewerScheduledRunWithoutSuccessorStaysCritical(): void {
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(60);
+    $this->container->get('database')->delete('audit_chain_recovery')->execute();
+
+    $this->container->get('audit_chain.scheduled_verifier')->runNow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('critical', $keys['chain_broken'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * Rows after a refreshing scheduled run make it stale again.
+   */
+  public function testRowsAfterRefreshingScheduledRunMakeItStale(): void {
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(60);
+    $this->governedRow();
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $this->assertSame('warning', $this->conditionKeys()['historical_exception'] ?? NULL);
+
+    $this->container->get('database')->insert('audit_chain_log')
+      ->fields([
+        'timestamp' => (int) $run['time'] + 1,
+        'uid' => 0,
+        'channel' => 'mcp_sentinel',
+        'operation' => 'entity_save',
+        'entity_type' => 'node',
+        'bundle' => '',
+        'entity_id' => 'later',
+        'entity_label' => '',
+        'ip_address' => '',
+        'user_agent' => '',
+        'metadata' => '{}',
+      ])
+      ->execute();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['chain_stale'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * A stored critical verify is not downgraded by a later agreeing run.
+   *
+   * Only a stored historical exception is refreshed. A break Sentinel saw
+   * itself stays critical until an operator verifies again.
+   */
+  public function testStoredCriticalVerifyIsNotDowngraded(): void {
+    $this->commands->auditVerify();
+    $this->assertSame('critical', $this->conditionKeys()['chain_broken'] ?? NULL);
+    $this->backdateStoredVerify(60);
+    $this->activateSuccessor();
+    $this->container->get('audit_chain.scheduled_verifier')->runNow();
+
+    $keys = $this->conditionKeys();
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * Moves the stored Sentinel verify back so a scheduled run is newer.
+   */
+  private function backdateStoredVerify(int $seconds): void {
+    $stored = \Drupal::state()->get('mcp_sentinel.last_verify');
+    $stored['time'] -= $seconds;
+    \Drupal::state()->set('mcp_sentinel.last_verify', $stored);
+  }
+
+  /**
    * Returns urgent condition severities keyed by condition key.
    *
    * @return array<string, string>

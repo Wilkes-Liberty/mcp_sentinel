@@ -119,13 +119,19 @@ final class McpLastVerify {
    * until it aged out. The placeholder Audit Chain writes when a segment is
    * activated is not such a run: it carries no successor verdict yet.
    *
-   * Before the first Sentinel verify, a fresh scheduled run that Audit Chain
-   * classifies as the disclosed historical exception is adopted, so the
-   * dashboard does not report the chain as never verified. No other
-   * scheduled verdict is adopted, and a scheduled run older than a day is
-   * ignored. The adopted value's row baseline is the governed rows stamped
-   * at or before the run, so later rows make it stale. A row written later
-   * in the same second as the run is caught by the next row after it.
+   * A fresh scheduled run that Audit Chain classifies as the disclosed
+   * historical exception is adopted in two cases: before the first Sentinel
+   * verify, so the dashboard does not report the chain as never verified,
+   * and when it is newer than a stored historical exception, so governed
+   * traffic after a manual verify does not leave the chain reported as
+   * stale while Audit Chain keeps confirming the same exception. A stored
+   * verify that is not the historical exception is never replaced this way,
+   * so a break Sentinel saw itself stays critical until an operator verifies
+   * again. No other scheduled verdict is adopted, and a scheduled run older
+   * than a day is ignored. The adopted value's row baseline is the governed
+   * rows stamped at or before the run, so later rows make it stale. A row
+   * written later in the same second as the run is caught by the next row
+   * after it.
    *
    * @param array<string, mixed>|null $last
    *   The mcp_sentinel.last_verify value, or NULL.
@@ -160,9 +166,32 @@ final class McpLastVerify {
           'source' => 'audit_chain_scheduled',
         ];
       }
+      if (self::isDocumentedHistoricalException($last)
+        && is_array($scheduled)
+        && (int) ($scheduled['time'] ?? 0) > (int) ($last['time'] ?? 0)) {
+        return self::adoptHistoricalException($scheduled, $now, $governedRowsThrough) ?? $last;
+      }
       return $last;
     }
-    if (!is_array($scheduled) || !self::auditChainClassifiesHistoricalException($scheduled)) {
+    return is_array($scheduled) ? self::adoptHistoricalException($scheduled, $now, $governedRowsThrough) : NULL;
+  }
+
+  /**
+   * Adopts a fresh scheduled run Audit Chain classifies as the exception.
+   *
+   * @param array<string, mixed> $scheduled
+   *   The Audit Chain scheduled-verification state value.
+   * @param int $now
+   *   Request time.
+   * @param \Closure(int): int $governedRowsThrough
+   *   Counts governed-channel audit rows stamped at or before a time.
+   *
+   * @return array<string, mixed>|null
+   *   The adopted state value, or NULL when the run is not the documented
+   *   historical exception or is older than a day.
+   */
+  private static function adoptHistoricalException(array $scheduled, int $now, \Closure $governedRowsThrough): ?array {
+    if (!self::auditChainClassifiesHistoricalException($scheduled)) {
       return NULL;
     }
     $time = (int) ($scheduled['time'] ?? 0);
