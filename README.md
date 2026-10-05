@@ -988,6 +988,11 @@ $valid = hash_equals($expected, $request->headers->get('X-MCP-Signature-256', ''
   && abs(time() - (int) $timestamp) <= 300;
 ```
 
+`X-MCP-Delivery` is not covered by either signature. A captured request resent
+inside the skew window with a different id still verifies. To reject that, also
+keep the `X-MCP-Signature-256` values seen within the window and refuse a
+repeat.
+
 A receiver that dedupes on `X-MCP-Delivery` also drops an operator replay of a
 row it already accepted. Replay a `sent` row only to a receiver that has lost
 it, or one that does not dedupe.
