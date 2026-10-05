@@ -953,10 +953,48 @@ form. Each endpoint is its own add/remove row (use **Add endpoint** /
 | **Event filter** | One event name per line; leave empty to receive all events. |
 | **Enabled** | Toggles delivery without deleting the endpoint. |
 
-The request body is signed with HMAC-SHA256 and sent in the
-`X-MCP-Signature: sha256=…` header. Verify it with:
+### Request headers and signatures
 
+Every delivery attempt, including retries and replays, sends these headers:
+
+| Header | Value |
+|--------|-------|
+| `X-MCP-Timestamp` | Unix seconds when this attempt was sent. A retry carries a new value. |
+| `X-MCP-Delivery` | The delivery log row id, as a decimal string. The same on every retry and replay of that row. |
+| `X-MCP-Signature-256` | `sha256=` and the lowercase hex HMAC-SHA256 of `{X-MCP-Timestamp}.{raw body}`. Sent only when the endpoint has a signing secret. |
+| `X-MCP-Signature` | `sha256=` and the lowercase hex HMAC-SHA256 of the raw body. Sent only when the endpoint has a signing secret. Kept for existing receivers. |
+
+Both signatures use the endpoint's signing secret. The body is the stored
+payload, sent byte for byte on every attempt. Its `timestamp` field is the time
+of the change that produced the event, not the time of the send. Do not use it
+for a freshness check: a retry can arrive hours after the change, and a check
+on the body timestamp rejects every retry.
+
+Recommended receiver check:
+
+1. Read the raw body before parsing it.
+2. Verify `X-MCP-Signature-256` against `{X-MCP-Timestamp}.{raw body}` with a
+   constant-time comparison.
+3. Reject the request if `X-MCP-Timestamp` is outside your allowed clock skew,
+   for example 5 minutes either way.
+4. Dedupe on `X-MCP-Delivery`. Record the id after you process the delivery
+   successfully, and answer a repeat with a 2xx without processing it again.
+
+```php
+$timestamp = $request->headers->get('X-MCP-Timestamp', '');
+$expected = 'sha256=' . hash_hmac('sha256', $timestamp . '.' . $body, $secret);
+$valid = hash_equals($expected, $request->headers->get('X-MCP-Signature-256', ''))
+  && preg_match('/^[0-9]+$/', $timestamp) === 1
+  && abs(time() - (int) $timestamp) <= 300;
 ```
+
+A receiver that dedupes on `X-MCP-Delivery` also drops an operator replay of a
+row it already accepted. Replay a `sent` row only to a receiver that has lost
+it, or one that does not dedupe.
+
+Receivers that only check the body signature keep working:
+
+```php
 hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
 ```
 
