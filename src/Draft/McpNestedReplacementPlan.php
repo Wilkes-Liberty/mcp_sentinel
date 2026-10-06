@@ -34,6 +34,21 @@ final class McpNestedReplacementPlan {
   ];
 
   /**
+   * Fields restored after that in-place save.
+   *
+   * The parent pointer is rewritten on the same revision. A translatable
+   * paragraph also advances content_translation_changed while saving it.
+   *
+   * @var list<string>
+   */
+  private const RESTORABLE_FIELDS = [
+    'parent_id',
+    'parent_type',
+    'parent_field_name',
+    'content_translation_changed',
+  ];
+
+  /**
    * The entity type manager.
    *
    * @var \Drupal\Core\Entity\EntityTypeManagerInterface
@@ -157,9 +172,10 @@ final class McpNestedReplacementPlan {
    *
    * Entity Reference Revisions post-save can rewrite parent_id,
    * parent_type, and parent_field_name on a kept child without creating a
-   * revision. That rewrite is undone here. Any other change, including a
-   * new revision of a paragraph the published host still pins, fails the
-   * save so the transaction rolls back.
+   * revision. On a translatable paragraph that save also advances
+   * content_translation_changed. Those fields are restored. Any other
+   * change, including a new revision of a paragraph the published host
+   * still pins, fails the save so the transaction rolls back.
    */
   public function assertPublishedUntouched(): void {
     if (!$this->publishedIsUnchanged()) {
@@ -181,7 +197,7 @@ final class McpNestedReplacementPlan {
         continue;
       }
       $changed = self::changedFields($watched['values'], $values);
-      $unexpected = array_diff($changed, self::PARENT_FIELDS);
+      $unexpected = array_diff($changed, self::RESTORABLE_FIELDS);
       if ($changed === [] || $unexpected !== []) {
         throw new ConflictHttpException('Nested replacement changed a published paragraph; the save was rolled back.');
       }
@@ -305,17 +321,33 @@ final class McpNestedReplacementPlan {
   /**
    * Writes the snapshotted parent pointers back onto the same revision.
    *
+   * Also restores content_translation_changed on each translation. The
+   * pointer save advances that timestamp, and a second save would advance
+   * it again unless this write puts the snapshotted value back first.
+   *
    * @param \Drupal\Core\Entity\ContentEntityInterface $revision
    *   The kept paragraph revision.
    * @param array<string, array<string, mixed>> $values
    *   The snapshot taken before the draft save.
    */
   private function restoreParentPointers(ContentEntityInterface $revision, array $values): void {
-    $default_language = $revision->getUntranslated()->language()->getId();
+    $untranslated = $revision->getUntranslated();
+    $default_language = $untranslated->language()->getId();
     $stored = $values[$default_language] ?? [];
     foreach (self::PARENT_FIELDS as $name) {
-      if (isset($stored[$name]) && $revision->hasField($name)) {
-        $revision->set($name, $stored[$name]);
+      if (isset($stored[$name]) && $untranslated->hasField($name)) {
+        $untranslated->set($name, $stored[$name]);
+      }
+    }
+    foreach ($values as $langcode => $translation_values) {
+      $timestamp = $translation_values['content_translation_changed']
+        ?? NULL;
+      if ($timestamp === NULL || !$revision->hasTranslation($langcode)) {
+        continue;
+      }
+      $translation = $revision->getTranslation($langcode);
+      if ($translation->hasField('content_translation_changed')) {
+        $translation->set('content_translation_changed', $timestamp);
       }
     }
     $was_default = $revision->isDefaultRevision();

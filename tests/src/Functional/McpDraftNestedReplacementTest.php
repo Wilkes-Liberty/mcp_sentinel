@@ -8,6 +8,7 @@ use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\NodeInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
@@ -40,7 +41,8 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
   protected static $modules = [
     'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'workflows', 'content_moderation',
-    'paragraphs', 'entity_reference_revisions',
+    'language', 'content_translation', 'paragraphs',
+    'entity_reference_revisions',
   ];
 
   /**
@@ -297,6 +299,140 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $this->assertFalse($new_child->isPublished());
     $this->assertSame('Replaced', $new_child->get('field_title')->value);
     $this->assertSame(7, $this->paragraphCount());
+  }
+
+  /**
+   * Restores a translatable child's changed time after the pointer rewrite.
+   */
+  public function testNestedReplacementRestoresTranslationChangedTime(): void {
+    $this->drupalCreateContentType(['type' => 'page']);
+    $workflow = $this->createEditorialWorkflow();
+    $this->addEntityTypeAndBundleToWorkflow($workflow, 'node', 'page');
+    $this->enableRoleFallbackGovernance();
+    $this->configureDefaultProfile(allowWrite: TRUE, allowRead: TRUE);
+    $this->config('mcp_sentinel.mcp_policy_profile.default')->set('deny_publish', TRUE)->save();
+    $this->config('jsonapi.settings')->set('read_only', FALSE)->save();
+    ConfigurableLanguage::createFromLangcode('es')->save();
+
+    foreach (['p_faq_group', 'p_faq_item'] as $bundle) {
+      ParagraphsType::create(['id' => $bundle, 'label' => $bundle])->save();
+    }
+    $this->addField('paragraph', 'field_heading', 'string', ['p_faq_group']);
+    $this->addField('paragraph', 'field_title', 'string', ['p_faq_item']);
+    $this->addField('paragraph', 'field_items', 'entity_reference_revisions', ['p_faq_group'], [
+      'p_faq_item' => 'p_faq_item',
+    ]);
+    $this->addField('node', 'field_group', 'entity_reference_revisions', ['page'], [
+      'p_faq_group' => 'p_faq_group',
+    ]);
+    foreach (['p_faq_group', 'p_faq_item'] as $bundle) {
+      $this->container->get('content_translation.manager')
+        ->setEnabled('paragraph', $bundle, TRUE);
+    }
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+    $this->container->get('entity_type.bundle.info')->clearCachedBundles();
+
+    $agent = $this->createGovernedAgentAccount([
+      'access content',
+      'edit any page content',
+      'view any unpublished content',
+      'view unpublished paragraphs',
+      'use editorial transition create_new_draft',
+      'use editorial transition publish',
+    ]);
+
+    $kept = Paragraph::create([
+      'type' => 'p_faq_item',
+      'field_title' => 'Keep',
+    ]);
+    $kept->save();
+    $replaced = Paragraph::create([
+      'type' => 'p_faq_item',
+      'field_title' => 'Old',
+    ]);
+    $replaced->save();
+    $group = Paragraph::create([
+      'type' => 'p_faq_group',
+      'field_heading' => 'Questions',
+      'field_items' => [
+        $this->pin($kept),
+        $this->pin($replaced),
+      ],
+    ]);
+    $group->save();
+    $node = $this->drupalCreateNode([
+      'type' => 'page',
+      'title' => 'Live page',
+      'moderation_state' => 'published',
+      'field_group' => [
+        $this->pin($group),
+      ],
+    ]);
+    $this->container->get('router.builder')->rebuild();
+
+    $paragraphs = $this->storage('paragraph');
+    $nodes = $this->storage('node');
+    $nodes->resetCache([$node->id()]);
+    $published = $nodes->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $published);
+    $live_vid = (string) $published->getRevisionId();
+
+    $paragraphs->resetCache([(string) $kept->id()]);
+    $kept = $paragraphs->loadUnchanged($kept->id());
+    $this->assertInstanceOf(Paragraph::class, $kept);
+    $this->assertTrue($kept->hasField('content_translation_changed'));
+    $pinned_revision = (string) $kept->getRevisionId();
+    $this->container->get('content_translation.manager')
+      ->getTranslationMetadata($kept)
+      ->setChangedTime(\Drupal::time()->getRequestTime() - 3600);
+    $kept->setNewRevision(FALSE);
+    $kept->save();
+    $paragraphs->resetCache([(string) $kept->id()]);
+    $kept = $paragraphs->loadUnchanged($kept->id());
+    $this->assertInstanceOf(Paragraph::class, $kept);
+    $this->assertSame($pinned_revision, (string) $kept->getRevisionId());
+    $kept_changed = (string) $kept->get('content_translation_changed')->value;
+    $this->assertNotSame(
+      (string) \Drupal::time()->getRequestTime(),
+      $kept_changed,
+    );
+
+    $saved = $this->draft($agent, $node, '"' . $live_vid . '"', [
+      'title' => 'Draft page',
+      'moderation_state' => 'draft',
+    ], [
+      'field' => 'field_group',
+      'parent' => $group->uuid(),
+      'childField' => 'field_items',
+      'children' => [
+        ['op' => 'keep', 'id' => $kept->uuid()],
+        [
+          'op' => 'replace',
+          'id' => $replaced->uuid(),
+          'type' => 'paragraph--p_faq_item',
+          'attributes' => ['field_title' => 'Replaced'],
+        ],
+      ],
+    ]);
+    $this->assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+
+    $nodes->resetCache([$node->id()]);
+    $paragraphs->resetCache();
+    $published = $nodes->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $published);
+    $this->assertSame($live_vid, (string) $published->getRevisionId());
+    $kept_stored = $this->revisions($paragraphs)->loadRevision($pinned_revision);
+    $this->assertInstanceOf(Paragraph::class, $kept_stored);
+    $this->assertSame($pinned_revision, (string) $kept_stored->getRevisionId());
+    $this->assertSame(
+      $pinned_revision,
+      (string) $paragraphs->loadUnchanged($kept->id())->getRevisionId(),
+    );
+    $this->assertSame('Keep', $kept_stored->get('field_title')->value);
+    $this->assertSame(
+      $kept_changed,
+      (string) $kept_stored->get('content_translation_changed')->value,
+    );
   }
 
   /**
