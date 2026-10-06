@@ -424,10 +424,9 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $kept_stored = $this->revisions($paragraphs)->loadRevision($pinned_revision);
     $this->assertInstanceOf(Paragraph::class, $kept_stored);
     $this->assertSame($pinned_revision, (string) $kept_stored->getRevisionId());
-    $this->assertSame(
-      $pinned_revision,
-      (string) $paragraphs->loadUnchanged($kept->id())->getRevisionId(),
-    );
+    $kept_default = $paragraphs->loadUnchanged($kept->id());
+    $this->assertInstanceOf(Paragraph::class, $kept_default);
+    $this->assertSame($pinned_revision, (string) $kept_default->getRevisionId());
     $this->assertSame('Keep', $kept_stored->get('field_title')->value);
     $this->assertSame(
       $kept_changed,
