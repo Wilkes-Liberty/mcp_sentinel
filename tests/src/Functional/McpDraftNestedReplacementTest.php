@@ -302,7 +302,7 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
   }
 
   /**
-   * Restores a translatable child's changed time after the pointer rewrite.
+   * Restores every translation's changed time after the pointer rewrite.
    */
   public function testNestedReplacementRestoresTranslationChangedTime(): void {
     $this->drupalCreateContentType(['type' => 'page']);
@@ -345,6 +345,9 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
       'type' => 'p_faq_item',
       'field_title' => 'Keep',
     ]);
+    $kept->addTranslation('es', [
+      'field_title' => 'Preserve',
+    ]);
     $kept->save();
     $replaced = Paragraph::create([
       'type' => 'p_faq_item',
@@ -381,10 +384,14 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $kept = $paragraphs->loadUnchanged($kept->id());
     $this->assertInstanceOf(Paragraph::class, $kept);
     $this->assertTrue($kept->hasField('content_translation_changed'));
+    $this->assertTrue($kept->hasTranslation('es'));
     $pinned_revision = (string) $kept->getRevisionId();
-    $this->container->get('content_translation.manager')
-      ->getTranslationMetadata($kept)
-      ->setChangedTime(\Drupal::time()->getRequestTime() - 3600);
+    $request_time = \Drupal::time()->getRequestTime();
+    /** @var \Drupal\content_translation\ContentTranslationManagerInterface $manager */
+    $manager = $this->container->get('content_translation.manager');
+    $manager->getTranslationMetadata($kept)->setChangedTime($request_time - 3600);
+    $manager->getTranslationMetadata($kept->getTranslation('es'))
+      ->setChangedTime($request_time - 7200);
     $kept->setNewRevision(FALSE);
     $kept->save();
     $paragraphs->resetCache([(string) $kept->id()]);
@@ -392,10 +399,11 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $this->assertInstanceOf(Paragraph::class, $kept);
     $this->assertSame($pinned_revision, (string) $kept->getRevisionId());
     $kept_changed = (string) $kept->get('content_translation_changed')->value;
-    $this->assertNotSame(
-      (string) \Drupal::time()->getRequestTime(),
-      $kept_changed,
-    );
+    $kept_es_changed = (string) $kept->getTranslation('es')
+      ->get('content_translation_changed')->value;
+    $this->assertNotSame((string) $request_time, $kept_changed);
+    $this->assertNotSame((string) $request_time, $kept_es_changed);
+    $this->assertNotSame($kept_changed, $kept_es_changed);
 
     $saved = $this->draft($agent, $node, '"' . $live_vid . '"', [
       'title' => 'Draft page',
@@ -431,6 +439,22 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     $this->assertSame(
       $kept_changed,
       (string) $kept_stored->get('content_translation_changed')->value,
+    );
+    $this->assertTrue($kept_stored->hasTranslation('es'));
+    $stored_es = $kept_stored->getTranslation('es');
+    $this->assertSame('Preserve', $stored_es->get('field_title')->value);
+    $this->assertSame(
+      $kept_es_changed,
+      (string) $stored_es->get('content_translation_changed')->value,
+    );
+    $this->assertSame(
+      $kept_changed,
+      (string) $kept_default->get('content_translation_changed')->value,
+    );
+    $this->assertSame(
+      $kept_es_changed,
+      (string) $kept_default->getTranslation('es')
+        ->get('content_translation_changed')->value,
     );
   }
 

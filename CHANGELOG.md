@@ -11,8 +11,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A nested paragraph replacement on a translatable paragraph no longer
   rolls back when saving the new parent advances the kept child's
   `content_translation_changed` field. That timestamp is restored with
-  the parent pointer. A new revision, or any other field change, still
-  rolls the draft back.
+  the parent pointer, on every translation. A timestamp change on its
+  own, a new revision, or any other field change still rolls the draft
+  back.
 
 ## [2.31.0] - 2026-10-05
 

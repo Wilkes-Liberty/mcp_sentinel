@@ -34,19 +34,15 @@ final class McpNestedReplacementPlan {
   ];
 
   /**
-   * Fields restored after that in-place save.
+   * Translation timestamp restored with a parent-pointer rewrite.
    *
-   * The parent pointer is rewritten on the same revision. A translatable
-   * paragraph also advances content_translation_changed while saving it.
+   * Entity Reference Revisions advances this field while saving the new
+   * parent pointer. It is not restored on its own: a timestamp-only edit
+   * is a real change to the published paragraph.
    *
-   * @var list<string>
+   * @var string
    */
-  private const RESTORABLE_FIELDS = [
-    'parent_id',
-    'parent_type',
-    'parent_field_name',
-    'content_translation_changed',
-  ];
+  private const TRANSLATION_CHANGED_FIELD = 'content_translation_changed';
 
   /**
    * The entity type manager.
@@ -173,9 +169,10 @@ final class McpNestedReplacementPlan {
    * Entity Reference Revisions post-save can rewrite parent_id,
    * parent_type, and parent_field_name on a kept child without creating a
    * revision. On a translatable paragraph that save also advances
-   * content_translation_changed. Those fields are restored. Any other
-   * change, including a new revision of a paragraph the published host
-   * still pins, fails the save so the transaction rolls back.
+   * content_translation_changed. The timestamp is restored only when a
+   * parent pointer changed with it. A timestamp change on its own, any
+   * other field change, or a new revision of a paragraph the published
+   * host still pins, fails the save so the transaction rolls back.
    */
   public function assertPublishedUntouched(): void {
     if (!$this->publishedIsUnchanged()) {
@@ -197,8 +194,11 @@ final class McpNestedReplacementPlan {
         continue;
       }
       $changed = self::changedFields($watched['values'], $values);
-      $unexpected = array_diff($changed, self::RESTORABLE_FIELDS);
-      if ($changed === [] || $unexpected !== []) {
+      $restorable = self::PARENT_FIELDS;
+      if (array_intersect($changed, self::PARENT_FIELDS) !== []) {
+        $restorable[] = self::TRANSLATION_CHANGED_FIELD;
+      }
+      if ($changed === [] || array_diff($changed, $restorable) !== []) {
         throw new ConflictHttpException('Nested replacement changed a published paragraph; the save was rolled back.');
       }
       $this->restoreParentPointers($revision, $watched['values']);
@@ -340,14 +340,14 @@ final class McpNestedReplacementPlan {
       }
     }
     foreach ($values as $langcode => $translation_values) {
-      $timestamp = $translation_values['content_translation_changed']
+      $timestamp = $translation_values[self::TRANSLATION_CHANGED_FIELD]
         ?? NULL;
       if ($timestamp === NULL || !$revision->hasTranslation($langcode)) {
         continue;
       }
       $translation = $revision->getTranslation($langcode);
-      if ($translation->hasField('content_translation_changed')) {
-        $translation->set('content_translation_changed', $timestamp);
+      if ($translation->hasField(self::TRANSLATION_CHANGED_FIELD)) {
+        $translation->set(self::TRANSLATION_CHANGED_FIELD, $timestamp);
       }
     }
     $was_default = $revision->isDefaultRevision();
