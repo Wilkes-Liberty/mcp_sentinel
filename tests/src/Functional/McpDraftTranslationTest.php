@@ -1017,7 +1017,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
       ->accessCheck(FALSE)
       ->execute();
     $vids = array_map(static fn (int|string $vid): string => (string) $vid, array_keys($ids));
-    sort($vids, SORT_STRING);
+    sort($vids, SORT_NUMERIC);
     return $vids;
   }
 
