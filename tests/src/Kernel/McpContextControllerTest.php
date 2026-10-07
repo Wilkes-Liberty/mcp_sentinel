@@ -8,6 +8,8 @@ use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\node\Entity\NodeType;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -148,6 +150,91 @@ final class McpContextControllerTest extends KernelTestBase {
     $this->assertSame('unauthenticated', $payload['reason']);
     $this->assertSame('MCP access is denied.', $payload['error']);
     $this->assertArrayNotHasKey('contract_ready', $payload);
+  }
+
+  /**
+   * Text fields report allowed_formats; other fields omit the key.
+   *
+   * A content-tier token cannot read field_config. This document is the
+   * list that token can enforce. An empty list means the field does not
+   * restrict formats.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder
+   */
+  public function testContextReportsTextAllowedFormats(): void {
+    $this->installConfig(['filter', 'node']);
+    NodeType::create(['type' => 'solution', 'name' => 'Solution'])->save();
+
+    FieldStorageConfig::create([
+      'field_name' => 'field_summary',
+      'entity_type' => 'node',
+      'type' => 'text_long',
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_summary',
+      'entity_type' => 'node',
+      'bundle' => 'solution',
+      'label' => 'Summary',
+      'settings' => [
+        'allowed_formats' => ['plain_text'],
+      ],
+    ])->save();
+
+    FieldStorageConfig::create([
+      'field_name' => 'field_notes',
+      'entity_type' => 'node',
+      'type' => 'text_long',
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_notes',
+      'entity_type' => 'node',
+      'bundle' => 'solution',
+      'label' => 'Notes',
+      'settings' => [
+        'allowed_formats' => [],
+      ],
+    ])->save();
+
+    FieldStorageConfig::create([
+      'field_name' => 'field_weight',
+      'entity_type' => 'node',
+      'type' => 'string',
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_weight',
+      'entity_type' => 'node',
+      'bundle' => 'solution',
+      'label' => 'Weight',
+    ])->save();
+
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+    $this->switchToDevelopmentGovernedUser();
+    $response = McpContextController::create($this->container)->context();
+    $this->assertSame(200, $response->getStatusCode());
+    $payload = json_decode((string) $response->getContent(), TRUE);
+    $fields = $payload['content_types']['solution']['fields'];
+
+    $this->assertSame(['plain_text'], $fields['field_summary']['allowed_formats']);
+    $this->assertSame([], $fields['field_notes']['allowed_formats']);
+    $this->assertArrayNotHasKey('allowed_formats', $fields['field_weight']);
+    $this->assertArrayNotHasKey('allowed_formats', $fields['title']);
+  }
+
+  /**
+   * Disabled checkbox leftovers are not advertised as format IDs.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder
+   */
+  public function testAllowedFormatsDropDisabledCheckboxValues(): void {
+    $builder = $this->container->get('mcp_sentinel.site_schema_builder');
+    $method = new \ReflectionMethod($builder, 'normalizeAllowedFormats');
+    $formats = $method->invoke($builder, [
+      'plain_text' => 'plain_text',
+      'headless_clean' => 0,
+      'basic_html' => '0',
+      'blank' => '',
+    ]);
+    $this->assertSame(['plain_text'], $formats);
   }
 
   /**

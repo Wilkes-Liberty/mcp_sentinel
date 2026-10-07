@@ -28,6 +28,15 @@ final class McpSiteSchemaBuilder {
   ];
 
   /**
+   * Field types whose allowed_formats setting is a write restriction.
+   */
+  private const FORMATTED_FIELD_TYPES = [
+    'text',
+    'text_long',
+    'text_with_summary',
+  ];
+
+  /**
    * Constructs an McpSiteSchemaBuilder.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
@@ -71,6 +80,8 @@ final class McpSiteSchemaBuilder {
    * @return array
    *   Keyed by node-type machine name; each entry carries the type label,
    *   description, and a field map (label, type, required, multiple).
+   *   Text fields also carry allowed_formats: a list of format IDs, or an
+   *   empty list when the field does not restrict formats.
    */
   private function buildContentTypeSchemas(callable $describes): array {
     $types = $this->entityTypeManager->getStorage('node_type')->loadMultiple();
@@ -85,12 +96,18 @@ final class McpSiteSchemaBuilder {
         if (in_array($fieldName, self::SKIP_FIELDS, TRUE)) {
           continue;
         }
-        $fieldSchemas[$fieldName] = [
+        $row = [
           'label' => (string) $field->getLabel(),
           'type' => $field->getType(),
           'required' => $field->isRequired(),
           'multiple' => $field->getFieldStorageDefinition()->isMultiple(),
         ];
+        if (in_array($field->getType(), self::FORMATTED_FIELD_TYPES, TRUE)) {
+          $row['allowed_formats'] = $this->normalizeAllowedFormats(
+            $field->getSetting('allowed_formats')
+          );
+        }
+        $fieldSchemas[$fieldName] = $row;
       }
       $result[$typeId] = [
         'label' => (string) $type->label(),
@@ -99,6 +116,33 @@ final class McpSiteSchemaBuilder {
       ];
     }
     return $result;
+  }
+
+  /**
+   * Normalizes a text field's allowed_formats setting.
+   *
+   * Saved config is a sequence of format IDs. A checkbox map may still
+   * carry 0 or "0" for a format that was not selected. An empty list means
+   * the field does not restrict formats.
+   *
+   * @param mixed $raw
+   *   The field setting.
+   *
+   * @return list<string>
+   *   Enabled format IDs.
+   */
+  private function normalizeAllowedFormats(mixed $raw): array {
+    if (!is_array($raw)) {
+      return [];
+    }
+    $formats = [];
+    foreach ($raw as $value) {
+      if (!is_string($value) || $value === '' || $value === '0') {
+        continue;
+      }
+      $formats[] = $value;
+    }
+    return $formats;
   }
 
   /**
