@@ -930,6 +930,98 @@ final class McpDraftTranslationTest extends BrowserTestBase {
   }
 
   /**
+   * A translation create on a never-published node must not write.
+   *
+   * Content moderation makes the next save the default revision when nothing
+   * is published. The dry run and the real request both refuse before that
+   * save. The revision table, the live revision, and the working copy stay
+   * as they were. See https://www.drupal.org/node/3628712
+   */
+  public function testNeverPublishedTranslationCreateDoesNotWrite(): void {
+    [$agent] = $this->setUpTranslatedPage();
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+
+    $node = $this->drupalCreateNode([
+      'type' => 'page',
+      'title' => 'Unpublished draft',
+      'moderation_state' => 'draft',
+      'path' => ['alias' => '/unpublished-draft'],
+    ]);
+    $first_vid = (string) $node->getRevisionId();
+    $this->assertFalse($node->isPublished());
+
+    // A second draft ahead of the first. With nothing published, content
+    // moderation makes this the default revision, which is also the latest.
+    $node->setTitle('Draft ahead');
+    $node->setNewRevision(TRUE);
+    $node->set('moderation_state', 'draft');
+    $node->save();
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $live_vid = (string) $live->getRevisionId();
+    $this->assertNotSame($first_vid, $live_vid);
+    $this->assertSame($live_vid, (string) $storage->getLatestRevisionId($node->id()));
+    $this->assertFalse($live->isPublished());
+    $this->assertFalse($live->hasTranslation('es'));
+    $this->assertSame('/unpublished-draft', $live->get('path')->alias);
+
+    $path = $this->buildUrl('/jsonapi/node/page/' . $node->uuid() . '/mcp-draft/translations');
+    $inventory = $this->buildUrl('/jsonapi/node/page/' . $node->uuid() . '/mcp-translations');
+    $if_match = '"' . $live_vid . '"';
+    $before = $this->nodeRevisionIds($node);
+
+    $preflight = $this->translationRequest('POST', $path, $agent, $node, ['title' => 'Spanish draft'], $if_match, TRUE, 'es');
+    $this->assertSame(409, $preflight->getStatusCode(), (string) $preflight->getBody());
+    $preflight_detail = json_decode((string) $preflight->getBody(), TRUE)['errors'][0]['detail'] ?? '';
+    $this->assertStringContainsString('no published revision', $preflight_detail);
+    $this->assertStringNotContainsString('rolled back', $preflight_detail);
+    $this->assertSame($before, $this->nodeRevisionIds($node));
+
+    $created = $this->translationRequest('POST', $path, $agent, $node, ['title' => 'Spanish draft'], $if_match, FALSE, 'es');
+    $this->assertSame(409, $created->getStatusCode(), (string) $created->getBody());
+    $created_detail = json_decode((string) $created->getBody(), TRUE)['errors'][0]['detail'] ?? '';
+    $this->assertStringContainsString('no published revision', $created_detail);
+    $this->assertStringNotContainsString('rolled back', $created_detail);
+    $this->assertSame($before, $this->nodeRevisionIds($node));
+
+    $storage->resetCache([$node->id()]);
+    $live = $storage->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $live);
+    $this->assertSame($live_vid, (string) $live->getRevisionId());
+    $this->assertFalse($live->hasTranslation('es'));
+    $this->assertSame('Draft ahead', $live->label());
+    $this->assertSame('/unpublished-draft', $live->get('path')->alias);
+    $meta = $this->inventoryMeta($inventory, $agent);
+    $this->assertSame($live_vid, $meta['live']['vid']);
+    $this->assertNull($meta['working']);
+    $live_langs = array_column($meta['live']['translations'], 'langcode');
+    $this->assertSame(['en'], $live_langs);
+  }
+
+  /**
+   * Revision ids for a node, in ascending order.
+   *
+   * @param \Drupal\node\NodeInterface $node
+   *   The node.
+   *
+   * @return list<string>
+   *   Stored revision ids.
+   */
+  private function nodeRevisionIds(NodeInterface $node): array {
+    $storage = $this->container->get('entity_type.manager')->getStorage('node');
+    $storage->resetCache([$node->id()]);
+    $ids = $storage->getQuery()
+      ->allRevisions()
+      ->condition('nid', $node->id())
+      ->accessCheck(FALSE)
+      ->execute();
+    $vids = array_map(static fn (int|string $vid): string => (string) $vid, array_keys($ids));
+    sort($vids, SORT_STRING);
+    return $vids;
+  }
+
+  /**
    * GET .../mcp-translations meta for a governed agent.
    *
    * @param string $path_inventory

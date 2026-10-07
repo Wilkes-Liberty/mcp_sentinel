@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- [#3628712](https://www.drupal.org/project/mcp_sentinel/issues/3628712):
+  Creating a translation on a moderated node that has no published revision
+  is refused before anything is written. The dry run reports the same
+  refusal. The revision table, the live revision, and the alias stay as
+  they were. A node that already has a published revision is unchanged.
+
 ## [2.31.1] - 2026-10-06
 
 ### Fixed
