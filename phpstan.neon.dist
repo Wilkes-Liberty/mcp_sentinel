@@ -102,3 +102,12 @@ parameters:
       paths:
         - modules/mcp_sentinel_server/src/EventSubscriber/McpAuthorizationAuditSubscriber.php
         - modules/mcp_sentinel_server/tests/src/Kernel/McpAuthorizationAuditTest.php
+    # PHPStan 2.3 reports hook parameters an implementation does not read.
+    # The signature is Drupal's. Dropping a parameter changes the hook.
+    -
+      identifier: function.unusedParameter
+      paths:
+        - mcp_sentinel.module
+        - modules/mcp_sentinel_approval/mcp_sentinel_approval.module
+        - modules/mcp_sentinel_graphql/mcp_sentinel_graphql.module
+        - modules/mcp_sentinel_server/mcp_sentinel_server.module

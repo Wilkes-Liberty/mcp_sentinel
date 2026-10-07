@@ -388,6 +388,9 @@ final class McpDraftResource extends EntityResource {
     // split revise uses: only the language being saved is affected.
     $this->markOtherLanguagesUnaffected($translation);
     static::validate($translation);
+    // Content moderation promotes this save to the default revision when
+    // nothing is published. Refuse before the dry run or the write.
+    $this->assertCreateKeepsUnpublishedLive($live);
     $save_versions = [
       1 => (string) $live->getRevisionId(),
       // Empty when If-Match was live-only; otherwise the working revision.
@@ -872,6 +875,11 @@ final class McpDraftResource extends EntityResource {
           throw new ConflictHttpException('A translation for this language already exists. Continue it instead of creating it.');
         }
       }
+      // Re-read under the lock. The preflight check used the copy loaded
+      // before this transaction, which another request may have replaced.
+      if ($write_mode === 'create' && self::isPublishableContent($stored_live)) {
+        $this->assertCreateKeepsUnpublishedLive($stored_live);
+      }
       $live_pins = [];
       foreach ($components as $component) {
         $paragraph_id = $component['entity']->id();
@@ -939,7 +947,8 @@ final class McpDraftResource extends EntityResource {
           $intact = $nested->publishedIsUnchanged();
         }
         catch (\Throwable) {
-          $intact = FALSE;
+          // The initial FALSE stands: the published revision could not
+          // be re-read.
         }
         $suffix = $intact
           ? ' The nested replacement was rolled back. The published revision was not saved.'
@@ -1919,6 +1928,33 @@ final class McpDraftResource extends EntityResource {
       'vid' => (string) $entity->getRevisionId(),
       'translations' => $translations,
     ];
+  }
+
+  /**
+   * Refuses a translation create that content moderation would make live.
+   *
+   * When the default revision is not published, content moderation forces the
+   * next save to become the default revision. That replaces the live revision.
+   * Refuse before any write. The same check runs for a dry run.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $live
+   *   The stored default revision.
+   *
+   * @throws \Symfony\Component\HttpKernel\Exception\ConflictHttpException
+   *   When the create would replace the unpublished live revision.
+   */
+  private function assertCreateKeepsUnpublishedLive(ContentEntityInterface $live): void {
+    $moderation = $this->draftModeration;
+    if (!$moderation || !$moderation->isModeratedEntity($live)) {
+      return;
+    }
+    if ($moderation->isDefaultRevisionPublished($live)) {
+      return;
+    }
+    throw new ConflictHttpException(
+      'This content has no published revision. Adding a translation would '
+      . 'replace the live revision, so nothing was saved.',
+    );
   }
 
   /**
