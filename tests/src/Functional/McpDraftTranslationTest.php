@@ -226,7 +226,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
    * Alt-only image writes change the translation; the file target stays shared.
    */
   public function testImageAltOnlyTranslation(): void {
-    [$agent, $node, $live_vid, $path_create, $path_draft] = $this->setUpTranslatedPage();
+    [$agent, $node, , $path_create, $path_draft] = $this->setUpTranslatedPage();
     $this->installPhotoField();
     $storage = $this->container->get('entity_type.manager')->getStorage('node');
     $storage->resetCache([$node->id()]);
@@ -623,7 +623,7 @@ final class McpDraftTranslationTest extends BrowserTestBase {
    * is stored on the new revision.
    */
   public function testDefaultLanguageContinuationOnMultilingualNode(): void {
-    [$agent, $node, $live_vid, , $path_draft] = $this->setUpTranslatedPage();
+    [$agent, $node, , , $path_draft] = $this->setUpTranslatedPage();
     FieldStorageConfig::create([
       'field_name' => 'field_related',
       'entity_type' => 'node',

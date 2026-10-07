@@ -97,7 +97,7 @@ final class McpUrgentConditions {
     $conditions = [];
 
     $this->evaluateChain($conditions);
-    $this->evaluateEncryption($config, $conditions);
+    $this->evaluateEncryption($conditions);
     $this->evaluateMasterSwitch($config, $conditions);
     $this->evaluateConfigGovernance($config, $conditions);
     $this->evaluateEndpoints($conditions);
@@ -361,12 +361,14 @@ final class McpUrgentConditions {
   /**
    * Adds encryption_unresolvable when a configured profile cannot be loaded.
    *
-   * @param \Drupal\Core\Config\ImmutableConfig $config
-   *   The settings config.
+   * The profile id lives on audit_chain.settings. The Sentinel settings
+   * object is not an input: reading it reported a missing profile on sites
+   * that configure encryption only on the chain.
+   *
    * @param array $conditions
    *   The condition list, modified by reference.
    */
-  private function evaluateEncryption(ImmutableConfig $config, array &$conditions): void {
+  private function evaluateEncryption(array &$conditions): void {
     // The chain owns this setting now; reading the stale mcp_sentinel key
     // would report "no encryption configured" on a site that has it enabled.
     $profileId = (string) ($this->configFactory
