@@ -124,7 +124,6 @@ final class McpApprovalExecutor {
 
     $executed = FALSE;
     $reason = NULL;
-    $message = '';
 
     if ($request->getOperation() === 'delete') {
       // Guard against an invalid or uninstalled entity type (Fix 2): calling
