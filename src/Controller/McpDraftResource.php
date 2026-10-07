@@ -943,6 +943,7 @@ final class McpDraftResource extends EntityResource {
         catch (\Throwable) {
           throw $exception;
         }
+        $intact = FALSE;
         try {
           $intact = $nested->publishedIsUnchanged();
         }
