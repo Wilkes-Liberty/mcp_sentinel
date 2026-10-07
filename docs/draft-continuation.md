@@ -142,7 +142,11 @@ used here. Translation writes are explicit:
   new unpublished forward revision. `If-Match` is `"<live>"` when there is no
   working revision, or `"<live>:<working>"` when adding the language onto an
   existing unpublished forward revision. An existing translation on live or
-  working is 409, not an overwrite.
+  working is 409, not an overwrite. When the stored default revision is not
+  published, content moderation would make that save the new default
+  revision. The POST is then 409 before any write, and a preflight
+  (`X-MCP-Draft-Preflight: 1`) returns the same 409. The detail says the
+  content has no published revision and that nothing was saved.
 - The same POST with `X-MCP-Draft-Mode: revise` opens that forward draft when
   the language is already published on the live default revision.
   `If-Match` is `"<live>"` when nothing is ahead of live, or
@@ -189,7 +193,9 @@ used here. Translation writes are explicit:
 
 The selected translation is the entity that is validated and saved, so
 content_moderation sees its unpublished draft state and does not promote the
-working revision to the live default. English on the live revision — title,
+working revision to the live default when that default is already published.
+When the stored default is not published, the create is refused instead, as
+described above. English on the live revision — title,
 summary, body, status, alias, and default revision ID — is left unchanged.
 Anonymous requests do not receive working-revision languages or the draft
 body. Shared aliases, file targets, and paragraph structure cannot be changed
