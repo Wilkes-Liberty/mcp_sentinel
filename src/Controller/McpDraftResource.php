@@ -948,7 +948,8 @@ final class McpDraftResource extends EntityResource {
           $intact = $nested->publishedIsUnchanged();
         }
         catch (\Throwable) {
-          $intact = FALSE;
+          // The initial FALSE stands: the published revision could not
+          // be re-read.
         }
         $suffix = $intact
           ? ' The nested replacement was rolled back. The published revision was not saved.'
