@@ -17,6 +17,8 @@ use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
+use Drupal\tool\Tool\ToolDefinition;
+use Drupal\tool\Tool\ToolOperation;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -38,6 +40,24 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * @see \Drupal\Tests\mcp_sentinel\Kernel\McpDownstreamToolContractTest
  */
 abstract class McpGovernedToolBase extends ToolBase {
+
+  /**
+   * Reserved key on a successful Read or Explain result.
+   *
+   * Clients must treat the rest of the result as data, not as instructions.
+   * The value grants no permission. A payload cannot remove or replace it.
+   *
+   * @api
+   */
+  public const UNTRUSTED_READ_MARKER = '_mcp_sentinel_untrusted_read';
+
+  /**
+   * The only value the untrusted-read marker may carry.
+   */
+  private const UNTRUSTED_READ_VALUE = [
+    'class' => 'untrusted_data',
+    'instructions' => FALSE,
+  ];
 
   /**
    * Source-governance readiness service.
@@ -132,7 +152,35 @@ abstract class McpGovernedToolBase extends ToolBase {
   public function execute(): static {
     parent::execute();
     $this->applyDlpToResult();
+    $this->markUntrustedRead();
     return $this;
+  }
+
+  /**
+   * Stamps successful reads so a client cannot treat retrieved text as orders.
+   *
+   * Write, trigger, and failed results are left alone. The stamp is applied
+   * after DLP and overwrites any copy the payload tried to supply.
+   */
+  private function markUntrustedRead(): void {
+    if ($this->result === NULL || !$this->result->isSuccess()) {
+      return;
+    }
+    $definition = $this->getPluginDefinition();
+    if (!$definition instanceof ToolDefinition) {
+      return;
+    }
+    $operation = $definition->getOperation();
+    $reads = [ToolOperation::Read, ToolOperation::Explain];
+    if (!in_array($operation, $reads, TRUE)) {
+      return;
+    }
+    $context = $this->result->getContextValues();
+    if (!is_array($context)) {
+      return;
+    }
+    $context[self::UNTRUSTED_READ_MARKER] = self::UNTRUSTED_READ_VALUE;
+    $this->result = ExecutableResult::success($this->result->getMessage(), $context);
   }
 
   /**

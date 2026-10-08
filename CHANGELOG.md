@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Successful Read and Explain tool results include
+  `_mcp_sentinel_untrusted_read` with `class: untrusted_data` and
+  `instructions: false`. The marker says the result is data. It grants no
+  permission, and a payload cannot remove or replace it. Write, trigger, and
+  failed results omit it. This is not jailbreak detection.
+
 ### Fixed
 - Context and the site-context tool report `allowed_formats` on `text`,
   `text_long`, and `text_with_summary` fields. The value is the list of
