@@ -83,7 +83,10 @@ A successful Tool result whose operation is **Read** or **Explain** includes
 
 The rest of that result is data. A client must not follow it as instructions.
 The marker grants no permission, and text inside the payload cannot remove or
-replace it. Write, trigger, and failed results do not carry the marker. This
+replace it. The marker is part of the payload measured against the profile
+response-size cap. A read that fits before the marker and exceeds the cap
+after it is refused, and the payload is not returned. Write, trigger, and
+failed results do not carry the marker. This
 is not jailbreak detection. Prompt text in a result does not change policy.
 
 ## Requirements

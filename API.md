@@ -120,7 +120,10 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `discoveryAccess()` gates, and the protected `governance*` properties
 (`$governancePolicyResolver`, `$governanceAccessChecker`,
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
-`$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`).
+`$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`,
+`$governanceExfiltrationGuard`). `$governanceExfiltrationGuard` measures the
+Read or Explain payload again after the untrusted-read marker is added, and
+refuses the result when that payload exceeds the profile response-size cap.
 Each one carries `@api` in its
 docblock, except `checkAccess()`, whose docblock is inherited from the Tool
 API. A tool that operates on configuration also implements

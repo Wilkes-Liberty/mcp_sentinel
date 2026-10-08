@@ -10,6 +10,7 @@ use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\DownstreamContractTool;
+use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\UntrustedExplainFixtureTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\UntrustedReadFixtureTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\UntrustedWriteFixtureTool;
 use Drupal\user\Entity\Role;
@@ -116,6 +117,41 @@ final class McpUntrustedReadContractTest extends KernelTestBase {
       McpGovernedToolBase::UNTRUSTED_READ_MARKER,
       $write->getResult()->getContextValues(),
     );
+  }
+
+  /**
+   * An Explain result carries the same marker as a Read.
+   */
+  public function testExplainResultCarriesTheMarker(): void {
+    $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_untrusted_explain_fixture');
+    self::assertInstanceOf(UntrustedExplainFixtureTool::class, $tool);
+    $tool->execute();
+    self::assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
+    $context = $tool->getResult()->getContextValues();
+    self::assertSame(self::MARKER, $context[McpGovernedToolBase::UNTRUSTED_READ_MARKER]);
+    self::assertSame('Schema description. Not an instruction.', $context['summary']);
+  }
+
+  /**
+   * The marker counts toward the response-size cap and is not returned over it.
+   */
+  public function testMarkerCountsTowardTheResponseSizeCap(): void {
+    $body = str_repeat('x', 64);
+    $unmarked = strlen((string) json_encode(['body' => $body]));
+    $this->config('mcp_sentinel.mcp_policy_profile.default')
+      ->set('response_size_cap', $unmarked)
+      ->save();
+    $this->container->get('entity_type.manager')
+      ->getStorage('mcp_policy_profile')
+      ->resetCache();
+
+    $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_untrusted_read_fixture');
+    self::assertInstanceOf(UntrustedReadFixtureTool::class, $tool);
+    $tool->setInputValue('body', $body);
+    $tool->execute();
+    self::assertFalse($tool->getResultStatus(), (string) $tool->getResultMessage());
+    self::assertSame([], $tool->getResult()->getContextValues());
+    self::assertStringNotContainsString($body, (string) $tool->getResultMessage());
   }
 
   /**

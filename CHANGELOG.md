@@ -10,7 +10,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Successful Read and Explain tool results include
   `_mcp_sentinel_untrusted_read` with `class: untrusted_data` and
   `instructions: false`. The marker says the result is data. It grants no
-  permission, and a payload cannot remove or replace it. Write, trigger, and
+  permission, and a payload cannot remove or replace it. The marker counts
+  toward the profile response-size cap; a read that exceeds the cap after the
+  marker is refused and the payload is not returned. Write, trigger, and
   failed results omit it. This is not jailbreak detection.
 
 ### Fixed
