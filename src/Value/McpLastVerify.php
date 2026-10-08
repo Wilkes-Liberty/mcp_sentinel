@@ -128,10 +128,12 @@ final class McpLastVerify {
    * verify that is not the historical exception is never replaced this way,
    * so a break Sentinel saw itself stays critical until an operator verifies
    * again. No other scheduled verdict is adopted, and a scheduled run older
-   * than a day is ignored. The adopted value's row baseline is the governed
-   * rows stamped at or before the run, so later rows make it stale. A row
-   * written later in the same second as the run is caught by the next row
-   * after it.
+   * than $staleAfter seconds (the site's evidence_stale_after setting) is
+   * ignored. The adopted value's row baseline is the governed rows stamped
+   * at or before the run. McpEvidenceState::fromLastVerify() then decides
+   * staleness against that baseline using the site's evidence_stale_rows
+   * tolerance. A row written later in the same second as the run is counted
+   * from the next row after it.
    *
    * @param array<string, mixed>|null $last
    *   The mcp_sentinel.last_verify value, or NULL.
