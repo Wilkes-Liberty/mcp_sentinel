@@ -176,9 +176,6 @@ abstract class McpGovernedToolBase extends ToolBase {
       return;
     }
     $context = $this->result->getContextValues();
-    if (!is_array($context)) {
-      return;
-    }
     $context[self::UNTRUSTED_READ_MARKER] = self::UNTRUSTED_READ_VALUE;
     $this->result = ExecutableResult::success($this->result->getMessage(), $context);
   }
