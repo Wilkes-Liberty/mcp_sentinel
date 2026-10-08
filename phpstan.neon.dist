@@ -86,6 +86,14 @@ parameters:
     -
       identifier: phpunit.coversMethod
       path: tests/src/Kernel/McpMetricsTest.php
+    # Drupal calls these hook implementations with a fixed argument list.
+    # PHP 8 rejects extra arguments, so an unused hook parameter stays.
+    # PHPStan 2.3 bleeding edge reports that as function.unusedParameter.
+    -
+      identifier: function.unusedParameter
+      paths:
+        - mcp_sentinel.module
+        - modules/*/*.module
     # MCP Server's authorization-denied event is not in an MCP Server release
     # yet. Until it is, the subscriber is never called and the stream test
     # skips. Remove this when the supported MCP Server ships the event.

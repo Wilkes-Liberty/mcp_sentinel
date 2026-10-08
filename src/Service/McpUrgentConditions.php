@@ -361,6 +361,10 @@ final class McpUrgentConditions {
   /**
    * Adds encryption_unresolvable when a configured profile cannot be loaded.
    *
+   * The profile id lives on audit_chain.settings. The Sentinel settings
+   * object is not an input: reading it reported a missing profile on sites
+   * that configure encryption only on the chain.
+   *
    * @param array $conditions
    *   The condition list, modified by reference.
    */

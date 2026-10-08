@@ -7,6 +7,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Context and the site-context tool report `allowed_formats` on `text`,
+  `text_long`, and `text_with_summary` fields. The value is the list of
+  enabled format IDs. An empty list means the field does not restrict
+  formats. Non-text fields omit the key. Disabled checkbox values (`0`)
+  are not reported as formats. A content-tier token can read this list
+  from `GET /drupal-mcp/context` without `administer node fields`.
 - [#3628712](https://www.drupal.org/project/mcp_sentinel/issues/3628712):
   Creating a translation on a moderated node that has no published revision
   is refused before anything is written. The dry run reports the same
