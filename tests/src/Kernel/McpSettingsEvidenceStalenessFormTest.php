@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Core\Form\FormState;
+use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Render\Element;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Form\McpSettingsForm;
@@ -80,10 +81,10 @@ final class McpSettingsEvidenceStalenessFormTest extends KernelTestBase {
    * @param array<string, mixed> $overrides
    *   Top-level form values to change.
    *
-   * @return \Drupal\Core\Form\FormState
+   * @return \Drupal\Core\Form\FormStateInterface
    *   The submitted form state.
    */
-  private function submitWith(array $overrides): FormState {
+  private function submitWith(array $overrides): FormStateInterface {
     $built = \Drupal::formBuilder()->getForm(McpSettingsForm::class);
     $values = array_replace($this->defaultValues($built), $overrides);
     $form_state = (new FormState())->setValues($values);
