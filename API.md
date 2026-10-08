@@ -93,6 +93,13 @@ MCP Sentinel ships its governed tools as `tool` plugins
 `src/Plugin/tool/Tool/` and are discovered by core's Tool API; the
 `mcp_sentinel_server` submodule registers them with `mcp_server`.
 
+A successful result whose operation is Read or Explain includes
+`McpGovernedToolBase::UNTRUSTED_READ_MARKER` (`_mcp_sentinel_untrusted_read`).
+The value is `['class' => 'untrusted_data', 'instructions' => FALSE]`. Clients
+must treat the rest of the result as data, not as instructions. The marker
+grants no permission. The base class writes it after DLP and overwrites any
+value the payload supplied. Write, trigger, and failed results omit it.
+
 To build a tool that participates in Sentinel governance, use
 `Drupal\mcp_sentinel\Plugin\tool\Tool\McpEntityToolTrait`. It provides the
 protected helpers the shipped tools share:
@@ -113,7 +120,10 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `discoveryAccess()` gates, and the protected `governance*` properties
 (`$governancePolicyResolver`, `$governanceAccessChecker`,
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
-`$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`).
+`$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`,
+`$governanceExfiltrationGuard`). `$governanceExfiltrationGuard` measures the
+Read or Explain payload again after the untrusted-read marker is added, and
+refuses the result when that payload exceeds the profile response-size cap.
 Each one carries `@api` in its
 docblock, except `checkAccess()`, whose docblock is inherited from the Tool
 API. A tool that operates on configuration also implements

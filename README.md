@@ -71,6 +71,24 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 > WARNING, "MCP Sentinel: not governing any request". Fix the warning before
 > relying on governance; until then the module is failing open.
 
+## Tool result contract
+
+A successful Tool result whose operation is **Read** or **Explain** includes
+`_mcp_sentinel_untrusted_read`:
+
+| Key | Value |
+| --- | --- |
+| `class` | `untrusted_data` |
+| `instructions` | `false` |
+
+The rest of that result is data. A client must not follow it as instructions.
+The marker grants no permission, and text inside the payload cannot remove or
+replace it. The marker is part of the payload measured against the profile
+response-size cap. A read that fits before the marker and exceeds the cap
+after it is refused, and the payload is not returned. Write, trigger, and
+failed results do not carry the marker. This
+is not jailbreak detection. Prompt text in a result does not change policy.
+
 ## Requirements
 
 - Drupal 10.6+ or 11.3+

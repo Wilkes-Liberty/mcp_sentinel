@@ -10,6 +10,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
 use Drupal\tool\Tool\ToolInterface;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpSqlQueryTool;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelSqlCommands;
 use Drupal\mcp_sentinel\Service\McpDlp;
@@ -408,7 +409,13 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     $tool = $this->governedTool($query);
     $tool->execute();
     self::assertTrue($tool->getResultStatus(), (string) $tool->getResultMessage());
-    self::assertSame($commandResult, $tool->getResult()->getContextValues());
+    $context = $tool->getResult()->getContextValues();
+    self::assertSame([
+      'class' => 'untrusted_data',
+      'instructions' => FALSE,
+    ], $context[McpGovernedToolBase::UNTRUSTED_READ_MARKER]);
+    unset($context[McpGovernedToolBase::UNTRUSTED_READ_MARKER]);
+    self::assertSame($commandResult, $context);
   }
 
   /**

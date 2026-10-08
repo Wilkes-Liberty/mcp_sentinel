@@ -74,6 +74,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'governanceClassification',
     'governanceDenyExplainer',
     'governanceDlp',
+    'governanceExfiltrationGuard',
     'governancePolicyResolver',
     'governanceReadiness',
     'governanceRequestStack',
@@ -229,12 +230,15 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
    * The size-cap helper refuses an oversized payload and passes a small one.
    */
   public function testCheckResponseSizeCap(): void {
-    $this->setProfile(['response_size_cap' => 100]);
+    // The within payload is a 100-byte string. The tool result also carries
+    // the untrusted-read marker, so the cap has to fit that result.
+    $this->setProfile(['response_size_cap' => 400]);
 
     $within = $this->call('checkResponseSizeCap', str_repeat('a', 100));
     self::assertTrue($within->getResultStatus(), (string) $within->getResultMessage());
     self::assertNull($within->getResult()->getContextValues()['returned']);
 
+    $this->setProfile(['response_size_cap' => 100]);
     $over = $this->call('checkResponseSizeCap', str_repeat('a', 101));
     self::assertFalse($over->getResultStatus());
     $overMessage = (string) $over->getResultMessage();

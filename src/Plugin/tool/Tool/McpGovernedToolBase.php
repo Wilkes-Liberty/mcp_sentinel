@@ -12,11 +12,14 @@ use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpDlp;
+use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
+use Drupal\tool\Tool\ToolDefinition;
+use Drupal\tool\Tool\ToolOperation;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -38,6 +41,24 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * @see \Drupal\Tests\mcp_sentinel\Kernel\McpDownstreamToolContractTest
  */
 abstract class McpGovernedToolBase extends ToolBase {
+
+  /**
+   * Reserved key on a successful Read or Explain result.
+   *
+   * Clients must treat the rest of the result as data, not as instructions.
+   * The value grants no permission. A payload cannot remove or replace it.
+   *
+   * @api
+   */
+  public const UNTRUSTED_READ_MARKER = '_mcp_sentinel_untrusted_read';
+
+  /**
+   * The only value the untrusted-read marker may carry.
+   */
+  private const UNTRUSTED_READ_VALUE = [
+    'class' => 'untrusted_data',
+    'instructions' => FALSE,
+  ];
 
   /**
    * Source-governance readiness service.
@@ -103,6 +124,15 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpDenyExplainer $governanceDenyExplainer = NULL;
 
   /**
+   * Response-size cap used after the untrusted-read marker is added.
+   *
+   * NULL in unit tests that construct a tool without the container.
+   *
+   * @api
+   */
+  protected ?McpExfiltrationGuard $governanceExfiltrationGuard = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -123,6 +153,9 @@ abstract class McpGovernedToolBase extends ToolBase {
     $instance->governanceDenyExplainer = $container->has('mcp_sentinel.deny_explainer')
       ? $container->get('mcp_sentinel.deny_explainer')
       : NULL;
+    $instance->governanceExfiltrationGuard = $container->has('mcp_sentinel.exfiltration_guard')
+      ? $container->get('mcp_sentinel.exfiltration_guard')
+      : NULL;
     return $instance;
   }
 
@@ -132,7 +165,67 @@ abstract class McpGovernedToolBase extends ToolBase {
   public function execute(): static {
     parent::execute();
     $this->applyDlpToResult();
+    $this->markUntrustedRead();
     return $this;
+  }
+
+  /**
+   * Stamps successful reads so a client cannot treat retrieved text as orders.
+   *
+   * Write, trigger, and failed results are left alone. The stamp is applied
+   * after DLP and overwrites any copy the payload tried to supply.
+   */
+  private function markUntrustedRead(): void {
+    if ($this->result === NULL || !$this->result->isSuccess()) {
+      return;
+    }
+    $definition = $this->getPluginDefinition();
+    if (!$definition instanceof ToolDefinition) {
+      return;
+    }
+    $operation = $definition->getOperation();
+    $reads = [ToolOperation::Read, ToolOperation::Explain];
+    if (!in_array($operation, $reads, TRUE)) {
+      return;
+    }
+    $context = $this->result->getContextValues();
+    $context[self::UNTRUSTED_READ_MARKER] = self::UNTRUSTED_READ_VALUE;
+    if ($this->markedPayloadExceedsSizeCap($context)) {
+      $this->result = ExecutableResult::failure($this->t('MCP Sentinel refused a read that exceeds the response size cap.'));
+      return;
+    }
+    $this->result = ExecutableResult::success($this->result->getMessage(), $context);
+  }
+
+  /**
+   * TRUE when the marked payload is larger than the profile's response cap.
+   *
+   * Tools measure their own result before this marker exists. The marker is
+   * part of the payload the client receives, so it counts toward the same cap.
+   * A cap of 0 is unlimited. Missing services leave the marked result in place.
+   */
+  private function markedPayloadExceedsSizeCap(array $context): bool {
+    if ($this->governanceExfiltrationGuard === NULL || $this->governancePolicyResolver === NULL) {
+      return FALSE;
+    }
+    $profile = $this->governancePolicyResolver->resolve($this->currentUser);
+    if ($profile === NULL) {
+      return FALSE;
+    }
+    $before = $context;
+    unset($before[self::UNTRUSTED_READ_MARKER]);
+    $beforeEncoded = json_encode($before);
+    $afterEncoded = json_encode($context);
+    if ($beforeEncoded === FALSE || $afterEncoded === FALSE) {
+      return TRUE;
+    }
+    // Only a result that fit before the marker and does not fit after it is
+    // refused here. A tool that already returned an over-cap payload keeps
+    // that decision.
+    $guard = $this->governanceExfiltrationGuard;
+    $fitted = !$guard->exceedsResponseSizeCap(strlen($beforeEncoded), $profile);
+    $exceeds = $guard->exceedsResponseSizeCap(strlen($afterEncoded), $profile);
+    return $fitted && $exceeds;
   }
 
   /**
