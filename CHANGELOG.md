@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.33.0] - 2026-10-08
+
 ### Added
 - [#3629250](https://www.drupal.org/project/mcp_sentinel/issues/3629250):
   Two settings control when chain evidence goes stale.
@@ -2803,7 +2805,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.32.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.33.0...1.x
+[2.33.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.32.0...2.33.0
 [2.32.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.1...2.32.0
 [2.31.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.0...2.31.1
 [2.31.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.30.1...2.31.0
