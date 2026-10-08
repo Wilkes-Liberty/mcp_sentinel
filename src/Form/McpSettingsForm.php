@@ -9,6 +9,7 @@ use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
+use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
@@ -273,6 +274,22 @@ class McpSettingsForm extends ConfigFormBase {
       '#default_value' => $config->get('audit_retention_days') ?? 90,
       '#min' => 0,
       '#max' => 3650,
+      '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['audit']['evidence_stale_after'] = [
+      '#type'          => 'number',
+      '#title'         => $this->t('Chain evidence stays current for (seconds)'),
+      '#description'   => $this->t('After this long, a chain verify reads as stale even if no new audit rows were written. Minimum @min. The default of 86400 is one day.', ['@min' => McpEvidenceState::MIN_STALE_AFTER]),
+      '#default_value' => $config->get('evidence_stale_after') ?? McpEvidenceState::STALE_AFTER,
+      '#min' => McpEvidenceState::MIN_STALE_AFTER,
+      '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
+    ];
+    $form['audit']['evidence_stale_rows'] = [
+      '#type'          => 'number',
+      '#title'         => $this->t('New governed rows allowed before chain evidence is stale'),
+      '#description'   => $this->t('A chain verify reads as stale once more governed audit rows than this land after it. 0 means any new row. On a site with steady agent traffic, a higher value keeps the dashboard from reading stale minutes after every verify; the age limit above still applies. Critical chain conditions are never softened by this setting.'),
+      '#default_value' => $config->get('evidence_stale_rows') ?? 0,
+      '#min' => 0,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];
     // The three fields below are presented on this form for the operator, but
@@ -892,6 +909,15 @@ class McpSettingsForm extends ConfigFormBase {
   public function validateForm(array &$form, FormStateInterface $form_state): void {
     parent::validateForm($form, $form_state);
 
+    $staleAfter = $form_state->getValue('evidence_stale_after');
+    if (!is_numeric($staleAfter) || (int) $staleAfter < McpEvidenceState::MIN_STALE_AFTER) {
+      $form_state->setErrorByName('evidence_stale_after', $this->t('Chain evidence must stay current for at least @min seconds.', ['@min' => McpEvidenceState::MIN_STALE_AFTER]));
+    }
+    $staleRows = $form_state->getValue('evidence_stale_rows');
+    if (!is_numeric($staleRows) || (int) $staleRows < 0) {
+      $form_state->setErrorByName('evidence_stale_rows', $this->t('The number of new governed rows allowed cannot be negative.'));
+    }
+
     // Refuse to govern an admin role. It holds every permission implicitly, so
     // no policy profile constrains it and no forbidden-permission list can
     // enumerate what it might use — "governed" would be a label, not a fact.
@@ -1334,6 +1360,8 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('audit_enabled', (bool) $form_state->getValue('audit_enabled'))
       ->set('audit_log_reads', (bool) $form_state->getValue('audit_log_reads'))
       ->set('audit_retention_days', (int) $form_state->getValue('audit_retention_days'))
+      ->set('evidence_stale_after', (int) $form_state->getValue('evidence_stale_after'))
+      ->set('evidence_stale_rows', (int) $form_state->getValue('evidence_stale_rows'))
       ->set('audit_sensitive_config_keys', $split((string) $form_state->getValue('audit_sensitive_config_keys')))
       ->set('audit_secret_config_prefixes', $split((string) $form_state->getValue('audit_secret_config_prefixes')))
       ->set('dlp_enabled', (bool) $form_state->getValue('dlp_enabled'))

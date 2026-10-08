@@ -142,11 +142,14 @@ final class McpLastVerify {
    * @param \Closure(int): int $governedRowsThrough
    *   Counts governed-channel audit rows stamped at or before a time.
    *   Called only when a scheduled run is adopted.
+   * @param int $staleAfter
+   *   Seconds after which a scheduled run is too old to adopt; the site's
+   *   evidence_stale_after setting.
    *
    * @return array<string, mixed>|null
    *   The state value to classify, or NULL when there is none.
    */
-  public static function effective(?array $last, mixed $scheduled, int $now, \Closure $governedRowsThrough): ?array {
+  public static function effective(?array $last, mixed $scheduled, int $now, \Closure $governedRowsThrough, int $staleAfter = McpEvidenceState::STALE_AFTER): ?array {
     if ($last !== NULL && $last !== []) {
       if (self::isDocumentedHistoricalException($last)
         && is_array($scheduled)
@@ -169,11 +172,11 @@ final class McpLastVerify {
       if (self::isDocumentedHistoricalException($last)
         && is_array($scheduled)
         && (int) ($scheduled['time'] ?? 0) > (int) ($last['time'] ?? 0)) {
-        return self::adoptHistoricalException($scheduled, $now, $governedRowsThrough) ?? $last;
+        return self::adoptHistoricalException($scheduled, $now, $governedRowsThrough, $staleAfter) ?? $last;
       }
       return $last;
     }
-    return is_array($scheduled) ? self::adoptHistoricalException($scheduled, $now, $governedRowsThrough) : NULL;
+    return is_array($scheduled) ? self::adoptHistoricalException($scheduled, $now, $governedRowsThrough, $staleAfter) : NULL;
   }
 
   /**
@@ -185,17 +188,19 @@ final class McpLastVerify {
    *   Request time.
    * @param \Closure(int): int $governedRowsThrough
    *   Counts governed-channel audit rows stamped at or before a time.
+   * @param int $staleAfter
+   *   Seconds after which the run is too old to adopt.
    *
    * @return array<string, mixed>|null
    *   The adopted state value, or NULL when the run is not the documented
-   *   historical exception or is older than a day.
+   *   historical exception or is older than the configured age.
    */
-  private static function adoptHistoricalException(array $scheduled, int $now, \Closure $governedRowsThrough): ?array {
+  private static function adoptHistoricalException(array $scheduled, int $now, \Closure $governedRowsThrough, int $staleAfter): ?array {
     if (!self::auditChainClassifiesHistoricalException($scheduled)) {
       return NULL;
     }
     $time = (int) ($scheduled['time'] ?? 0);
-    if ($time <= 0 || $now - $time >= McpEvidenceState::STALE_AFTER) {
+    if ($time <= 0 || $now - $time >= $staleAfter) {
       return NULL;
     }
     $verdict = is_array($scheduled['verdict'] ?? NULL) ? $scheduled['verdict'] : [];

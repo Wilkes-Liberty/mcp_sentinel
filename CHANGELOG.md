@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- [#3629250](https://www.drupal.org/project/mcp_sentinel/issues/3629250):
+  Two settings control when chain evidence goes stale.
+  `evidence_stale_after` is how many seconds a verify stays current
+  (default 86400, minimum 300). `evidence_stale_rows` is how many governed
+  rows may land after a verify before it is stale (default 0, meaning any new
+  row). The defaults keep the previous behaviour. A site with steady agent
+  traffic can raise the row count so the dashboard stops reading
+  `chain_stale` minutes after every verify. Both settings are on the settings
+  form under Audit. The age limit also bounds which Audit Chain scheduled run
+  Sentinel adopts. Critical chain conditions are unchanged. Update 10028 adds
+  the defaults to existing sites.
+
 ## [2.32.0] - 2026-10-07
 
 ### Added

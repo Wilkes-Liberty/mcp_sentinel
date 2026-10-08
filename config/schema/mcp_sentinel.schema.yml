@@ -19,6 +19,18 @@ mcp_sentinel.settings:
     audit_retention_days:
       type: integer
       label: 'Audit log retention in days'
+    evidence_stale_after:
+      type: integer
+      label: 'Seconds after which a chain verify is stale, regardless of new rows'
+      constraints:
+        Range:
+          min: 300
+    evidence_stale_rows:
+      type: integer
+      label: 'Governed rows that may land after a chain verify before it is stale (0 = any new row)'
+      constraints:
+        Range:
+          min: 0
     # webhook_enabled, webhook_url, webhook_secret, webhook_secret_key and
     # allow_internal_webhook_urls lived here until webhook_endpoints replaced
     # the single-URL settings. They are intentionally absent from this schema

@@ -262,6 +262,7 @@ final class McpUrgentConditions {
    */
   private function evaluateChain(array &$conditions): void {
     $last = $this->state->get('mcp_sentinel.last_verify');
+    [$staleAfter, $staleRows] = $this->evidenceThresholds();
     $last = McpLastVerify::effective(
       is_array($last) ? $last : NULL,
       $this->state->get(McpLastVerify::SCHEDULED_STATE_KEY),
@@ -270,11 +271,12 @@ final class McpUrgentConditions {
         ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
         ->condition('l.timestamp', $time, '<=')
         ->countQuery()->execute()->fetchField(),
+      $staleAfter,
     );
     $rows = (int) $this->database->select('audit_chain_log', 'l')
       ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
       ->countQuery()->execute()->fetchField();
-    $state = McpEvidenceState::fromLastVerify($last, $rows, $this->time->getRequestTime());
+    $state = McpEvidenceState::fromLastVerify($last, $rows, $this->time->getRequestTime(), $staleAfter, $staleRows);
     $url = $this->routeUrl('mcp_sentinel.audit_log');
     switch ($state) {
       case McpEvidenceState::Failed:
@@ -330,7 +332,7 @@ final class McpUrgentConditions {
         $conditions[] = [
           'severity' => 'warning',
           'key' => 'chain_stale',
-          'message' => 'Audit hash chain verification is stale (new rows or older than 24 hours). Re-verify before treating posture as clear.',
+          'message' => 'Audit hash chain verification is stale (more new rows or more time than the evidence staleness settings allow). Re-verify before treating posture as clear.',
           'url' => $url,
         ];
         return;
@@ -511,6 +513,17 @@ final class McpUrgentConditions {
     catch (\Throwable $e) {
       return NULL;
     }
+  }
+
+  /**
+   * Returns the configured evidence staleness thresholds.
+   *
+   * @return array{0: int, 1: int}
+   *   Seconds after which a verify is stale, and tolerated new governed rows.
+   */
+  private function evidenceThresholds(): array {
+    $config = $this->configFactory->get('mcp_sentinel.settings');
+    return McpEvidenceState::thresholds($config->get('evidence_stale_after'), $config->get('evidence_stale_rows'));
   }
 
 }
