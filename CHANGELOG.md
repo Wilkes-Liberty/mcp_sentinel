@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.32.0] - 2026-10-07
+
 ### Added
 - Successful Read and Explain tool results include
   `_mcp_sentinel_untrusted_read` with `class: untrusted_data` and
@@ -2788,7 +2790,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.32.0...1.x
+[2.32.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.1...2.32.0
 [2.31.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.0...2.31.1
 [2.31.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.30.1...2.31.0
 [2.30.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.30.0...2.30.1
