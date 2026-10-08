@@ -482,6 +482,65 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
   }
 
   /**
+   * A configured row tolerance keeps the warning through a few new rows.
+   */
+  public function testConfiguredRowToleranceKeepsWarning(): void {
+    $this->config('mcp_sentinel.settings')->set('evidence_stale_rows', 2)->save();
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->governedRow();
+    $this->governedRow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['historical_exception'] ?? NULL);
+    $this->assertArrayNotHasKey('chain_stale', $keys);
+
+    $this->governedRow();
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['chain_stale'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * A configured age limit also bounds which scheduled run is adopted.
+   */
+  public function testConfiguredAgeBoundsScheduledAdoption(): void {
+    $this->config('mcp_sentinel.settings')->set('evidence_stale_after', 3600)->save();
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(7200);
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $run['time'] -= 3700;
+    \Drupal::state()->set('audit_chain.scheduled_verification', $run);
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('warning', $keys['chain_stale'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
+   * Thresholds never soften a critical verdict.
+   */
+  public function testConfiguredToleranceDoesNotHideNewBreak(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('evidence_stale_rows', 1000)
+      ->set('evidence_stale_after', 604800)
+      ->save();
+    $this->activateSuccessor();
+    $this->commands->auditVerify();
+    $this->backdateStoredVerify(60);
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['entity_label' => 'changed after review'])
+      ->condition('id', 1)
+      ->execute();
+    $this->container->get('audit_chain.scheduled_verifier')->runNow();
+
+    $keys = $this->conditionKeys();
+    $this->assertSame('critical', $keys['chain_broken'] ?? NULL);
+    $this->assertArrayNotHasKey('historical_exception', $keys);
+  }
+
+  /**
    * Moves the stored Sentinel verify back so a scheduled run is newer.
    */
   private function backdateStoredVerify(int $seconds): void {

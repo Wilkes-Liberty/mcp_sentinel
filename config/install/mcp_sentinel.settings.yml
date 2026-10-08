@@ -5,6 +5,8 @@ governed_roles:
 audit_enabled: true
 audit_log_reads: false
 audit_retention_days: 90
+evidence_stale_after: 86400
+evidence_stale_rows: 0
 webhook_endpoints: {  }
 webhook_delivery_retention_days: 30
 agent_oauth_clients: {  }

@@ -502,6 +502,7 @@ final class McpMetrics {
    */
   private function lastVerify(): ?array {
     $last = $this->state->get('mcp_sentinel.last_verify');
+    [$staleAfter] = $this->evidenceThresholds();
     return McpLastVerify::effective(
       is_array($last) ? $last : NULL,
       $this->state->get(McpLastVerify::SCHEDULED_STATE_KEY),
@@ -510,6 +511,7 @@ final class McpMetrics {
         ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
         ->condition('l.timestamp', $time, '<=')
         ->countQuery()->execute()->fetchField(),
+      $staleAfter,
     );
   }
 
@@ -538,11 +540,14 @@ final class McpMetrics {
     return $this->guard(__FUNCTION__, NULL, $empty, function (): array {
       $chain = $this->chainIntegrity();
       $last = $this->lastVerify();
+      [$staleAfter, $staleRows] = $this->evidenceThresholds();
       return [
         'state' => McpEvidenceState::fromLastVerify(
           $last,
           $chain['rows'],
           $this->time->getRequestTime(),
+          $staleAfter,
+          $staleRows,
         ),
         'rows' => $chain['rows'],
         'verified_at' => $chain['verified_at'],
@@ -735,6 +740,17 @@ final class McpMetrics {
     }
     $this->staticCache[$key] = $value;
     return $value;
+  }
+
+  /**
+   * Returns the configured evidence staleness thresholds.
+   *
+   * @return array{0: int, 1: int}
+   *   Seconds after which a verify is stale, and tolerated new governed rows.
+   */
+  private function evidenceThresholds(): array {
+    $config = $this->configFactory->get('mcp_sentinel.settings');
+    return McpEvidenceState::thresholds($config->get('evidence_stale_after'), $config->get('evidence_stale_rows'));
   }
 
 }

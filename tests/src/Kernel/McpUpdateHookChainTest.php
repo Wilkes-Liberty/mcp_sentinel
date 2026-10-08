@@ -893,6 +893,31 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10028 adds the evidence staleness defaults and is idempotent.
+   */
+  public function testUpdate10028AddsEvidenceStalenessDefaults(): void {
+    $this->config('mcp_sentinel.settings')
+      ->clear('evidence_stale_after')
+      ->clear('evidence_stale_rows')
+      ->save();
+
+    $message = mcp_sentinel_update_10028();
+    $this->assertStringContainsString('evidence_stale_after', $message);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertSame(86400, $this->config('mcp_sentinel.settings')->get('evidence_stale_after'));
+    $this->assertSame(0, $this->config('mcp_sentinel.settings')->get('evidence_stale_rows'));
+
+    $this->config('mcp_sentinel.settings')
+      ->set('evidence_stale_after', 3600)
+      ->set('evidence_stale_rows', 25)
+      ->save();
+    $this->assertStringContainsString('already present', mcp_sentinel_update_10028());
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertSame(3600, $this->config('mcp_sentinel.settings')->get('evidence_stale_after'));
+    $this->assertSame(25, $this->config('mcp_sentinel.settings')->get('evidence_stale_rows'));
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

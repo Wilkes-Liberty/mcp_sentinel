@@ -1375,3 +1375,29 @@ function mcp_sentinel_update_10027(): string {
     . 'that schedules a publish or unpublish state is refused unless a profile '
     . 'turns this on.';
 }
+
+/**
+ * Add the chain evidence staleness thresholds to existing sites.
+ *
+ * Writes the defaults that match the behaviour before the settings existed
+ * (d.o #3629250): a verify is stale after a day, or as soon as one new
+ * governed row lands. Values an operator already set are kept.
+ */
+function mcp_sentinel_update_10028(): string {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $added = [];
+  if ($config->get('evidence_stale_after') === NULL) {
+    $config->set('evidence_stale_after', 86400);
+    $added[] = 'evidence_stale_after (86400)';
+  }
+  if ($config->get('evidence_stale_rows') === NULL) {
+    $config->set('evidence_stale_rows', 0);
+    $added[] = 'evidence_stale_rows (0)';
+  }
+  if ($added === []) {
+    return 'evidence_stale_after and evidence_stale_rows are already present.';
+  }
+  $config->save();
+  return 'Added ' . implode(' and ', $added) . ' to mcp_sentinel.settings. '
+    . 'Chain evidence goes stale exactly as before until an administrator raises them.';
+}
