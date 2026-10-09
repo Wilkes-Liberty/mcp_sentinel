@@ -10,7 +10,7 @@ dependencies:
   - drupal:user
   - drupal:node
   - drupal:jsonapi
-  - tool:tool (>=1.0.0-beta8)
+  - tool:tool (>=1.0.0-beta11)
   - key:key
   - simple_oauth:simple_oauth
   - consumers:consumers

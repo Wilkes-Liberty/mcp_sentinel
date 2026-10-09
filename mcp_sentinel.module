@@ -23,11 +23,13 @@ use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Field\FieldStorageDefinitionInterface;
 use Drupal\Core\Hook\Attribute\LegacyModuleImplementsAlter;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\mcp_sentinel\Service\McpScheduledPublishGate;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Url;
 use Drupal\simple_oauth\Entities\AccessTokenEntity;
+use Drupal\tool\Tool\ToolDefinition;
 use Symfony\Component\Routing\Route;
 use Symfony\Component\Routing\RouteCollection;
 
@@ -79,6 +81,28 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
   }
 
   return '';
+}
+
+/**
+ * Implements hook_tool_info_alter().
+ *
+ * Every governed tool requires 'access mcp sentinel context' at execution
+ * through McpGovernedToolBase::checkAccess(). Declaring the same permission on
+ * the Tool API definition lets catalog code that runs before any inputs exist,
+ * such as MCP Server Tool Bridge's tools/list through
+ * ToolManager::checkPermission(), leave the tool out for an account that
+ * could never run it. A governed tool that declares its own permission keeps
+ * it; readiness, scope and IP gates stay in the access check.
+ */
+function mcp_sentinel_tool_info_alter(array &$definitions): void {
+  foreach ($definitions as $definition) {
+    if (!$definition instanceof ToolDefinition || $definition->getPermission() !== NULL) {
+      continue;
+    }
+    if (is_subclass_of($definition->getClass(), McpGovernedToolBase::class)) {
+      $definition->setPermission(McpGovernedToolBase::CONTEXT_PERMISSION);
+    }
+  }
 }
 
 /**

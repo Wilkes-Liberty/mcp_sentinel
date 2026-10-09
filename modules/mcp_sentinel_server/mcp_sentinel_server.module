@@ -40,6 +40,10 @@ function mcp_sentinel_server_help(string $route_name, RouteMatchInterface $route
 
 /**
  * Implements hook_mcp_server_tool_bridge_discovery_access().
+ *
+ * Only a Tool Bridge build that carries the discovery hook from the earlier
+ * #3618720 proposal calls this. Released bridges filter tools/list through
+ * the declared permission instead (see mcp_sentinel_tool_info_alter()).
  */
 function mcp_sentinel_server_mcp_server_tool_bridge_discovery_access(ToolInterface $tool, AccountInterface $account): ?AccessResultInterface {
   return $tool instanceof McpGovernedToolBase ? $tool->discoveryAccess($account) : NULL;

@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- [#3629706](https://www.drupal.org/project/mcp_sentinel/issues/3629706):
+  Governed tools declare `access mcp sentinel context` on their Tool API
+  definition. MCP Server Tool Bridge checks that permission when it builds
+  `tools/list`, so an account that cannot run a Sentinel tool is no longer
+  shown it. A tool that declares its own permission keeps it. The Tool API
+  floor is 1.0.0-beta11, which adds the input-free permission check.
+  Readiness, scope and IP gates are unchanged at execution.
+
 ## [2.33.0] - 2026-10-08
 
 ### Added

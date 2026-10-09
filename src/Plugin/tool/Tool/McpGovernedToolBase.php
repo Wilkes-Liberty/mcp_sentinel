@@ -53,6 +53,15 @@ abstract class McpGovernedToolBase extends ToolBase {
   public const UNTRUSTED_READ_MARKER = '_mcp_sentinel_untrusted_read';
 
   /**
+   * The permission every governed tool requires, at execution and in catalogs.
+   *
+   * The tool_info alter in mcp_sentinel.module declares it on each governed
+   * tool's Tool API definition, so catalog code that checks the definition
+   * before any inputs exist reaches the same first gate as checkAccess().
+   */
+  public const CONTEXT_PERMISSION = 'access mcp sentinel context';
+
+  /**
    * The only value the untrusted-read marker may carry.
    */
   private const UNTRUSTED_READ_VALUE = [
@@ -300,7 +309,7 @@ abstract class McpGovernedToolBase extends ToolBase {
   private function commonAccess(AccountInterface $account): AccessResultInterface {
     $access = AccessResult::allowedIfHasPermission(
       $account,
-      'access mcp sentinel context',
+      self::CONTEXT_PERMISSION,
     );
     if (!$access->isAllowed()) {
       return $access;

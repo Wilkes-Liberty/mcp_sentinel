@@ -1433,12 +1433,23 @@ Upstream: [module-owned governed SELECT](https://www.drupal.org/project/mcp_sent
 
 ### Tool discovery access
 
-The optional `mcp_sentinel_server` module implements the Tool Bridge discovery
-access hook. With a bridge version supporting that hook, Sentinel tools enter
-`tools/list` only after the current account passes the same permission, source
-readiness, OAuth scope, and IP checks used for execution. SQL also requires the
-account policy to permit raw SQL. The decision is recomputed without execution
-inputs and is never cached across callers or policy changes.
+Every governed tool declares `access mcp sentinel context` on its Tool API
+definition (`mcp_sentinel_tool_info_alter()`), the same permission
+`McpGovernedToolBase` checks first at execution. MCP Server Tool Bridge asks
+`ToolManager::checkPermission()` about that definition when it builds
+`tools/list`, before any inputs exist, so an account without the permission is
+not shown the tool at all. A tool that declares its own `permission` keeps it;
+Sentinel only fills in the gap. Tool API 1.0.0-beta11 is the floor for this
+check.
+
+Readiness, OAuth scope and IP gates still run at execution. A read-scope
+consumer therefore sees write tools in the catalog and is refused on call,
+until MCP Server grows a per-account visibility hook
+([mcp_server #3585931](https://git.drupalcode.org/project/mcp_server/-/work_items/3585931)).
+The optional `mcp_sentinel_server` module keeps its implementation of the
+Tool Bridge discovery hook from the earlier proposal; only a bridge build that
+still carries that hook calls it, and it then applies the full
+`discoveryAccess()` gate per caller.
 
 Module-owned tools may narrow `checkGovernedDiscoveryAccess()` for additional
 account-level requirements. Keep record-specific checks in
