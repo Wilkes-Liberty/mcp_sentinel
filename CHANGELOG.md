@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.34.0] - 2026-10-09
+
 ### Changed
 - [#3629706](https://www.drupal.org/project/mcp_sentinel/issues/3629706):
   Governed tools declare `access mcp sentinel context` on their Tool API
@@ -14,7 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shown it. A tool that declares its own permission keeps it and must also
   hold the context permission before the catalog lists the tool. The Tool API
   floor is 1.0.0-beta11, which adds the input-free permission check.
-  Readiness, scope and IP gates are unchanged at execution.
+  Readiness, scope and IP gates are unchanged at execution. There is no
+  database update. Sites must be on Tool API 1.0.0-beta11 or newer.
 
 ## [2.33.0] - 2026-10-08
 
@@ -2815,7 +2818,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.33.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.0...1.x
+[2.34.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.33.0...2.34.0
 [2.33.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.32.0...2.33.0
 [2.32.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.1...2.32.0
 [2.31.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.31.0...2.31.1
