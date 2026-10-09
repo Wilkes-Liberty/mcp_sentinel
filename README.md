@@ -1438,9 +1438,14 @@ definition (`mcp_sentinel_tool_info_alter()`), the same permission
 `McpGovernedToolBase` checks first at execution. MCP Server Tool Bridge asks
 `ToolManager::checkPermission()` about that definition when it builds
 `tools/list`, before any inputs exist, so an account without the permission is
-not shown the tool at all. A tool that declares its own `permission` keeps it;
-Sentinel only fills in the gap. Tool API 1.0.0-beta11 is the floor for this
-check.
+not shown the tool at all. A tool that declares its own `permission` keeps it
+and also requires the context permission. Tool API treats a comma-separated
+permission string as AND, the same way a route `_permission` requirement does,
+so an account that holds only the tool's own permission still fails the
+catalog check. A declaration that uses `+` (OR) cannot be combined with a
+comma, so the catalog requires the context permission and the tool's access
+hook still enforces the OR at execution. Tool API 1.0.0-beta11 is the floor
+for this check.
 
 Readiness, OAuth scope and IP gates still run at execution. A read-scope
 consumer therefore sees write tools in the catalog and is refused on call,

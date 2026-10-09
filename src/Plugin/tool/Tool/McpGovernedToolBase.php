@@ -56,8 +56,9 @@ abstract class McpGovernedToolBase extends ToolBase {
    * The permission every governed tool requires, at execution and in catalogs.
    *
    * The tool_info alter in mcp_sentinel.module declares it on each governed
-   * tool's Tool API definition, so catalog code that checks the definition
-   * before any inputs exist reaches the same first gate as checkAccess().
+   * tool's Tool API definition. A definition that already names a permission
+   * keeps that permission and also requires this one, so a catalog check
+   * cannot admit an account that execution would refuse for lack of it.
    */
   public const CONTEXT_PERMISSION = 'access mcp sentinel context';
 

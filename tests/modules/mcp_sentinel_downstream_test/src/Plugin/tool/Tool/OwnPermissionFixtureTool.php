@@ -16,8 +16,8 @@ use Drupal\tool\Tool\ToolOperation;
 /**
  * A governed tool that declares a permission of its own.
  *
- * Sentinel fills in the context permission for governed tools that declare
- * none. This fixture proves a declared permission is kept as written.
+ * Sentinel keeps that permission and also requires the context permission,
+ * so the catalog check admits only an account that holds both.
  */
 #[Tool(
   id: 'mcp_sentinel_own_permission_fixture',

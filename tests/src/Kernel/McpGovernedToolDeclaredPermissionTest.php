@@ -20,7 +20,9 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * Catalog code that cannot supply inputs, such as MCP Server Tool Bridge's
  * tools/list, asks ToolManager::checkPermission() about the definition alone.
  * A governed tool that declares no permission would be advertised to every
- * account with endpoint access, even though execution refuses it.
+ * account with endpoint access, even though execution refuses it. A tool
+ * that declares its own permission keeps it and also requires the context
+ * permission, so either permission alone is not enough for the catalog.
  *
  * @group mcp_sentinel
  *
@@ -74,7 +76,10 @@ final class McpGovernedToolDeclaredPermissionTest extends KernelTestBase {
   }
 
   /**
-   * Every governed tool carries the context permission unless it declares one.
+   * Every governed tool carries the context permission.
+   *
+   * A tool that declares its own permission keeps that permission as an
+   * additional required part.
    */
   public function testGovernedToolsDeclareTheContextPermission(): void {
     $governed = [];
@@ -87,7 +92,10 @@ final class McpGovernedToolDeclaredPermissionTest extends KernelTestBase {
     }
 
     self::assertGreaterThanOrEqual(12, count($governed), 'The shipped governed tools were discovered.');
-    self::assertSame(OwnPermissionFixtureTool::PERMISSION, $governed['mcp_sentinel_own_permission_fixture']);
+    self::assertSame(
+      McpGovernedToolBase::CONTEXT_PERMISSION . ',' . OwnPermissionFixtureTool::PERMISSION,
+      $governed['mcp_sentinel_own_permission_fixture'],
+    );
     unset($governed['mcp_sentinel_own_permission_fixture']);
     foreach ($governed as $id => $permission) {
       self::assertSame(McpGovernedToolBase::CONTEXT_PERMISSION, $permission, $id);
@@ -106,6 +114,30 @@ final class McpGovernedToolDeclaredPermissionTest extends KernelTestBase {
 
     $agent = $this->createUser([McpGovernedToolBase::CONTEXT_PERMISSION]);
     self::assertTrue(ToolManager::checkPermission($definition, $agent)->isAllowed());
+  }
+
+  /**
+   * A tool's own permission does not stand in for the context permission.
+   *
+   * The catalog check requires both. An account that holds only one of them
+   * cannot run the tool, so the catalog hides it.
+   */
+  public function testCatalogCheckRequiresBothPermissionsWhenTheToolDeclaresOne(): void {
+    $manager = $this->container->get('plugin.manager.tool');
+    $definition = $manager->getDefinition('mcp_sentinel_own_permission_fixture');
+    self::assertInstanceOf(ToolDefinition::class, $definition);
+
+    $custom_only = $this->createUser([OwnPermissionFixtureTool::PERMISSION]);
+    self::assertFalse(ToolManager::checkPermission($definition, $custom_only)->isAllowed());
+
+    $context_only = $this->createUser([McpGovernedToolBase::CONTEXT_PERMISSION]);
+    self::assertFalse(ToolManager::checkPermission($definition, $context_only)->isAllowed());
+
+    $both = $this->createUser([
+      McpGovernedToolBase::CONTEXT_PERMISSION,
+      OwnPermissionFixtureTool::PERMISSION,
+    ]);
+    self::assertTrue(ToolManager::checkPermission($definition, $both)->isAllowed());
   }
 
 }

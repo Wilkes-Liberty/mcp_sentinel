@@ -92,17 +92,52 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
  * such as MCP Server Tool Bridge's tools/list through
  * ToolManager::checkPermission(), leave the tool out for an account that
  * could never run it. A governed tool that declares its own permission keeps
- * it; readiness, scope and IP gates stay in the access check.
+ * it and also requires the context permission. Readiness, scope and IP gates
+ * stay in the access check.
  */
 function mcp_sentinel_tool_info_alter(array &$definitions): void {
   foreach ($definitions as $definition) {
-    if (!$definition instanceof ToolDefinition || $definition->getPermission() !== NULL) {
+    if (!$definition instanceof ToolDefinition) {
       continue;
     }
-    if (is_subclass_of($definition->getClass(), McpGovernedToolBase::class)) {
-      $definition->setPermission(McpGovernedToolBase::CONTEXT_PERMISSION);
+    if (!is_subclass_of($definition->getClass(), McpGovernedToolBase::class)) {
+      continue;
     }
+    $definition->setPermission(mcp_sentinel_catalog_permission(
+      $definition->getPermission(),
+    ));
   }
+}
+
+/**
+ * Composes the context permission into a governed tool's declared permission.
+ *
+ * Tool API parses a permission like a route _permission requirement: a comma
+ * requires every part, and a plus requires any one part. The two operators
+ * cannot be mixed. A comma-compatible declaration therefore gains the context
+ * permission as an additional required part. A plus-separated declaration
+ * cannot express that AND, so the catalog requires the context permission and
+ * the tool's own access hook still enforces the OR at execution.
+ *
+ * @param string|null $declared
+ *   The permission the tool declared, or NULL when it declared none.
+ *
+ * @return string
+ *   The permission the catalog check should require.
+ */
+function mcp_sentinel_catalog_permission(?string $declared): string {
+  $context = McpGovernedToolBase::CONTEXT_PERMISSION;
+  if ($declared === NULL || $declared === '') {
+    return $context;
+  }
+  if (str_contains($declared, '+')) {
+    return $context;
+  }
+  $parts = array_map('trim', explode(',', $declared));
+  if (in_array($context, $parts, TRUE)) {
+    return $declared;
+  }
+  return $context . ',' . $declared;
 }
 
 /**
