@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Draft;
 
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\Field\FieldItemInterface;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
@@ -45,11 +47,40 @@ final class McpNestedReplacementPlan {
   private const TRANSLATION_CHANGED_FIELD = 'content_translation_changed';
 
   /**
+   * Revision flag restored with a parent-pointer rewrite.
+   *
+   * Core recomputes this flag on save for every translation whose stored
+   * value is NULL. The pointer rewrite counts as a change, so a translation
+   * that was not affected by its published revision reads as affected
+   * afterwards. Like the timestamp, it is restored only with a pointer.
+   *
+   * @var string
+   */
+  private const TRANSLATION_AFFECTED_FIELD = 'revision_translation_affected';
+
+  /**
+   * Translation metadata restored only together with a parent pointer.
+   *
+   * @var list<string>
+   */
+  private const TRANSLATION_FIELDS = [
+    self::TRANSLATION_CHANGED_FIELD,
+    self::TRANSLATION_AFFECTED_FIELD,
+  ];
+
+  /**
    * The entity type manager.
    *
    * @var \Drupal\Core\Entity\EntityTypeManagerInterface
    */
   private EntityTypeManagerInterface $entityTypeManager;
+
+  /**
+   * The database connection the draft transaction runs on.
+   *
+   * @var \Drupal\Core\Database\Connection
+   */
+  private Connection $database;
 
   /**
    * Host field that holds the direct paragraph.
@@ -119,9 +150,12 @@ final class McpNestedReplacementPlan {
    *   Published pin keys.
    * @param list<array{id: string, revision_id: string, values: array<string, array<string, mixed>>}> $watched
    *   Paragraph snapshots.
+   * @param \Drupal\Core\Database\Connection $database
+   *   The connection the draft transaction runs on.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, string $field_name, int $delta, ContentEntityInterface $new_parent, string $host_id, string $host_revision_id, array $host_pin_keys, array $watched) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, string $field_name, int $delta, ContentEntityInterface $new_parent, string $host_id, string $host_revision_id, array $host_pin_keys, array $watched, Connection $database) {
     $this->entityTypeManager = $entity_type_manager;
+    $this->database = $database;
     $this->fieldName = $field_name;
     $this->delta = $delta;
     $this->newParent = $new_parent;
@@ -169,8 +203,9 @@ final class McpNestedReplacementPlan {
    * Entity Reference Revisions post-save can rewrite parent_id,
    * parent_type, and parent_field_name on a kept child without creating a
    * revision. On a translatable paragraph that save also advances
-   * content_translation_changed. The timestamp is restored only when a
-   * parent pointer changed with it. A timestamp change on its own, any
+   * content_translation_changed, and sets revision_translation_affected
+   * on any translation that stored NULL. Both are restored only when a
+   * parent pointer changed with them. A change to either on its own, any
    * other field change, or a new revision of a paragraph the published
    * host still pins, fails the save so the transaction rolls back.
    */
@@ -196,7 +231,7 @@ final class McpNestedReplacementPlan {
       $changed = self::changedFields($watched['values'], $values);
       $restorable = self::PARENT_FIELDS;
       if (array_intersect($changed, self::PARENT_FIELDS) !== []) {
-        $restorable[] = self::TRANSLATION_CHANGED_FIELD;
+        $restorable = array_merge($restorable, self::TRANSLATION_FIELDS);
       }
       if ($changed === [] || array_diff($changed, $restorable) !== []) {
         throw new ConflictHttpException('Nested replacement changed a published paragraph; the save was rolled back.');
@@ -324,6 +359,8 @@ final class McpNestedReplacementPlan {
    * Also restores content_translation_changed on each translation. The
    * pointer save advances that timestamp, and a second save would advance
    * it again unless this write puts the snapshotted value back first.
+   * The revision_translation_affected flag is written back after the
+   * save, because the save recomputes it.
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $revision
    *   The kept paragraph revision.
@@ -354,6 +391,68 @@ final class McpNestedReplacementPlan {
     $revision->setNewRevision(FALSE);
     $revision->isDefaultRevision($was_default);
     $revision->save();
+    $this->restoreTranslationAffected($revision, $values);
+  }
+
+  /**
+   * Writes the snapshotted revision_translation_affected flags back.
+   *
+   * Core's storage recomputes the flag for every translation that stores
+   * NULL, on every save, from the entity's changes. The restore save above
+   * changes the parent pointer back, so a translation that was unaffected
+   * by its published revision would be stored as affected. Only a direct
+   * write can keep NULL. The write stays inside the draft transaction and
+   * covers both the data table and the revision data table, so a rollback
+   * undoes it with everything else.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $revision
+   *   The kept paragraph revision, already saved.
+   * @param array<string, array<string, mixed>> $values
+   *   The snapshot taken before the draft save.
+   */
+  private function restoreTranslationAffected(ContentEntityInterface $revision, array $values): void {
+    $storage = $this->paragraphStorage();
+    if (!$storage instanceof SqlContentEntityStorage
+      || !$revision->hasField(self::TRANSLATION_AFFECTED_FIELD)) {
+      return;
+    }
+    $entity_type = $revision->getEntityType();
+    $id_key = $entity_type->getKey('id');
+    $revision_key = $entity_type->getKey('revision');
+    $langcode_key = $entity_type->getKey('langcode');
+    if (!is_string($id_key) || !is_string($revision_key) || !is_string($langcode_key)) {
+      return;
+    }
+    $definition = $revision->getFieldDefinition(self::TRANSLATION_AFFECTED_FIELD);
+    if ($definition === NULL) {
+      return;
+    }
+    $column = $storage->getTableMapping()
+      ->getFieldColumnName($definition->getFieldStorageDefinition(), 'value');
+    $tables = [
+      [$storage->getDataTable(), $id_key, $revision->id()],
+      [$storage->getRevisionDataTable(), $revision_key, $revision->getRevisionId()],
+    ];
+    foreach ($values as $langcode => $translation_values) {
+      if (!array_key_exists(self::TRANSLATION_AFFECTED_FIELD, $translation_values)
+        || !$revision->hasTranslation($langcode)) {
+        continue;
+      }
+      $items = $translation_values[self::TRANSLATION_AFFECTED_FIELD];
+      $value = is_array($items) ? ($items[0]['value'] ?? NULL) : NULL;
+      $flag = $value === NULL ? NULL : (int) (bool) $value;
+      foreach ($tables as [$table, $key, $key_value]) {
+        if (!is_string($table)) {
+          continue;
+        }
+        $this->database->update($table)
+          ->fields([$column => $flag])
+          ->condition($key, $key_value)
+          ->condition($revision_key, $revision->getRevisionId())
+          ->condition($langcode_key, $langcode)
+          ->execute();
+      }
+    }
   }
 
   /**

@@ -1025,6 +1025,7 @@ final class McpDraftResource extends EntityResource {
       $this->serializer,
       $this->user,
       $this->languageManager,
+      $this->draftDatabase,
     );
   }
 

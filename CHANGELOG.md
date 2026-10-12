@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- [#3630399](https://www.drupal.org/project/mcp_sentinel/issues/3630399):
+  A nested replacement no longer fails with 409 when the kept child's
+  pinned revision stores `revision_translation_affected` as NULL for a
+  translation. Entity Reference Revisions rewrites the kept child's parent
+  pointer in place, and core recomputes that flag on the save, so an
+  unaffected translation read as affected and the guard treated it as a
+  real change. The flag is now restored with the parent pointer and the
+  translation changed time. Because an entity save recomputes a NULL flag,
+  the restore writes the stored value back directly, inside the draft
+  transaction, so a rollback still undoes it. The guard still fails the
+  save for a flag change that arrives without a pointer rewrite. A
+  functional test forces a rollback and checks that every stored row of
+  the kept child, in both languages, reads as published afterwards.
+
 ## [2.34.0] - 2026-10-09
 
 ### Changed
