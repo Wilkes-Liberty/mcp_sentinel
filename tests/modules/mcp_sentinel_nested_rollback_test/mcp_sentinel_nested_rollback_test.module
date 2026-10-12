@@ -1,0 +1,28 @@
+<?php
+
+/**
+ * @file
+ * Taints one paragraph during its save so a nested replacement rolls back.
+ */
+
+declare(strict_types=1);
+
+use Drupal\paragraphs\ParagraphInterface;
+
+/**
+ * Implements hook_ENTITY_TYPE_presave() for paragraph.
+ *
+ * When the state key names this paragraph, its title changes on the way to
+ * storage. Entity Reference Revisions saves a kept child to rewrite its
+ * parent pointer, so the change lands inside the draft transaction and the
+ * published-untouched guard must fail the save.
+ */
+function mcp_sentinel_nested_rollback_test_paragraph_presave(ParagraphInterface $paragraph): void {
+  $target = \Drupal::state()->get('mcp_sentinel_nested_rollback_test.taint');
+  if ($target === NULL || (string) $paragraph->id() !== (string) $target) {
+    return;
+  }
+  if ($paragraph->hasField('field_title')) {
+    $paragraph->set('field_title', 'Tainted');
+  }
+}

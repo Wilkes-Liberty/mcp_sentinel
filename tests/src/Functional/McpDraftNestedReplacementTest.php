@@ -6,9 +6,11 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\Core\Entity\EntityStorageInterface;
 use Drupal\Core\Entity\RevisionableStorageInterface;
+use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\language\Entity\ConfigurableLanguage;
+use Drupal\mcp_sentinel\Draft\McpNestedReplacementPlan;
 use Drupal\node\NodeInterface;
 use Drupal\paragraphs\Entity\Paragraph;
 use Drupal\paragraphs\Entity\ParagraphsType;
@@ -42,7 +44,7 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
     'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'workflows', 'content_moderation',
     'language', 'content_translation', 'paragraphs',
-    'entity_reference_revisions',
+    'entity_reference_revisions', 'mcp_sentinel_nested_rollback_test',
   ];
 
   /**
@@ -194,7 +196,8 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
         'type' => 'paragraph--p_faq_group',
         'id' => $group->uuid(),
         'attributes' => ['field_heading' => 'Changed'],
-      ]],
+      ],
+      ],
       'mcp_nested_replacement' => $replacement,
     ]);
     $this->assertSame(400, $combined->getStatusCode(), (string) $combined->getBody());
@@ -206,7 +209,8 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
         'type' => 'paragraph--p_faq_item',
         'id' => $replaced->uuid(),
         'attributes' => ['field_title' => 'Direct'],
-      ]],
+      ],
+      ],
     ]);
     $this->assertSame(400, $nested_only->getStatusCode(), (string) $nested_only->getBody());
     $this->assertStringContainsString('directly', (string) $nested_only->getBody());
@@ -456,6 +460,266 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
       (string) $kept_default->getTranslation('es')
         ->get('content_translation_changed')->value,
     );
+  }
+
+  /**
+   * Keeps a child whose default language is not revision-affected.
+   *
+   * The pinned revision of the kept child changed only its Spanish
+   * translation, so its English revision_translation_affected is NULL.
+   * The parent-pointer rewrite recomputes that flag. The save must still
+   * succeed, and the pinned revision must read back as it was published.
+   */
+  public function testNestedReplacementRestoresUnaffectedTranslationFlag(): void {
+    $fixture = $this->createTranslatableFixture();
+
+    $saved = $this->draft($fixture['agent'], $fixture['node'], '"' . $fixture['live_vid'] . '"', [
+      'title' => 'Draft page',
+      'moderation_state' => 'draft',
+    ], $fixture['replacement']);
+    $this->assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+
+    $nodes = $this->storage('node');
+    $nodes->resetCache([$fixture['node']->id()]);
+    $published = $nodes->loadUnchanged($fixture['node']->id());
+    $this->assertInstanceOf(NodeInterface::class, $published);
+    $this->assertSame($fixture['live_vid'], (string) $published->getRevisionId());
+    $this->assertNotSame(
+      $fixture['live_vid'],
+      (string) $this->revisions($nodes)->getLatestRevisionId($fixture['node']->id()),
+    );
+    $this->assertSame($fixture['paragraph_count'] + 2, $this->paragraphCount());
+    $this->assertKeptChildUnchanged($fixture);
+  }
+
+  /**
+   * A rolled-back nested replacement leaves the kept child as published.
+   *
+   * The test module changes the kept child's title while Entity Reference
+   * Revisions saves its new parent pointer. That is not a restorable change,
+   * so the save fails and the transaction rolls back. Every stored row of
+   * the kept child, in both languages, must still read as published.
+   */
+  public function testRolledBackNestedReplacementLeavesKeptChildUnchanged(): void {
+    $fixture = $this->createTranslatableFixture();
+    $this->container->get('state')
+      ->set('mcp_sentinel_nested_rollback_test.taint', $fixture['kept_id']);
+
+    $failed = $this->draft($fixture['agent'], $fixture['node'], '"' . $fixture['live_vid'] . '"', [
+      'title' => 'Draft page',
+      'moderation_state' => 'draft',
+    ], $fixture['replacement']);
+    $this->assertSame(409, $failed->getStatusCode(), (string) $failed->getBody());
+    $this->assertStringContainsString('changed a published paragraph', (string) $failed->getBody());
+    $this->assertStringContainsString('The nested replacement was rolled back.', (string) $failed->getBody());
+
+    $nodes = $this->storage('node');
+    $nodes->resetCache([$fixture['node']->id()]);
+    $published = $nodes->loadUnchanged($fixture['node']->id());
+    $this->assertInstanceOf(NodeInterface::class, $published);
+    $this->assertSame($fixture['live_vid'], (string) $published->getRevisionId());
+    $this->assertSame(
+      $fixture['live_vid'],
+      (string) $this->revisions($nodes)->getLatestRevisionId($fixture['node']->id()),
+    );
+    $this->assertSame($fixture['paragraph_count'], $this->paragraphCount());
+    $this->assertKeptChildUnchanged($fixture);
+  }
+
+  /**
+   * Builds a published translatable host with one kept and one replaced child.
+   *
+   * The kept child's pinned revision changed only its Spanish translation,
+   * so its English revision_translation_affected is stored as NULL while
+   * the Spanish flag is 1. Each translation has its own changed time.
+   *
+   * @return array<string, mixed>
+   *   The agent, node, group, kept child, ids, the live revision id, the
+   *   replacement spec, the paragraph count, and the kept child's stored
+   *   values keyed by langcode then field.
+   */
+  private function createTranslatableFixture(): array {
+    $this->drupalCreateContentType(['type' => 'page']);
+    $workflow = $this->createEditorialWorkflow();
+    $this->addEntityTypeAndBundleToWorkflow($workflow, 'node', 'page');
+    $this->enableRoleFallbackGovernance();
+    $this->configureDefaultProfile(allowWrite: TRUE, allowRead: TRUE);
+    $this->config('mcp_sentinel.mcp_policy_profile.default')->set('deny_publish', TRUE)->save();
+    $this->config('jsonapi.settings')->set('read_only', FALSE)->save();
+    ConfigurableLanguage::createFromLangcode('es')->save();
+
+    foreach (['p_faq_group', 'p_faq_item'] as $bundle) {
+      ParagraphsType::create(['id' => $bundle, 'label' => $bundle])->save();
+    }
+    $this->addField('paragraph', 'field_heading', 'string', ['p_faq_group']);
+    $this->addField('paragraph', 'field_title', 'string', ['p_faq_item']);
+    $this->addField('paragraph', 'field_items', 'entity_reference_revisions', ['p_faq_group'], [
+      'p_faq_item' => 'p_faq_item',
+    ]);
+    $this->addField('node', 'field_group', 'entity_reference_revisions', ['page'], [
+      'p_faq_group' => 'p_faq_group',
+    ]);
+    foreach (['p_faq_group', 'p_faq_item'] as $bundle) {
+      $this->container->get('content_translation.manager')
+        ->setEnabled('paragraph', $bundle, TRUE);
+    }
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+    $this->container->get('entity_type.bundle.info')->clearCachedBundles();
+
+    $agent = $this->createGovernedAgentAccount([
+      'access content',
+      'edit any page content',
+      'view any unpublished content',
+      'view unpublished paragraphs',
+      'use editorial transition create_new_draft',
+      'use editorial transition publish',
+    ]);
+
+    $kept = Paragraph::create([
+      'type' => 'p_faq_item',
+      'field_title' => 'Keep',
+    ]);
+    $kept->addTranslation('es', [
+      'field_title' => 'Preserve',
+    ]);
+    $kept->save();
+    $replaced = Paragraph::create([
+      'type' => 'p_faq_item',
+      'field_title' => 'Old',
+    ]);
+    $replaced->save();
+    $group = Paragraph::create([
+      'type' => 'p_faq_group',
+      'field_heading' => 'Questions',
+      'field_items' => [
+        $this->pin($kept),
+        $this->pin($replaced),
+      ],
+    ]);
+    $group->save();
+
+    // A new revision that touches only the Spanish translation. Core then
+    // stores the English flag as NULL and the Spanish flag as 1. The parent
+    // pointer was already written by the group save above, so it does not
+    // count as an English change here.
+    $paragraphs = $this->storage('paragraph');
+    $paragraphs->resetCache([(string) $kept->id()]);
+    $kept = $paragraphs->loadUnchanged($kept->id());
+    $this->assertInstanceOf(Paragraph::class, $kept);
+    $request_time = \Drupal::time()->getRequestTime();
+    /** @var \Drupal\content_translation\ContentTranslationManagerInterface $manager */
+    $manager = $this->container->get('content_translation.manager');
+    $manager->getTranslationMetadata($kept)->setChangedTime($request_time - 3600);
+    $spanish = $kept->getTranslation('es');
+    $spanish->set('field_title', 'Preserved');
+    $manager->getTranslationMetadata($spanish)->setChangedTime($request_time - 7200);
+    $kept->setNewRevision(TRUE);
+    $kept->save();
+    $group->set('field_items', [
+      $this->pin($kept),
+      $this->pin($replaced),
+    ]);
+    $group->save();
+
+    $node = $this->drupalCreateNode([
+      'type' => 'page',
+      'title' => 'Live page',
+      'moderation_state' => 'published',
+      'field_group' => [
+        $this->pin($group),
+      ],
+    ]);
+    $this->container->get('router.builder')->rebuild();
+
+    $nodes = $this->storage('node');
+    $nodes->resetCache([$node->id()]);
+    $published = $nodes->loadUnchanged($node->id());
+    $this->assertInstanceOf(NodeInterface::class, $published);
+    $live_vid = (string) $published->getRevisionId();
+
+    $paragraphs->resetCache();
+    $kept_id = (string) $kept->id();
+    $pinned_revision = (string) $kept->getRevisionId();
+    $kept_stored = $this->revisions($paragraphs)->loadRevision($pinned_revision);
+    $this->assertInstanceOf(Paragraph::class, $kept_stored);
+    $this->assertSame((string) $group->id(), (string) $kept_stored->get('parent_id')->value);
+    $this->assertNull($kept_stored->get('revision_translation_affected')->value);
+    $this->assertSame('1', (string) $kept_stored->getTranslation('es')->get('revision_translation_affected')->value);
+    $this->assertSame((string) ($request_time - 3600), (string) $kept_stored->get('content_translation_changed')->value);
+    $this->assertSame((string) ($request_time - 7200), (string) $kept_stored->getTranslation('es')->get('content_translation_changed')->value);
+
+    return [
+      'agent' => $agent,
+      'node' => $node,
+      'live_vid' => $live_vid,
+      'group_id' => (string) $group->id(),
+      'kept_id' => $kept_id,
+      'kept_revision' => $pinned_revision,
+      'kept_values' => McpNestedReplacementPlan::fieldValues($kept_stored),
+      'paragraph_count' => $this->paragraphCount(),
+      'replacement' => [
+        'field' => 'field_group',
+        'parent' => $group->uuid(),
+        'childField' => 'field_items',
+        'children' => [
+          ['op' => 'keep', 'id' => $kept->uuid()],
+          [
+            'op' => 'replace',
+            'id' => $replaced->uuid(),
+            'type' => 'paragraph--p_faq_item',
+            'attributes' => ['field_title' => 'Replaced'],
+          ],
+        ],
+      ],
+    ];
+  }
+
+  /**
+   * Asserts the kept child still reads exactly as the fixture published it.
+   *
+   * Checks the pinned revision, the default revision, and the raw data
+   * table rows of both languages, so a cache that outlived a rollback
+   * cannot hide a changed row.
+   *
+   * @param array<string, mixed> $fixture
+   *   The fixture from createTranslatableFixture().
+   */
+  private function assertKeptChildUnchanged(array $fixture): void {
+    $paragraphs = $this->storage('paragraph');
+    $paragraphs->resetCache();
+    $stored = $this->revisions($paragraphs)->loadRevision($fixture['kept_revision']);
+    $this->assertInstanceOf(Paragraph::class, $stored);
+    $this->assertSame($fixture['kept_values'], McpNestedReplacementPlan::fieldValues($stored));
+    $default = $paragraphs->loadUnchanged($fixture['kept_id']);
+    $this->assertInstanceOf(Paragraph::class, $default);
+    $this->assertSame($fixture['kept_revision'], (string) $default->getRevisionId());
+    $this->assertSame($fixture['kept_values'], McpNestedReplacementPlan::fieldValues($default));
+    $this->assertSame($fixture['group_id'], (string) $default->get('parent_id')->value);
+    $this->assertInstanceOf(Paragraph::class, $default->getParentEntity());
+    $this->assertNull($default->get('revision_translation_affected')->value);
+
+    $this->assertInstanceOf(SqlContentEntityStorage::class, $paragraphs);
+    foreach ([$paragraphs->getDataTable(), $paragraphs->getRevisionDataTable()] as $table) {
+      $this->assertIsString($table);
+      $rows = $this->container->get('database')->select($table, 'd')
+        ->fields('d', ['langcode', 'parent_id', 'revision_translation_affected', 'content_translation_changed'])
+        ->condition('id', $fixture['kept_id'])
+        ->condition('revision_id', $fixture['kept_revision'])
+        ->execute()
+        ->fetchAllAssoc('langcode');
+      ksort($rows);
+      $this->assertSame(['en', 'es'], array_keys($rows), $table);
+      foreach ($rows as $langcode => $row) {
+        $this->assertSame($fixture['group_id'], (string) $row->parent_id, $table . ' ' . $langcode);
+        $this->assertSame(
+          $fixture['kept_values'][$langcode]['content_translation_changed'][0]['value'],
+          (string) $row->content_translation_changed,
+          $table . ' ' . $langcode,
+        );
+      }
+      $this->assertNull($rows['en']->revision_translation_affected, $table);
+      $this->assertSame(1, (int) $rows['es']->revision_translation_affected, $table);
+    }
   }
 
   /**

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Draft;
 
 use Drupal\Component\Plugin\Exception\PluginNotFoundException;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
@@ -137,6 +138,13 @@ final class McpNestedReplacement {
   private LanguageManagerInterface $languageManager;
 
   /**
+   * The database connection the draft transaction runs on.
+   *
+   * @var \Drupal\Core\Database\Connection
+   */
+  private Connection $database;
+
+  /**
    * Constructs the planner.
    *
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entity_type_manager
@@ -149,13 +157,16 @@ final class McpNestedReplacement {
    *   The acting account.
    * @param \Drupal\Core\Language\LanguageManagerInterface $language_manager
    *   The language manager.
+   * @param \Drupal\Core\Database\Connection $database
+   *   The connection the draft transaction runs on.
    */
-  public function __construct(EntityTypeManagerInterface $entity_type_manager, ResourceTypeRepositoryInterface $resource_types, DenormalizerInterface $serializer, AccountInterface $account, LanguageManagerInterface $language_manager) {
+  public function __construct(EntityTypeManagerInterface $entity_type_manager, ResourceTypeRepositoryInterface $resource_types, DenormalizerInterface $serializer, AccountInterface $account, LanguageManagerInterface $language_manager, Connection $database) {
     $this->entityTypeManager = $entity_type_manager;
     $this->resourceTypes = $resource_types;
     $this->serializer = $serializer;
     $this->account = $account;
     $this->languageManager = $language_manager;
+    $this->database = $database;
   }
 
   /**
@@ -232,6 +243,7 @@ final class McpNestedReplacement {
       (string) $published_host->getRevisionId(),
       $this->pinKeys($published_host, $field_name),
       $watched,
+      $this->database,
     );
   }
 
