@@ -121,20 +121,31 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 (`$governancePolicyResolver`, `$governanceAccessChecker`,
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
 `$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`,
-`$governanceExfiltrationGuard`, `$governancePrincipalDispatcher`).
+`$governanceExfiltrationGuard`, `$governancePrincipalDispatcher`,
+`$governanceAuditLogger`).
 `principalContext()` returns the frozen
-principal + tenant context built from the validated token at the request
-boundary (DEV-844 / DEV-839). `principalKey()` is `iss|sub|actor` (actor
-= top-level `act.sub` per RFC 8693, else `azp`); `humanKey()` is
-`iss|sub`. Missing iss/sub/azp/`act.sub`, or a `|` in a segment, fails
-closed. Import `mcp_sentinel.principal_key::fromClaims()` from rate
-limits, budgets, and kill. Shared vectors:
+principal + tenant context sealed at the request boundary
+(DEV-844 / DEV-839). It throws when the dispatcher is missing or no
+principal is sealed; it never returns an empty context and never
+reads the request attribute. `principalKey()` is `iss|sub|actor`
+(actor = top-level `act.sub` per RFC 8693, else `azp`; never
+`client_id` or `act.subject`); `humanKey()` is `iss|sub`. Missing
+iss/sub/azp/`act.sub`, a `|`, whitespace-only or control characters,
+or a part longer than 256 characters, fails closed. Import
+`mcp_sentinel.principal_key::fromClaims()` from rate limits,
+budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json` (the Node connector will
 test a JS twin against the same file).
-Tools must never read identity or tenant from arguments; reserved keys
-(`user`, `uid`, `principal`, `tenant`, `tenant_id`, `act`,
-`on_behalf_of`) are rejected before dispatch, including nested maps and
-case variants.
+Tools must never read identity or tenant from arguments. The guard
+scans the exact `doExecute()` / handler argument array
+(`getExecutableValues()`), not a raw HTTP body. Reserved keys
+(`user`, `uid`, `principal`, `tenant`, `tenant_id`, `tenantId`,
+`act`, `on_behalf_of`, `onBehalfOf`, `sub`, `iss`, `azp`,
+`client_id`, `user_id`, `userId`, `actor`, `scope`, `scopes`,
+`subject`) are matched after NFKC, stripping whitespace and
+zero-width characters, folding case, and dropping `_`/`-`. Every
+denial writes a `denied_access` audit row. Network and sealed-token
+HTTP calls require a tenant claim.
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.

@@ -10,6 +10,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpDlp;
@@ -153,6 +154,13 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpPrincipalContextDispatcher $governancePrincipalDispatcher = NULL;
 
   /**
+   * Audit writer used when the dispatcher is missing (NULL in unit tests).
+   *
+   * @api
+   */
+  protected ?McpAuditLogger $governanceAuditLogger = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -179,6 +187,9 @@ abstract class McpGovernedToolBase extends ToolBase {
     $instance->governancePrincipalDispatcher = $container->has('mcp_sentinel.principal_context_dispatcher')
       ? $container->get('mcp_sentinel.principal_context_dispatcher')
       : NULL;
+    $instance->governanceAuditLogger = $container->has('mcp_sentinel.audit_logger')
+      ? $container->get('mcp_sentinel.audit_logger')
+      : NULL;
     return $instance;
   }
 
@@ -203,70 +214,82 @@ abstract class McpGovernedToolBase extends ToolBase {
    * Identity is never taken from tool arguments. Downstream tools that
    * need the acting principal or tenant must call this helper (or take
    * the context parameter from McpPrincipalContextDispatcher::dispatch).
+   * Reads the write-once holder, never the request attribute.
    *
    * @api
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the dispatcher is missing or no principal is sealed.
    */
   protected function principalContext(): McpPrincipalContext {
-    $request = $this->governanceRequestStack?->getCurrentRequest();
-    $existing = $request?->attributes->get(McpPrincipalContext::REQUEST_ATTRIBUTE);
-    if ($existing instanceof McpPrincipalContext) {
-      return $existing;
+    if ($this->governancePrincipalDispatcher === NULL) {
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+        'The principal-context dispatcher is required.',
+      );
     }
-    if ($this->governancePrincipalDispatcher !== NULL) {
-      $ctx = $this->governancePrincipalDispatcher->context();
-      $request?->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
-      return $ctx;
-    }
-    return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
+    return $this->governancePrincipalDispatcher->sealedContext();
   }
 
   /**
-   * Rejects reserved identity keys and a missing network tenant.
+   * Rejects reserved identity keys and a missing principal or tenant.
    *
-   * Runs before ToolBase::execute() so a spoofed argument never reaches
-   * doExecute(). The official handler shape is handler(args, ctx) on
-   * McpPrincipalContextDispatcher.
+   * Runs on the exact array ToolBase::execute() will pass to
+   * doExecute() (getExecutableValues). A raw HTTP body is never the
+   * choke point: empty top-level `arguments: {}` cannot hide a payload
+   * in params.arguments, and Drush / queue / setInputValue paths are
+   * checked even when there is no request.
    *
    * @return \Drupal\tool\ExecutableResult|null
    *   A failure result when the call is refused, or NULL to proceed.
    */
   private function refuseIdentitySpoofBeforeDispatch(): ?ExecutableResult {
     if ($this->governancePrincipalDispatcher === NULL) {
-      return NULL;
-    }
-    $arguments = $this->identityArgumentMap();
-    try {
-      $this->governancePrincipalDispatcher->assertDispatchAllowed($arguments);
-      $ctx = $this->governancePrincipalDispatcher->context();
-      $this->governanceRequestStack?->getCurrentRequest()?->attributes->set(
-        McpPrincipalContext::REQUEST_ATTRIBUTE,
-        $ctx,
+      return $this->principalDenialResult(
+        new McpPrincipalContextDeniedException(
+          McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+          'The principal-context dispatcher is required.',
+        ),
       );
     }
+    $arguments = $this->getExecutableValues(TRUE);
+    try {
+      $this->governancePrincipalDispatcher->admit($arguments);
+    }
     catch (McpPrincipalContextDeniedException $e) {
-      $message = $e->getMessage();
-      if ($this->governanceDenyExplainer !== NULL) {
-        $message = $this->governanceDenyExplainer->annotate($message);
-      }
-      return ExecutableResult::failure($this->t('@message', [
-        '@message' => $message,
-      ]));
+      return $this->principalDenialResult($e, FALSE);
     }
     return NULL;
   }
 
   /**
-   * Caller-supplied arguments visible before Tool API schema filtering.
+   * Annotates a principal denial and writes an audit row when needed.
    *
-   * @return array<string, mixed>
-   *   Top-level argument map.
+   * @param \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException $e
+   *   The denial.
+   * @param bool $audit
+   *   FALSE when the dispatcher already wrote the audit row.
    */
-  private function identityArgumentMap(): array {
-    $request = $this->governanceRequestStack?->getCurrentRequest();
-    if ($request === NULL) {
-      return [];
+  private function principalDenialResult(
+    McpPrincipalContextDeniedException $e,
+    bool $audit = TRUE,
+  ): ExecutableResult {
+    if ($audit && $this->governanceAuditLogger !== NULL) {
+      $this->governanceAuditLogger->log('denied_access', [
+        'tool' => $this->getPluginId(),
+        'entity_type' => 'principal',
+        'id' => '-',
+        'operation' => 'dispatch',
+        'reason' => $e->reasonCode,
+      ]);
     }
-    return McpPrincipalContextDispatcher::rawArgumentsFromRequest($request);
+    $message = $e->getMessage();
+    if ($this->governanceDenyExplainer !== NULL) {
+      $message = $this->governanceDenyExplainer->annotate($message);
+    }
+    return ExecutableResult::failure($this->t('@message', [
+      '@message' => $message,
+    ]));
   }
 
   /**

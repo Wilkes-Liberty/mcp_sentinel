@@ -43,9 +43,9 @@ final readonly class McpPrincipalContext {
   /**
    * Identity and tenant keys that must never appear in tool arguments.
    *
-   * Checked case-insensitively at every nesting depth before dispatch.
-   * Keep this list in one place so a later key cannot be added in only
-   * one caller.
+   * Compared after normalizeKey() (NFKC, strip whitespace and
+   * zero-width, fold case, drop `_` and `-`). Nested arrays and
+   * objects are walked. Keep this list in one place.
    */
   public const RESERVED_IDENTITY_KEYS = [
     'user',
@@ -53,8 +53,20 @@ final readonly class McpPrincipalContext {
     'principal',
     'tenant',
     'tenant_id',
+    'tenantId',
     'act',
     'on_behalf_of',
+    'onBehalfOf',
+    'sub',
+    'iss',
+    'azp',
+    'client_id',
+    'user_id',
+    'userId',
+    'actor',
+    'scope',
+    'scopes',
+    'subject',
   ];
 
   /**
@@ -68,7 +80,7 @@ final readonly class McpPrincipalContext {
    * @param string $clientId
    *   OAuth client id / authorized party.
    * @param string $azp
-   *   Authorized-party claim; falls back to client id.
+   *   Authorized-party claim. Never a client_id fallback.
    * @param list<string> $scopes
    *   Granted scope names from the token.
    * @param string $tenant
@@ -116,7 +128,7 @@ final readonly class McpPrincipalContext {
   }
 
   /**
-   * Authorized party (azp), or the client id when azp was absent.
+   * Authorized party (azp). Empty when the token omitted it.
    */
   public function azp(): string {
     return $this->azp;
@@ -157,29 +169,16 @@ final readonly class McpPrincipalContext {
   }
 
   /**
-   * Claims used to compose the shared principal key.
+   * Token claims used to compose the shared principal key.
    *
-   * Stored token claims when this context was built from a request.
-   * Otherwise synthesized from the frozen fields (tests).
+   * Only the claims the factory stored from the token — never a
+   * uid or client_id fallback.
    *
    * @return array<string, mixed>
    *   JWT-shaped iss/sub/azp/act map for McpPrincipalKey::fromClaims().
    */
   public function keyClaims(): array {
-    if ($this->keyClaims !== []) {
-      return $this->keyClaims;
-    }
-    $claims = [
-      'iss' => $this->issuer,
-      'sub' => $this->subject,
-    ];
-    if ($this->actChain !== [] && $this->actChain[0] !== '') {
-      $claims['act'] = ['sub' => $this->actChain[0]];
-    }
-    else {
-      $claims['azp'] = $this->azp;
-    }
-    return $claims;
+    return $this->keyClaims;
   }
 
   /**
@@ -206,11 +205,41 @@ final readonly class McpPrincipalContext {
   }
 
   /**
+   * Normalizes an argument key for reserved-identity matching.
+   *
+   * NFKC, strip whitespace and zero-width characters, fold case,
+   * then drop `_` and `-`. `onBehalfOf`, `on_behalf_of`, and
+   * `ON-BEHALF-OF` all become `onbehalfof`.
+   */
+  public static function normalizeKey(string $name): string {
+    $normalized = \Normalizer::normalize($name, \Normalizer::FORM_KC);
+    if (!is_string($normalized)) {
+      $normalized = $name;
+    }
+    $stripped = preg_replace(
+      '/[\x{200B}-\x{200D}\x{FEFF}\x{2060}]/u',
+      '',
+      $normalized,
+    );
+    if (is_string($stripped)) {
+      $normalized = $stripped;
+    }
+    $compact = preg_replace('/\s+/u', '', $normalized);
+    if (is_string($compact)) {
+      $normalized = $compact;
+    }
+    return str_replace(
+      ['_', '-'],
+      '',
+      mb_strtolower($normalized, 'UTF-8'),
+    );
+  }
+
+  /**
    * Reserved identity keys present in an argument map.
    *
-   * Walks nested arrays. Matching is case-insensitive. Reported paths
-   * keep the caller's original casing and use dotted nesting
-   * (`meta.filters.USER`).
+   * Walks nested arrays and objects. Matching uses normalizeKey().
+   * Reported paths keep the caller's original casing.
    *
    * @param array<string, mixed> $arguments
    *   Caller-supplied tool arguments.
@@ -219,14 +248,26 @@ final readonly class McpPrincipalContext {
    *   Matching paths, grouped in RESERVED_IDENTITY_KEYS order.
    */
   public static function reservedKeysIn(array $arguments): array {
-    $foundByReserved = [];
-    self::collectReservedKeys($arguments, '', $foundByReserved);
-    $found = [];
+    $reservedNorms = [];
     foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
-      if (!isset($foundByReserved[$reserved])) {
+      $reservedNorms[self::normalizeKey($reserved)] = TRUE;
+    }
+    $foundByReserved = [];
+    self::collectReservedKeys(
+      $arguments,
+      '',
+      $foundByReserved,
+      $reservedNorms,
+    );
+    $found = [];
+    $seenNorm = [];
+    foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
+      $norm = self::normalizeKey($reserved);
+      if (isset($seenNorm[$norm]) || !isset($foundByReserved[$norm])) {
         continue;
       }
-      foreach ($foundByReserved[$reserved] as $path) {
+      $seenNorm[$norm] = TRUE;
+      foreach ($foundByReserved[$norm] as $path) {
         $found[] = $path;
       }
     }
@@ -237,28 +278,53 @@ final readonly class McpPrincipalContext {
    * Collects reserved keys at every nesting depth.
    *
    * @param array<mixed> $arguments
-   *   Argument map or nested list.
+   *   Argument map, nested list, or object vars.
    * @param string $prefix
    *   Dotted path to this map.
    * @param array<string, list<string>> $foundByReserved
-   *   Accumulator keyed by the reserved name.
+   *   Accumulator keyed by the normalized reserved name.
+   * @param array<string, true> $reservedNorms
+   *   Normalized reserved names.
    */
   private static function collectReservedKeys(
     array $arguments,
     string $prefix,
     array &$foundByReserved,
+    array $reservedNorms,
   ): void {
     foreach ($arguments as $key => $value) {
       $name = (string) $key;
       $path = $prefix === '' ? $name : $prefix . '.' . $name;
-      $normalized = strtolower($name);
-      if (in_array($normalized, self::RESERVED_IDENTITY_KEYS, TRUE)) {
+      $normalized = self::normalizeKey($name);
+      if (isset($reservedNorms[$normalized])) {
         $foundByReserved[$normalized][] = $path;
       }
-      if (is_array($value)) {
-        self::collectReservedKeys($value, $path, $foundByReserved);
+      $nested = self::nestedMap($value);
+      if ($nested !== NULL) {
+        self::collectReservedKeys(
+          $nested,
+          $path,
+          $foundByReserved,
+          $reservedNorms,
+        );
       }
     }
+  }
+
+  /**
+   * Nested array or object walked as a map, or NULL.
+   *
+   * @return array<mixed>|null
+   *   Child map.
+   */
+  private static function nestedMap(mixed $value): ?array {
+    if (is_array($value)) {
+      return $value;
+    }
+    if ($value instanceof \stdClass) {
+      return get_object_vars($value);
+    }
+    return NULL;
   }
 
 }

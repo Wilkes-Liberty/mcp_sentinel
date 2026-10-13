@@ -10,6 +10,8 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Service\McpDlp;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
@@ -304,6 +306,22 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
     if ($master !== NULL && $master->hasSession()) {
       $request->setSession($master->getSession());
     }
+    if ($master !== NULL) {
+      foreach ([
+        McpPrincipalContext::CLAIMS_ATTRIBUTE,
+        McpOauthContext::SEALED_ATTRIBUTE,
+      ] as $attribute) {
+        if ($master->attributes->has($attribute)
+          && !$request->attributes->has($attribute)) {
+          $request->attributes->set(
+            $attribute,
+            $master->attributes->get($attribute),
+          );
+        }
+      }
+    }
+    $this->container->get('mcp_sentinel.principal_context_holder')
+      ->resetForTest();
     $stack->push($request);
   }
 

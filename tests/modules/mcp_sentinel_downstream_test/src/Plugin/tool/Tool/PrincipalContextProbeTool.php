@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool;
 
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolOperation;
@@ -23,7 +24,13 @@ use Drupal\tool\TypedData\InputDefinition;
     'note' => new InputDefinition(
       data_type: 'string',
       label: new TranslatableMarkup('Note'),
-      description: new TranslatableMarkup('Optional marker. "mutate" attempts to change the context.'),
+      description: new TranslatableMarkup('Optional marker. mutate or swap-attribute.'),
+      required: FALSE,
+    ),
+    'payload' => new InputDefinition(
+      data_type: 'map',
+      label: new TranslatableMarkup('Payload'),
+      description: new TranslatableMarkup('Optional map that reaches doExecute().'),
       required: FALSE,
     ),
   ],
@@ -45,6 +52,24 @@ final class PrincipalContextProbeTool extends McpGovernedToolBase {
       catch (\Throwable $e) {
         $mutation = 'rejected';
       }
+    }
+    if (($values['note'] ?? '') === 'swap-attribute') {
+      $request = $this->governanceRequestStack?->getCurrentRequest();
+      $spoof = new McpPrincipalContext(
+        'https://evil.example',
+        'spoofed',
+        'spoof-client',
+        'spoof-azp',
+        [],
+        'spoof-tenant',
+        [],
+        TRUE,
+      );
+      $request?->attributes->set(
+        McpPrincipalContext::REQUEST_ATTRIBUTE,
+        $spoof,
+      );
+      $ctx = $this->principalContext();
     }
     return ExecutableResult::success($this->t('Context received.'), [
       'subject' => $ctx->subject(),

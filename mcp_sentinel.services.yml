@@ -180,18 +180,28 @@ services:
       - '@config.factory'
       - '@request_stack'
 
+  mcp_sentinel.principal_context_guard:
+    class: Drupal\mcp_sentinel\Service\McpPrincipalContextGuard
+
+  mcp_sentinel.principal_context_holder:
+    class: Drupal\mcp_sentinel\Service\McpPrincipalContextHolder
+    arguments:
+      - '@request_stack'
+
   mcp_sentinel.principal_context_factory:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextFactory
     arguments:
       - '@request_stack'
       - '@mcp_sentinel.oauth_context'
-      - '@current_user'
 
   mcp_sentinel.principal_context_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher
     arguments:
       - '@mcp_sentinel.principal_context_factory'
       - '@request_stack'
+      - '@mcp_sentinel.principal_context_guard'
+      - '@mcp_sentinel.principal_context_holder'
+      - '@mcp_sentinel.audit_logger'
 
   mcp_sentinel.principal_key:
     class: Drupal\mcp_sentinel\Service\McpPrincipalKey
@@ -202,6 +212,7 @@ services:
     class: Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber
     arguments:
       - '@mcp_sentinel.principal_context_factory'
+      - '@mcp_sentinel.principal_context_holder'
     tags:
       - { name: event_subscriber }
 

@@ -20,6 +20,16 @@ final class McpPrincipalContextDeniedException extends \RuntimeException {
   public const MISSING_TENANT_CLAIM = 'missing_tenant_claim';
 
   /**
+   * The principal-context dispatcher is not wired.
+   */
+  public const MISSING_DISPATCHER = 'missing_dispatcher';
+
+  /**
+   * No verified principal (missing iss/sub/azp/act.sub).
+   */
+  public const MISSING_PRINCIPAL = 'missing_principal';
+
+  /**
    * Constructs a fail-closed refusal.
    *
    * @param string $reasonCode

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
@@ -15,7 +16,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
  *
  * Runs after Drupal authentication so Paladin / sealed-token claims are
  * already on the request. Tools still go through the dispatcher; this
- * subscriber only materialises the immutable context once per request.
+ * subscriber seals the immutable context once per request. The request
+ * attribute is informational; tools read the holder.
  */
 final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
 
@@ -24,9 +26,12 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
    *   Token-derived context factory.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
+   *   Write-once sealed context.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
+    private readonly McpPrincipalContextHolder $holder,
   ) {}
 
   /**
@@ -40,7 +45,7 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
   }
 
   /**
-   * Stamps the frozen context onto the main request.
+   * Seals the frozen context for the main request.
    *
    * @param \Symfony\Component\HttpKernel\Event\RequestEvent $event
    *   The request event.
@@ -51,6 +56,7 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     }
     $request = $event->getRequest();
     $ctx = $this->factory->fromRequest($request);
+    $this->holder->seal($ctx, $request);
     $request->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
   }
 

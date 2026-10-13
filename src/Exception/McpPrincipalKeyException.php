@@ -38,6 +38,16 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const INVALID_SEPARATOR = 'invalid_separator';
 
   /**
+   * A part is whitespace-only or contains a control character.
+   */
+  public const INVALID_PART = 'invalid_part';
+
+  /**
+   * A part exceeds MAX_PART_LENGTH (256) characters.
+   */
+  public const PART_TOO_LONG = 'part_too_long';
+
+  /**
    * Constructs a fail-closed key refusal.
    *
    * @param string $reasonCode

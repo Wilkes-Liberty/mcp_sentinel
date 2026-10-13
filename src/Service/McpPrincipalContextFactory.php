@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
-use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -13,8 +12,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * Builds a frozen principal + tenant context from the validated token.
  *
  * Reads only server-validated claims (request attributes set by the
- * auth layer, sealed-token claims, Simple OAuth). Never reads tool
- * arguments or client headers for identity or tenant.
+ * auth layer, sealed-token claims). Never reads tool arguments, the
+ * Drupal uid, or client_id as identity. act.subject is not an actor.
  */
 final class McpPrincipalContextFactory {
 
@@ -25,14 +24,10 @@ final class McpPrincipalContextFactory {
    *   The request stack.
    * @param \Drupal\mcp_sentinel\Service\McpOauthContext $oauthContext
    *   Validated OAuth channel (consumer + scopes).
-   * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
-   *   The current account, used only as a subject fallback when the
-   *   token did not carry sub.
    */
   public function __construct(
     private readonly RequestStack $requestStack,
     private readonly McpOauthContext $oauthContext,
-    private readonly AccountProxyInterface $currentUser,
   ) {}
 
   /**
@@ -51,35 +46,27 @@ final class McpPrincipalContextFactory {
   public function fromRequest(?Request $request): McpPrincipalContext {
     $claims = $this->validatedClaims($request);
     $network = $this->isNetworkCall($request);
-    $subject = $this->stringClaim($claims, ['sub', 'subject']);
-    if ($subject === '') {
-      $uid = $this->currentUser->id();
-      $subject = $uid ? (string) $uid : '';
-    }
+    $subject = $this->stringClaim($claims, ['sub']);
     $clientId = $this->oauthContext->clientId()
-      ?? $this->stringClaim($claims, ['azp', 'client_id', 'client']);
-    $azp = $this->stringClaim($claims, ['azp', 'client_id']);
-    if ($azp === '') {
-      $azp = $clientId;
-    }
+      ?? $this->stringClaim($claims, ['client_id', 'client']);
+    $azp = $this->stringClaim($claims, ['azp']);
     $scopes = $this->oauthContext->scopes();
     if ($scopes === []) {
       $scopes = $this->scopesFromClaims($claims);
     }
     $tenant = $this->stringClaim($claims, ['tenant']);
-    $actChain = $this->actChain($claims['act'] ?? NULL);
-    $issuer = $this->stringClaim($claims, ['iss', 'issuer']);
-    $tokenSub = $this->stringClaim($claims, ['sub']);
-    $tokenAzp = $this->stringClaim($claims, ['azp']);
+    $actClaim = array_key_exists('act', $claims) ? $claims['act'] : NULL;
+    $actChain = $this->actChain($actClaim);
+    $issuer = $this->stringClaim($claims, ['iss']);
     $keyClaims = [];
     if ($issuer !== '') {
       $keyClaims['iss'] = $issuer;
     }
-    if ($tokenSub !== '') {
-      $keyClaims['sub'] = $tokenSub;
+    if ($subject !== '') {
+      $keyClaims['sub'] = $subject;
     }
-    if ($tokenAzp !== '') {
-      $keyClaims['azp'] = $tokenAzp;
+    if ($azp !== '') {
+      $keyClaims['azp'] = $azp;
     }
     if (array_key_exists('act', $claims) && $claims['act'] !== NULL) {
       $keyClaims['act'] = $claims['act'];
@@ -120,12 +107,10 @@ final class McpPrincipalContextFactory {
   }
 
   /**
-   * A network call is an explicit mark or Paladin claims on the request.
+   * Paladin claims, an explicit mark, or a sealed-token HTTP call.
    *
-   * CLI / role-fallback / sealed-token-only traffic is not a Paladin
-   * network call and does not fail closed on a missing tenant. That
-   * keep existing local-operator and sealed-token paths intact; tenant
-   * fail-closed is the Paladin/network concern (DEV-839 / DEV-844).
+   * Sealed-token HTTP requires a tenant claim (DEV-839). CLI / stdio
+   * with no request is not a network call.
    */
   private function isNetworkCall(?Request $request): bool {
     if ($request === NULL) {
@@ -134,7 +119,10 @@ final class McpPrincipalContextFactory {
     if ($request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE) === TRUE) {
       return TRUE;
     }
-    return $request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    if ($request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)) {
+      return TRUE;
+    }
+    return $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE);
   }
 
   /**
@@ -185,33 +173,22 @@ final class McpPrincipalContextFactory {
   }
 
   /**
-   * Flattens an RFC 8693 act claim into a subject chain.
+   * Flattens RFC 8693 act into a chain of act.sub values only.
+   *
+   * The act.subject claim is ignored so the chain matches the key's
+   * actor. A list or non-object act produces an empty chain.
    *
    * @param mixed $act
-   *   The act claim: nested object, list of subjects, or absent.
+   *   The act claim.
    *
    * @return list<string>
    *   Actor subjects, outermost first.
    */
   private function actChain(mixed $act): array {
     $chain = [];
-    while (is_array($act)) {
-      if (array_is_list($act)) {
-        foreach ($act as $item) {
-          if (is_string($item) && $item !== '') {
-            $chain[] = $item;
-          }
-          elseif (is_array($item)) {
-            $sub = $item['sub'] ?? $item['subject'] ?? NULL;
-            if (is_string($sub) && $sub !== '') {
-              $chain[] = $sub;
-            }
-          }
-        }
-        break;
-      }
-      $sub = $act['sub'] ?? $act['subject'] ?? NULL;
-      if (is_string($sub) && $sub !== '') {
+    while (is_array($act) && !array_is_list($act)) {
+      $sub = McpPrincipalKey::topLevelActSub($act);
+      if ($sub !== '') {
         $chain[] = $sub;
       }
       $act = $act['act'] ?? NULL;

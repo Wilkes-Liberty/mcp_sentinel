@@ -5,16 +5,18 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Dispatches a tool handler as handler(args, ctx).
  *
- * Identity and tenant come only from the frozen token context. Reserved
- * keys in arguments are rejected before the handler runs. A network
- * call without a tenant claim fails closed.
+ * Identity and tenant come only from the frozen token context. The
+ * reserved-key and principal checks run on the exact argument array
+ * passed to the handler / doExecute() — never a raw HTTP body. A
+ * network or sealed-token HTTP call without a tenant claim fails
+ * closed. Every denial writes a denied_access audit row.
  */
 final class McpPrincipalContextDispatcher {
 
@@ -24,11 +26,20 @@ final class McpPrincipalContextDispatcher {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
    *   Builds the frozen context from the validated token.
    * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
-   *   Request stack used to stamp the frozen context.
+   *   Request stack used to key the write-once holder.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextGuard $guard
+   *   On/off switch (always on outside PHPUnit injection).
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
+   *   Write-once sealed context for this request.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   Writes denied_access rows.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
     private readonly RequestStack $requestStack,
+    private readonly McpPrincipalContextGuard $guard,
+    private readonly McpPrincipalContextHolder $holder,
+    private readonly McpAuditLogger $auditLogger,
   ) {}
 
   /**
@@ -37,23 +48,45 @@ final class McpPrincipalContextDispatcher {
    * @param callable(array<string, mixed>, \Drupal\mcp_sentinel\Value\McpPrincipalContext): mixed $handler
    *   The tool handler. Receives arguments and the frozen context.
    * @param array<string, mixed> $arguments
-   *   Caller-supplied tool arguments.
+   *   Caller-supplied tool arguments (the exact handler/doExecute map).
    *
    * @return mixed
    *   Whatever the handler returns.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
-   *   Reserved identity keys, or a network call with no tenant claim.
+   *   Reserved identity keys, missing principal, or missing tenant.
    */
   public function dispatch(callable $handler, array $arguments): mixed {
-    $this->assertDispatchAllowed($arguments);
-    $ctx = $this->factory->fromCurrentRequest();
-    $this->attachToRequest($ctx);
+    $ctx = $this->admit($arguments);
     return $handler($arguments, $ctx);
   }
 
   /**
-   * Refuses reserved identity keys and a missing network tenant.
+   * Preflight + seal for the exact values about to reach doExecute().
+   *
+   * @param array<string, mixed> $arguments
+   *   The array ToolBase::execute() will pass to doExecute().
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpPrincipalContext
+   *   The sealed context.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the guard is on and the call is not allowed.
+   */
+  public function admit(array $arguments): McpPrincipalContext {
+    $this->assertDispatchAllowed($arguments);
+    $ctx = $this->factory->fromCurrentRequest();
+    $token = $this->requestStack->getCurrentRequest() ?? 'cli';
+    $this->holder->seal($ctx, $token);
+    return $ctx;
+  }
+
+  /**
+   * Refuses reserved identity keys, a missing principal, or tenant.
+   *
+   * Checks $arguments as-is — the exact map the handler receives.
+   * HTTP body parsing is not a choke point (empty top-level
+   * `arguments: {}` must not hide `params.arguments`).
    *
    * @param array<string, mixed> $arguments
    *   Caller-supplied tool arguments.
@@ -62,12 +95,12 @@ final class McpPrincipalContextDispatcher {
    *   When the guard is on and the call is not allowed.
    */
   public function assertDispatchAllowed(array $arguments): void {
-    if (!McpPrincipalContextGuard::required()) {
+    if (!$this->guard->required()) {
       return;
     }
     $reserved = McpPrincipalContext::reservedKeysIn($arguments);
     if ($reserved !== []) {
-      throw new McpPrincipalContextDeniedException(
+      $this->deny(
         McpPrincipalContextDeniedException::RESERVED_IDENTITY_ARGUMENT,
         'Tool arguments must not carry identity or tenant keys ('
         . implode(', ', $reserved)
@@ -76,81 +109,62 @@ final class McpPrincipalContextDispatcher {
     }
     $ctx = $this->factory->fromCurrentRequest();
     if ($ctx->isNetwork() && $ctx->tenant() === '') {
-      throw new McpPrincipalContextDeniedException(
+      $this->deny(
         McpPrincipalContextDeniedException::MISSING_TENANT_CLAIM,
         'Network calls require a tenant claim on the validated token (DEV-839).',
+      );
+    }
+    try {
+      McpPrincipalKey::fromClaims($ctx->keyClaims());
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->deny(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        'A verified principal is required (iss, sub, and azp or act.sub): '
+        . $e->reasonCode
+        . '.',
       );
     }
   }
 
   /**
-   * Frozen context for the current request.
+   * Frozen context for the current request (factory rebuild, not the slot).
    */
   public function context(): McpPrincipalContext {
     return $this->factory->fromCurrentRequest();
   }
 
   /**
-   * Raw tool arguments from an HTTP body or form, if present.
+   * Sealed context tools must read. Never the request attribute.
    *
-   * Used at the Tool API seam so a spoofed identity key is seen even
-   * when the plugin schema strips unknown inputs.
-   *
-   * @param \Symfony\Component\HttpFoundation\Request $request
-   *   The request.
-   *
-   * @return array<string, mixed>
-   *   Top-level argument map, or empty when none is present.
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When nothing is sealed or the sealed context has no subject.
    */
-  public static function rawArgumentsFromRequest(Request $request): array {
-    $content = $request->getContent();
-    if ($content !== '') {
-      $decoded = json_decode($content, TRUE);
-      if (is_array($decoded)) {
-        $fromJson = self::argumentsFromDocument($decoded);
-        if ($fromJson !== []) {
-          return $fromJson;
-        }
-      }
+  public function sealedContext(): McpPrincipalContext {
+    $ctx = $this->holder->get();
+    if ($ctx instanceof McpPrincipalContext && $ctx->subject() !== '') {
+      return $ctx;
     }
-    $requestBag = $request->request->all();
-    return self::argumentsFromDocument($requestBag);
-  }
-
-  /**
-   * Pulls a tool-argument map out of a JSON-RPC / form document.
-   *
-   * @param array<string, mixed> $document
-   *   Decoded body or form values.
-   *
-   * @return array<string, mixed>
-   *   Arguments, or empty.
-   */
-  private static function argumentsFromDocument(array $document): array {
-    foreach (['arguments', 'input'] as $key) {
-      if (isset($document[$key]) && is_array($document[$key])) {
-        return $document[$key];
-      }
-    }
-    $params = $document['params'] ?? NULL;
-    if (is_array($params)) {
-      foreach (['arguments', 'input'] as $key) {
-        if (isset($params[$key]) && is_array($params[$key])) {
-          return $params[$key];
-        }
-      }
-    }
-    return [];
-  }
-
-  /**
-   * Stamps the frozen context on the current request when one exists.
-   */
-  private function attachToRequest(McpPrincipalContext $ctx): void {
-    $this->requestStack->getCurrentRequest()?->attributes->set(
-      McpPrincipalContext::REQUEST_ATTRIBUTE,
-      $ctx,
+    throw new McpPrincipalContextDeniedException(
+      McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+      'A verified principal context is required.',
     );
+  }
+
+  /**
+   * Writes a denied_access row and throws.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   */
+  private function deny(string $reasonCode, string $message): never {
+    $this->auditLogger->log('denied_access', [
+      'tool' => 'principal_context',
+      'entity_type' => 'principal',
+      'id' => '-',
+      'operation' => 'dispatch',
+      'reason' => $reasonCode,
+    ]);
+    throw new McpPrincipalContextDeniedException($reasonCode, $message);
   }
 
 }

@@ -10,22 +10,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - DEV-844: Governed tool dispatch builds an immutable principal + tenant
   context from the validated token at the request boundary and passes it
   to handlers as a separate parameter (`handler(args, ctx)`). Tools must
-  not read identity or tenant from arguments. Reserved identity keys
-  (`user`, `uid`, `principal`, `tenant`, `tenant_id`, `act`,
-  `on_behalf_of`) are rejected before dispatch, including nested maps
-  and case variants. The frozen context exposes a shared principal key
-  (`iss|sub|actor`, actor = immediate `act.sub` or else azp/client id)
-  and a human key (`iss|sub`) via `principalKey()` / `humanKey()` and
-  the `mcp_sentinel.principal_key` service (`fromClaims()`) for rate
-  limits, budgets, and kill. Actor is the top-level `act.sub` (RFC 8693
-  current actor; nested act entries do not change the key) or else
-  `azp`. Missing iss, sub, azp (when no act), or act.sub (when act is
-  present) fails closed — no key. A `|` in iss, sub, or actor is
-  rejected so a claim cannot forge a segment. Shared vectors live in
-  `tests/fixtures/principal-key-vectors.json` (the Node connector will
-  test a JS twin against the same file). A network call whose token
-  omits the tenant claim (DEV-839) fails closed. Grant tables are not
-  an identity source; their retirement is a later slice.
+  not read identity or tenant from arguments. The reserved-key and
+  principal checks run on the exact array passed to `doExecute()` /
+  `handler()` (Tool API `getExecutableValues()`), not a raw HTTP body.
+  A missing dispatcher or missing principal fails closed. Reserved
+  identity keys (`user`, `uid`, `principal`, `tenant`, `tenant_id`,
+  `tenantId`, `act`, `on_behalf_of`, `onBehalfOf`, `sub`, `iss`,
+  `azp`, `client_id`, `user_id`, `userId`, `actor`, `scope`,
+  `scopes`, `subject`) are matched after NFKC, stripping whitespace
+  and zero-width characters, folding case, and dropping `_`/`-`,
+  including nested maps. The frozen context is sealed once in
+  `McpPrincipalContextHolder`; the request attribute is not the
+  source of truth. The shared principal key is `iss|sub|actor`
+  (actor = top-level `act.sub` or else `azp`; never `client_id` or
+  `act.subject`) and the human key is `iss|sub`, via
+  `principalKey()` / `humanKey()` and
+  `mcp_sentinel.principal_key` (`fromClaims()`). Each part is capped
+  at 256 characters; whitespace-only parts, control characters, and
+  `|` are rejected. Shared vectors live in
+  `tests/fixtures/principal-key-vectors.json` (the Node connector
+  will test a JS twin against the same file). Network and
+  sealed-token HTTP calls require a tenant claim (DEV-839). Every
+  denial writes a `denied_access` audit row. The guard has no
+  environment kill switch; tests inject
+  `McpPrincipalContextGuard::disableForTest()` under PHPUnit only.
+  Grant tables are not an identity source; their retirement is a
+  later slice.
 
 ## [2.34.1] - 2026-10-12
 

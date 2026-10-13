@@ -79,6 +79,15 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains('missing-iss', $names);
     $this->assertContains('act-present-missing-act-sub', $names);
     $this->assertContains('pipe-in-sub-rejected', $names);
+    $this->assertContains('act-as-string', $names);
+    $this->assertContains('act-as-list', $names);
+    $this->assertContains('act-as-empty-object', $names);
+    $this->assertContains('empty-act-sub', $names);
+    $this->assertContains('integer-sub', $names);
+    $this->assertContains('whitespace-only-sub', $names);
+    $this->assertContains('unicode-sub-valid', $names);
+    $this->assertContains('zero-width-sub', $names);
+    $this->assertContains('part-too-long-sub', $names);
     $this->assertSame($names, array_unique($names));
   }
 
@@ -98,6 +107,12 @@ final class McpPrincipalKeyTest extends UnitTestCase {
       'tenant-a',
       ['agent-1', 'B'],
       TRUE,
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+        'act' => ['sub' => 'agent-1', 'act' => ['sub' => 'B']],
+      ],
     );
     $fromClaims = McpPrincipalKey::fromClaims($ctx->keyClaims());
     $this->assertSame(

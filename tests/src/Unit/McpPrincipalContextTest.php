@@ -30,6 +30,14 @@ final class McpPrincipalContextTest extends UnitTestCase {
     $this->assertContains('user', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
     $this->assertContains('tenant', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
     $this->assertContains('on_behalf_of', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('sub', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('iss', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('azp', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('client_id', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('user_id', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('actor', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('scope', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
+    $this->assertContains('subject', McpPrincipalContext::RESERVED_IDENTITY_KEYS);
     $this->assertSame(
       ['user', 'Tenant'],
       McpPrincipalContext::reservedKeysIn([
@@ -62,12 +70,38 @@ final class McpPrincipalContextTest extends UnitTestCase {
       ]),
     );
     $this->assertSame(
-      ['items.0.tenant', 'items.1.act'],
+      ['items.0.tenant', 'items.1.act', 'items.1.act.sub'],
       McpPrincipalContext::reservedKeysIn([
         'items' => [
           ['tenant' => 'evil'],
           ['act' => ['sub' => 'spoof']],
         ],
+      ]),
+    );
+  }
+
+  /**
+   * Matching uses NFKC, strips whitespace/zero-width, folds case.
+   *
+   * @covers ::normalizeKey
+   * @covers ::reservedKeysIn
+   */
+  public function testReservedKeysNormalizeUnicodeAndZeroWidth(): void {
+    $this->assertSame('user', McpPrincipalContext::normalizeKey(' USER '));
+    $this->assertSame(
+      'user',
+      McpPrincipalContext::normalizeKey("us\u{200B}er"),
+    );
+    $this->assertSame(
+      'onbehalfof',
+      McpPrincipalContext::normalizeKey('ON-BEHALF-OF'),
+    );
+    $this->assertSame(
+      [' user ', "us\u{200B}er", 'Ｓｕｂ'],
+      McpPrincipalContext::reservedKeysIn([
+        ' user ' => '2',
+        "us\u{200B}er" => '3',
+        'Ｓｕｂ' => '4',
       ]),
     );
   }
@@ -149,6 +183,16 @@ final class McpPrincipalContextTest extends UnitTestCase {
     string $clientId = 'agent-client',
     string $azp = 'agent-client',
   ): McpPrincipalContext {
+    $keyClaims = [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+    ];
+    if ($azp !== '') {
+      $keyClaims['azp'] = $azp;
+    }
+    if ($actChain !== []) {
+      $keyClaims['act'] = ['sub' => $actChain[0]];
+    }
     return new McpPrincipalContext(
       'https://idp.example/realms/agents',
       'human-1',
@@ -158,6 +202,7 @@ final class McpPrincipalContextTest extends UnitTestCase {
       'tenant-a',
       $actChain,
       TRUE,
+      $keyClaims,
     );
   }
 

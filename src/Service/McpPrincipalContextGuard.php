@@ -7,36 +7,40 @@ namespace Drupal\mcp_sentinel\Service;
 /**
  * On/off switch for the principal-context dispatch guard.
  *
- * Production is always on. The disable env is honoured only under
- * PHPUnit so a red run can prove the denies are real (DEV-844).
+ * Production is always on. The only disable is an instance method that
+ * throws unless PHPUnit's own constants are defined — no environment
+ * variable can turn this off.
  */
 final class McpPrincipalContextGuard {
 
   /**
-   * PHPUnit-only escape that restores pre-DEV-844 admission.
-   *
-   * Production never honours this. PHPUnit is detected via the composer
-   * autoload constant the runner defines, not a caller-supplied flag.
+   * Whether reserved-key and principal denies are enforced.
    */
-  public const TEST_DISABLE_ENV = 'MCP_TEST_DISABLE_PRINCIPAL_CONTEXT_GUARD';
+  private bool $required = TRUE;
 
   /**
-   * Whether reserved-key and missing-tenant denies are enforced.
+   * Whether reserved-key and missing-principal denies are enforced.
    */
-  public static function required(): bool {
-    if (getenv(self::TEST_DISABLE_ENV) !== '1') {
-      return TRUE;
-    }
-    return !self::runningUnderPhpunit();
+  public function required(): bool {
+    return $this->required;
   }
 
   /**
-   * TRUE only inside a PHPUnit process.
+   * Test-only injection that restores pre-DEV-844 admission.
+   *
+   * Impossible outside the PHPUnit process: the runner's autoload
+   * constants are required. No getenv() path exists.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
    */
-  private static function runningUnderPhpunit(): bool {
-    return defined('PHPUNIT_COMPOSER_INSTALL')
-      || defined('__PHPUNIT_PHAR__')
-      || getenv('PHPUNIT') === '1';
+  public function disableForTest(): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Principal-context guard can be disabled only under PHPUnit.',
+      );
+    }
+    $this->required = FALSE;
   }
 
 }
