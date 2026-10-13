@@ -196,7 +196,7 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * sealForJob() keeps a principal already sealed for the current request.
+   * A job seal keeps a principal already sealed for the current request.
    *
    * @covers ::seal
    * @covers ::sealForJob

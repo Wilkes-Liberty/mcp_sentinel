@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -35,25 +36,12 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
   public function testNestedMainRequestKeepsSealedPrincipal(): void {
     $stack = new RequestStack();
     $main = Request::create('/mcp');
-    $main->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
-      'sub' => 'human-1',
-    ]);
+    $main->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-1', 'agent-a'));
     $nested = Request::create('/nested');
-    $nested->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
-      'sub' => 'human-2',
-    ]);
+    $nested->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-2', 'agent-b'));
     $stack->push($main);
     $holder = new McpPrincipalContextHolder($stack);
-    $first = $this->ctx('human-1', 'agent-a');
-    $factory = $this->createMock(McpPrincipalContextFactory::class);
-    $factory->method('fromRequest')->willReturnCallback(
-      function (Request $request) use ($first, $main): McpPrincipalContext {
-        return $request === $main
-          ? $first
-          : $this->ctx('human-2', 'agent-b');
-      },
-    );
-    $subscriber = new McpPrincipalContextSubscriber($factory, $holder);
+    $subscriber = new McpPrincipalContextSubscriber($this->factory($stack), $holder);
     $kernel = $this->createMock(HttpKernelInterface::class);
 
     $subscriber->onRequest(new RequestEvent(
@@ -61,7 +49,8 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
       $main,
       HttpKernelInterface::MAIN_REQUEST,
     ));
-    $this->assertSame($first, $holder->get());
+    $first = $holder->get();
+    $this->assertSame('human-1', $first?->subject());
 
     $stack->push($nested);
     $subscriber->onRequest(new RequestEvent(
@@ -86,9 +75,7 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     $leftover = Request::create('/');
     $stack->push($leftover);
     $holder = new McpPrincipalContextHolder($stack);
-    $factory = $this->createMock(McpPrincipalContextFactory::class);
-    $factory->expects($this->never())->method('fromRequest');
-    $subscriber = new McpPrincipalContextSubscriber($factory, $holder);
+    $subscriber = new McpPrincipalContextSubscriber($this->factory($stack), $holder);
     $kernel = $this->createMock(HttpKernelInterface::class);
 
     $subscriber->onRequest(new RequestEvent(
@@ -97,27 +84,32 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
       HttpKernelInterface::MAIN_REQUEST,
     ));
     $this->assertNull($holder->get());
+    $this->assertFalse($leftover->attributes->has(McpPrincipalContext::REQUEST_ATTRIBUTE));
   }
 
   /**
-   * Builds a context that can compose a principal key.
+   * A real factory (the class is final) over a mocked OAuth seam.
    */
-  private function ctx(string $sub, string $azp): McpPrincipalContext {
-    return new McpPrincipalContext(
-      'https://idp.example/realms/agents',
-      $sub,
-      $azp,
-      $azp,
-      ['mcp_read'],
-      'tenant-a',
-      [],
-      TRUE,
-      [
-        'iss' => 'https://idp.example/realms/agents',
-        'sub' => $sub,
-        'azp' => $azp,
-      ],
-    );
+  private function factory(RequestStack $stack): McpPrincipalContextFactory {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    return new McpPrincipalContextFactory($stack, $oauth);
+  }
+
+  /**
+   * Validated claims that can compose a principal key.
+   *
+   * @return array<string, string>
+   *   JWT-shaped claims.
+   */
+  private function claims(string $sub, string $azp): array {
+    return [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => $sub,
+      'azp' => $azp,
+      'tenant' => 'tenant-a',
+    ];
   }
 
 }
