@@ -1,0 +1,293 @@
+[
+  {
+    "name": "no-act-azp-present",
+    "doc": "Keys are not case-folded or Unicode-normalized; iss/sub/azp are copied as-is.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|agent-client",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "single-act",
+    "doc": "Actor is top-level act.sub (RFC 8693 current actor).",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "sub": "agent-1"
+      }
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|agent-1",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "nested-act-chain-top-level-actor",
+    "doc": "Nested act entries are prior actors and do not change the key.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "sub": "A",
+        "act": {
+          "sub": "B"
+        }
+      }
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|A",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "no-act-missing-azp",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1"
+    },
+    "expected": {
+      "error": "missing_azp"
+    }
+  },
+  {
+    "name": "no-act-missing-azp-client-id-ignored",
+    "doc": "client_id is never an actor.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "client_id": "must-not-be-actor"
+    },
+    "expected": {
+      "error": "missing_azp"
+    }
+  },
+  {
+    "name": "missing-sub",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "missing_sub"
+    }
+  },
+  {
+    "name": "missing-iss",
+    "claims": {
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "missing_iss"
+    }
+  },
+  {
+    "name": "act-present-missing-act-sub",
+    "doc": "act.subject is ignored; only act.sub is an actor.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "act": {
+          "sub": "B"
+        }
+      }
+    },
+    "expected": {
+      "error": "missing_act_sub"
+    }
+  },
+  {
+    "name": "pipe-in-sub-rejected",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human|forged",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_separator"
+    }
+  },
+  {
+    "name": "pipe-in-iss-rejected",
+    "claims": {
+      "iss": "https://idp.example|evil",
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_separator"
+    }
+  },
+  {
+    "name": "pipe-in-actor-rejected",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent|forged"
+    },
+    "expected": {
+      "error": "invalid_separator"
+    }
+  },
+  {
+    "name": "act-as-string",
+    "doc": "act must be a non-list object; a string is not a delegation.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": "agent-1"
+    },
+    "expected": {
+      "error": "missing_act_sub"
+    }
+  },
+  {
+    "name": "act-as-list",
+    "doc": "A list act is not a delegation object.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": ["agent-1"]
+    },
+    "expected": {
+      "error": "missing_act_sub"
+    }
+  },
+  {
+    "name": "act-as-empty-object",
+    "doc": "Empty act {} has no act.sub.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {}
+    },
+    "expected": {
+      "error": "missing_act_sub"
+    }
+  },
+  {
+    "name": "empty-act-sub",
+    "doc": "act.sub present but empty is not an actor.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "sub": ""
+      }
+    },
+    "expected": {
+      "error": "missing_act_sub"
+    }
+  },
+  {
+    "name": "integer-sub",
+    "doc": "sub must be a string; integer 1 is missing_sub.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": 1,
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "missing_sub"
+    }
+  },
+  {
+    "name": "whitespace-only-sub",
+    "doc": "Whitespace-only parts are rejected (invalid_part). Mid-string spaces are allowed.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "   ",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "unicode-sub-valid",
+    "doc": "Non-ASCII letters are valid and not case-folded or NFKC-normalized.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "用户-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|用户-1|agent-client",
+      "humanKey": "https://idp.example/realms/agents|用户-1"
+    }
+  },
+  {
+    "name": "zero-width-sub",
+    "doc": "U+200B is a format control (\\p{C}) and is rejected.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human\u200b1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "part-too-long-sub",
+    "doc": "Each iss/sub/actor part is capped at 256 Unicode characters.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "part_too_long"
+    }
+  },
+  {
+    "name": "nbsp-only-sub",
+    "doc": "U+00A0 NBSP is Unicode whitespace (\\p{Z}) and is rejected.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "\u00a0",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "part-too-long-iss",
+    "doc": "iss is capped at 256 Unicode characters.",
+    "claims": {
+      "iss": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "part_too_long"
+    }
+  },
+  {
+    "name": "part-too-long-actor",
+    "doc": "azp/actor is capped at 256 Unicode characters.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "expected": {
+      "error": "part_too_long"
+    }
+  }
+]

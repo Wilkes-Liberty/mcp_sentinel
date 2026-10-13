@@ -257,7 +257,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['audit']['audit_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable audit logging'),
-      '#description'   => $this->t('Record every governed operation to the tamper-evident audit log. Strongly recommended — turning this off also disables the dashboard, chain verification, and SIEM streaming.'),
+      '#description'   => $this->t('Record governed allow operations to the tamper-evident audit log. Denials (denied_access) are always written, even when this is off. Turning this off still disables the dashboard, chain verification, and SIEM streaming for allow rows.'),
       '#default_value' => $config->get('audit_enabled') ?? TRUE,
     ];
     $form['audit']['audit_log_reads'] = [

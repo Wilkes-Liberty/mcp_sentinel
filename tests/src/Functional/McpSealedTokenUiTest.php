@@ -74,8 +74,10 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->drupalGet('/admin/config/services/mcp-sentinel/tokens');
     $this->assertSession()->fieldExists('client_id');
     $this->assertSession()->pageTextContains('mcp-agent-prod');
+    $this->assertSession()->fieldExists('tenant');
     $this->submitForm([
       'client_id' => 'mcp-agent-prod',
+      'tenant' => 'tenant-a',
       'ttl' => '900',
     ], 'Mint sealed token');
     $this->assertSession()->addressEquals('/admin/config/services/mcp-sentinel/tokens/reveal');

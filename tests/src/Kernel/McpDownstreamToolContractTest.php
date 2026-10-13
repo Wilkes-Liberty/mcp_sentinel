@@ -64,6 +64,9 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'create',
     'discoveryAccess',
     'execute',
+    'principalContext',
+    'reservedArgumentExceptions',
+    'reservedNestedMapAllowlists',
   ];
 
   /**
@@ -71,11 +74,13 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
    */
   private const BASE_PROPERTIES = [
     'governanceAccessChecker',
+    'governanceAuditLogger',
     'governanceClassification',
     'governanceDenyExplainer',
     'governanceDlp',
     'governanceExfiltrationGuard',
     'governancePolicyResolver',
+    'governancePrincipalDispatcher',
     'governanceReadiness',
     'governanceRequestStack',
     'governanceRequiredScope',

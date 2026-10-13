@@ -41,6 +41,57 @@ final class McpDenyExplainer {
       ? ' Edit policy profile "' . $profileId . '".'
       : ' Edit the active MCP policy profile.';
 
+    if (str_contains($reason, 'reserved_identity_argument')
+      || str_contains($reason, 'must not carry identity or tenant keys')) {
+      return new McpDenyExplanation(
+        'reserved_identity_argument',
+        'identity argument rejected',
+        FALSE,
+        'Remove identity and tenant keys from tool arguments. Tenant and principal come only from the token.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'missing_tenant_claim')
+      || str_contains($reason, 'require a tenant claim')) {
+      return new McpDenyExplanation(
+        'missing_tenant_claim',
+        'tenant claim missing',
+        FALSE,
+        'Issue the agent token with a tenant claim (DEV-839). Never pass tenant as a tool argument.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'missing_dispatcher')
+      || str_contains($reason, 'principal-context dispatcher is required')) {
+      return new McpDenyExplanation(
+        'missing_dispatcher',
+        'principal dispatcher missing',
+        FALSE,
+        'Wire mcp_sentinel.principal_context_dispatcher. A missing dispatcher fails closed.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'reseal_refused')
+      || str_contains($reason, 'cannot reseal')
+      || str_contains($reason, 'already sealed')) {
+      return new McpDenyExplanation(
+        'reseal_refused',
+        'principal reseal refused',
+        FALSE,
+        'A subrequest cannot change the sealed principal. CLI workers must call resetForJob() per message.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'missing_principal')
+      || str_contains($reason, 'verified principal')) {
+      return new McpDenyExplanation(
+        'missing_principal',
+        'verified principal missing',
+        FALSE,
+        'Issue a Paladin token with iss, sub, and azp or act.sub. Drupal uid is not a subject.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'classification_egress_denied')) {
       return new McpDenyExplanation(
         'classification_egress_denied',

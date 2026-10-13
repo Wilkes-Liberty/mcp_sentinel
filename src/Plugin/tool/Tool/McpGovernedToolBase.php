@@ -8,14 +8,18 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolDefinition;
@@ -143,6 +147,20 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpExfiltrationGuard $governanceExfiltrationGuard = NULL;
 
   /**
+   * Frozen principal + tenant dispatch (NULL in unit tests).
+   *
+   * @api
+   */
+  protected ?McpPrincipalContextDispatcher $governancePrincipalDispatcher = NULL;
+
+  /**
+   * Audit writer used when the dispatcher is missing (NULL in unit tests).
+   *
+   * @api
+   */
+  protected ?McpAuditLogger $governanceAuditLogger = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -166,6 +184,12 @@ abstract class McpGovernedToolBase extends ToolBase {
     $instance->governanceExfiltrationGuard = $container->has('mcp_sentinel.exfiltration_guard')
       ? $container->get('mcp_sentinel.exfiltration_guard')
       : NULL;
+    $instance->governancePrincipalDispatcher = $container->has('mcp_sentinel.principal_context_dispatcher')
+      ? $container->get('mcp_sentinel.principal_context_dispatcher')
+      : NULL;
+    $instance->governanceAuditLogger = $container->has('mcp_sentinel.audit_logger')
+      ? $container->get('mcp_sentinel.audit_logger')
+      : NULL;
     return $instance;
   }
 
@@ -173,10 +197,181 @@ abstract class McpGovernedToolBase extends ToolBase {
    * {@inheritdoc}
    */
   public function execute(): static {
+    $denied = $this->refuseIdentitySpoofBeforeDispatch();
+    if ($denied !== NULL) {
+      $this->result = $denied;
+      return $this;
+    }
     parent::execute();
     $this->applyDlpToResult();
     $this->markUntrustedRead();
     return $this;
+  }
+
+  /**
+   * Frozen principal + tenant context for this call.
+   *
+   * Identity is never taken from tool arguments. Downstream tools that
+   * need the acting principal or tenant must call this helper (or take
+   * the context parameter from McpPrincipalContextDispatcher::dispatch).
+   * Reads the write-once holder, never the request attribute.
+   *
+   * @api
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the dispatcher is missing or no principal is sealed.
+   */
+  protected function principalContext(): McpPrincipalContext {
+    if ($this->governancePrincipalDispatcher === NULL) {
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+        'The principal-context dispatcher is required.',
+      );
+    }
+    return $this->governancePrincipalDispatcher->sealedContext();
+  }
+
+  /**
+   * Declared schema input names exempted from reserved-key matching.
+   *
+   * Top-level declared inputs only. NEVER_EXEMPT_IDENTITY_KEYS cannot
+   * be exempted. Nested keys use reservedNestedMapAllowlists() when
+   * the tool has a field-definition-tied `fields` map. Override in a
+   * subclass after review.
+   *
+   * @return list<string>
+   *   Declared input names.
+   *
+   * @api
+   */
+  protected function reservedArgumentExceptions(): array {
+    return [];
+  }
+
+  /**
+   * Field-definition rules for nested maps such as `fields`.
+   *
+   * Node and media write tools override this. config_set must not:
+   * its `data` map stays fully scanned. NEVER_EXEMPT_IDENTITY_KEYS
+   * cannot be allowed.
+   *
+   * @param array<string, mixed> $values
+   *   The exact doExecute() argument map.
+   *
+   * @return array<string, array{allow?: list<string>, refuse?: list<string>}>
+   *   Rules keyed by map input name.
+   *
+   * @api
+   */
+  protected function reservedNestedMapAllowlists(array $values): array {
+    return [];
+  }
+
+  /**
+   * Declared-input exceptions that are allowed after review.
+   *
+   * @return list<string>
+   *   Names that are both declared inputs and not never-exempt.
+   */
+  private function reviewedReservedExceptions(): array {
+    $declared = array_map(
+      'strval',
+      array_keys($this->getInputDefinitions()),
+    );
+    $exempt = [];
+    foreach ($this->reservedArgumentExceptions() as $name) {
+      if (!in_array($name, $declared, TRUE)) {
+        continue;
+      }
+      $norm = McpPrincipalContext::normalizeKey($name);
+      $never = FALSE;
+      foreach (McpPrincipalContext::NEVER_EXEMPT_IDENTITY_KEYS as $reserved) {
+        if (McpPrincipalContext::normalizeKey($reserved) === $norm) {
+          $never = TRUE;
+          break;
+        }
+      }
+      if (!$never) {
+        $exempt[] = $name;
+      }
+    }
+    return $exempt;
+  }
+
+  /**
+   * Rejects reserved identity keys and a missing principal or tenant.
+   *
+   * Runs on the exact array ToolBase::execute() will pass to
+   * doExecute() (getExecutableValues). A raw HTTP body is never the
+   * choke point: empty top-level `arguments: {}` cannot hide a payload
+   * in params.arguments, and Drush / queue / setInputValue paths are
+   * checked even when there is no request.
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when the call is refused, or NULL to proceed.
+   */
+  private function refuseIdentitySpoofBeforeDispatch(): ?ExecutableResult {
+    if ($this->governancePrincipalDispatcher === NULL) {
+      return $this->principalDenialResult(
+        new McpPrincipalContextDeniedException(
+          McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+          'The principal-context dispatcher is required.',
+        ),
+      );
+    }
+    $arguments = $this->getExecutableValues(TRUE);
+    $exceptions = $this->reviewedReservedExceptions();
+    $nested = $this->reservedNestedMapAllowlists($arguments);
+    try {
+      $this->governancePrincipalDispatcher->admit(
+        $arguments,
+        $this->getPluginId(),
+        $exceptions,
+        $nested,
+      );
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      return $this->principalDenialResult($e, FALSE);
+    }
+    return NULL;
+  }
+
+  /**
+   * Annotates a principal denial and writes an audit row when needed.
+   *
+   * @param \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException $e
+   *   The denial.
+   * @param bool $audit
+   *   FALSE when the dispatcher already wrote the audit row.
+   */
+  private function principalDenialResult(
+    McpPrincipalContextDeniedException $e,
+    bool $audit = TRUE,
+  ): ExecutableResult {
+    if ($audit && $this->governancePrincipalDispatcher !== NULL) {
+      $this->governancePrincipalDispatcher->writeDenialAudit(
+        $this->getPluginId(),
+        $e->reasonCode,
+      );
+    }
+    elseif ($audit && $this->governanceAuditLogger !== NULL) {
+      $ctx = new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
+      $this->governanceAuditLogger->logAlways(
+        'denied_access',
+        McpPrincipalContextDispatcher::denialAuditMetadata(
+          $this->getPluginId(),
+          $e->reasonCode,
+          $ctx,
+        ),
+      );
+    }
+    $message = $e->getMessage();
+    if ($this->governanceDenyExplainer !== NULL) {
+      $message = $this->governanceDenyExplainer->annotate($message);
+    }
+    return ExecutableResult::failure($this->t('@message', [
+      '@message' => $message,
+    ]));
   }
 
   /**

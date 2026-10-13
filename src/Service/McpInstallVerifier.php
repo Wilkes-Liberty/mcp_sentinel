@@ -393,7 +393,7 @@ final class McpInstallVerifier {
     $settings = $this->configFactory->get('mcp_sentinel.settings');
     if (!(bool) $settings->get('audit_enabled')) {
       return McpInstallCheck::fail('keyed_evidence', $title, [
-        'audit_enabled is off; refusals would not be recorded.',
+        'audit_enabled is off; allow rows would not be recorded. Denials are still written.',
       ]);
     }
     if (!$this->moduleHandler->moduleExists('audit_chain')) {

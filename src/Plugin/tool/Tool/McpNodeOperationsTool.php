@@ -9,6 +9,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\node\NodeInterface;
 use Drupal\tool\Attribute\Tool;
@@ -93,6 +94,11 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
   protected McpPolicyResolver $policyResolver;
 
   /**
+   * Field-definition allowlist for the fields map.
+   */
+  protected McpEntityFieldReservedAllowlist $fieldReservedAllowlist;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -101,7 +107,21 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
     $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->contentLock = $container->get('mcp_sentinel.content_lock');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
+    $instance->fieldReservedAllowlist = $container->get('mcp_sentinel.entity_field_reserved_allowlist');
     return $instance;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function reservedNestedMapAllowlists(array $values): array {
+    $bundle = $this->bundleForReservedFields($values);
+    if ($bundle === '') {
+      return [];
+    }
+    return [
+      'fields' => $this->fieldReservedAllowlist->forBundle('node', $bundle),
+    ];
   }
 
   /**
@@ -236,6 +256,25 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
       $this->t('Node @verb.', ['@verb' => $verb]),
       ['id' => $node->id(), 'uuid' => $node->uuid(), 'bundle' => $node->bundle(), 'title' => $node->label()],
     );
+  }
+
+  /**
+   * Bundle for the fields-map allowlist, or '' when unknown.
+   *
+   * Update uses the loaded node's type so a caller-supplied bundle cannot
+   * choose the refuse list for a different (or nonexistent) type. Create
+   * uses the caller bundle, which is the type that will be written.
+   *
+   * @param array<string, mixed> $values
+   *   Tool inputs.
+   */
+  private function bundleForReservedFields(array $values): string {
+    if (($values['action'] ?? '') !== 'create') {
+      $node = $this->loadNode((string) ($values['id'] ?? ''));
+      return $node instanceof NodeInterface ? $node->bundle() : '';
+    }
+    $bundle = $values['bundle'] ?? '';
+    return (is_string($bundle) && $bundle !== '') ? $bundle : '';
   }
 
   /**

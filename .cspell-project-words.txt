@@ -157,3 +157,10 @@ xaxis
 yaxis
 SCMI
 unregistered
+azp
+NBSP
+NFKC
+Paladin
+Spoofchecker
+stdio
+forgeable

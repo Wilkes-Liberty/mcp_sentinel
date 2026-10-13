@@ -6,6 +6,83 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking
+- DEV-844: Governed Tool plugins (`McpGovernedToolBase` only) refuse a
+  call that has no Paladin-issued principal. Sealed tokens that carry
+  only `client_id`, `scopes`, and `jti` are denied
+  (`missing_principal` / `missing_tenant_claim`). Session,
+  role-fallback, and claimless stdio/CLI calls to those tools are
+  denied the same way. There is no bypass. Callers must present a
+  Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
+  Sealed tokens minted before this release carry no tenant: re-mint
+  them with one (the mint form now requires it) and they work again.
+  Nothing in this release stamps Paladin claims on the request; that
+  is the connector/auth slice, so until it lands a sealed token minted
+  with a tenant is the only admitted caller. Drush, GraphQL, JSON:API,
+  and Context entry points are not covered by this guard (follow-up
+  tickets). Denial `denied_access` rows are always written;
+  `audit_enabled` gates allow rows only. `ext-intl` is now a declared
+  Composer requirement: the module already needed it for `Normalizer`,
+  and look-alike detection has no fallback.
+
+### Added
+- DEV-844: Governed tool dispatch builds an immutable principal + tenant
+  context from the validated token at the request boundary and passes it
+  to handlers as a separate parameter (`handler(args, ctx)`). Tools must
+  not read identity or tenant from arguments. The reserved-key and
+  principal checks run on the exact array passed to `doExecute()` /
+  `handler()` (Tool API `getExecutableValues()`), not a raw HTTP body.
+  A missing dispatcher or missing principal fails closed. Reserved
+  identity keys (`user`, `uid`, `principal`, `tenant`, `tenant_id`,
+  `tenantId`, `act`, `on_behalf_of`, `onBehalfOf`, `sub`, `iss`,
+  `azp`, `client_id`, `user_id`, `userId`, `actor`, `scope`,
+  `scopes`, `subject`) are matched after NFKC, stripping whitespace
+  and zero-width characters, folding case, and dropping `_`/`-`,
+  including nested maps. The frozen context is sealed once in
+  `McpPrincipalContextHolder`; the request attribute is not the
+  source of truth. The shared principal key is `iss|sub|actor`
+  (actor = top-level `act.sub` or else `azp`; never `client_id` or
+  `act.subject`) and the human key is `iss|sub`, via
+  `principalKey()` / `humanKey()` and
+  `mcp_sentinel.principal_key` (`fromClaims()`). Each part is capped
+  at 256 characters; whitespace-only parts, control characters, and
+  `|` are rejected. Shared vectors live in
+  `tests/fixtures/principal-key-vectors.json` (the Node connector
+  will test a JS twin against the same file). Network and
+  sealed-token HTTP calls require a tenant claim (DEV-839). Every
+  denial writes a `denied_access` audit row that carries the
+  verified `principal_key` and `human_key` (or `unverified` plus the
+  reason) and the real tool id. `X-MCP-Client` stays a labeled
+  self-reported `mcp_client` field. The guard applies only to
+  `McpGovernedToolBase` subclasses. The holder seals per request and
+  the dispatcher validates and hands out that sealed context, so a
+  claims attribute replaced after the request boundary changes
+  nothing; subrequests cannot reseal a different principal.
+  `resetForJob()` exists for a custom CLI/queue runner, is refused
+  while an HTTP request is current, and has no shipped caller because
+  no-request calls have no claim source yet. Reserved-key matching
+  strips all `\\p{Cf}` and variation selectors and runs non-ASCII
+  keys through one process-wide Spoofchecker (UTS #39). Key parts
+  treat all Unicode whitespace (including NBSP) as whitespace and
+  reject invalid UTF-8. The guard has no environment kill switch;
+  tests inject `McpPrincipalContextGuard::disableForTest()` under
+  PHPUnit only. Grant tables are not an identity source; their
+  retirement is a later slice. Denial `denied_access` rows are always
+  written; `audit_enabled` gates allow rows only. Nested `fields`
+  maps on node_operations and media_create allow a reserved
+  content-field name (`subject`, `scope`, `actor`, …) only when
+  EntityFieldManager lists that field on the target bundle and it is
+  not a user reference. Owner/author fields (`uid`, `owner`,
+  `revision_uid`, `revision_user`) and every user-reference field
+  stay refused; `NEVER_EXEMPT_IDENTITY_KEYS` are never allowed.
+  `config_set:data` stays fully scanned.
+- Sealed tokens carry a principal. `McpSealedTokenManager::verify()`
+  returns `iss` (`urn:mcp-sentinel:sealed-token`), `sub` (the
+  designated Consumer owner's UUID), `azp` (the client_id), and
+  `tenant` when the token was minted with one; the auth provider
+  stamps all of them on the request. `mint()` takes an optional
+  tenant and the mint form requires one.
+
 ## [2.34.1] - 2026-10-12
 
 ### Fixed

@@ -83,6 +83,13 @@ final class McpSealedTokenMintForm extends FormBase {
       '#required' => TRUE,
       '#default_value' => array_key_first($options),
     ];
+    $form['tenant'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Tenant'),
+      '#description' => $this->t('Sealed into the token as its tenant claim. Governed tools refuse a sealed token that carries no tenant.'),
+      '#required' => TRUE,
+      '#maxlength' => McpSealedTokenManager::MAX_TENANT_LENGTH,
+    ];
     $form['ttl'] = [
       '#type' => 'select',
       '#title' => $this->t('Lifetime'),
@@ -111,6 +118,7 @@ final class McpSealedTokenMintForm extends FormBase {
         (string) $form_state->getValue('client_id'),
         (int) $form_state->getValue('ttl'),
         $this->currentUser(),
+        (string) $form_state->getValue('tenant'),
       );
     }
     catch (\InvalidArgumentException $e) {
