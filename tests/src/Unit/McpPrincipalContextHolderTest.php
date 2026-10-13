@@ -87,7 +87,7 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * get() does not return a principal after its request leaves the stack.
+   * A seal is hidden once its request has left the stack.
    *
    * @covers ::get
    */
