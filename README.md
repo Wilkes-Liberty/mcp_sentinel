@@ -33,7 +33,9 @@ Governed tool dispatch (`McpGovernedToolBase` only) builds an immutable
 principal + tenant context from the validated Paladin token and passes
 it to handlers as a separate parameter. Tools must not read identity or
 tenant from arguments. Drush, GraphQL, JSON:API, and Context are not
-covered by this guard. Reserved identity and tenant keys (the full
+covered by this guard
+([DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927)).
+Reserved identity and tenant keys (the full
 list is `McpPrincipalContext::RESERVED_IDENTITY_KEYS`, documented in
 [`API.md`](API.md#tool-plugin-contract)) are rejected before dispatch,
 including nested maps, case variants, format characters, and
@@ -49,18 +51,22 @@ rows only. Nested `fields` maps on node and media write tools allow
 a real content field that collides with a reserved word only when
 EntityFieldManager defines it on the target bundle and it is not a
 user reference. Owner/author and user-reference fields stay refused.
-`config_set:data` stays fully scanned. Grant tables are not an
-identity source.
+`config_set:data` stays fully scanned: reserved-word keys in
+legitimate config (`user.mail` `subject`, Views `user`/`uid`) are
+refused via the MCP tool by design and go through the admin path.
+Grant tables are not an identity source.
 
 ### Breaking: Paladin tokens required for governed tools
 
 Cookie sessions, role-fallback, claimless stdio calls, and sealed
-tokens minted without a tenant are refused. There is no bypass. Callers
-must use Paladin-issued tokens that carry `iss`, `sub`, `azp` (or
-`act.sub`), and `tenant`, or a sealed token re-minted with a tenant.
-For stdio development, mint that token and send it on the connector
-channel. A custom CLI worker that supplies claims calls
-`mcp_sentinel.principal_context_holder::resetForJob()` per message.
+tokens minted without a tenant are refused. There is no bypass and
+**no interim path for sealed-token sites**: governed tools fail
+closed until Paladin tokens are in place. Callers must use
+Paladin-issued tokens that carry `iss`, `sub`, `azp` (or
+`act.sub`), and `tenant`. For stdio development, mint that token
+and send it on the connector channel. Queue and Drush runners
+reset through the internal
+`mcp_sentinel.principal_context_job` service, not the holder.
 See [`API.md`](API.md#migration-paladin-tokens-required-dev-844).
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight

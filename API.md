@@ -132,7 +132,9 @@ principal is sealed; it never returns an empty context and never
 reads the request attribute. This guard applies **only** to
 `McpGovernedToolBase` subclasses. Drush commands, GraphQL,
 JSON:API, and the Context controller are not admitted through
-`admit()`/`dispatch()` (follow-up work). `principalKey()` is
+`admit()`/`dispatch()`
+([DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927)).
+`principalKey()` is
 `iss|sub|actor` (actor = top-level `act.sub` per RFC 8693, else
 `azp`; never `client_id` or `act.subject`); `humanKey()` is
 `iss|sub`. Missing iss/sub/azp/`act.sub`, a `|`, Unicode
@@ -152,8 +154,11 @@ scans the exact `doExecute()` / handler argument array
 characters (`\\p{Cf}`) and variation selectors, folding case, and
 dropping `_`/`-`. A non-ASCII key that intl Spoofchecker (UTS #39)
 finds confusable with a reserved key is treated as that key; pure-ASCII
-keys are compared by equality. `ext-intl` is a declared requirement and
-there is no weaker fallback.
+keys are compared by equality. The reserved-fold set and
+`Spoofchecker` are built once per process. `ext-intl` is a declared
+Composer requirement and a `hook_requirements` ERROR when
+`Spoofchecker` is missing. Governed calls then fail closed
+(`lookalike_check_unavailable`); there is no iconv fallback.
 A subclass may override `reservedArgumentExceptions()` to exempt a
 **declared schema input** that is not in
 `NEVER_EXEMPT_IDENTITY_KEYS` (`sub`, `iss`, `azp`, tenant, `act`,
@@ -168,7 +173,13 @@ to `user`. Owner/author fields (`uid`, `owner`, `revision_uid`,
 author comes from the token principal, never args.
 `NEVER_EXEMPT_IDENTITY_KEYS` are never allowed even if a field
 with that name exists. `config_set:data` stays fully scanned (no
-allowlist). Every denial writes a `denied_access` audit row with
+allowlist). That is intended: a legitimate config tree that
+contains reserved-word keys (`user.mail` template `subject`, Views
+display `user`/`uid` options) is refused through the MCP tool.
+Those writes are config-class and go through the normal Drupal
+admin / config-management path. This release does not add a
+config-data exemption. Every denial writes a `denied_access` audit
+row with
 `principal_key` and `human_key` (or `unverified` plus the reason)
 and the real tool id. Denial rows are always written;
 `audit_enabled` gates allow rows only. `X-MCP-Client` is recorded
@@ -182,18 +193,22 @@ request boundary, not a rebuild from request attributes.
 Governed Tool plugins no longer accept cookie sessions, role-fallback
 accounts, or claimless stdio. There is no bypass. Issue Paladin
 tokens with `iss`, `sub`, `azp` (or RFC 8693 `act.sub`), and
-`tenant`. Sealed tokens now verify to `iss`
-(`urn:mcp-sentinel:sealed-token`), `sub` (the Consumer owner's UUID),
-`azp` (the client_id), and `tenant`; a token minted before this
-release has no tenant and is refused, so re-mint it with one. For
-local stdio development, mint a Paladin token with those claims and
-pass it on the connector channel the same way a network agent would.
-A custom CLI/queue runner that supplies claims and constructs a
-context must call
-`mcp_sentinel.principal_context_holder::resetForJob()` at the start
-of each message; the call is refused while an HTTP request is
-current, and no shipped runner needs it because a no-request call has
-no claim source.
+`tenant`. **There is no interim path for sealed-token sites.**
+Governed tools fail closed until Paladin tokens are in place.
+`client_id`/`scopes`/`jti`-only sealed tokens are refused
+(`missing_principal` / `missing_tenant_claim`). Re-minting a sealed
+token is not a compatibility mode and is not a substitute for
+Paladin. For local stdio development, mint a Paladin token with
+those claims and pass it on the connector channel the same way a
+network agent would.
+Queue workers reset the job principal per item and Drush commands
+per invocation through the internal
+`mcp_sentinel.principal_context_job` service (`@internal`, not a
+public API). Do not call `resetForJob()` / `sealForJob()` from site
+code; those holder methods are internal. Uncovered entry points
+(Drush as a governed-tool surface, GraphQL, JSON:API, Context)
+are tracked in
+[DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927).
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.

@@ -11,6 +11,7 @@ use Drupal\Core\Queue\Attribute\QueueWorker;
 use Drupal\Core\Queue\QueueWorkerBase;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\key\KeyRepositoryInterface;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -190,6 +191,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The time service.
    * @param \Psr\Log\LoggerInterface $logger
    *   The MCP Sentinel logger channel.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextJob $principalJob
+   *   Internal job-boundary reset (per queue item).
    */
   public function __construct(
     array $configuration,
@@ -200,6 +203,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     protected KeyRepositoryInterface $keyRepository,
     protected TimeInterface $time,
     protected LoggerInterface $logger,
+    protected McpPrincipalContextJob $principalJob,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }
@@ -222,6 +226,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $container->get('key.repository'),
       $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
+      $container->get('mcp_sentinel.principal_context_job'),
     );
   }
 
@@ -229,6 +234,22 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    * {@inheritdoc}
    */
   public function processItem(mixed $data): void {
+    $this->principalJob->begin();
+    try {
+      $this->processClaimedItem($data);
+    }
+    finally {
+      $this->principalJob->end();
+    }
+  }
+
+  /**
+   * Processes one delivery after the job principal has been reset.
+   *
+   * @param mixed $data
+   *   The queue item payload.
+   */
+  private function processClaimedItem(mixed $data): void {
     $deliveryId = (int) ($data['delivery_id'] ?? 0);
     $row = $this->loadRow($deliveryId);
     if ($row === NULL) {

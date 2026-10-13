@@ -14,16 +14,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role-fallback, and claimless stdio/CLI calls to those tools are
   denied the same way. There is no bypass. Callers must present a
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
-  Sealed tokens minted before this release carry no tenant: re-mint
-  them with one (the mint form now requires it) and they work again.
-  Nothing in this release stamps Paladin claims on the request; that
-  is the connector/auth slice, so until it lands a sealed token minted
-  with a tenant is the only admitted caller. Drush, GraphQL, JSON:API,
-  and Context entry points are not covered by this guard (follow-up
-  tickets). Denial `denied_access` rows are always written;
-  `audit_enabled` gates allow rows only. `ext-intl` is now a declared
-  Composer requirement: the module already needed it for `Normalizer`,
-  and look-alike detection has no fallback.
+  There is no interim path for sealed-token sites: governed tools
+  fail closed until Paladin tokens are in place. Re-minting a sealed
+  token is not a compatibility mode. Drush, GraphQL, JSON:API,
+  and Context entry points are not covered by this guard
+  ([DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927)).
+  Denial `denied_access` rows are always written via `logAlways()`;
+  `audit_enabled` gates allow rows only. `ext-intl` is a declared
+  Composer requirement; a missing `Spoofchecker` is a
+  `hook_requirements` ERROR and governed calls fail closed
+  (`lookalike_check_unavailable`). There is no iconv fallback.
 
 ### Added
 - DEV-844: Governed tool dispatch builds an immutable principal + tenant
@@ -58,13 +58,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the dispatcher validates and hands out that sealed context, so a
   claims attribute replaced after the request boundary changes
   nothing; subrequests cannot reseal a different principal.
-  `resetForJob()` exists for a custom CLI/queue runner, is refused
-  while an HTTP request is current, and has no shipped caller because
-  no-request calls have no claim source yet. Reserved-key matching
-  strips all `\\p{Cf}` and variation selectors and runs non-ASCII
-  keys through one process-wide Spoofchecker (UTS #39). Key parts
-  treat all Unicode whitespace (including NBSP) as whitespace and
-  reject invalid UTF-8. The guard has no environment kill switch;
+  Queue workers reset the job principal per item and Drush
+  commands per invocation through the internal
+  `mcp_sentinel.principal_context_job` service (`@internal`; not a
+  public API). `resetForJob()` / `sealForJob()` on the holder are
+  internal. Reserved-key matching strips all `\\p{Cf}` and variation
+  selectors and runs non-ASCII keys through one process-wide
+  Spoofchecker plus a process-wide reserved-fold set (UTS #39). Key
+  parts treat all Unicode whitespace (including NBSP) as whitespace
+  and reject invalid UTF-8. The guard has no environment kill switch;
   tests inject `McpPrincipalContextGuard::disableForTest()` under
   PHPUnit only. Grant tables are not an identity source; their
   retirement is a later slice. Denial `denied_access` rows are always
@@ -75,7 +77,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not a user reference. Owner/author fields (`uid`, `owner`,
   `revision_uid`, `revision_user`) and every user-reference field
   stay refused; `NEVER_EXEMPT_IDENTITY_KEYS` are never allowed.
-  `config_set:data` stays fully scanned.
+  `config_set:data` stays fully scanned: legitimate config trees
+  that contain reserved-word keys (`user.mail` `subject`, Views
+  `user`/`uid` options) are refused via the MCP tool by design.
+  Those writes are config-class and go through the normal admin
+  path. No nested exemption ships in this release.
 - Sealed tokens carry a principal. `McpSealedTokenManager::verify()`
   returns `iss` (`urn:mcp-sentinel:sealed-token`), `sub` (the
   designated Consumer owner's UUID), `azp` (the client_id), and

@@ -132,7 +132,7 @@ function mcp_sentinel_install(): void {
  *
  * Fail-loud guard against the silent no-op failure mode: when the module is
  * enabled but governance can never engage, it fails open without telling
- * anyone.
+ * anyone. A missing Spoofchecker is an ERROR in every phase.
  * This emits a runtime status-report WARNING in either of the two situations
  * where no request can ever be governed and gated:
  *
@@ -153,6 +153,16 @@ function mcp_sentinel_install(): void {
  */
 function mcp_sentinel_requirements(string $phase): array {
   $requirements = [];
+  if (!class_exists(\Spoofchecker::class)) {
+    $requirements['mcp_sentinel_spoofchecker'] = [
+      'title' => t('MCP Sentinel: ext-intl Spoofchecker is missing'),
+      'value' => t('Required PHP extension missing'),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t(
+        'MCP Sentinel refuses reserved look-alike argument keys with intl Spoofchecker (UTS #39). Without <code>ext-intl</code> / <code>Spoofchecker</code>, governed tool calls fail closed (<code>lookalike_check_unavailable</code>). Install the PHP intl extension.',
+      ),
+    ];
+  }
   if ($phase !== 'runtime') {
     return $requirements;
   }

@@ -13,12 +13,10 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * Tools read through this holder, never from a swappable request
  * attribute. A subrequest cannot reseal a different principal. A
- * long-running CLI worker must call resetForJob() per message so the
- * first context is never reused. No shipped runner does so today:
- * validated claims live on the HTTP request, so a no-request call has
- * no claim source and is refused before it seals. sealForJob() is
- * reached only by a custom CLI/queue runner that supplies claims, and
- * that runner owns the per-message reset.
+ * long-running CLI worker resets through the internal
+ * mcp_sentinel.principal_context_job service (not this class) per
+ * message so the first context is never reused. sealForJob() and
+ * resetForJob() are @internal.
  */
 final class McpPrincipalContextHolder {
 
@@ -110,8 +108,10 @@ final class McpPrincipalContextHolder {
   /**
    * Seals ctx for one CLI / queue job.
    *
-   * A second seal without resetForJob() is refused so a worker cannot
-   * reuse the first message's principal.
+   * Internal: called by the dispatcher. Runners reset through
+   * mcp_sentinel.principal_context_job, not this method. A second
+   * seal without resetForJob() is refused so a worker cannot reuse
+   * the first message's principal.
    *
    * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
    *   The frozen context for this job.
@@ -144,10 +144,10 @@ final class McpPrincipalContextHolder {
   /**
    * Clears the seal so the next CLI/queue message can seal again.
    *
-   * Long-running workers call this at the start of each job. It is
-   * refused while an HTTP request's own seal is current: code running
-   * inside that request cannot clear it. A leftover Drupal CLI
-   * bootstrap request is not an inbound HTTP seal, so a job may reset.
+   * Internal: called by mcp_sentinel.principal_context_job. Not a
+   * public API. Refused while an HTTP request's own seal is current.
+   * A leftover Drupal CLI bootstrap request is not an inbound HTTP
+   * seal, so a job may reset.
    *
    * @throws \LogicException
    *   When an HTTP request's sealed principal is current.

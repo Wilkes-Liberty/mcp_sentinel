@@ -35,6 +35,11 @@ final class McpPrincipalContextDeniedException extends \RuntimeException {
   public const RESEAL_REFUSED = 'reseal_refused';
 
   /**
+   * Spoofchecker is missing; look-alike reserved-key checks cannot run.
+   */
+  public const LOOKALIKE_CHECK_UNAVAILABLE = 'lookalike_check_unavailable';
+
+  /**
    * Constructs a fail-closed refusal.
    *
    * @param string $reasonCode

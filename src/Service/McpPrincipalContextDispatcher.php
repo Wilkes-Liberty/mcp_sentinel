@@ -216,11 +216,16 @@ final class McpPrincipalContextDispatcher {
     if (!$this->guard->required()) {
       return;
     }
-    $reserved = McpPrincipalContext::reservedKeysIn(
-      $arguments,
-      $reservedExceptions,
-      $nestedMapRules,
-    );
+    try {
+      $reserved = McpPrincipalContext::reservedKeysIn(
+        $arguments,
+        $reservedExceptions,
+        $nestedMapRules,
+      );
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->deny($toolId, $e->reasonCode, $e->getMessage());
+    }
     if ($reserved !== []) {
       $this->deny(
         $toolId,

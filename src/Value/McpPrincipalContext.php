@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Value;
 
+use Drupal\mcp_sentinel\Service\McpLookalikeChecker;
 use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 
 /**
@@ -244,8 +245,9 @@ final readonly class McpPrincipalContext {
    * soft hyphen and direction marks) and variation selectors, strip
    * Unicode whitespace, fold case, then drop `_` and `-`. A non-ASCII
    * key that intl Spoofchecker (UTS #39) finds confusable with a
-   * reserved key is treated as that reserved key. ext-intl is a
-   * declared requirement (composer.json); there is no weaker fallback.
+   * reserved key is treated as that reserved key. ext-intl and
+   * Spoofchecker are required; a missing checker fails closed
+   * (lookalike_check_unavailable). There is no iconv fallback.
    */
   public static function normalizeKey(string $name): string {
     $folded = self::foldKey($name);
@@ -289,20 +291,14 @@ final readonly class McpPrincipalContext {
    * Pure-ASCII keys are compared by equality only. A key with any
    * non-ASCII character is run through Spoofchecker (UTS #39) against
    * each reserved fold. The checker and the reserved folds are built
-   * once per process. Documented so a JS twin can match.
+   * once per process (McpLookalikeChecker). Documented so a JS twin
+   * can match.
    *
-   * @throws \RuntimeException
-   *   When ext-intl is not loaded. The check must not silently weaken.
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When Spoofchecker is unavailable (lookalike_check_unavailable).
    */
   private static function canonicalReserved(string $folded, string $original): string {
-    static $reservedFolds = NULL;
-    static $checker = NULL;
-    if ($reservedFolds === NULL) {
-      $reservedFolds = [];
-      foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
-        $reservedFolds[self::foldKey($reserved)] = TRUE;
-      }
-    }
+    $reservedFolds = McpLookalikeChecker::reservedFolds();
     if (isset($reservedFolds[$folded])) {
       return $folded;
     }
@@ -310,14 +306,7 @@ final readonly class McpPrincipalContext {
       && preg_match('/[^\x00-\x7F]/', $folded) !== 1) {
       return $folded;
     }
-    if (!class_exists(\Spoofchecker::class)) {
-      throw new \RuntimeException(
-        'MCP Sentinel requires ext-intl: reserved-key look-alike detection has no fallback.',
-      );
-    }
-    if ($checker === NULL) {
-      $checker = new \Spoofchecker();
-    }
+    $checker = McpLookalikeChecker::checker();
     foreach (array_keys($reservedFolds) as $reserved) {
       if ($checker->areConfusable($folded, $reserved)
         || $checker->areConfusable($original, $reserved)) {
@@ -354,6 +343,7 @@ final readonly class McpPrincipalContext {
     array $topLevelExceptions = [],
     array $nestedMapRules = [],
   ): array {
+    McpLookalikeChecker::assertAvailable();
     $reservedNorms = [];
     foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
       $reservedNorms[self::normalizeKey($reserved)] = TRUE;

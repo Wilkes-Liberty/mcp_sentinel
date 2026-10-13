@@ -108,4 +108,17 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertFalse($explained->widenAppropriate);
   }
 
+  /**
+   * A missing Spoofchecker stays denied.
+   *
+   * @covers ::explain
+   */
+  public function testLookalikeCheckUnavailableStaysDenied(): void {
+    $explained = (new McpDenyExplainer())->explain(
+      'Reserved-key look-alike detection requires ext-intl Spoofchecker.',
+    );
+    $this->assertSame('lookalike_check_unavailable', $explained->ruleId);
+    $this->assertFalse($explained->widenAppropriate);
+  }
+
 }

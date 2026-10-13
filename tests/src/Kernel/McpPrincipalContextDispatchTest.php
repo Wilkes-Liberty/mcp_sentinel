@@ -660,6 +660,120 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
+   * A missing Spoofchecker fails closed and is audited.
+   */
+  public function testLookalikeCheckUnavailableFailsClosed(): void {
+    $checker = $this->container->get('mcp_sentinel.lookalike_checker');
+    $checker->disableForTest();
+    $tool = $this->executeProbe(
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+        'tenant' => 'tenant-a',
+      ],
+      ['params' => ['arguments' => ['note' => 'ok']]],
+    );
+    $this->assertFalse($tool->getResultStatus());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame(
+      McpPrincipalContextDeniedException::LOOKALIKE_CHECK_UNAVAILABLE,
+      $meta['reason'],
+    );
+    $this->assertSame('mcp_sentinel_principal_context_probe', $meta['tool']);
+    $checker->resetForTest();
+  }
+
+  /**
+   * Two sequential CLI jobs use their own principal; unsealed is refused.
+   */
+  public function testSequentialCliJobsUseOwnPrincipal(): void {
+    $stack = $this->container->get('request_stack');
+    $popped = [];
+    while ($stack->getCurrentRequest() !== NULL
+      && $stack->getCurrentRequest() !== $stack->getMainRequest()) {
+      $popped[] = $stack->pop();
+    }
+    $leftover = $stack->getMainRequest();
+    $this->assertNotNull($leftover);
+    $this->assertSame($leftover, $stack->getCurrentRequest());
+    $this->container->get('mcp_sentinel.principal_context_holder')
+      ->resetForTest();
+    $job = $this->container->get('mcp_sentinel.principal_context_job');
+    $stamp = function (string $sub) use ($leftover): void {
+      $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => $sub,
+        'azp' => 'agent-client',
+        'tenant' => 'tenant-a',
+      ]);
+    };
+
+    $job->begin();
+    $stamp('human-1');
+    $first = $this->dispatcher()->dispatch(
+      static function (array $args, McpPrincipalContext $ctx): string {
+        return $ctx->subject();
+      },
+      ['note' => 'ok'],
+      'mcp_sentinel_principal_context_probe',
+    );
+    $this->assertSame('human-1', $first);
+
+    $job->begin();
+    $stamp('human-2');
+    $second = $this->dispatcher()->dispatch(
+      static function (array $args, McpPrincipalContext $ctx): string {
+        return $ctx->subject();
+      },
+      ['note' => 'ok'],
+      'mcp_sentinel_principal_context_probe',
+    );
+    $this->assertSame('human-2', $second);
+
+    $stamp('human-3');
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx): string {
+          return $ctx->subject();
+        },
+        ['note' => 'ok'],
+        'mcp_sentinel_principal_context_probe',
+      );
+      $this->fail('A second CLI job without reset must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        $e->reasonCode,
+      );
+    }
+    $held = $this->container->get('mcp_sentinel.principal_context_holder')->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $held);
+    $this->assertSame('human-2', $held->subject());
+
+    $job->begin();
+    $leftover->attributes->remove(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx): string {
+          return $ctx->subject();
+        },
+        ['note' => 'ok'],
+        'mcp_sentinel_principal_context_probe',
+      );
+      $this->fail('An unsealed CLI call must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+    }
+    $this->restoreRequestStack($popped);
+  }
+
+  /**
    * A disableForTest call turns the guard off; a fresh service stays on.
    */
   public function testGuardDisableIsInstanceOnly(): void {

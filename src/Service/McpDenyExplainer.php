@@ -82,6 +82,16 @@ final class McpDenyExplainer {
         'Stay denied.',
       );
     }
+    if (str_contains($reason, 'lookalike_check_unavailable')
+      || str_contains($reason, 'requires ext-intl Spoofchecker')) {
+      return new McpDenyExplanation(
+        'lookalike_check_unavailable',
+        'look-alike check unavailable',
+        FALSE,
+        'Install PHP ext-intl so Spoofchecker can detect reserved-key look-alikes. Governed calls fail closed until it is present.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'missing_principal')
       || str_contains($reason, 'verified principal')) {
       return new McpDenyExplanation(
