@@ -58,7 +58,9 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     );
 
     $dispatcher->admit([], 'tool-a');
-    $this->assertSame('human-1', $holder->get()?->subject());
+    $sealed = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $sealed);
+    $this->assertSame('human-1', $sealed->subject());
     $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-2', 'agent-b'));
     try {
       $dispatcher->admit([], 'tool-b');
@@ -70,10 +72,12 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
         $e->reasonCode,
       );
     }
-    $this->assertSame('human-1', $holder->get()?->subject());
+    $this->assertSame($sealed, $holder->get());
     $holder->resetForJob();
     $dispatcher->admit([], 'tool-b');
-    $this->assertSame('human-2', $holder->get()?->subject());
+    $resealed = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $resealed);
+    $this->assertSame('human-2', $resealed->subject());
   }
 
   /**

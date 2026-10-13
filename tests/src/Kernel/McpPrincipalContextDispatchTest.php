@@ -375,7 +375,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    * A setInputValue call with no HTTP request is still scanned.
    */
   public function testNoRequestPathReservedKeysDenied(): void {
-    $this->clearRequestStack();
+    $popped = $this->clearRequestStack();
     $tool = $this->container->get('plugin.manager.tool')
       ->createInstance('mcp_sentinel_principal_context_probe');
     self::assertInstanceOf(PrincipalContextProbeTool::class, $tool);
@@ -385,6 +385,9 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertFalse($tool->getResultStatus());
     $this->assertStringContainsString('payload.sub', (string) $tool->getResultMessage());
     $this->assertSame(1, $this->deniedAccessCount());
+    // KernelTestBase::tearDown() reads the session off the current request
+    // on Drupal 11.3, so hand the bootstrap request(s) back.
+    $this->restoreRequestStack($popped);
   }
 
   /**
@@ -740,14 +743,32 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
 
   /**
    * Drops every request so execute() runs with no HTTP request.
+   *
+   * @return list<\Symfony\Component\HttpFoundation\Request>
+   *   The popped requests, innermost first, for restoreRequestStack().
    */
-  private function clearRequestStack(): void {
+  private function clearRequestStack(): array {
     $stack = $this->container->get('request_stack');
+    $popped = [];
     while ($stack->getCurrentRequest() !== NULL) {
-      $stack->pop();
+      $popped[] = $stack->pop();
     }
     $this->container->get('mcp_sentinel.principal_context_holder')
       ->resetForTest();
+    return $popped;
+  }
+
+  /**
+   * Pushes requests popped by clearRequestStack() back, outermost first.
+   *
+   * @param list<\Symfony\Component\HttpFoundation\Request> $popped
+   *   Requests in pop order (innermost first).
+   */
+  private function restoreRequestStack(array $popped): void {
+    $stack = $this->container->get('request_stack');
+    foreach (array_reverse($popped) as $request) {
+      $stack->push($request);
+    }
   }
 
   /**
