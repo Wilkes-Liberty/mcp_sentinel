@@ -261,16 +261,20 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
   /**
    * Bundle for the fields-map allowlist, or '' when unknown.
    *
+   * Update uses the loaded node's type so a caller-supplied bundle cannot
+   * choose the refuse list for a different (or nonexistent) type. Create
+   * uses the caller bundle, which is the type that will be written.
+   *
    * @param array<string, mixed> $values
    *   Tool inputs.
    */
   private function bundleForReservedFields(array $values): string {
-    $bundle = $values['bundle'] ?? '';
-    if (is_string($bundle) && $bundle !== '') {
-      return $bundle;
+    if (($values['action'] ?? '') !== 'create') {
+      $node = $this->loadNode((string) ($values['id'] ?? ''));
+      return $node instanceof NodeInterface ? $node->bundle() : '';
     }
-    $node = $this->loadNode((string) ($values['id'] ?? ''));
-    return $node instanceof NodeInterface ? $node->bundle() : '';
+    $bundle = $values['bundle'] ?? '';
+    return (is_string($bundle) && $bundle !== '') ? $bundle : '';
   }
 
   /**

@@ -9,6 +9,7 @@ use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpNodeOperationsTool;
+use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -185,6 +186,35 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
     $tool = $this->executeNodeCreate('page', ['sub' => 'spoof']);
     $this->assertFalse($tool->getResultStatus());
     $this->assertStringContainsString('fields.sub', (string) $tool->getResultMessage());
+  }
+
+  /**
+   * Update refuse lists use the loaded node's type, not a caller bundle.
+   */
+  public function testUpdateRefuseListIgnoresCallerBundle(): void {
+    $this->createUserReferenceField('node', 'page', 'field_author', 'Author');
+    $this->createGovernedAccount();
+    $node = Node::create([
+      'type' => 'page',
+      'title' => 'Owned page',
+      'uid' => 1,
+    ]);
+    $node->save();
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_node_operations');
+    self::assertInstanceOf(McpNodeOperationsTool::class, $tool);
+    $tool->setInputValue('action', 'update');
+    $tool->setInputValue('id', (string) $node->id());
+    $tool->setInputValue('bundle', 'article');
+    $tool->setInputValue('fields', ['field_author' => 1]);
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $this->assertStringContainsString(
+      'fields.field_author',
+      (string) $tool->getResultMessage(),
+    );
   }
 
   /**
