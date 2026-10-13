@@ -11,6 +11,7 @@ use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextGuard;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -19,7 +20,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * Dispatcher uses sealForJob() for leftover Drupal CLI requests.
+ * Leftover CLI is write-once; an overlay admit is always refused.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher
  *
@@ -30,11 +31,11 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class McpPrincipalContextDispatcherTest extends UnitTestCase {
 
   /**
-   * A leftover bootstrap request still requires resetForJob() per message.
+   * A leftover bootstrap request keeps the first seal; overlay refuses.
    *
    * @covers ::admit
    */
-  public function testLeftoverCliRequestSecondAdmitIsRefused(): void {
+  public function testLeftoverCliRequestKeepsFirstSealAndOverlayRefuses(): void {
     $stack = new RequestStack();
     $leftover = Request::create('/');
     $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-1', 'agent-a'));
@@ -62,22 +63,24 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     $this->assertInstanceOf(McpPrincipalContext::class, $sealed);
     $this->assertSame('human-1', $sealed->subject());
     $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-2', 'agent-b'));
+    $second = $dispatcher->admit([], 'tool-b');
+    $this->assertSame($sealed, $second);
+    $this->assertSame('human-1', $holder->get()?->subject());
+
+    $job = new McpPrincipalContextJob($holder);
+    $job->begin();
     try {
-      $dispatcher->admit([], 'tool-b');
-      $this->fail('A leftover CLI request must not reuse the first principal.');
+      $dispatcher->admit([], 'tool-c');
+      $this->fail('An overlay admit must be refused.');
     }
     catch (McpPrincipalContextDeniedException $e) {
       $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
         $e->reasonCode,
       );
     }
+    $job->end();
     $this->assertSame($sealed, $holder->get());
-    $holder->resetForJob();
-    $dispatcher->admit([], 'tool-b');
-    $resealed = $holder->get();
-    $this->assertInstanceOf(McpPrincipalContext::class, $resealed);
-    $this->assertSame('human-2', $resealed->subject());
   }
 
   /**

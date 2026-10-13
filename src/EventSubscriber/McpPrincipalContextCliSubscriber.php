@@ -11,13 +11,13 @@ use Symfony\Component\Console\Event\ConsoleEvent;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Resets the job principal for Symfony Console (core/scripts).
+ * Opens a deny-only overlay for Symfony Console (core/scripts).
  *
  * Drush does not deliver ConsoleEvents to Drupal's event_dispatcher.
- * Per-invocation Drush reset is
+ * Per-invocation Drush overlay is
  * McpPrincipalContextCommands (PRE/POST_COMMAND_HOOK).
  *
- * @internal Queue items are reset in the worker, not here.
+ * @internal Queue items open the overlay in the worker, not here.
  */
 final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface {
 
@@ -72,7 +72,7 @@ final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface
    *   The console event.
    *
    * @return bool
-   *   TRUE when this command must reset the job principal.
+   *   TRUE when this command must open the deny-only overlay.
    */
   private function isOurCommand(ConsoleEvent $event): bool {
     $name = $event->getCommand()?->getName() ?? '';

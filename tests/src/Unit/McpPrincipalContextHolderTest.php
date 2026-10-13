@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * Holder seals per request and requires resetForJob() on CLI workers.
+ * Holder seals per request and hides that seal under a deny-only overlay.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder
  *
@@ -109,9 +109,27 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * A CLI worker must resetForJob() between messages.
+   * A leftover Drupal CLI request is write-once, like HTTP.
    *
-   * @covers ::sealForJob
+   * @covers ::seal
+   * @covers ::resetForJob
+   */
+  public function testLeftoverCliRequestIsWriteOnce(): void {
+    $stack = new RequestStack();
+    $leftover = Request::create('/');
+    $stack->push($leftover);
+    $holder = new McpPrincipalContextHolder($stack);
+    $first = $this->ctx('human-1', 'agent-a');
+    $holder->seal($first, $leftover);
+    $holder->seal($this->ctx('human-2', 'agent-b'), $leftover);
+    $this->assertSame($first, $holder->get());
+    $this->expectException(\LogicException::class);
+    $holder->resetForJob();
+  }
+
+  /**
+   * ResetForJob() is refused while an HTTP request's own seal is current.
+   *
    * @covers ::resetForJob
    */
   public function testResetForJobIsRefusedDuringRequest(): void {
@@ -124,119 +142,29 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * A second CLI seal without resetForJob() is refused.
-   */
-  public function testCliJobRequiresResetBetweenMessages(): void {
-    $holder = new McpPrincipalContextHolder(new RequestStack());
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    try {
-      $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-      $this->fail('A second CLI seal without resetForJob must be refused.');
-    }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
-        $e->reasonCode,
-      );
-    }
-    $holder->resetForJob();
-    $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-    $this->assertSame('human-2', $holder->get()?->subject());
-  }
-
-  /**
-   * A leftover Drupal CLI request still requires resetForJob().
-   *
-   * @covers ::sealForJob
-   * @covers ::resetForJob
-   */
-  public function testLeftoverCliRequestRequiresResetBetweenMessages(): void {
-    $stack = new RequestStack();
-    $leftover = Request::create('/');
-    $stack->push($leftover);
-    $holder = new McpPrincipalContextHolder($stack);
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    try {
-      $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-      $this->fail('A leftover CLI request must not reuse the first principal.');
-    }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
-        $e->reasonCode,
-      );
-    }
-    $this->assertSame('human-1', $holder->get()?->subject());
-    $holder->resetForJob();
-    $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-    $this->assertSame('human-2', $holder->get()?->subject());
-  }
-
-  /**
-   * An HTTP seal cannot replace a job that is already sealed.
-   *
-   * @covers ::seal
-   * @covers ::sealForJob
-   */
-  public function testHttpSealDoesNotOverwriteJobPrincipal(): void {
-    $stack = new RequestStack();
-    $request = Request::create('/mcp');
-    $stack->push($request);
-    $holder = new McpPrincipalContextHolder($stack);
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    try {
-      $holder->seal($this->ctx('human-2', 'agent-b'), $request);
-      $this->fail('An HTTP seal must not replace a sealed job principal.');
-    }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
-        $e->reasonCode,
-      );
-    }
-    $this->assertSame('human-1', $holder->get()?->subject());
-  }
-
-  /**
-   * A job seal keeps a principal already sealed for the current request.
-   *
-   * @covers ::seal
-   * @covers ::sealForJob
-   */
-  public function testSealForJobKeepsAlreadySealedHttpRequest(): void {
-    $stack = new RequestStack();
-    $request = Request::create('/mcp');
-    $stack->push($request);
-    $holder = new McpPrincipalContextHolder($stack);
-    $first = $this->ctx('human-1', 'agent-a');
-    $holder->seal($first, $request);
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    $this->assertSame($first, $holder->get());
-  }
-
-  /**
-   * A job scope overlays a request seal and restores it after leave.
+   * Seal during an overlay is a no-op and does not mutate the request.
    *
    * @covers ::enterJobScope
    * @covers ::leaveJobScope
-   * @covers ::sealForJob
+   * @covers ::seal
    * @covers ::get
    */
-  public function testJobScopeOverlaysRequestSealWithoutMutatingIt(): void {
+  public function testOverlaySealIsNoopAndRestoresRequestSeal(): void {
     $stack = new RequestStack();
     $request = Request::create('/cron/test-key');
     $stack->push($request);
     $holder = new McpPrincipalContextHolder($stack);
     $cron = $this->ctx('cron-human', 'cron-client');
     $holder->seal($cron, $request);
-    $this->assertSame($cron, $holder->get());
 
     $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
     $stub->begin();
     $this->assertTrue($holder->inJobScope());
-    $this->assertNull($holder->get());
-    $holder->sealForJob($this->ctx('job-human', 'job-client'));
-    $this->assertSame('job-human', $holder->get()?->subject());
+    $hidden = $holder->get();
+    $this->assertNull($hidden);
+    $holder->seal($this->ctx('job-human', 'job-client'), $request);
+    $stillHidden = $holder->get();
+    $this->assertNull($stillHidden);
 
     $stub->end();
     $this->assertFalse($holder->inJobScope());
@@ -246,12 +174,11 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * Sequential enterJobScope() without leave clears only the overlay.
+   * Sequential enterJobScope() stays in the overlay.
    *
    * @covers ::enterJobScope
-   * @covers ::sealForJob
    */
-  public function testSequentialEnterJobScopeClearsOverlayOnly(): void {
+  public function testSequentialEnterJobScopeStaysInOverlay(): void {
     $stack = new RequestStack();
     $request = Request::create('/cron/test-key');
     $stack->push($request);
@@ -261,28 +188,14 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
 
     $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
     $stub->begin();
-    $holder->sealForJob($this->ctx('job-1', 'job-client'));
+    $hidden = $holder->get();
+    $this->assertNull($hidden);
     $stub->begin();
-    $this->assertNull($holder->get());
-    $holder->sealForJob($this->ctx('job-2', 'job-client'));
-    $this->assertSame('job-2', $holder->get()?->subject());
+    $this->assertTrue($holder->inJobScope());
+    $stillHidden = $holder->get();
+    $this->assertNull($stillHidden);
     $stub->end();
     $this->assertSame($cron, $holder->get());
-  }
-
-  /**
-   * A plain HTTP caller cannot open a job overlay.
-   *
-   * @covers ::enterJobScope
-   */
-  public function testEnterJobScopeFromHttpCallerIsRefused(): void {
-    $stack = new RequestStack();
-    $request = Request::create('/mcp');
-    $stack->push($request);
-    $holder = new McpPrincipalContextHolder($stack);
-    $holder->seal($this->ctx('human-1', 'agent-a'), $request);
-    $this->expectException(\LogicException::class);
-    $holder->enterJobScope();
   }
 
   /**

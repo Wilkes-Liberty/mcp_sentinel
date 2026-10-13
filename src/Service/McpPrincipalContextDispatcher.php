@@ -7,7 +7,6 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -24,6 +23,12 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class McpPrincipalContextDispatcher {
 
   /**
+   * Overlay refuse until a hop token supplies a Paladin principal.
+   */
+  private const OVERLAY_REFUSED = 'Governed tools refuse under queue '
+    . 'and Drush until a hop token supplies a Paladin principal.';
+
+  /**
    * Constructs the dispatcher.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
@@ -33,7 +38,7 @@ final class McpPrincipalContextDispatcher {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextGuard $guard
    *   On/off switch (always on outside PHPUnit injection).
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
-   *   Write-once sealed context for this request or CLI job.
+   *   Write-once sealed context for this request.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Writes denied_access rows.
    */
@@ -112,24 +117,16 @@ final class McpPrincipalContextDispatcher {
       $nestedMapRules,
     );
     if ($this->holder->inJobScope()) {
-      $sealed = $this->holder->get();
-      if (!$sealed instanceof McpPrincipalContext) {
-        $this->deny(
-          $toolId,
-          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-          'A job overlay has no sealed principal. Identity is not read from the request.',
-        );
-      }
-      $this->assertContextAllowed($sealed, $toolId);
-      return $sealed;
+      $this->deny(
+        $toolId,
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        self::OVERLAY_REFUSED,
+      );
     }
     $ctx = $this->factory->fromCurrentRequest();
     $request = $this->requestStack->getCurrentRequest();
     try {
-      if ($this->isCliJob($request)) {
-        $this->holder->sealForJob($ctx);
-      }
-      elseif ($request !== NULL) {
+      if ($request !== NULL) {
         $this->holder->seal($ctx, $request);
       }
     }
@@ -145,27 +142,6 @@ final class McpPrincipalContextDispatcher {
     $sealed = $this->holder->get() ?? $ctx;
     $this->assertContextAllowed($sealed, $toolId);
     return $sealed;
-  }
-
-  /**
-   * Leftover Drupal CLI/Drush/queue request, or no request at all.
-   *
-   * Drush and queue workers keep a process-lifetime bootstrap request
-   * on the stack. That object is not an inbound HTTP call, so a second
-   * message must go through sealForJob() (resetForJob() required).
-   *
-   * @param \Symfony\Component\HttpFoundation\Request|null $request
-   *   The current request, or NULL when the stack is empty.
-   *
-   * @return bool
-   *   TRUE when the holder must seal via sealForJob().
-   */
-  private function isCliJob(?Request $request): bool {
-    if ($request === NULL) {
-      return TRUE;
-    }
-    return PHP_SAPI === 'cli'
-      && $request === $this->requestStack->getMainRequest();
   }
 
   /**
@@ -199,16 +175,11 @@ final class McpPrincipalContextDispatcher {
       $nestedMapRules,
     );
     if ($this->holder->inJobScope()) {
-      $sealed = $this->holder->get();
-      if (!$sealed instanceof McpPrincipalContext) {
-        $this->deny(
-          $toolId,
-          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-          'A job overlay has no sealed principal. Identity is not read from the request.',
-        );
-      }
-      $this->assertContextAllowed($sealed, $toolId);
-      return;
+      $this->deny(
+        $toolId,
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        self::OVERLAY_REFUSED,
+      );
     }
     $this->assertContextAllowed(
       $this->holder->get() ?? $this->factory->fromCurrentRequest(),
@@ -276,7 +247,8 @@ final class McpPrincipalContextDispatcher {
     if (!$this->guard->required()) {
       return;
     }
-    if ($ctx->fromSealedToken()) {
+    if ($ctx->fromSealedToken()
+      || $ctx->issuer() === McpSealedTokenManager::ISSUER) {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::NON_IDP_ISSUER,
@@ -307,18 +279,14 @@ final class McpPrincipalContextDispatcher {
   /**
    * Frozen context for the current request (factory rebuild, not the slot).
    *
-   * Inside a job overlay this is the job seal only; the request is
-   * not read.
+   * Inside a job overlay this refuses: the overlay hides the request
+   * and never holds a caller-built context.
    */
   public function context(): McpPrincipalContext {
     if ($this->holder->inJobScope()) {
-      $sealed = $this->holder->get();
-      if ($sealed instanceof McpPrincipalContext) {
-        return $sealed;
-      }
       throw new McpPrincipalContextDeniedException(
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-        'A job overlay has no sealed principal. Identity is not read from the request.',
+        self::OVERLAY_REFUSED,
       );
     }
     return $this->factory->fromCurrentRequest();

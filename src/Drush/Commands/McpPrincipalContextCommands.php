@@ -13,14 +13,18 @@ use Drush\Commands\DrushCommands;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
- * Resets the job principal at the start and end of a Drush invocation.
+ * Opens a deny-only overlay for every Drush command.
  *
  * Drush dispatches ConsoleEvents::COMMAND / TERMINATE on its own
  * eventDispatcher, not Drupal's event_dispatcher. The Symfony
  * Console subscriber therefore never runs for Drush. These
- * PRE/POST_COMMAND_HOOK methods are the Drush-native reset.
+ * PRE/POST_COMMAND_HOOK methods are the Drush-native overlay.
+ * The hook target is `*`, so a Drush-hosted stdio server is
+ * never admitted for governed tools. Governed tools refuse
+ * (`missing_principal`) until a hop token supplies a Paladin
+ * principal.
  *
- * @internal Queue items are reset in the worker, not here.
+ * @internal Queue items open the overlay in the worker, not here.
  */
 final class McpPrincipalContextCommands extends DrushCommands {
 

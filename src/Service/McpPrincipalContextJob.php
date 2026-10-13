@@ -9,9 +9,10 @@ namespace Drupal\mcp_sentinel\Service;
  *
  * @internal Not a public API. Queue workers call begin()/end() per
  *   item. Drush commands call them per invocation. begin() pushes a
- *   nested job overlay over a request-sealed state (web cron) and
- *   never mutates that seal. Site code must not reset a sealed HTTP
- *   principal through the holder.
+ *   deny-only overlay over a request-sealed state (web cron) and
+ *   never mutates that seal. Governed tools refuse while the overlay
+ *   is open. Site code must not reset a sealed HTTP principal
+ *   through the holder.
  */
 final class McpPrincipalContextJob {
 
@@ -26,12 +27,10 @@ final class McpPrincipalContextJob {
   ) {}
 
   /**
-   * Opens a job overlay so this item can seal its own principal.
+   * Opens a deny-only overlay that hides the request seal.
    *
    * A request-sealed HTTP principal (web cron) is not mutated.
-   * Sequential begin() without end() clears only the overlay.
-   * Refused from arbitrary HTTP code; queue workers and Drush
-   * commands are the allowed callers.
+   * Governed tools refuse until a hop token is available.
    */
   public function begin(): void {
     $this->holder->enterJobScope();

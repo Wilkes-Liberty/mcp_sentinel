@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Queue\QueueWorkerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -587,8 +589,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   /**
    * Sealed-token provenance is refused even when iss looks like Paladin.
    *
-   * Paladin is the sole issuer (DEV-843). Refusal keys off the
-   * sealed-token auth provider, not the iss string.
+   * Paladin is the sole issuer (DEV-843). This case keys off the
+   * sealed-token auth provider (SEALED_ATTRIBUTE), not the iss string.
    */
   public function testSealedTokenProvenanceIsRefused(): void {
     $ran = FALSE;
@@ -627,23 +629,37 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
-   * A Paladin claim set is not refused by matching a sealed-token iss.
+   * A Paladin-shaped claim set with the sealed-token iss is refused.
+   *
+   * Paladin is the sole issuer (DEV-843). This case keys off the
+   * issuer string, not sealed-token provenance.
    */
-  public function testPaladinClaimsAreNotRefusedByIssuerString(): void {
+  public function testSealedTokenIssuerStringIsRefused(): void {
+    $ran = FALSE;
     $this->pushNetworkToken([
       'iss' => McpSealedTokenManager::ISSUER,
       'sub' => 'human-1',
       'azp' => 'agent-client',
       'tenant' => 'tenant-a',
     ]);
-    $seen = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): string {
-        return $ctx->subject();
-      },
-      ['note' => 'ok'],
-    );
-    $this->assertSame('human-1', $seen);
-    $this->assertSame(0, $this->deniedAccessCount());
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
+          return $ctx->subject();
+        },
+        ['note' => 'ok'],
+      );
+      $this->fail('The sealed-token issuer string must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::NON_IDP_ISSUER,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame(1, $this->deniedAccessCount());
   }
 
   /**
@@ -716,9 +732,13 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
-   * Two sequential CLI jobs use their own principal; unsealed is refused.
+   * Governed tools refuse under a queue overlay (deny-only).
+   *
+   * Until a hop token supplies a Paladin principal, begin() only
+   * hides the request seal. Sequential leftover CLI jobs cannot
+   * admit a caller-built context.
    */
-  public function testSequentialCliJobsUseOwnPrincipal(): void {
+  public function testSequentialCliJobsRefuseUnderOverlay(): void {
     $stack = $this->container->get('request_stack');
     $popped = [];
     while ($stack->getCurrentRequest() !== NULL
@@ -740,71 +760,66 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       ]);
     };
 
+    $before = $this->deniedAccessCount();
     $job->begin();
-    $holder->sealForJob($this->jobCtx('human-1'));
-    $stamp('human-evil');
-    $first = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): string {
-        return $ctx->subject();
-      },
-      ['note' => 'ok'],
-      'mcp_sentinel_principal_context_probe',
-    );
-    $this->assertSame('human-1', $first);
-
-    $job->begin();
-    $holder->sealForJob($this->jobCtx('human-2'));
-    $stamp('human-evil-2');
-    $second = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): string {
-        return $ctx->subject();
-      },
-      ['note' => 'ok'],
-      'mcp_sentinel_principal_context_probe',
-    );
-    $this->assertSame('human-2', $second);
-
-    $stamp('human-3');
-    $reused = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): string {
-        return $ctx->subject();
-      },
-      ['note' => 'ok'],
-      'mcp_sentinel_principal_context_probe',
-    );
-    $this->assertSame('human-2', $reused);
-    $held = $this->container->get('mcp_sentinel.principal_context_holder')->get();
-    $this->assertInstanceOf(McpPrincipalContext::class, $held);
-    $this->assertSame('human-2', $held->subject());
-
-    $job->begin();
-    $leftover->attributes->remove(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    $stamp('human-1');
+    $ran = FALSE;
     try {
       $this->dispatcher()->dispatch(
-        static function (array $args, McpPrincipalContext $ctx): string {
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
           return $ctx->subject();
         },
         ['note' => 'ok'],
         'mcp_sentinel_principal_context_probe',
       );
-      $this->fail('An unsealed CLI call must be refused.');
+      $this->fail('A queue overlay must refuse governed tools.');
     }
     catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
       $this->assertSame(
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
         $e->reasonCode,
       );
     }
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+
+    $job->begin();
+    $stamp('human-2');
+    $ran = FALSE;
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
+          return $ctx->subject();
+        },
+        ['note' => 'ok'],
+        'mcp_sentinel_principal_context_probe',
+      );
+      $this->fail('A nested queue overlay must still refuse.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame($before + 2, $this->deniedAccessCount());
+    $job->end();
+    $this->assertFalse($holder->inJobScope());
+    $this->assertNull($holder->get());
     $this->restoreRequestStack($popped);
   }
 
   /**
-   * Drush PRE/POST_COMMAND_HOOK reset the job principal per invocation.
+   * Drush PRE/POST_COMMAND_HOOK refuse governed tools per invocation.
    *
-   * Drush does not deliver ConsoleEvents to Drupal's event_dispatcher,
-   * so the Symfony Console subscriber never runs for Drush.
+   * The hook target is `*`, so a Drush-hosted stdio server is never
+   * admitted. Drush does not deliver ConsoleEvents to Drupal's
+   * event_dispatcher, so the Symfony Console subscriber never runs.
    */
-  public function testDrushHooksResetPerInvocation(): void {
+  public function testDrushHooksRefuseGovernedTools(): void {
     $stack = $this->container->get('request_stack');
     $popped = [];
     while ($stack->getCurrentRequest() !== NULL
@@ -816,48 +831,68 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $holder = $this->container->get('mcp_sentinel.principal_context_holder');
     $holder->resetForTest();
     $commands = new McpPrincipalContextCommands($holder);
-    $stamp = function (string $sub) use ($leftover): void {
-      $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
-        'iss' => 'https://idp.example/realms/agents',
-        'sub' => $sub,
-        'azp' => 'agent-client',
-        'tenant' => 'tenant-a',
-      ]);
-    };
+    $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+    ]);
 
+    $before = $this->deniedAccessCount();
     $commands->preCommand();
-    $holder->sealForJob($this->jobCtx('human-1'));
-    $stamp('human-evil');
-    $first = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): string {
-        return $ctx->subject();
-      },
-      ['note' => 'ok'],
-      'mcp_sentinel_principal_context_probe',
-    );
-    $this->assertSame('human-1', $first);
-
+    $this->assertTrue($holder->inJobScope());
+    $ran = FALSE;
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
+          return $ctx->subject();
+        },
+        ['note' => 'ok'],
+        'mcp_sentinel_principal_context_probe',
+      );
+      $this->fail('A Drush overlay must refuse governed tools.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame($before + 1, $this->deniedAccessCount());
     $commands->postCommand();
+    $this->assertFalse($holder->inJobScope());
     $this->assertNull($holder->get());
 
     $commands->preCommand();
-    $holder->sealForJob($this->jobCtx('human-2'));
-    $stamp('human-evil-2');
-    $second = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): string {
-        return $ctx->subject();
-      },
-      ['note' => 'ok'],
-      'mcp_sentinel_principal_context_probe',
-    );
-    $this->assertSame('human-2', $second);
+    $ran = FALSE;
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
+          return $ctx->subject();
+        },
+        ['note' => 'ok'],
+        'mcp_sentinel_principal_context_probe',
+      );
+      $this->fail('A second Drush invocation must still refuse.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame($before + 2, $this->deniedAccessCount());
     $commands->postCommand();
     $this->assertNull($holder->get());
     $this->restoreRequestStack($popped);
   }
 
   /**
-   * Swapped request claims inside an overlay are never the job principal.
+   * Swapped request claims inside an overlay are never admitted.
    */
   public function testOverlayIgnoresSwappedRequestClaims(): void {
     $request = $this->pushNetworkToken([
@@ -870,23 +905,37 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $holder->seal($this->jobCtx('cron-human'), $request);
     $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
 
-    $seen = $stub->processItem(function () use ($holder, $request): string {
-      $holder->sealForJob($this->jobCtx('job-human'));
-      $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
-        'iss' => 'https://evil.example',
-        'sub' => 'swapped',
-        'azp' => 'spoof-client',
-        'tenant' => 'tenant-evil',
-      ]);
-      return $this->dispatcher()->dispatch(
-        static function (array $args, McpPrincipalContext $ctx): string {
-          return $ctx->subject();
-        },
-        ['note' => 'ok'],
-        'mcp_sentinel_principal_context_probe',
+    $ran = FALSE;
+    try {
+      $stub->processItem(function () use ($holder, $request, &$ran): string {
+        $holder->seal($this->jobCtx('job-human'), $request);
+        $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+          'iss' => 'https://evil.example',
+          'sub' => 'swapped',
+          'azp' => 'spoof-client',
+          'tenant' => 'tenant-evil',
+        ]);
+        return $this->dispatcher()->dispatch(
+          static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+            $ran = TRUE;
+            return $ctx->subject();
+          },
+          ['note' => 'ok'],
+          'mcp_sentinel_principal_context_probe',
+        );
+      });
+      $this->fail('An overlay must refuse governed tools.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
       );
-    });
-    $this->assertSame('job-human', $seen);
+    }
+    $restored = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame('cron-human', $restored->subject());
 
     $ran = FALSE;
     try {
@@ -921,20 +970,109 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
-   * Begin() from a plain HTTP controller is refused.
+   * An anonymous queue worker cannot admit a caller-built principal.
+   *
+   * Would admit the forged iss/sub/tenant if sealForJob() stored a
+   * caller context and admit() returned the overlay.
    */
-  public function testBeginFromHttpControllerIsRefused(): void {
+  public function testAnonymousQueueWorkerCannotForgePrincipal(): void {
     $request = $this->pushNetworkToken([
       'iss' => 'https://idp.example/realms/agents',
-      'sub' => 'human-1',
-      'azp' => 'agent-client',
+      'sub' => 'cron-human',
+      'azp' => 'cron-client',
       'tenant' => 'tenant-a',
     ]);
     $holder = $this->container->get('mcp_sentinel.principal_context_holder');
-    $holder->seal($this->jobCtx('human-1'), $request);
+    $holder->seal($this->jobCtx('cron-human'), $request);
+    $dispatcher = $this->dispatcher();
+    $forged = new McpPrincipalContext(
+      'https://evil.example',
+      'forged-sub',
+      'forged-azp',
+      'forged-azp',
+      ['mcp_read'],
+      'tenant-evil',
+      [],
+      TRUE,
+      [
+        'iss' => 'https://evil.example',
+        'sub' => 'forged-sub',
+        'azp' => 'forged-azp',
+      ],
+    );
     $job = new McpPrincipalContextJob($holder);
-    $this->expectException(\LogicException::class);
-    $job->begin();
+    $worker = new class($job, $holder, $dispatcher, $forged, $request) implements QueueWorkerInterface {
+
+      /**
+       * Constructs the forged worker.
+       *
+       * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextJob $job
+       *   Job overlay helper.
+       * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
+       *   Sealed-context holder.
+       * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher $dispatcher
+       *   Governed-tool dispatcher.
+       * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $forged
+       *   Caller-built context an attacker would inject.
+       * @param \Symfony\Component\HttpFoundation\Request $request
+       *   Current HTTP request.
+       */
+      public function __construct(
+        private readonly McpPrincipalContextJob $job,
+        private readonly McpPrincipalContextHolder $holder,
+        private readonly McpPrincipalContextDispatcher $dispatcher,
+        private readonly McpPrincipalContext $forged,
+        private readonly Request $request,
+      ) {}
+
+      /**
+       * {@inheritdoc}
+       */
+      public function getPluginId(): string {
+        return 'mcp_sentinel_forged_worker';
+      }
+
+      /**
+       * {@inheritdoc}
+       */
+      public function getPluginDefinition(): array {
+        return [];
+      }
+
+      /**
+       * {@inheritdoc}
+       */
+      public function processItem($data): mixed {
+        return $this->job->run(function (): string {
+          $this->holder->seal($this->forged, $this->request);
+          return $this->dispatcher->dispatch(
+            static function (array $args, McpPrincipalContext $ctx): string {
+              return $ctx->subject();
+            },
+            ['note' => 'ok'],
+            'mcp_sentinel_principal_context_probe',
+          );
+        });
+      }
+
+    };
+
+    $before = $this->deniedAccessCount();
+    try {
+      $worker->processItem(NULL);
+      $this->fail('A forged overlay principal must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+    $restored = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame('cron-human', $restored->subject());
+    $this->assertFalse($holder->inJobScope());
   }
 
   /**

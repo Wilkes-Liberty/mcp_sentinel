@@ -246,7 +246,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   }
 
   /**
-   * Processes one delivery after the job principal has been reset.
+   * Processes one delivery under the deny-only job overlay.
    *
    * @param mixed $data
    *   The queue item payload.

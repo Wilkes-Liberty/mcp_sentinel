@@ -65,10 +65,13 @@ closed until Paladin tokens are in place. Sealed tokens (the sealed-token auth p
 for governed Tool plugins (`non_idp_issuer`). Callers must use Paladin-issued tokens that
 carry `iss`, `sub`, `azp` (or `act.sub`), and `tenant`. For stdio
 development, mint that token and send it on the connector channel.
-Queue and Drush runners reset through the internal
-`mcp_sentinel.principal_context_job` service (`public: false`),
-not the holder. Drush resets via PRE/POST_COMMAND_HOOK; Drupal's
-event_dispatcher does not receive Drush ConsoleEvents.
+Queue and Drush open a deny-only overlay through the internal
+`mcp_sentinel.principal_context_job` service (`public: false`).
+Governed tools refuse under that overlay until a hop token
+supplies a Paladin principal. Drush PRE/POST_COMMAND_HOOK
+targets every command (`*`), so a Drush-hosted stdio server is
+never admitted for governed tools. Drupal's event_dispatcher
+does not receive Drush ConsoleEvents.
 See [`API.md`](API.md#migration-paladin-tokens-required-dev-844).
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight

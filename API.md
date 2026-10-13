@@ -207,18 +207,21 @@ not a substitute for Paladin.
 For local stdio development, mint a Paladin token with those
 claims and pass it on the connector channel the same way a
 network agent would.
-Queue workers reset the job principal per item and Drush commands
-per invocation through the internal
+Queue and Drush open a deny-only overlay that hides the request
+seal and never stores a caller-built context. There is no API that
+accepts a context object from callers. Governed tools refuse
+(`missing_principal`) while that overlay is open until a hop
+token (DEV-844) supplies a Paladin principal. The overlay is
+opened through the internal
 `mcp_sentinel.principal_context_job` service (`@internal`,
-`public: false`). The job helper pushes a nested overlay over a
-request-sealed web-cron state and restores that seal after the
-item; it never mutates the request seal. Drush resets via
-PRE/POST_COMMAND_HOOK because Drush does not deliver
-ConsoleEvents to Drupal's event_dispatcher. Do not call
-`resetForJob()` / `sealForJob()` from site code; those holder
-methods are internal. Uncovered entry points
-(Drush as a governed-tool surface, GraphQL, JSON:API, Context)
-are tracked in
+`public: false`). It never mutates the request seal. Drush
+opens it via PRE/POST_COMMAND_HOOK (`*` — every command)
+because Drush does not deliver ConsoleEvents to Drupal's
+event_dispatcher. A Drush-hosted stdio server is therefore
+never admitted for governed tools. Do not call `resetForJob()`
+from site code; that holder method is internal. Uncovered
+entry points (Drush as a governed-tool surface, GraphQL,
+JSON:API, Context) are tracked in
 [DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927).
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and

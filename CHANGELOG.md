@@ -60,14 +60,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the dispatcher validates and hands out that sealed context, so a
   claims attribute replaced after the request boundary changes
   nothing; subrequests cannot reseal a different principal.
-  Queue workers reset the job principal per item and Drush
-  commands per invocation through the internal
-  `mcp_sentinel.principal_context_job` service (`@internal`,
-  `public: false`). begin() pushes a nested job overlay over a
-  request-sealed web-cron state and restores that seal after the
-  item. Drush resets via PRE/POST_COMMAND_HOOK (Drush does not
-  deliver ConsoleEvents to Drupal's event_dispatcher).
-  `resetForJob()` / `sealForJob()` on the holder are internal. Reserved-key matching strips all `\\p{Cf}` and variation
+  Queue and Drush open a deny-only overlay that hides the
+  request seal and never stores a caller-built context.
+  Governed tools refuse (`missing_principal`) while that
+  overlay is open until a hop token (DEV-844) supplies a
+  Paladin principal. The overlay is opened through the
+  internal `mcp_sentinel.principal_context_job` service
+  (`@internal`, `public: false`). Drush PRE/POST_COMMAND_HOOK
+  targets every command (`*`), so a Drush-hosted stdio
+  server is never admitted for governed tools. There is no
+  API that accepts a context object from callers.
+  `resetForJob()` on the holder is internal. Reserved-key matching strips all `\\p{Cf}` and variation
   selectors and runs non-ASCII keys through one process-wide
   Spoofchecker plus a process-wide reserved-fold set (UTS #39). Key
   parts treat all Unicode whitespace (including NBSP) as whitespace

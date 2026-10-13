@@ -15,7 +15,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * Job helper clears the holder around one CLI/queue item.
+ * Job helper opens a deny-only overlay around one CLI/queue item.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpPrincipalContextJob
  *
@@ -26,23 +26,25 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class McpPrincipalContextJobTest extends UnitTestCase {
 
   /**
-   * Run() resets before and after the item so a leftover seal cannot stick.
+   * Run() hides any leftover and never stores a caller-built context.
    *
    * @covers ::run
    * @covers ::begin
    * @covers ::end
    */
-  public function testRunClearsSealAroundTheItem(): void {
+  public function testRunHidesSealAroundTheItem(): void {
     $holder = new McpPrincipalContextHolder(new RequestStack());
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    $this->assertSame('human-1', $holder->get()?->subject());
+    $this->assertNull($holder->get());
     $job = new McpPrincipalContextJob($holder);
-    $seen = $job->run(function () use ($holder): string {
+    $seen = $job->run(function () use ($holder): bool {
+      $this->assertTrue($holder->inJobScope());
       $this->assertNull($holder->get());
-      $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-      return (string) $holder->get()?->subject();
+      $holder->seal($this->ctx('human-2', 'agent-b'), 'ignored');
+      $this->assertNull($holder->get());
+      return $holder->inJobScope();
     });
-    $this->assertSame('human-2', $seen);
+    $this->assertTrue($seen);
+    $this->assertFalse($holder->inJobScope());
     $this->assertNull($holder->get());
   }
 
@@ -62,29 +64,14 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     $holder->seal($cron, $request);
     $job = new McpPrincipalContextJob($holder);
     $stub = new McpJobScopeQueueStub($job);
-    $seen = $stub->processItem(function () use ($holder): string {
+    $seen = $stub->processItem(function () use ($holder, $request): bool {
       $this->assertNull($holder->get());
-      $holder->sealForJob($this->ctx('job-human', 'job-client'));
-      return (string) $holder->get()?->subject();
+      $holder->seal($this->ctx('job-human', 'job-client'), $request);
+      $this->assertNull($holder->get());
+      return $holder->inJobScope();
     });
-    $this->assertSame('job-human', $seen);
+    $this->assertTrue($seen);
     $this->assertSame($cron, $holder->get());
-  }
-
-  /**
-   * Begin() from a plain HTTP caller is refused.
-   *
-   * @covers ::begin
-   */
-  public function testBeginFromHttpCallerIsRefused(): void {
-    $stack = new RequestStack();
-    $request = Request::create('/mcp');
-    $stack->push($request);
-    $holder = new McpPrincipalContextHolder($stack);
-    $holder->seal($this->ctx('human-1', 'agent-a'), $request);
-    $job = new McpPrincipalContextJob($holder);
-    $this->expectException(\LogicException::class);
-    $job->begin();
   }
 
   /**
