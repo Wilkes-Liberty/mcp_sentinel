@@ -17,8 +17,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * passed to the handler / doExecute() — never a raw HTTP body. A
  * network or sealed-token HTTP call without a tenant claim fails
  * closed. Every denial writes a denied_access audit row that carries
- * the verified principal keys (or an unverified marker). Rows are
- * dropped when audit_enabled is off (existing logger behaviour).
+ * the verified principal keys (or an unverified marker), through
+ * logAlways() so audit_enabled cannot hide it.
  */
 final class McpPrincipalContextDispatcher {
 
@@ -93,7 +93,7 @@ final class McpPrincipalContextDispatcher {
     string $toolId,
     array $reservedExceptions = [],
   ): McpPrincipalContext {
-    $this->assertDispatchAllowed($arguments, $toolId, $reservedExceptions);
+    $this->assertArgumentsAllowed($arguments, $toolId, $reservedExceptions);
     $ctx = $this->factory->fromCurrentRequest();
     $request = $this->requestStack->getCurrentRequest();
     try {
@@ -108,11 +108,21 @@ final class McpPrincipalContextDispatcher {
       $this->writeDenialAudit($toolId, $e->reasonCode);
       throw $e;
     }
-    return $ctx;
+    // Validate and hand out the context the holder actually sealed. When
+    // the request subscriber sealed first, that is the request-boundary
+    // context, not a rebuild from attributes that may have been replaced
+    // since. The holder only accepts an equal-identity reseal, so the
+    // tenant and key checks below apply to what the handler receives.
+    $sealed = $this->holder->get() ?? $ctx;
+    $this->assertContextAllowed($sealed, $toolId);
+    return $sealed;
   }
 
   /**
    * Refuses reserved identity keys, a missing principal, or tenant.
+   *
+   * Checks the arguments and the context that would be handed out: the
+   * sealed one when the holder has it, else a build from the request.
    *
    * @param array<string, mixed> $arguments
    *   Caller-supplied tool arguments.
@@ -128,6 +138,31 @@ final class McpPrincipalContextDispatcher {
     array $arguments,
     string $toolId,
     array $reservedExceptions = [],
+  ): void {
+    $this->assertArgumentsAllowed($arguments, $toolId, $reservedExceptions);
+    $this->assertContextAllowed(
+      $this->holder->get() ?? $this->factory->fromCurrentRequest(),
+      $toolId,
+    );
+  }
+
+  /**
+   * Refuses reserved identity keys in the exact handler argument map.
+   *
+   * @param array<string, mixed> $arguments
+   *   Caller-supplied tool arguments.
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   * @param list<string> $reservedExceptions
+   *   Declared schema input names that may be exempted.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the guard is on and a reserved key is present.
+   */
+  private function assertArgumentsAllowed(
+    array $arguments,
+    string $toolId,
+    array $reservedExceptions,
   ): void {
     if (!$this->guard->required()) {
       return;
@@ -145,7 +180,23 @@ final class McpPrincipalContextDispatcher {
         . '). Identity comes from the validated token context.',
       );
     }
-    $ctx = $this->factory->fromCurrentRequest();
+  }
+
+  /**
+   * Refuses a context with no tenant on a network call or no principal.
+   *
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
+   *   The context the handler would receive.
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the guard is on and the context is not allowed.
+   */
+  private function assertContextAllowed(McpPrincipalContext $ctx, string $toolId): void {
+    if (!$this->guard->required()) {
+      return;
+    }
     if ($ctx->isNetwork() && $ctx->tenant() === '') {
       $this->deny(
         $toolId,
@@ -194,16 +245,19 @@ final class McpPrincipalContextDispatcher {
   /**
    * Writes a denied_access row with verified keys or an unverified marker.
    *
+   * Written through logAlways(), the same as break-glass: a principal
+   * denial is recorded even when audit_enabled is off. The principal is
+   * the sealed context when one is held, else a build from the request.
    * X-MCP-Client is not set here. The logger records it as mcp_client,
    * labeled self-reported only.
    */
   public function writeDenialAudit(string $toolId, string $reasonCode): void {
-    $this->auditLogger->log(
+    $this->auditLogger->logAlways(
       'denied_access',
       self::denialAuditMetadata(
         $toolId,
         $reasonCode,
-        $this->factory->fromCurrentRequest(),
+        $this->holder->get() ?? $this->factory->fromCurrentRequest(),
       ),
     );
   }

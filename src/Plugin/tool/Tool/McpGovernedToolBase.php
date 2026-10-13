@@ -334,7 +334,7 @@ abstract class McpGovernedToolBase extends ToolBase {
     }
     elseif ($audit && $this->governanceAuditLogger !== NULL) {
       $ctx = new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
-      $this->governanceAuditLogger->log(
+      $this->governanceAuditLogger->logAlways(
         'denied_access',
         McpPrincipalContextDispatcher::denialAuditMetadata(
           $this->getPluginId(),

@@ -112,6 +112,18 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
    * @covers ::sealForJob
    * @covers ::resetForJob
    */
+  public function testResetForJobIsRefusedDuringRequest(): void {
+    $stack = new RequestStack();
+    $stack->push(Request::create('/mcp', 'POST'));
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($this->ctx('human-1', 'agent-client'), $stack->getCurrentRequest());
+    $this->expectException(\LogicException::class);
+    $holder->resetForJob();
+  }
+
+  /**
+   * A second CLI seal without resetForJob() is refused.
+   */
   public function testCliJobRequiresResetBetweenMessages(): void {
     $holder = new McpPrincipalContextHolder(new RequestStack());
     $holder->sealForJob($this->ctx('human-1', 'agent-a'));

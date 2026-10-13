@@ -93,7 +93,7 @@ final class McpPrincipalContextTest extends UnitTestCase {
       McpPrincipalContext::normalizeKey("us\u{200B}er"),
     );
     $this->assertSame(
-      'onbehalfof',
+      McpPrincipalContext::normalizeKey('onBehalfOf'),
       McpPrincipalContext::normalizeKey('ON-BEHALF-OF'),
     );
     $this->assertSame(
@@ -119,7 +119,7 @@ final class McpPrincipalContextTest extends UnitTestCase {
   }
 
   /**
-   * Look-alikes fold to the reserved name (Spoofchecker or ASCII skeleton).
+   * Look-alike keys fold to the reserved name (Spoofchecker, UTS #39).
    *
    * @covers ::normalizeKey
    */

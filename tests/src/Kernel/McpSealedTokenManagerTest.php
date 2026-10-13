@@ -90,6 +90,12 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
     $this->assertIsArray($claims);
     $this->assertSame('mcp-agent-prod', $claims['client_id']);
     $this->assertSame((int) $owner->id(), $claims['uid']);
+    // Principal claims the dispatcher reads. No tenant was minted.
+    $this->assertSame(McpSealedTokenManager::ISSUER, $claims['iss']);
+    $this->assertSame($owner->uuid(), $claims['sub']);
+    $this->assertSame('mcp-agent-prod', $claims['azp']);
+    $this->assertArrayNotHasKey('tenant', $claims);
+    $this->assertNull($issued['tenant']);
 
     $listed = $manager->list();
     $this->assertCount(1, $listed);
@@ -99,6 +105,27 @@ final class McpSealedTokenManagerTest extends KernelTestBase {
 
     $this->assertTrue($manager->revoke($issued['jti'], $operator));
     $this->assertNull($manager->verify($issued['token']));
+  }
+
+  /**
+   * A tenant minted into the token comes back as a verified claim.
+   *
+   * @covers ::mint
+   * @covers ::verify
+   */
+  public function testTenantIsSealedIntoTheToken(): void {
+    $owner = $this->createAgentOwner();
+    $this->createDesignatedConsumer('mcp-agent-prod', $owner);
+    $operator = $this->createOperator();
+
+    $issued = $this->manager()->mint('mcp-agent-prod', 900, $operator, ' tenant-a ');
+    $this->assertSame('tenant-a', $issued['tenant']);
+    $claims = $this->manager()->verify($issued['token']);
+    $this->assertIsArray($claims);
+    $this->assertSame('tenant-a', $claims['tenant']);
+
+    $this->expectException(\InvalidArgumentException::class);
+    $this->manager()->mint('mcp-agent-prod', 900, $operator, "bad\x00tenant");
   }
 
   /**

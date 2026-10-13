@@ -14,9 +14,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role-fallback, and claimless stdio/CLI calls to those tools are
   denied the same way. There is no bypass. Callers must present a
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
-  Drush, GraphQL, JSON:API, and Context entry points are not covered
-  by this guard (follow-up tickets). Denial `denied_access` rows are
-  still omitted when `audit_enabled` is off.
+  Sealed tokens minted before this release carry no tenant: re-mint
+  them with one (the mint form now requires it) and they work again.
+  Nothing in this release stamps Paladin claims on the request; that
+  is the connector/auth slice, so until it lands a sealed token minted
+  with a tenant is the only admitted caller. Drush, GraphQL, JSON:API,
+  and Context entry points are not covered by this guard (follow-up
+  tickets). Principal denials are written with `logAlways()`, the same
+  as break-glass, so `audit_enabled: false` cannot hide them.
+  `ext-intl` is now a declared Composer requirement: the module already
+  needed it for `Normalizer`, and look-alike detection has no fallback.
 
 ### Added
 - DEV-844: Governed tool dispatch builds an immutable principal + tenant
@@ -47,16 +54,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verified `principal_key` and `human_key` (or `unverified` plus the
   reason) and the real tool id. `X-MCP-Client` stays a labeled
   self-reported `mcp_client` field. The guard applies only to
-  `McpGovernedToolBase` subclasses. The holder seals per request;
-  subrequests cannot reseal a different principal; CLI workers must
-  call `resetForJob()` per message. Reserved-key matching strips all
-  `\\p{Cf}` and variation selectors and uses Spoofchecker (UTS #39)
-  when ext-intl is available. Key parts treat all Unicode whitespace
-  (including NBSP) as whitespace and reject invalid UTF-8. The guard
-  has no environment kill switch; tests inject
-  `McpPrincipalContextGuard::disableForTest()` under PHPUnit only.
-  Grant tables are not an identity source; their retirement is a
-  later slice.
+  `McpGovernedToolBase` subclasses. The holder seals per request and
+  the dispatcher validates and hands out that sealed context, so a
+  claims attribute replaced after the request boundary changes
+  nothing; subrequests cannot reseal a different principal.
+  `resetForJob()` exists for a custom CLI/queue runner, is refused
+  while an HTTP request is current, and has no shipped caller because
+  no-request calls have no claim source yet. Reserved-key matching
+  strips all `\\p{Cf}` and variation selectors and runs non-ASCII
+  keys through one process-wide Spoofchecker (UTS #39). Key parts
+  treat all Unicode whitespace (including NBSP) as whitespace and
+  reject invalid UTF-8. The guard has no environment kill switch;
+  tests inject `McpPrincipalContextGuard::disableForTest()` under
+  PHPUnit only. Grant tables are not an identity source; their
+  retirement is a later slice.
+- Sealed tokens carry a principal. `McpSealedTokenManager::verify()`
+  returns `iss` (`urn:mcp-sentinel:sealed-token`), `sub` (the
+  designated Consumer owner's UUID), `azp` (the client_id), and
+  `tenant` when the token was minted with one; the auth provider
+  stamps all of them on the request. `mint()` takes an optional
+  tenant and the mint form requires one.
 
 ## [2.34.1] - 2026-10-12
 

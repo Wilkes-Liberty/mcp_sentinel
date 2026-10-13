@@ -545,6 +545,86 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
+   * A sealed token minted with iss/sub/azp/tenant passes the preflight.
+   *
+   * This is the claim shape McpSealedTokenAuthProvider stamps after
+   * McpSealedTokenManager::verify(), so a sealed token re-minted with a
+   * tenant is a usable governed caller again.
+   */
+  public function testSealedTokenWithTenantIsAdmitted(): void {
+    $this->pushSealedToken([
+      'client_id' => 'agent-client',
+      'scopes' => ['mcp_read'],
+      'jti' => 'jti-1',
+      'iss' => 'urn:mcp-sentinel:sealed-token',
+      'sub' => 'c2b8c8d6-0000-4000-8000-000000000001',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+    ]);
+    $seen = $this->dispatcher()->dispatch(
+      static function (array $args, McpPrincipalContext $ctx): array {
+        return [
+          'tenant' => $ctx->tenant(),
+          'key' => $ctx->principalKey(),
+          'network' => $ctx->isNetwork(),
+        ];
+      },
+      ['note' => 'ok'],
+    );
+    $this->assertSame('tenant-a', $seen['tenant']);
+    $this->assertSame(
+      'urn:mcp-sentinel:sealed-token|c2b8c8d6-0000-4000-8000-000000000001|agent-client',
+      $seen['key'],
+    );
+    $this->assertTrue($seen['network']);
+    $this->assertSame(0, $this->deniedAccessCount());
+  }
+
+  /**
+   * The dispatcher hands out the sealed context, not a rebuild from attributes.
+   *
+   * After the request-boundary seal, replacing the validated-claims
+   * attribute on the same request must not change the identity or
+   * tenant the handler receives.
+   */
+  public function testDispatchHandsOutSealedContextAfterAttributeSwap(): void {
+    $request = $this->pushNetworkToken([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->assertSame('tenant-a', $this->dispatcher()->admit(['note' => 'ok'], 'probe')->tenant());
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://evil.example',
+      'sub' => 'spoofed',
+      'azp' => 'spoof-client',
+      'tenant' => 'tenant-evil',
+    ]);
+    $seen = $this->dispatcher()->dispatch(
+      static function (array $args, McpPrincipalContext $ctx): array {
+        return [$ctx->subject(), $ctx->tenant()];
+      },
+      ['note' => 'ok'],
+      'probe',
+    );
+    $this->assertSame(['human-1', 'tenant-a'], $seen);
+  }
+
+  /**
+   * A principal denial is audited even when audit_enabled is off.
+   */
+  public function testDenialRowIsWrittenWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    $tool = $this->executeProbe(
+      ['iss' => 'https://idp.example/realms/agents', 'sub' => 'human-1', 'azp' => 'agent-client'],
+      ['params' => ['arguments' => ['note' => 'ok']]],
+    );
+    $this->assertFalse($tool->getResultStatus());
+    $this->assertSame(1, $this->deniedAccessCount());
+  }
+
+  /**
    * A disableForTest call turns the guard off; a fresh service stays on.
    */
   public function testGuardDisableIsInstanceOnly(): void {
@@ -594,6 +674,26 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     );
     $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
     $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $this->container->get('mcp_sentinel.principal_context_holder')
+      ->resetForTest();
+    $stack = $this->container->get('request_stack');
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $request->setSession($master->getSession());
+    }
+    $stack->push($request);
+    return $request;
+  }
+
+  /**
+   * Pushes a request carrying verified sealed-token claims.
+   *
+   * @param array<string, mixed> $claims
+   *   What McpSealedTokenAuthProvider stamps on SEALED_ATTRIBUTE.
+   */
+  private function pushSealedToken(array $claims): Request {
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpOauthContext::SEALED_ATTRIBUTE, $claims);
     $this->container->get('mcp_sentinel.principal_context_holder')
       ->resetForTest();
     $stack = $this->container->get('request_stack');

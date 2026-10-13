@@ -49,11 +49,20 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
     if (!$account instanceof UserInterface || !$account->isActive()) {
       return NULL;
     }
-    $request->attributes->set(McpOauthContext::SEALED_ATTRIBUTE, [
+    // The principal-context factory reads these server-validated claims.
+    // iss/sub/azp come from the verified token, never from the request.
+    $sealed = [
       'client_id' => $claims['client_id'],
       'scopes' => $claims['scopes'],
       'jti' => $claims['jti'],
-    ]);
+      'iss' => $claims['iss'],
+      'sub' => $claims['sub'],
+      'azp' => $claims['azp'],
+    ];
+    if (isset($claims['tenant'])) {
+      $sealed['tenant'] = $claims['tenant'];
+    }
+    $request->attributes->set(McpOauthContext::SEALED_ATTRIBUTE, $sealed);
     return $account;
   }
 

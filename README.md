@@ -33,9 +33,11 @@ Governed tool dispatch (`McpGovernedToolBase` only) builds an immutable
 principal + tenant context from the validated Paladin token and passes
 it to handlers as a separate parameter. Tools must not read identity or
 tenant from arguments. Drush, GraphQL, JSON:API, and Context are not
-covered by this guard. Reserved keys are rejected before dispatch,
+covered by this guard. Reserved identity and tenant keys (the full
+list is `McpPrincipalContext::RESERVED_IDENTITY_KEYS`, documented in
+[`API.md`](API.md#tool-plugin-contract)) are rejected before dispatch,
 including nested maps, case variants, format characters, and
-look-alikes. The shared principal key is `iss|sub|actor` (actor =
+look-alike keys. The shared principal key is `iss|sub|actor` (actor =
 top-level `act.sub`, else `azp`; missing parts, Unicode whitespace-only
 values, invalid UTF-8, or a `|` fail closed). The human key is
 `iss|sub`. Import `mcp_sentinel.principal_key` (`fromClaims()`) for
@@ -46,12 +48,12 @@ are not an identity source.
 
 ### Breaking: Paladin tokens required for governed tools
 
-Sealed tokens (`client_id`, `scopes`, `jti` only), cookie sessions,
-role-fallback, and claimless stdio calls to governed tools are refused.
-There is no bypass. Callers must use Paladin-issued tokens that carry
-`iss`, `sub`, `azp` (or `act.sub`), and `tenant`. For stdio
-development, mint that token and send it on the connector channel.
-Long-running CLI workers must call
+Cookie sessions, role-fallback, claimless stdio calls, and sealed
+tokens minted without a tenant are refused. There is no bypass. Callers
+must use Paladin-issued tokens that carry `iss`, `sub`, `azp` (or
+`act.sub`), and `tenant`, or a sealed token re-minted with a tenant.
+For stdio development, mint that token and send it on the connector
+channel. A custom CLI worker that supplies claims calls
 `mcp_sentinel.principal_context_holder::resetForJob()` per message.
 See [`API.md`](API.md#migration-paladin-tokens-required-dev-844).
 

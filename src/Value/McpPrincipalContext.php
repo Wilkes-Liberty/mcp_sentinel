@@ -44,7 +44,7 @@ final readonly class McpPrincipalContext {
    * Identity and tenant keys that must never appear in tool arguments.
    *
    * Compared after normalizeKey() (NFKC, strip \\p{Cf} and variation
-   * selectors, fold case, drop `_` and `-`, Spoofchecker look-alikes).
+   * selectors, fold case, drop `_` and `-`, Spoofchecker look-alike keys).
    * Nested arrays and objects are walked. Keep this list in one place.
    */
   public const RESERVED_IDENTITY_KEYS = [
@@ -228,10 +228,10 @@ final readonly class McpPrincipalContext {
    *
    * NFKC, strip all Unicode format characters (\\p{Cf}, including
    * soft hyphen and direction marks) and variation selectors, strip
-   * Unicode whitespace, fold case, then drop `_` and `-`. Look-alikes
-   * use intl Spoofchecker (UTS #39) when ext-intl is available;
-   * otherwise a non-ASCII key whose ASCII skeleton equals a reserved
-   * key is treated as that reserved key.
+   * Unicode whitespace, fold case, then drop `_` and `-`. A non-ASCII
+   * key that intl Spoofchecker (UTS #39) finds confusable with a
+   * reserved key is treated as that reserved key. ext-intl is a
+   * declared requirement (composer.json); there is no weaker fallback.
    */
   public static function normalizeKey(string $name): string {
     $folded = self::foldKey($name);
@@ -270,51 +270,47 @@ final readonly class McpPrincipalContext {
   }
 
   /**
-   * Maps a folded key onto a reserved name when it is a look-alike.
+   * Maps a folded key onto a reserved name when it is a look-alike key.
    *
-   * Spoofchecker (UTS #39) when ext-intl is loaded. Otherwise only a
-   * non-ASCII original whose ASCII skeleton equals a reserved fold is
-   * rewritten. Documented so a JS twin can match.
+   * Pure-ASCII keys are compared by equality only. A key with any
+   * non-ASCII character is run through Spoofchecker (UTS #39) against
+   * each reserved fold. The checker and the reserved folds are built
+   * once per process. Documented so a JS twin can match.
+   *
+   * @throws \RuntimeException
+   *   When ext-intl is not loaded. The check must not silently weaken.
    */
   private static function canonicalReserved(string $folded, string $original): string {
-    $reservedFolds = [];
-    foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
-      $reservedFolds[self::foldKey($reserved)] = TRUE;
+    static $reservedFolds = NULL;
+    static $checker = NULL;
+    if ($reservedFolds === NULL) {
+      $reservedFolds = [];
+      foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
+        $reservedFolds[self::foldKey($reserved)] = TRUE;
+      }
     }
     if (isset($reservedFolds[$folded])) {
       return $folded;
     }
-    if (class_exists(\Spoofchecker::class)) {
-      $checker = new \Spoofchecker();
-      foreach (array_keys($reservedFolds) as $reserved) {
-        if ($checker->areConfusable($folded, $reserved)
-          || $checker->areConfusable($original, $reserved)) {
-          return $reserved;
-        }
-      }
+    if (preg_match('/[^\x00-\x7F]/', $original) !== 1
+      && preg_match('/[^\x00-\x7F]/', $folded) !== 1) {
       return $folded;
     }
-    if (preg_match('/[^\x00-\x7F]/u', $original) === 1) {
-      $ascii = self::asciiSkeleton($folded);
-      if (isset($reservedFolds[$ascii])) {
-        return $ascii;
+    if (!class_exists(\Spoofchecker::class)) {
+      throw new \RuntimeException(
+        'MCP Sentinel requires ext-intl: reserved-key look-alike detection has no fallback.',
+      );
+    }
+    if ($checker === NULL) {
+      $checker = new \Spoofchecker();
+    }
+    foreach (array_keys($reservedFolds) as $reserved) {
+      if ($checker->areConfusable($folded, $reserved)
+        || $checker->areConfusable($original, $reserved)) {
+        return $reserved;
       }
     }
     return $folded;
-  }
-
-  /**
-   * Best-effort ASCII skeleton when Spoofchecker is unavailable.
-   */
-  private static function asciiSkeleton(string $folded): string {
-    if (function_exists('iconv')) {
-      $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $folded);
-      if (is_string($ascii) && $ascii !== '') {
-        return strtolower($ascii);
-      }
-    }
-    $stripped = preg_replace('/[^\x00-\x7F]/', '', $folded);
-    return is_string($stripped) ? $stripped : $folded;
   }
 
   /**

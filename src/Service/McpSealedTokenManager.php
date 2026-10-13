@@ -39,6 +39,20 @@ final class McpSealedTokenManager {
   public const DEFAULT_TTL = 3600;
 
   /**
+   * Issuer (iss) carried by every verified sealed token.
+   *
+   * Sealed tokens are minted by this module, not by an IdP, so the
+   * issuer is a fixed URN. The subject is the designated Consumer
+   * owner's UUID and the authorized party is the client_id.
+   */
+  public const ISSUER = 'urn:mcp-sentinel:sealed-token';
+
+  /**
+   * Maximum length of a tenant claim minted into a sealed token.
+   */
+  public const MAX_TENANT_LENGTH = 256;
+
+  /**
    * Maximum lifetime, in seconds.
    */
   public const MAX_TTL = 86400;
@@ -141,15 +155,22 @@ final class McpSealedTokenManager {
    *   Lifetime in seconds, clamped to MAX_TTL.
    * @param \Drupal\Core\Session\AccountInterface $operator
    *   The minting administrator.
+   * @param string|null $tenant
+   *   Tenant claim sealed into the token. Governed tools refuse a
+   *   sealed-token HTTP call whose token carries no tenant, so a token
+   *   minted without one can only be used by surfaces that do not go
+   *   through the principal-context dispatcher.
    *
-   * @return array{token: string, jti: string, client_id: string, expires: int, ttl: int, scopes: string[]}
+   * @return array{token: string, jti: string, client_id: string, expires: int, ttl: int, scopes: string[], tenant: string|null}
    *   One-time plaintext plus metadata. The token key must not be logged.
    *
    * @throws \InvalidArgumentException
-   *   When the client is not designated or cannot mint.
+   *   When the client is not designated, cannot mint, or the tenant is
+   *   malformed.
    */
-  public function mint(string $clientId, int $ttl, AccountInterface $operator): array {
+  public function mint(string $clientId, int $ttl, AccountInterface $operator, ?string $tenant = NULL): array {
     $clientId = trim($clientId);
+    $tenant = $this->normalizeTenant($tenant);
     if (!in_array($clientId, $this->designatedClientIds(), TRUE)) {
       throw new \InvalidArgumentException('Sealed tokens can only be bound to a designated agent client.');
     }
@@ -175,6 +196,9 @@ final class McpSealedTokenManager {
       'scp' => $scopes,
       'exp' => $expires,
     ];
+    if ($tenant !== NULL) {
+      $body['tnt'] = $tenant;
+    }
     $bodyEncoded = $this->b64(json_encode($body, JSON_THROW_ON_ERROR));
     $sig = $this->b64(hash_hmac('sha256', $jti . '.' . $bodyEncoded, $this->material(), TRUE));
     $token = self::PREFIX . $jti . '.' . $bodyEncoded . '.' . $sig;
@@ -198,6 +222,7 @@ final class McpSealedTokenManager {
       'expires' => $expires,
       'ttl' => $ttl,
       'minted_by' => (int) $operator->id(),
+      'tenant' => $tenant,
     ]);
 
     return [
@@ -207,6 +232,7 @@ final class McpSealedTokenManager {
       'expires' => $expires,
       'ttl' => $ttl,
       'scopes' => $scopes,
+      'tenant' => $tenant,
     ];
   }
 
@@ -216,7 +242,11 @@ final class McpSealedTokenManager {
    * @param string $token
    *   Raw bearer value.
    *
-   * @return array{jti: string, client_id: string, uid: int, scopes: string[], expires: int}|null
+   *   The returned claims carry the principal the dispatcher needs: iss
+   *   (ISSUER), sub (the Consumer owner's UUID), azp (the client_id), and
+   *   tenant when the token was minted with one.
+   *
+   * @return array{jti: string, client_id: string, uid: int, scopes: string[], expires: int, iss: string, sub: string, azp: string, tenant?: string}|null
    *   Claims when valid.
    */
   public function verify(string $token): ?array {
@@ -276,17 +306,58 @@ final class McpSealedTokenManager {
     if ((int) $consumer->getOwnerId() !== (int) $row['uid']) {
       return NULL;
     }
+    $owner = $this->entityTypeManager->getStorage('user')->load((int) $row['uid']);
+    if (!$owner instanceof UserInterface || !$owner->isActive()) {
+      return NULL;
+    }
 
     $scopes = is_array($body['scp'] ?? NULL)
       ? array_values(array_filter($body['scp'], 'is_string'))
       : [];
-    return [
+    $claims = [
       'jti' => $jti,
       'client_id' => (string) $row['client_id'],
       'uid' => (int) $row['uid'],
       'scopes' => $scopes,
       'expires' => (int) $row['expires'],
+      'iss' => self::ISSUER,
+      'sub' => (string) $owner->uuid(),
+      'azp' => (string) $row['client_id'],
     ];
+    $tenant = $this->normalizeTenant(is_string($body['tnt'] ?? NULL) ? $body['tnt'] : NULL);
+    if ($tenant !== NULL) {
+      $claims['tenant'] = $tenant;
+    }
+    return $claims;
+  }
+
+  /**
+   * Trims a tenant claim and refuses an unusable one.
+   *
+   * @param string|null $tenant
+   *   Raw tenant, or NULL when none was given.
+   *
+   * @return string|null
+   *   The trimmed tenant, or NULL when none was given.
+   *
+   * @throws \InvalidArgumentException
+   *   When the tenant is empty after trimming, over-long, or carries
+   *   control characters.
+   */
+  private function normalizeTenant(?string $tenant): ?string {
+    if ($tenant === NULL) {
+      return NULL;
+    }
+    $tenant = trim($tenant);
+    if ($tenant === ''
+      || mb_strlen($tenant, 'UTF-8') > self::MAX_TENANT_LENGTH
+      || preg_match('/\p{C}/u', $tenant) !== 0) {
+      throw new \InvalidArgumentException(
+        'The tenant claim must be 1 to ' . (string) self::MAX_TENANT_LENGTH
+        . ' visible characters.',
+      );
+    }
+    return $tenant;
   }
 
   /**

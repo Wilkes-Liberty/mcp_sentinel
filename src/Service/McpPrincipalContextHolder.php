@@ -14,7 +14,11 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * Tools read through this holder, never from a swappable request
  * attribute. A subrequest cannot reseal a different principal. A
  * long-running CLI worker must call resetForJob() per message so the
- * first context is never reused.
+ * first context is never reused. No shipped runner does so today:
+ * validated claims live on the HTTP request, so a no-request call has
+ * no claim source and is refused before it seals. sealForJob() is
+ * reached only by a custom CLI/queue runner that supplies claims, and
+ * that runner owns the per-message reset.
  */
 final class McpPrincipalContextHolder {
 
@@ -122,9 +126,20 @@ final class McpPrincipalContextHolder {
   /**
    * Clears the seal so the next CLI/queue message can seal again.
    *
-   * Long-running workers must call this at the start of each job.
+   * Long-running workers call this at the start of each job. It is
+   * refused while an HTTP request is on the stack: code running inside
+   * a request cannot clear the request's sealed principal and reseal
+   * another one.
+   *
+   * @throws \LogicException
+   *   When an HTTP request is current.
    */
   public function resetForJob(): void {
+    if ($this->requestStack->getCurrentRequest() !== NULL) {
+      throw new \LogicException(
+        'resetForJob() is for CLI/queue workers; an HTTP request cannot reset its sealed principal.',
+      );
+    }
     $this->context = NULL;
     $this->sealedFor = NULL;
   }
@@ -162,7 +177,8 @@ final class McpPrincipalContextHolder {
         'Principal-context holder can be reset only under PHPUnit.',
       );
     }
-    $this->resetForJob();
+    $this->context = NULL;
+    $this->sealedFor = NULL;
   }
 
   /**

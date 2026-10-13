@@ -148,31 +148,41 @@ scans the exact `doExecute()` / handler argument array
 `client_id`, `user_id`, `userId`, `actor`, `scope`, `scopes`,
 `subject`) are matched after NFKC, stripping all Unicode format
 characters (`\\p{Cf}`) and variation selectors, folding case, and
-dropping `_`/`-`. Look-alikes use intl Spoofchecker (UTS #39) when
-ext-intl is available; otherwise a non-ASCII key whose ASCII
-skeleton equals a reserved key is treated as that reserved key.
+dropping `_`/`-`. A non-ASCII key that intl Spoofchecker (UTS #39)
+finds confusable with a reserved key is treated as that key; pure-ASCII
+keys are compared by equality. `ext-intl` is a declared requirement and
+there is no weaker fallback.
 A subclass may override `reservedArgumentExceptions()` to exempt a
 **declared schema input** that is not in
 `NEVER_EXEMPT_IDENTITY_KEYS` (`sub`, `iss`, `azp`, tenant, `act`,
 `principal`, `on_behalf_of`, `client_id`, `user_id`). Nested keys
 and JSON inside strings are never exempted. Every denial writes a
 `denied_access` audit row with `principal_key` and `human_key` (or
-`unverified` plus the reason) and the real tool id. Those rows are
-omitted when `audit_enabled` is off. `X-MCP-Client` is recorded
-only as the self-reported `mcp_client` label. Network and
-sealed-token HTTP calls require a tenant claim.
+`unverified` plus the reason) and the real tool id, through
+`logAlways()`, so `audit_enabled: false` cannot hide a principal
+denial. `X-MCP-Client` is recorded only as the self-reported
+`mcp_client` label. Network and sealed-token HTTP calls require a
+tenant claim. The dispatcher validates and returns the context the
+holder sealed at the request boundary, not a rebuild from request
+attributes.
 
 ### Migration: Paladin tokens required (DEV-844)
 
-Governed Tool plugins no longer accept sealed tokens that carry only
-`client_id`, `scopes`, and `jti`, cookie sessions, role-fallback
+Governed Tool plugins no longer accept cookie sessions, role-fallback
 accounts, or claimless stdio. There is no bypass. Issue Paladin
 tokens with `iss`, `sub`, `azp` (or RFC 8693 `act.sub`), and
-`tenant`. For local stdio development, mint a Paladin token with
-those claims and pass it on the connector channel the same way a
-network agent would. CLI/queue workers that construct a context
-must call `mcp_sentinel.principal_context_holder::resetForJob()`
-at the start of each message.
+`tenant`. Sealed tokens now verify to `iss`
+(`urn:mcp-sentinel:sealed-token`), `sub` (the Consumer owner's UUID),
+`azp` (the client_id), and `tenant`; a token minted before this
+release has no tenant and is refused, so re-mint it with one. For
+local stdio development, mint a Paladin token with those claims and
+pass it on the connector channel the same way a network agent would.
+A custom CLI/queue runner that supplies claims and constructs a
+context must call
+`mcp_sentinel.principal_context_holder::resetForJob()` at the start
+of each message; the call is refused while an HTTP request is
+current, and no shipped runner needs it because a no-request call has
+no claim source.
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.
