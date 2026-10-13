@@ -69,6 +69,21 @@ final class McpPrincipalContextFactory {
     $tenant = $this->stringClaim($claims, ['tenant']);
     $actChain = $this->actChain($claims['act'] ?? NULL);
     $issuer = $this->stringClaim($claims, ['iss', 'issuer']);
+    $tokenSub = $this->stringClaim($claims, ['sub']);
+    $tokenAzp = $this->stringClaim($claims, ['azp']);
+    $keyClaims = [];
+    if ($issuer !== '') {
+      $keyClaims['iss'] = $issuer;
+    }
+    if ($tokenSub !== '') {
+      $keyClaims['sub'] = $tokenSub;
+    }
+    if ($tokenAzp !== '') {
+      $keyClaims['azp'] = $tokenAzp;
+    }
+    if (array_key_exists('act', $claims) && $claims['act'] !== NULL) {
+      $keyClaims['act'] = $claims['act'];
+    }
 
     return new McpPrincipalContext(
       $issuer,
@@ -79,6 +94,7 @@ final class McpPrincipalContextFactory {
       $tenant,
       $actChain,
       $network,
+      $keyClaims,
     );
   }
 

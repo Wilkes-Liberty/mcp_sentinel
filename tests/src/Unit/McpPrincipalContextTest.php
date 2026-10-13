@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -108,16 +109,19 @@ final class McpPrincipalContextTest extends UnitTestCase {
   }
 
   /**
-   * When azp is empty the non-delegated actor is the client id.
+   * No act and no azp fails closed (client id is not an actor).
    *
    * @covers ::principalKey
    */
-  public function testNonDelegatedTokenFallsBackToClientId(): void {
+  public function testNonDelegatedTokenWithoutAzpFailsClosed(): void {
     $ctx = $this->context(clientId: 'client-only', azp: '');
-    $this->assertSame(
-      'https://idp.example/realms/agents|human-1|client-only',
-      $ctx->principalKey(),
-    );
+    try {
+      $ctx->principalKey();
+      $this->fail('Missing azp must not produce a principal key.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::MISSING_AZP, $e->reasonCode);
+    }
   }
 
   /**

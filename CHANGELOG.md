@@ -16,10 +16,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and case variants. The frozen context exposes a shared principal key
   (`iss|sub|actor`, actor = immediate `act.sub` or else azp/client id)
   and a human key (`iss|sub`) via `principalKey()` / `humanKey()` and
-  the `mcp_sentinel.principal_key` service for rate limits, budgets,
-  and kill. A network call whose token omits the tenant claim (DEV-839)
-  fails closed. Grant tables are not an identity source; their
-  retirement is a later slice.
+  the `mcp_sentinel.principal_key` service (`fromClaims()`) for rate
+  limits, budgets, and kill. Actor is the top-level `act.sub` (RFC 8693
+  current actor; nested act entries do not change the key) or else
+  `azp`. Missing iss, sub, azp (when no act), or act.sub (when act is
+  present) fails closed — no key. A `|` in iss, sub, or actor is
+  rejected so a claim cannot forge a segment. Shared vectors live in
+  `tests/fixtures/principal-key-vectors.json` (the Node connector will
+  test a JS twin against the same file). A network call whose token
+  omits the tenant claim (DEV-839) fails closed. Grant tables are not
+  an identity source; their retirement is a later slice.
 
 ## [2.34.1] - 2026-10-12
 

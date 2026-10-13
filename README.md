@@ -35,11 +35,13 @@ claim) and passes it to handlers as a separate parameter. Tools must not
 read identity or tenant from arguments. Reserved keys (`user`, `uid`,
 `principal`, `tenant`, `tenant_id`, `act`, `on_behalf_of`) are rejected
 before dispatch, including nested maps and case variants. The shared
-principal key is `iss|sub|actor` (actor = immediate `act.sub`, else
-azp/client id); the human key is `iss|sub`. Import
-`mcp_sentinel.principal_key` for rate limits, budgets, and kill. A
-network call whose token omits the tenant claim fails closed. Grant
-tables are not an identity source.
+principal key is `iss|sub|actor` (actor = top-level `act.sub`, else
+`azp`; missing parts or a `|` in a segment fail closed). The human key
+is `iss|sub`. Import `mcp_sentinel.principal_key` (`fromClaims()`) for
+rate limits, budgets, and kill. Shared vectors:
+`tests/fixtures/principal-key-vectors.json` (Node connector tests a JS
+twin against the same file). A network call whose token omits the
+tenant claim fails closed. Grant tables are not an identity source.
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight
 enabled profile whose roles it holds, else the shipped `default` profile), which

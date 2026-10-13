@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Value;
 
+use Drupal\mcp_sentinel\Service\McpPrincipalKey;
+
 /**
  * Immutable principal + tenant context from a validated token.
  *
@@ -76,6 +78,9 @@ final readonly class McpPrincipalContext {
    *   the token has no act claim.
    * @param bool $network
    *   TRUE when this context was built for a network call.
+   * @param array<string, mixed> $keyClaims
+   *   Token claims used to compose principal keys (iss, sub, azp,
+   *   act). Empty when the context was built without a token.
    */
   public function __construct(
     private string $issuer,
@@ -86,6 +91,7 @@ final readonly class McpPrincipalContext {
     private string $tenant,
     private array $actChain,
     private bool $network,
+    private array $keyClaims = [],
   ) {}
 
   /**
@@ -151,26 +157,52 @@ final readonly class McpPrincipalContext {
   }
 
   /**
+   * Claims used to compose the shared principal key.
+   *
+   * Stored token claims when this context was built from a request.
+   * Otherwise synthesized from the frozen fields (tests).
+   *
+   * @return array<string, mixed>
+   *   JWT-shaped iss/sub/azp/act map for McpPrincipalKey::fromClaims().
+   */
+  public function keyClaims(): array {
+    if ($this->keyClaims !== []) {
+      return $this->keyClaims;
+    }
+    $claims = [
+      'iss' => $this->issuer,
+      'sub' => $this->subject,
+    ];
+    if ($this->actChain !== [] && $this->actChain[0] !== '') {
+      $claims['act'] = ['sub' => $this->actChain[0]];
+    }
+    else {
+      $claims['azp'] = $this->azp;
+    }
+    return $claims;
+  }
+
+  /**
    * Shared principal key: iss|sub|actor.
    *
-   * Actor is the immediate act.sub when a delegation chain exists,
-   * otherwise azp/client id. Same string as McpPrincipalKey.
+   * Actor is the top-level act.sub when a delegation claim is present,
+   * otherwise azp. Fails closed when the token cannot compose a key.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   Missing iss/sub/azp/act.sub, or a '|' in a segment.
    */
   public function principalKey(): string {
-    $chain = $this->actChain;
-    $actor = ($chain !== [] && $chain[0] !== '')
-      ? $chain[0]
-      : ($this->azp !== '' ? $this->azp : $this->clientId);
-    return $this->issuer . '|' . $this->subject . '|' . $actor;
+    return McpPrincipalKey::fromClaims($this->keyClaims())['principalKey'];
   }
 
   /**
    * Human principal key: iss|sub (no actor).
    *
-   * Same string as McpPrincipalKey::humanKey().
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   Missing iss/sub, or a '|' in a segment.
    */
   public function humanKey(): string {
-    return $this->issuer . '|' . $this->subject;
+    return McpPrincipalKey::fromClaims($this->keyClaims())['humanKey'];
   }
 
   /**

@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
- * Shared principal-key service matches the frozen context.
+ * Shared principal-key service against the language-neutral vectors.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpPrincipalKey
  *
@@ -22,74 +24,137 @@ use PHPUnit\Framework\Attributes\Group;
 final class McpPrincipalKeyTest extends UnitTestCase {
 
   /**
-   * The service returns iss|sub|azp for a token without act.
+   * Every shared vector produces the expected keys or error.
+   *
+   * @param array<string, mixed> $vector
+   *   One object from principal-key-vectors.json.
+   *
+   * @dataProvider vectorProvider
+   *
+   * @covers ::fromClaims
+   */
+  #[DataProvider('vectorProvider')]
+  public function testSharedVector(array $vector): void {
+    $name = (string) $vector['name'];
+    $claims = $vector['claims'];
+    $this->assertIsArray($claims, $name);
+    $expected = $vector['expected'];
+    $this->assertIsArray($expected, $name);
+
+    if (isset($expected['error'])) {
+      try {
+        McpPrincipalKey::fromClaims($claims);
+        $this->fail($name . ' must fail closed (no key).');
+      }
+      catch (McpPrincipalKeyException $e) {
+        $this->assertSame($expected['error'], $e->reasonCode, $name);
+      }
+      return;
+    }
+
+    $got = McpPrincipalKey::fromClaims($claims);
+    $this->assertSame($expected['principalKey'], $got['principalKey'], $name);
+    $this->assertSame($expected['humanKey'], $got['humanKey'], $name);
+    $this->assertArrayNotHasKey('error', $expected, $name);
+  }
+
+  /**
+   * The fixture is a non-empty array of named vectors.
+   */
+  public function testVectorFileIsComplete(): void {
+    $vectors = self::loadVectors();
+    $this->assertNotEmpty($vectors);
+    $names = [];
+    foreach ($vectors as $vector) {
+      $this->assertArrayHasKey('name', $vector);
+      $this->assertArrayHasKey('claims', $vector);
+      $this->assertArrayHasKey('expected', $vector);
+      $names[] = $vector['name'];
+    }
+    $this->assertContains('no-act-azp-present', $names);
+    $this->assertContains('single-act', $names);
+    $this->assertContains('nested-act-chain-top-level-actor', $names);
+    $this->assertContains('no-act-missing-azp', $names);
+    $this->assertContains('missing-sub', $names);
+    $this->assertContains('missing-iss', $names);
+    $this->assertContains('act-present-missing-act-sub', $names);
+    $this->assertContains('pipe-in-sub-rejected', $names);
+    $this->assertSame($names, array_unique($names));
+  }
+
+  /**
+   * Context helpers match fromClaims for a valid constructed token.
    *
    * @covers ::formatPrincipal
    * @covers ::formatHuman
    */
-  public function testNonDelegatedToken(): void {
-    $ctx = $this->context([]);
-    $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-client',
-      McpPrincipalKey::formatPrincipal($ctx),
-    );
-    $this->assertSame(
-      'https://idp.example/realms/agents|human-1',
-      McpPrincipalKey::formatHuman($ctx),
-    );
-    $this->assertSame(
-      $ctx->principalKey(),
-      McpPrincipalKey::formatPrincipal($ctx),
-    );
-    $this->assertSame(
-      $ctx->humanKey(),
-      McpPrincipalKey::formatHuman($ctx),
-    );
-  }
-
-  /**
-   * The service uses the immediate act.sub when a chain is present.
-   *
-   * @covers ::formatPrincipal
-   * @covers ::formatHuman
-   */
-  public function testDelegatedToken(): void {
-    $ctx = $this->context(['agent-1', 'agent-2']);
-    $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-1',
-      McpPrincipalKey::formatPrincipal($ctx),
-    );
-    $this->assertSame(
-      'https://idp.example/realms/agents|human-1',
-      McpPrincipalKey::formatHuman($ctx),
-    );
-    $this->assertSame(
-      $ctx->principalKey(),
-      McpPrincipalKey::formatPrincipal($ctx),
-    );
-    $this->assertSame(
-      $ctx->humanKey(),
-      McpPrincipalKey::formatHuman($ctx),
-    );
-  }
-
-  /**
-   * Builds a frozen context.
-   *
-   * @param list<string> $actChain
-   *   Delegation chain, outermost first.
-   */
-  private function context(array $actChain): McpPrincipalContext {
-    return new McpPrincipalContext(
+  public function testContextHelpersMatchFromClaims(): void {
+    $ctx = new McpPrincipalContext(
       'https://idp.example/realms/agents',
       'human-1',
       'agent-client',
       'agent-client',
       ['mcp_read'],
       'tenant-a',
-      $actChain,
+      ['agent-1', 'B'],
       TRUE,
     );
+    $fromClaims = McpPrincipalKey::fromClaims($ctx->keyClaims());
+    $this->assertSame(
+      $fromClaims['principalKey'],
+      McpPrincipalKey::formatPrincipal($ctx),
+    );
+    $this->assertSame(
+      $fromClaims['humanKey'],
+      McpPrincipalKey::formatHuman($ctx),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-1',
+      $ctx->principalKey(),
+    );
+  }
+
+  /**
+   * Vectors keyed by name for one PHPUnit case each.
+   *
+   * @return array<string, array{0: array<string, mixed>}>
+   *   name => [vector].
+   */
+  public static function vectorProvider(): array {
+    $cases = [];
+    foreach (self::loadVectors() as $vector) {
+      $name = $vector['name'] ?? NULL;
+      if (!is_string($name) || $name === '') {
+        continue;
+      }
+      $cases[$name] = [$vector];
+    }
+    return $cases;
+  }
+
+  /**
+   * Decodes the language-neutral vector file.
+   *
+   * @return list<array<string, mixed>>
+   *   Vector objects.
+   */
+  private static function loadVectors(): array {
+    $path = dirname(__DIR__, 3) . '/' . McpPrincipalKey::VECTORS_FILE;
+    $raw = file_get_contents($path);
+    if ($raw === FALSE) {
+      throw new \RuntimeException('Unable to read ' . $path);
+    }
+    $decoded = json_decode($raw, TRUE, 32, JSON_THROW_ON_ERROR);
+    if (!is_array($decoded)) {
+      throw new \RuntimeException('Vector file must be a JSON array.');
+    }
+    $vectors = [];
+    foreach ($decoded as $item) {
+      if (is_array($item)) {
+        $vectors[] = $item;
+      }
+    }
+    return $vectors;
   }
 
 }

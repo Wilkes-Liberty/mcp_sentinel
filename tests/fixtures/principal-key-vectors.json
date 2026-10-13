@@ -1,0 +1,137 @@
+[
+  {
+    "name": "no-act-azp-present",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|agent-client",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "single-act",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "sub": "agent-1"
+      }
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|agent-1",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "nested-act-chain-top-level-actor",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "sub": "A",
+        "act": {
+          "sub": "B"
+        }
+      }
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|A",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "no-act-missing-azp",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1"
+    },
+    "expected": {
+      "error": "missing_azp"
+    }
+  },
+  {
+    "name": "no-act-missing-azp-client-id-ignored",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "client_id": "must-not-be-actor"
+    },
+    "expected": {
+      "error": "missing_azp"
+    }
+  },
+  {
+    "name": "missing-sub",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "missing_sub"
+    }
+  },
+  {
+    "name": "missing-iss",
+    "claims": {
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "missing_iss"
+    }
+  },
+  {
+    "name": "act-present-missing-act-sub",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent-client",
+      "act": {
+        "act": {
+          "sub": "B"
+        }
+      }
+    },
+    "expected": {
+      "error": "missing_act_sub"
+    }
+  },
+  {
+    "name": "pipe-in-sub-rejected",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human|forged",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_separator"
+    }
+  },
+  {
+    "name": "pipe-in-iss-rejected",
+    "claims": {
+      "iss": "https://idp.example|evil",
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_separator"
+    }
+  },
+  {
+    "name": "pipe-in-actor-rejected",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "agent|forged"
+    },
+    "expected": {
+      "error": "invalid_separator"
+    }
+  }
+]

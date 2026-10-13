@@ -125,8 +125,12 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `principalContext()` returns the frozen
 principal + tenant context built from the validated token at the request
 boundary (DEV-844 / DEV-839). `principalKey()` is `iss|sub|actor` (actor
-= immediate `act.sub`, else azp/client id); `humanKey()` is `iss|sub`.
-Import `mcp_sentinel.principal_key` from rate limits, budgets, and kill.
+= top-level `act.sub` per RFC 8693, else `azp`); `humanKey()` is
+`iss|sub`. Missing iss/sub/azp/`act.sub`, or a `|` in a segment, fails
+closed. Import `mcp_sentinel.principal_key::fromClaims()` from rate
+limits, budgets, and kill. Shared vectors:
+`tests/fixtures/principal-key-vectors.json` (the Node connector will
+test a JS twin against the same file).
 Tools must never read identity or tenant from arguments; reserved keys
 (`user`, `uid`, `principal`, `tenant`, `tenant_id`, `act`,
 `on_behalf_of`) are rejected before dispatch, including nested maps and

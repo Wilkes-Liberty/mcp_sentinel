@@ -201,6 +201,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   public function testToolAttemptingToMutateCtxFails(): void {
     $tool = $this->executeProbe(
       [
+        'iss' => 'https://idp.example/realms/agents',
         'sub' => 'human-1',
         'azp' => 'agent-client',
         'tenant' => 'tenant-a',
