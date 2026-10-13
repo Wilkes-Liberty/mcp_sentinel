@@ -253,5 +253,41 @@
     "expected": {
       "error": "part_too_long"
     }
+  },
+  {
+    "name": "nbsp-only-sub",
+    "doc": "U+00A0 NBSP is Unicode whitespace (\\p{Z}) and is rejected.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "\u00a0",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "invalid_part"
+    }
+  },
+  {
+    "name": "part-too-long-iss",
+    "doc": "iss is capped at 256 Unicode characters.",
+    "claims": {
+      "iss": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sub": "human-1",
+      "azp": "agent-client"
+    },
+    "expected": {
+      "error": "part_too_long"
+    }
+  },
+  {
+    "name": "part-too-long-actor",
+    "doc": "azp/actor is capped at 256 Unicode characters.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "expected": {
+      "error": "part_too_long"
+    }
   }
 ]

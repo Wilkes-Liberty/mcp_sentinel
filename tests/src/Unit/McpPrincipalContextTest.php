@@ -97,12 +97,73 @@ final class McpPrincipalContextTest extends UnitTestCase {
       McpPrincipalContext::normalizeKey('ON-BEHALF-OF'),
     );
     $this->assertSame(
+      'user',
+      McpPrincipalContext::normalizeKey("us\u{00AD}er"),
+    );
+    $this->assertSame(
+      'user',
+      McpPrincipalContext::normalizeKey("us\u{200E}er"),
+    );
+    $this->assertSame(
+      'sub',
+      McpPrincipalContext::normalizeKey("sub\u{FE0F}"),
+    );
+    $this->assertSame(
       [' user ', "us\u{200B}er", 'Ｓｕｂ'],
       McpPrincipalContext::reservedKeysIn([
         ' user ' => '2',
         "us\u{200B}er" => '3',
         'Ｓｕｂ' => '4',
       ]),
+    );
+  }
+
+  /**
+   * Look-alikes fold to the reserved name (Spoofchecker or ASCII skeleton).
+   *
+   * @covers ::normalizeKey
+   */
+  public function testLookAlikeReservedKeyIsDetected(): void {
+    $cyrillicSub = "\u{0455}ub";
+    $this->assertSame(
+      [$cyrillicSub],
+      McpPrincipalContext::reservedKeysIn([$cyrillicSub => '1']),
+    );
+  }
+
+  /**
+   * A declared-input exception is top-level only, never never-exempt.
+   *
+   * @covers ::reservedKeysIn
+   */
+  public function testDeclaredInputExceptionIsTopLevelOnly(): void {
+    $this->assertSame(
+      [],
+      McpPrincipalContext::reservedKeysIn(
+        ['subject' => 'Hello'],
+        ['subject'],
+      ),
+    );
+    $this->assertSame(
+      ['wrap.subject'],
+      McpPrincipalContext::reservedKeysIn(
+        ['wrap' => ['subject' => 'Hello']],
+        ['subject'],
+      ),
+    );
+    $this->assertSame(
+      ['sub'],
+      McpPrincipalContext::reservedKeysIn(
+        ['sub' => 'human-1'],
+        ['sub'],
+      ),
+    );
+    $this->assertSame(
+      [],
+      McpPrincipalContext::reservedKeysIn(
+        ['user' => 'display-name'],
+        ['user'],
+      ),
     );
   }
 

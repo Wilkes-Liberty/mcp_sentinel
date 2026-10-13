@@ -318,9 +318,11 @@ class McpAuditLogger {
    */
   private function writeToChain(string $operation, array $metadata): void {
     // The connector's self-reported X-MCP-Client label (Integration Contract
-    // v1.0). Recorded into the audit metadata for forensic identity only — it
-    // is NEVER an enforcement signal. Governance keys on the authenticated role
-    // and OAuth scopes, so a forged or omitted header cannot bypass any gate.
+    // v1.0). Recorded into the audit metadata as mcp_client for forensic
+    // identity only — it is NEVER an enforcement signal and is not a
+    // principal. Governance keys on the Paladin token
+    // (principal_key / human_key). A forged or omitted header cannot
+    // bypass any gate.
     $request = $this->requestStack->getCurrentRequest();
     $mcpClient = $request
       ? substr((string) $request->headers->get('X-MCP-Client', ''), 0, 256)

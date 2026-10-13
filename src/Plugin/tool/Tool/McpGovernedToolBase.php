@@ -232,6 +232,53 @@ abstract class McpGovernedToolBase extends ToolBase {
   }
 
   /**
+   * Declared schema input names exempted from reserved-key matching.
+   *
+   * Top-level declared inputs only. NEVER_EXEMPT_IDENTITY_KEYS cannot
+   * be exempted. Nested keys are never exempted. Override in a
+   * subclass after review.
+   *
+   * @return list<string>
+   *   Declared input names.
+   *
+   * @api
+   */
+  protected function reservedArgumentExceptions(): array {
+    return [];
+  }
+
+  /**
+   * Declared-input exceptions that are allowed after review.
+   *
+   * @return list<string>
+   *   Names that are both declared inputs and not never-exempt.
+   */
+  private function reviewedReservedExceptions(): array {
+    $declared = array_map(
+      'strval',
+      array_keys($this->getInputDefinitions()),
+    );
+    $exempt = [];
+    foreach ($this->reservedArgumentExceptions() as $name) {
+      if (!in_array($name, $declared, TRUE)) {
+        continue;
+      }
+      $norm = McpPrincipalContext::normalizeKey($name);
+      $never = FALSE;
+      foreach (McpPrincipalContext::NEVER_EXEMPT_IDENTITY_KEYS as $reserved) {
+        if (McpPrincipalContext::normalizeKey($reserved) === $norm) {
+          $never = TRUE;
+          break;
+        }
+      }
+      if (!$never) {
+        $exempt[] = $name;
+      }
+    }
+    return $exempt;
+  }
+
+  /**
    * Rejects reserved identity keys and a missing principal or tenant.
    *
    * Runs on the exact array ToolBase::execute() will pass to
@@ -253,8 +300,13 @@ abstract class McpGovernedToolBase extends ToolBase {
       );
     }
     $arguments = $this->getExecutableValues(TRUE);
+    $exceptions = $this->reviewedReservedExceptions();
     try {
-      $this->governancePrincipalDispatcher->admit($arguments);
+      $this->governancePrincipalDispatcher->admit(
+        $arguments,
+        $this->getPluginId(),
+        $exceptions,
+      );
     }
     catch (McpPrincipalContextDeniedException $e) {
       return $this->principalDenialResult($e, FALSE);
@@ -274,14 +326,22 @@ abstract class McpGovernedToolBase extends ToolBase {
     McpPrincipalContextDeniedException $e,
     bool $audit = TRUE,
   ): ExecutableResult {
-    if ($audit && $this->governanceAuditLogger !== NULL) {
-      $this->governanceAuditLogger->log('denied_access', [
-        'tool' => $this->getPluginId(),
-        'entity_type' => 'principal',
-        'id' => '-',
-        'operation' => 'dispatch',
-        'reason' => $e->reasonCode,
-      ]);
+    if ($audit && $this->governancePrincipalDispatcher !== NULL) {
+      $this->governancePrincipalDispatcher->writeDenialAudit(
+        $this->getPluginId(),
+        $e->reasonCode,
+      );
+    }
+    elseif ($audit && $this->governanceAuditLogger !== NULL) {
+      $ctx = new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
+      $this->governanceAuditLogger->log(
+        'denied_access',
+        McpPrincipalContextDispatcher::denialAuditMetadata(
+          $this->getPluginId(),
+          $e->reasonCode,
+          $ctx,
+        ),
+      );
     }
     $message = $e->getMessage();
     if ($this->governanceDenyExplainer !== NULL) {

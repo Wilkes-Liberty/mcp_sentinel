@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking
+- DEV-844: Governed Tool plugins (`McpGovernedToolBase` only) refuse a
+  call that has no Paladin-issued principal. Sealed tokens that carry
+  only `client_id`, `scopes`, and `jti` are denied
+  (`missing_principal` / `missing_tenant_claim`). Session,
+  role-fallback, and claimless stdio/CLI calls to those tools are
+  denied the same way. There is no bypass. Callers must present a
+  Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
+  Drush, GraphQL, JSON:API, and Context entry points are not covered
+  by this guard (follow-up tickets). Denial `denied_access` rows are
+  still omitted when `audit_enabled` is off.
+
 ### Added
 - DEV-844: Governed tool dispatch builds an immutable principal + tenant
   context from the validated token at the request boundary and passes it
@@ -31,8 +43,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `tests/fixtures/principal-key-vectors.json` (the Node connector
   will test a JS twin against the same file). Network and
   sealed-token HTTP calls require a tenant claim (DEV-839). Every
-  denial writes a `denied_access` audit row. The guard has no
-  environment kill switch; tests inject
+  denial writes a `denied_access` audit row that carries the
+  verified `principal_key` and `human_key` (or `unverified` plus the
+  reason) and the real tool id. `X-MCP-Client` stays a labeled
+  self-reported `mcp_client` field. The guard applies only to
+  `McpGovernedToolBase` subclasses. The holder seals per request;
+  subrequests cannot reseal a different principal; CLI workers must
+  call `resetForJob()` per message. Reserved-key matching strips all
+  `\\p{Cf}` and variation selectors and uses Spoofchecker (UTS #39)
+  when ext-intl is available. Key parts treat all Unicode whitespace
+  (including NBSP) as whitespace and reject invalid UTF-8. The guard
+  has no environment kill switch; tests inject
   `McpPrincipalContextGuard::disableForTest()` under PHPUnit only.
   Grant tables are not an identity source; their retirement is a
   later slice.

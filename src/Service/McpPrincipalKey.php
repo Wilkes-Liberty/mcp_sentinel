@@ -18,8 +18,9 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * Only act.sub is read — never act.subject — so actChain() and the
  * key agree.
  *
- * Each part is capped at MAX_PART_LENGTH (256) characters. Whitespace-
- * only parts, control characters, and '|' are rejected.
+ * Each part is capped at MAX_PART_LENGTH (256) characters. Unicode
+ * whitespace-only parts (including NBSP), control characters, invalid
+ * UTF-8, and '|' are rejected.
  *
  * Language-neutral vectors: tests/fixtures/principal-key-vectors.json.
  * The Node connector tests a JS twin against the same file.
@@ -191,16 +192,28 @@ final class McpPrincipalKey {
    *   When the part cannot appear in a key.
    */
   private static function assertSafePart(string $part): void {
+    if (!mb_check_encoding($part, 'UTF-8')) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::INVALID_UTF8,
+        'Principal-key claims must be valid UTF-8.',
+      );
+    }
     if (str_contains($part, self::SEPARATOR)) {
       throw new McpPrincipalKeyException(
         McpPrincipalKeyException::INVALID_SEPARATOR,
         'Principal-key claims must not contain "|".',
       );
     }
-    if (trim($part) === '' || preg_match('/\p{C}/u', $part) === 1) {
+    if (preg_match('/^[\s\p{Z}]*$/u', $part) !== 0) {
       throw new McpPrincipalKeyException(
         McpPrincipalKeyException::INVALID_PART,
-        'Principal-key claims must not be whitespace-only or contain control characters.',
+        'Principal-key claims must not be whitespace-only.',
+      );
+    }
+    if (preg_match('/\p{C}/u', $part) !== 0) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::INVALID_PART,
+        'Principal-key claims must not contain control characters.',
       );
     }
     if (mb_strlen($part, 'UTF-8') > self::MAX_PART_LENGTH) {

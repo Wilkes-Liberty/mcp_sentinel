@@ -29,19 +29,31 @@ install). An admin's direct cookie-session Drupal UI is never governed. The
 omitting it, and a non-agent user cannot be governed by adding it. The
 `anonymous` and `authenticated` roles can never be governed.
 
-Governed tool dispatch builds an immutable principal + tenant context from
-the validated token (issuer, subject, client/azp, act chain, scopes, tenant
-claim) and passes it to handlers as a separate parameter. Tools must not
-read identity or tenant from arguments. Reserved keys (`user`, `uid`,
-`principal`, `tenant`, `tenant_id`, `act`, `on_behalf_of`) are rejected
-before dispatch, including nested maps and case variants. The shared
-principal key is `iss|sub|actor` (actor = top-level `act.sub`, else
-`azp`; missing parts or a `|` in a segment fail closed). The human key
-is `iss|sub`. Import `mcp_sentinel.principal_key` (`fromClaims()`) for
+Governed tool dispatch (`McpGovernedToolBase` only) builds an immutable
+principal + tenant context from the validated Paladin token and passes
+it to handlers as a separate parameter. Tools must not read identity or
+tenant from arguments. Drush, GraphQL, JSON:API, and Context are not
+covered by this guard. Reserved keys are rejected before dispatch,
+including nested maps, case variants, format characters, and
+look-alikes. The shared principal key is `iss|sub|actor` (actor =
+top-level `act.sub`, else `azp`; missing parts, Unicode whitespace-only
+values, invalid UTF-8, or a `|` fail closed). The human key is
+`iss|sub`. Import `mcp_sentinel.principal_key` (`fromClaims()`) for
 rate limits, budgets, and kill. Shared vectors:
-`tests/fixtures/principal-key-vectors.json` (Node connector tests a JS
-twin against the same file). A network call whose token omits the
-tenant claim fails closed. Grant tables are not an identity source.
+`tests/fixtures/principal-key-vectors.json`. A network or sealed-token
+HTTP call whose token omits the tenant claim fails closed. Grant tables
+are not an identity source.
+
+### Breaking: Paladin tokens required for governed tools
+
+Sealed tokens (`client_id`, `scopes`, `jti` only), cookie sessions,
+role-fallback, and claimless stdio calls to governed tools are refused.
+There is no bypass. Callers must use Paladin-issued tokens that carry
+`iss`, `sub`, `azp` (or `act.sub`), and `tenant`. For stdio
+development, mint that token and send it on the connector channel.
+Long-running CLI workers must call
+`mcp_sentinel.principal_context_holder::resetForJob()` per message.
+See [`API.md`](API.md#migration-paladin-tokens-required-dev-844).
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight
 enabled profile whose roles it holds, else the shipped `default` profile), which

@@ -43,9 +43,9 @@ final readonly class McpPrincipalContext {
   /**
    * Identity and tenant keys that must never appear in tool arguments.
    *
-   * Compared after normalizeKey() (NFKC, strip whitespace and
-   * zero-width, fold case, drop `_` and `-`). Nested arrays and
-   * objects are walked. Keep this list in one place.
+   * Compared after normalizeKey() (NFKC, strip \\p{Cf} and variation
+   * selectors, fold case, drop `_` and `-`, Spoofchecker look-alikes).
+   * Nested arrays and objects are walked. Keep this list in one place.
    */
   public const RESERVED_IDENTITY_KEYS = [
     'user',
@@ -67,6 +67,25 @@ final readonly class McpPrincipalContext {
     'scope',
     'scopes',
     'subject',
+  ];
+
+  /**
+   * Token identity claims that a declared-input exception cannot exempt.
+   */
+  public const NEVER_EXEMPT_IDENTITY_KEYS = [
+    'sub',
+    'iss',
+    'azp',
+    'tenant',
+    'tenant_id',
+    'tenantId',
+    'act',
+    'principal',
+    'on_behalf_of',
+    'onBehalfOf',
+    'client_id',
+    'user_id',
+    'userId',
   ];
 
   /**
@@ -207,24 +226,39 @@ final readonly class McpPrincipalContext {
   /**
    * Normalizes an argument key for reserved-identity matching.
    *
-   * NFKC, strip whitespace and zero-width characters, fold case,
-   * then drop `_` and `-`. `onBehalfOf`, `on_behalf_of`, and
-   * `ON-BEHALF-OF` all become `onbehalfof`.
+   * NFKC, strip all Unicode format characters (\\p{Cf}, including
+   * soft hyphen and direction marks) and variation selectors, strip
+   * Unicode whitespace, fold case, then drop `_` and `-`. Look-alikes
+   * use intl Spoofchecker (UTS #39) when ext-intl is available;
+   * otherwise a non-ASCII key whose ASCII skeleton equals a reserved
+   * key is treated as that reserved key.
    */
   public static function normalizeKey(string $name): string {
+    $folded = self::foldKey($name);
+    return self::canonicalReserved($folded, $name);
+  }
+
+  /**
+   * NFKC + format/whitespace strip + case fold, without look-alike map.
+   */
+  public static function foldKey(string $name): string {
     $normalized = \Normalizer::normalize($name, \Normalizer::FORM_KC);
     if (!is_string($normalized)) {
       $normalized = $name;
     }
-    $stripped = preg_replace(
-      '/[\x{200B}-\x{200D}\x{FEFF}\x{2060}]/u',
-      '',
-      $normalized,
-    );
+    $stripped = preg_replace('/\p{Cf}/u', '', $normalized);
     if (is_string($stripped)) {
       $normalized = $stripped;
     }
-    $compact = preg_replace('/\s+/u', '', $normalized);
+    $noVs = preg_replace(
+      '/[\x{FE00}-\x{FE0F}\x{E0100}-\x{E01EF}]/u',
+      '',
+      $normalized,
+    );
+    if (is_string($noVs)) {
+      $normalized = $noVs;
+    }
+    $compact = preg_replace('/[\s\p{Z}]+/u', '', $normalized);
     if (is_string($compact)) {
       $normalized = $compact;
     }
@@ -236,21 +270,87 @@ final readonly class McpPrincipalContext {
   }
 
   /**
+   * Maps a folded key onto a reserved name when it is a look-alike.
+   *
+   * Spoofchecker (UTS #39) when ext-intl is loaded. Otherwise only a
+   * non-ASCII original whose ASCII skeleton equals a reserved fold is
+   * rewritten. Documented so a JS twin can match.
+   */
+  private static function canonicalReserved(string $folded, string $original): string {
+    $reservedFolds = [];
+    foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
+      $reservedFolds[self::foldKey($reserved)] = TRUE;
+    }
+    if (isset($reservedFolds[$folded])) {
+      return $folded;
+    }
+    if (class_exists(\Spoofchecker::class)) {
+      $checker = new \Spoofchecker();
+      foreach (array_keys($reservedFolds) as $reserved) {
+        if ($checker->areConfusable($folded, $reserved)
+          || $checker->areConfusable($original, $reserved)) {
+          return $reserved;
+        }
+      }
+      return $folded;
+    }
+    if (preg_match('/[^\x00-\x7F]/u', $original) === 1) {
+      $ascii = self::asciiSkeleton($folded);
+      if (isset($reservedFolds[$ascii])) {
+        return $ascii;
+      }
+    }
+    return $folded;
+  }
+
+  /**
+   * Best-effort ASCII skeleton when Spoofchecker is unavailable.
+   */
+  private static function asciiSkeleton(string $folded): string {
+    if (function_exists('iconv')) {
+      $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $folded);
+      if (is_string($ascii) && $ascii !== '') {
+        return strtolower($ascii);
+      }
+    }
+    $stripped = preg_replace('/[^\x00-\x7F]/', '', $folded);
+    return is_string($stripped) ? $stripped : $folded;
+  }
+
+  /**
    * Reserved identity keys present in an argument map.
    *
    * Walks nested arrays and objects. Matching uses normalizeKey().
-   * Reported paths keep the caller's original casing.
+   * Reported paths keep the caller's original casing. $topLevelExceptions
+   * may skip declared schema input names at the top level only, never
+   * NEVER_EXEMPT_IDENTITY_KEYS.
    *
    * @param array<string, mixed> $arguments
    *   Caller-supplied tool arguments.
+   * @param list<string> $topLevelExceptions
+   *   Declared input names that may carry a false-positive reserved word.
    *
    * @return list<string>
    *   Matching paths, grouped in RESERVED_IDENTITY_KEYS order.
    */
-  public static function reservedKeysIn(array $arguments): array {
+  public static function reservedKeysIn(
+    array $arguments,
+    array $topLevelExceptions = [],
+  ): array {
     $reservedNorms = [];
     foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
       $reservedNorms[self::normalizeKey($reserved)] = TRUE;
+    }
+    $neverExempt = [];
+    foreach (self::NEVER_EXEMPT_IDENTITY_KEYS as $reserved) {
+      $neverExempt[self::normalizeKey($reserved)] = TRUE;
+    }
+    $exceptionNorms = [];
+    foreach ($topLevelExceptions as $name) {
+      $norm = self::normalizeKey((string) $name);
+      if (!isset($neverExempt[$norm])) {
+        $exceptionNorms[$norm] = TRUE;
+      }
     }
     $foundByReserved = [];
     self::collectReservedKeys(
@@ -258,6 +358,7 @@ final readonly class McpPrincipalContext {
       '',
       $foundByReserved,
       $reservedNorms,
+      $exceptionNorms,
     );
     $found = [];
     $seenNorm = [];
@@ -285,18 +386,22 @@ final readonly class McpPrincipalContext {
    *   Accumulator keyed by the normalized reserved name.
    * @param array<string, true> $reservedNorms
    *   Normalized reserved names.
+   * @param array<string, true> $exceptionNorms
+   *   Top-level declared-input exceptions.
    */
   private static function collectReservedKeys(
     array $arguments,
     string $prefix,
     array &$foundByReserved,
     array $reservedNorms,
+    array $exceptionNorms,
   ): void {
     foreach ($arguments as $key => $value) {
       $name = (string) $key;
       $path = $prefix === '' ? $name : $prefix . '.' . $name;
       $normalized = self::normalizeKey($name);
-      if (isset($reservedNorms[$normalized])) {
+      $exempt = $prefix === '' && isset($exceptionNorms[$normalized]);
+      if (isset($reservedNorms[$normalized]) && !$exempt) {
         $foundByReserved[$normalized][] = $path;
       }
       $nested = self::nestedMap($value);
@@ -306,6 +411,7 @@ final readonly class McpPrincipalContext {
           $path,
           $foundByReserved,
           $reservedNorms,
+          [],
         );
       }
     }

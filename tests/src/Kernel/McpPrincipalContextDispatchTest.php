@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -356,6 +357,18 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertFalse($tool->getResultStatus());
     $this->assertStringContainsString('payload.user', (string) $tool->getResultMessage());
     $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('mcp_sentinel_principal_context_probe', $meta['tool']);
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-client',
+      $meta['principal_key'],
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      $meta['human_key'],
+    );
+    $this->assertSame('human-1', $meta['sub']);
+    $this->assertNotSame('-', $meta['tool']);
   }
 
   /**
@@ -427,6 +440,50 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       );
     }
     $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('unverified', $meta['principal_key']);
+    $this->assertSame('unverified', $meta['human_key']);
+    $this->assertArrayHasKey('principal_unverified', $meta);
+  }
+
+  /**
+   * A declared subject input can be exempted; sub cannot.
+   */
+  public function testDeclaredInputExceptionAndNeverExempt(): void {
+    $this->pushNetworkToken([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+    ]);
+    $ok = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_reserved_exception_probe');
+    $ok->setInputValue('subject', 'Hello');
+    $ok->execute();
+    $this->assertTrue($ok->getResultStatus(), (string) $ok->getResultMessage());
+
+    $denied = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_reserved_never_exempt_probe');
+    $denied->setInputValue('sub', 'spoof');
+    $denied->execute();
+    $this->assertFalse($denied->getResultStatus());
+    $this->assertStringContainsString('sub', (string) $denied->getResultMessage());
+  }
+
+  /**
+   * No shipped governed tool declares a reserved top-level input.
+   */
+  public function testShippedToolsHaveNoReservedTopLevelInputs(): void {
+    $collisions = $this->shippedReservedInputCollisions();
+    $this->assertSame([], $collisions['top_level']);
+    $this->assertSame(
+      [
+        'mcp_sentinel_config_set:data',
+        'mcp_sentinel_media_create:fields',
+        'mcp_sentinel_node_operations:fields',
+      ],
+      $collisions['maps'],
+    );
   }
 
   /**
@@ -591,6 +648,79 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     }
     $this->container->get('mcp_sentinel.principal_context_holder')
       ->resetForTest();
+  }
+
+  /**
+   * Decodes the latest denied_access metadata.
+   *
+   * @return array<string, mixed>
+   *   Metadata keys.
+   */
+  private function lastDenialMetadata(): array {
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    return $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+  }
+
+  /**
+   * Audits declared inputs on shipped McpGovernedToolBase plugins.
+   *
+   * @return array{top_level: list<string>, maps: list<string>}
+   *   Collisions and map inputs that can carry nested reserved keys.
+   */
+  private function shippedReservedInputCollisions(): array {
+    $reserved = [];
+    foreach (McpPrincipalContext::RESERVED_IDENTITY_KEYS as $key) {
+      $reserved[McpPrincipalContext::normalizeKey($key)] = $key;
+    }
+    $top = [];
+    $maps = [];
+    $manager = $this->container->get('plugin.manager.tool');
+    foreach ($manager->getDefinitions() as $id => $definition) {
+      $class = '';
+      if (is_array($definition)) {
+        $class = (string) ($definition['class'] ?? '');
+      }
+      elseif (is_object($definition) && method_exists($definition, 'getClass')) {
+        $class = (string) $definition->getClass();
+      }
+      if ($class === ''
+        || !is_subclass_of($class, McpGovernedToolBase::class)
+        || !str_starts_with($class, 'Drupal\\mcp_sentinel\\')) {
+        continue;
+      }
+      $inputs = [];
+      if (is_object($definition) && method_exists($definition, 'getInputDefinitions')) {
+        $inputs = $definition->getInputDefinitions();
+      }
+      elseif (is_array($definition)
+        && isset($definition['input_definitions'])
+        && is_array($definition['input_definitions'])) {
+        $inputs = $definition['input_definitions'];
+      }
+      foreach ($inputs as $name => $input) {
+        $norm = McpPrincipalContext::normalizeKey((string) $name);
+        if (isset($reserved[$norm])) {
+          $top[] = $id . ':' . $name;
+        }
+        if (is_object($input)
+          && method_exists($input, 'getDataType')
+          && $input->getDataType() === 'map') {
+          $maps[] = $id . ':' . $name;
+        }
+      }
+    }
+    sort($top);
+    sort($maps);
+    return ['top_level' => $top, 'maps' => $maps];
   }
 
   /**

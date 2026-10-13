@@ -71,6 +71,17 @@ final class McpDenyExplainer {
         'Stay denied.',
       );
     }
+    if (str_contains($reason, 'reseal_refused')
+      || str_contains($reason, 'cannot reseal')
+      || str_contains($reason, 'already sealed')) {
+      return new McpDenyExplanation(
+        'reseal_refused',
+        'principal reseal refused',
+        FALSE,
+        'A subrequest cannot change the sealed principal. CLI workers must call resetForJob() per message.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'missing_principal')
       || str_contains($reason, 'verified principal')) {
       return new McpDenyExplanation(

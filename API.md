@@ -127,11 +127,15 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 principal + tenant context sealed at the request boundary
 (DEV-844 / DEV-839). It throws when the dispatcher is missing or no
 principal is sealed; it never returns an empty context and never
-reads the request attribute. `principalKey()` is `iss|sub|actor`
-(actor = top-level `act.sub` per RFC 8693, else `azp`; never
-`client_id` or `act.subject`); `humanKey()` is `iss|sub`. Missing
-iss/sub/azp/`act.sub`, a `|`, whitespace-only or control characters,
-or a part longer than 256 characters, fails closed. Import
+reads the request attribute. This guard applies **only** to
+`McpGovernedToolBase` subclasses. Drush commands, GraphQL,
+JSON:API, and the Context controller are not admitted through
+`admit()`/`dispatch()` (follow-up work). `principalKey()` is
+`iss|sub|actor` (actor = top-level `act.sub` per RFC 8693, else
+`azp`; never `client_id` or `act.subject`); `humanKey()` is
+`iss|sub`. Missing iss/sub/azp/`act.sub`, a `|`, Unicode
+whitespace-only parts (including NBSP), control characters, invalid
+UTF-8, or a part longer than 256 characters, fails closed. Import
 `mcp_sentinel.principal_key::fromClaims()` from rate limits,
 budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json` (the Node connector will
@@ -142,10 +146,33 @@ scans the exact `doExecute()` / handler argument array
 (`user`, `uid`, `principal`, `tenant`, `tenant_id`, `tenantId`,
 `act`, `on_behalf_of`, `onBehalfOf`, `sub`, `iss`, `azp`,
 `client_id`, `user_id`, `userId`, `actor`, `scope`, `scopes`,
-`subject`) are matched after NFKC, stripping whitespace and
-zero-width characters, folding case, and dropping `_`/`-`. Every
-denial writes a `denied_access` audit row. Network and sealed-token
-HTTP calls require a tenant claim.
+`subject`) are matched after NFKC, stripping all Unicode format
+characters (`\\p{Cf}`) and variation selectors, folding case, and
+dropping `_`/`-`. Look-alikes use intl Spoofchecker (UTS #39) when
+ext-intl is available; otherwise a non-ASCII key whose ASCII
+skeleton equals a reserved key is treated as that reserved key.
+A subclass may override `reservedArgumentExceptions()` to exempt a
+**declared schema input** that is not in
+`NEVER_EXEMPT_IDENTITY_KEYS` (`sub`, `iss`, `azp`, tenant, `act`,
+`principal`, `on_behalf_of`, `client_id`, `user_id`). Nested keys
+and JSON inside strings are never exempted. Every denial writes a
+`denied_access` audit row with `principal_key` and `human_key` (or
+`unverified` plus the reason) and the real tool id. Those rows are
+omitted when `audit_enabled` is off. `X-MCP-Client` is recorded
+only as the self-reported `mcp_client` label. Network and
+sealed-token HTTP calls require a tenant claim.
+
+### Migration: Paladin tokens required (DEV-844)
+
+Governed Tool plugins no longer accept sealed tokens that carry only
+`client_id`, `scopes`, and `jti`, cookie sessions, role-fallback
+accounts, or claimless stdio. There is no bypass. Issue Paladin
+tokens with `iss`, `sub`, `azp` (or RFC 8693 `act.sub`), and
+`tenant`. For local stdio development, mint a Paladin token with
+those claims and pass it on the connector channel the same way a
+network agent would. CLI/queue workers that construct a context
+must call `mcp_sentinel.principal_context_holder::resetForJob()`
+at the start of each message.
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.

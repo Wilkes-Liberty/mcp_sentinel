@@ -48,6 +48,11 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const PART_TOO_LONG = 'part_too_long';
 
   /**
+   * A part is not valid UTF-8.
+   */
+  public const INVALID_UTF8 = 'invalid_utf8';
+
+  /**
    * Constructs a fail-closed key refusal.
    *
    * @param string $reasonCode

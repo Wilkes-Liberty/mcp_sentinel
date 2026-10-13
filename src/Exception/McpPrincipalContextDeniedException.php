@@ -30,6 +30,11 @@ final class McpPrincipalContextDeniedException extends \RuntimeException {
   public const MISSING_PRINCIPAL = 'missing_principal';
 
   /**
+   * A second seal with a different principal was refused.
+   */
+  public const RESEAL_REFUSED = 'reseal_refused';
+
+  /**
    * Constructs a fail-closed refusal.
    *
    * @param string $reasonCode

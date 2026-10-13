@@ -65,6 +65,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'discoveryAccess',
     'execute',
     'principalContext',
+    'reservedArgumentExceptions',
   ];
 
   /**

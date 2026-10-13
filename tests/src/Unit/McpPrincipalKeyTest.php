@@ -88,6 +88,9 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains('unicode-sub-valid', $names);
     $this->assertContains('zero-width-sub', $names);
     $this->assertContains('part-too-long-sub', $names);
+    $this->assertContains('nbsp-only-sub', $names);
+    $this->assertContains('part-too-long-iss', $names);
+    $this->assertContains('part-too-long-actor', $names);
     $this->assertSame($names, array_unique($names));
   }
 
@@ -127,6 +130,27 @@ final class McpPrincipalKeyTest extends UnitTestCase {
       'https://idp.example/realms/agents|human-1|agent-1',
       $ctx->principalKey(),
     );
+  }
+
+  /**
+   * Invalid UTF-8 is rejected (not representable in the JSON vectors).
+   *
+   * @covers ::fromClaims
+   */
+  public function testInvalidUtf8SubIsRejected(): void {
+    $sub = "human\x80";
+    $this->assertFalse(mb_check_encoding($sub, 'UTF-8'));
+    try {
+      McpPrincipalKey::fromClaims([
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => $sub,
+        'azp' => 'agent-client',
+      ]);
+      $this->fail('Invalid UTF-8 must fail closed.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::INVALID_UTF8, $e->reasonCode);
+    }
   }
 
   /**
