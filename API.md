@@ -214,14 +214,20 @@ accepts a context object from callers. Governed tools refuse
 token (DEV-844) supplies a Paladin principal. The overlay is
 opened through the internal
 `mcp_sentinel.principal_context_job` service (`@internal`,
-`public: false`). It never mutates the request seal. Drush
-opens it via PRE/POST_COMMAND_HOOK (`*` — every command)
-because Drush does not deliver ConsoleEvents to Drupal's
-event_dispatcher. A Drush-hosted stdio server is therefore
-never admitted for governed tools. Do not call `resetForJob()`
-from site code; that holder method is internal. Uncovered
-entry points (Drush as a governed-tool surface, GraphQL,
-JSON:API, Context) are tracked in
+`public: false`). It never mutates the request seal.
+`enterJobScope()` returns a scope handle; `leaveJobScope()` is
+refused unless the caller presents that matching handle. Site
+code must not call either method. A second enter without the
+matching leave stays in the overlay. The holder is
+first-seal-wins for a given request object: a second `seal()`
+with the same request token is a no-op and keeps the first
+principal. Drush opens the overlay via PRE/POST_COMMAND_HOOK
+(`*` — every command) because Drush does not deliver
+ConsoleEvents to Drupal's event_dispatcher. A Drush-hosted
+stdio server is therefore never admitted for governed tools.
+Do not call `resetForJob()` from site code; that holder method
+is internal. Uncovered entry points (Drush as a governed-tool
+surface, GraphQL, JSON:API, Context) are tracked in
 [DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927).
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and

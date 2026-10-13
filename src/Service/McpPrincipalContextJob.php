@@ -17,6 +17,13 @@ namespace Drupal\mcp_sentinel\Service;
 final class McpPrincipalContextJob {
 
   /**
+   * Handles for begin() calls that have not yet been ended.
+   *
+   * @var list<\Drupal\mcp_sentinel\Service\McpJobScopeHandle>
+   */
+  private array $handles = [];
+
+  /**
    * Constructs the job boundary helper.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
@@ -33,14 +40,23 @@ final class McpPrincipalContextJob {
    * Governed tools refuse until a hop token is available.
    */
   public function begin(): void {
-    $this->holder->enterJobScope();
+    $this->handles[] = $this->holder->enterJobScope();
   }
 
   /**
-   * Drops the job overlay and restores any request seal.
+   * Drops the matching job overlay and restores any request seal.
+   *
+   * @throws \LogicException
+   *   When end() has no matching begin().
    */
   public function end(): void {
-    $this->holder->leaveJobScope();
+    $handle = array_pop($this->handles);
+    if ($handle === NULL) {
+      throw new \LogicException(
+        'end() requires a matching begin().',
+      );
+    }
+    $this->holder->leaveJobScope($handle);
   }
 
   /**

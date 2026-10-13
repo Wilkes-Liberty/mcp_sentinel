@@ -70,6 +70,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   targets every command (`*`), so a Drush-hosted stdio
   server is never admitted for governed tools. There is no
   API that accepts a context object from callers.
+  `enterJobScope()` returns a scope handle; `leaveJobScope()`
+  is refused without the matching handle. The holder is
+  first-seal-wins for a given request object. `context()`
+  refusal under an overlay writes a `denied_access` row.
   `resetForJob()` on the holder is internal. Reserved-key matching strips all `\\p{Cf}` and variation
   selectors and runs non-ASCII keys through one process-wide
   Spoofchecker plus a process-wide reserved-fold set (UTS #39). Key

@@ -807,6 +807,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     }
     $this->assertSame($before + 2, $this->deniedAccessCount());
     $job->end();
+    $job->end();
     $this->assertFalse($holder->inJobScope());
     $this->assertNull($holder->get());
     $this->restoreRequestStack($popped);
@@ -1000,8 +1001,10 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
         'azp' => 'forged-azp',
       ],
     );
+    $probe = new \stdClass();
+    $probe->ran = FALSE;
     $job = new McpPrincipalContextJob($holder);
-    $worker = new class($job, $holder, $dispatcher, $forged, $request) implements QueueWorkerInterface {
+    $worker = new class($job, $holder, $dispatcher, $forged, $request, $probe) implements QueueWorkerInterface {
 
       /**
        * Constructs the forged worker.
@@ -1016,6 +1019,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
        *   Caller-built context an attacker would inject.
        * @param \Symfony\Component\HttpFoundation\Request $request
        *   Current HTTP request.
+       * @param \stdClass $probe
+       *   Handler sets ran when the governed tool is admitted.
        */
       public function __construct(
         private readonly McpPrincipalContextJob $job,
@@ -1023,6 +1028,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
         private readonly McpPrincipalContextDispatcher $dispatcher,
         private readonly McpPrincipalContext $forged,
         private readonly Request $request,
+        private readonly \stdClass $probe,
       ) {}
 
       /**
@@ -1044,9 +1050,10 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
        */
       public function processItem($data): mixed {
         return $this->job->run(function (): string {
-          $this->holder->seal($this->forged, $this->request);
+          $this->tryEveryInjectRoute($this->holder, $this->forged, $this->request);
           return $this->dispatcher->dispatch(
-            static function (array $args, McpPrincipalContext $ctx): string {
+            function (array $args, McpPrincipalContext $ctx): string {
+              $this->probe->ran = TRUE;
               return $ctx->subject();
             },
             ['note' => 'ok'],
@@ -1055,12 +1062,87 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
         });
       }
 
+      /**
+       * Tries every public inject route a forged context could take.
+       *
+       * @param object $holder
+       *   The holder, typed as object so sealForJob() can be probed.
+       * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $forged
+       *   Caller-built context.
+       * @param \Symfony\Component\HttpFoundation\Request $request
+       *   Current HTTP request.
+       */
+      private function tryEveryInjectRoute(
+        object $holder,
+        McpPrincipalContext $forged,
+        Request $request,
+      ): void {
+        if (method_exists($holder, 'sealForJob')) {
+          $holder->sealForJob($forged);
+        }
+        try {
+          if (method_exists($holder, 'seal')) {
+            $holder->seal($forged, $request);
+          }
+        }
+        catch (\Throwable) {
+        }
+        try {
+          if (method_exists($holder, 'seal')) {
+            $holder->seal($forged, new \stdClass());
+          }
+        }
+        catch (\Throwable) {
+        }
+      }
+
     };
 
     $before = $this->deniedAccessCount();
+    $caught = NULL;
     try {
       $worker->processItem(NULL);
-      $this->fail('A forged overlay principal must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $caught = $e;
+    }
+    $this->assertFalse($probe->ran);
+    $this->assertInstanceOf(McpPrincipalContextDeniedException::class, $caught);
+    $this->assertSame(
+      McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+      $caught->reasonCode,
+    );
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $principalKey = (string) ($meta['principal_key'] ?? '');
+    $humanKey = (string) ($meta['human_key'] ?? '');
+    foreach (['forged-sub', 'tenant-evil', 'evil.example'] as $needle) {
+      $this->assertStringNotContainsString($needle, $principalKey);
+      $this->assertStringNotContainsString($needle, $humanKey);
+    }
+    $restored = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame('cron-human', $restored->subject());
+    $this->assertFalse($holder->inJobScope());
+  }
+
+  /**
+   * Context() under an overlay writes a denied_access row.
+   */
+  public function testContextRefusalWritesAuditRow(): void {
+    $this->pushNetworkToken([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'cron-human',
+      'azp' => 'cron-client',
+      'tenant' => 'tenant-a',
+    ]);
+    $holder = $this->container->get('mcp_sentinel.principal_context_holder');
+    $job = new McpPrincipalContextJob($holder);
+    $before = $this->deniedAccessCount();
+    $job->begin();
+    try {
+      $this->dispatcher()->context();
+      $this->fail('context() under an overlay must be refused.');
     }
     catch (McpPrincipalContextDeniedException $e) {
       $this->assertSame(
@@ -1069,10 +1151,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       );
     }
     $this->assertSame($before + 1, $this->deniedAccessCount());
-    $restored = $holder->get();
-    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
-    $this->assertSame('cron-human', $restored->subject());
-    $this->assertFalse($holder->inJobScope());
+    $job->end();
   }
 
   /**

@@ -31,9 +31,11 @@ final class McpPrincipalContextHolder {
   private mixed $sealedFor = NULL;
 
   /**
-   * TRUE while a deny-only job overlay hides the request seal.
+   * Open overlay handles, innermost last.
+   *
+   * @var list<\Drupal\mcp_sentinel\Service\McpJobScopeHandle>
    */
-  private bool $inJobScope = FALSE;
+  private array $scopeHandles = [];
 
   /**
    * Constructs the holder.
@@ -62,7 +64,7 @@ final class McpPrincipalContextHolder {
    *   When a subrequest tries to reseal a different principal.
    */
   public function seal(McpPrincipalContext $ctx, mixed $token): void {
-    if ($this->inJobScope) {
+    if ($this->inJobScope()) {
       return;
     }
     if ($this->sealedFor === $token) {
@@ -106,21 +108,41 @@ final class McpPrincipalContextHolder {
    * Pushes a deny-only overlay over the current seal.
    *
    * Hides the request seal. Does not store a job principal.
-   * A second begin() without leaveJobScope() stays in the overlay.
+   * A second enter without the matching leave stays in the overlay.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpJobScopeHandle
+   *   Token that the matching leaveJobScope() must present.
    *
    * @internal Called by mcp_sentinel.principal_context_job.
    */
-  public function enterJobScope(): void {
-    $this->inJobScope = TRUE;
+  public function enterJobScope(): McpJobScopeHandle {
+    $handle = new McpJobScopeHandle();
+    $this->scopeHandles[] = $handle;
+    return $handle;
   }
 
   /**
-   * Drops the overlay and restores the request seal.
+   * Drops the matching overlay and restores the request seal.
+   *
+   * @param \Drupal\mcp_sentinel\Service\McpJobScopeHandle $handle
+   *   The token returned by the matching enterJobScope().
+   *
+   * @throws \LogicException
+   *   When $handle is not the innermost open overlay.
    *
    * @internal Called by mcp_sentinel.principal_context_job.
    */
-  public function leaveJobScope(): void {
-    $this->inJobScope = FALSE;
+  public function leaveJobScope(McpJobScopeHandle $handle): void {
+    $top = $this->scopeHandles === []
+      ? NULL
+      : $this->scopeHandles[array_key_last($this->scopeHandles)];
+    if ($top !== $handle) {
+      throw new \LogicException(
+        'leaveJobScope() requires the handle returned by the '
+        . 'matching enterJobScope().',
+      );
+    }
+    array_pop($this->scopeHandles);
   }
 
   /**
@@ -129,7 +151,7 @@ final class McpPrincipalContextHolder {
    * @internal The dispatcher refuses governed tools while TRUE.
    */
   public function inJobScope(): bool {
-    return $this->inJobScope;
+    return $this->scopeHandles !== [];
   }
 
   /**
@@ -142,7 +164,7 @@ final class McpPrincipalContextHolder {
    *   When an HTTP request's sealed principal is current.
    */
   public function resetForJob(): void {
-    if ($this->inJobScope) {
+    if ($this->inJobScope()) {
       return;
     }
     if ($this->requestStack->getCurrentRequest() !== NULL
@@ -164,7 +186,7 @@ final class McpPrincipalContextHolder {
    * that request leaves the stack.
    */
   public function get(): ?McpPrincipalContext {
-    if ($this->inJobScope) {
+    if ($this->inJobScope()) {
       return NULL;
     }
     if ($this->context === NULL) {
@@ -195,7 +217,7 @@ final class McpPrincipalContextHolder {
     }
     $this->context = NULL;
     $this->sealedFor = NULL;
-    $this->inJobScope = FALSE;
+    $this->scopeHandles = [];
   }
 
   /**

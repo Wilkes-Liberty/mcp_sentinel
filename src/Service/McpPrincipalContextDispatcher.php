@@ -284,7 +284,8 @@ final class McpPrincipalContextDispatcher {
    */
   public function context(): McpPrincipalContext {
     if ($this->holder->inJobScope()) {
-      throw new McpPrincipalContextDeniedException(
+      $this->deny(
+        'mcp_principal_context',
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
         self::OVERLAY_REFUSED,
       );

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -195,7 +196,112 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
     $stillHidden = $holder->get();
     $this->assertNull($stillHidden);
     $stub->end();
+    $this->assertTrue($holder->inJobScope());
+    $stub->end();
     $this->assertSame($cron, $holder->get());
+  }
+
+  /**
+   * LeaveJobScope() is refused without the matching enter handle.
+   *
+   * @covers ::enterJobScope
+   * @covers ::leaveJobScope
+   */
+  public function testLeaveJobScopeRequiresMatchingHandle(): void {
+    $holder = new McpPrincipalContextHolder(new RequestStack());
+    $inner = $holder->enterJobScope();
+    try {
+      $holder->leaveJobScope(new McpJobScopeHandle());
+      $this->fail('A forged handle must be refused.');
+    }
+    catch (\LogicException $e) {
+      $this->assertStringContainsString(
+        'matching enterJobScope',
+        $e->getMessage(),
+      );
+    }
+    $this->assertTrue($holder->inJobScope());
+    $outer = $holder->enterJobScope();
+    try {
+      $holder->leaveJobScope($inner);
+      $this->fail('An outer handle must not close the inner overlay.');
+    }
+    catch (\LogicException $e) {
+      $this->assertStringContainsString(
+        'matching enterJobScope',
+        $e->getMessage(),
+      );
+    }
+    $holder->leaveJobScope($outer);
+    $this->assertTrue($holder->inJobScope());
+    $holder->leaveJobScope($inner);
+    $this->assertFalse($holder->inJobScope());
+  }
+
+  /**
+   * No public method other than seal() accepts a principal context.
+   *
+   * Fails if sealForJob() (or any other public injector) returns.
+   */
+  public function testPublicMethodsDoNotAcceptCallerBuiltContext(): void {
+    $class = new \ReflectionClass(McpPrincipalContextHolder::class);
+    $accepted = [];
+    foreach ($class->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+      if ($method->getDeclaringClass()->getName() !== $class->getName()) {
+        continue;
+      }
+      if ($method->getName() === 'seal') {
+        continue;
+      }
+      foreach ($method->getParameters() as $parameter) {
+        if ($this->parameterAcceptsPrincipalContext($parameter)) {
+          $accepted[] = $method->getName() . '::$' . $parameter->getName();
+        }
+      }
+    }
+    $this->assertSame([], $accepted);
+  }
+
+  /**
+   * Whether a parameter is typed as or accepts McpPrincipalContext.
+   *
+   * @param \ReflectionParameter $parameter
+   *   The parameter.
+   *
+   * @return bool
+   *   TRUE when the parameter can take a principal context.
+   */
+  private function parameterAcceptsPrincipalContext(\ReflectionParameter $parameter): bool {
+    $type = $parameter->getType();
+    if ($type === NULL) {
+      return TRUE;
+    }
+    return $this->typeAcceptsPrincipalContext($type);
+  }
+
+  /**
+   * Whether a reflected type includes McpPrincipalContext.
+   *
+   * @param \ReflectionType $type
+   *   The parameter type.
+   *
+   * @return bool
+   *   TRUE when the type includes McpPrincipalContext.
+   */
+  private function typeAcceptsPrincipalContext(\ReflectionType $type): bool {
+    if ($type instanceof \ReflectionNamedType) {
+      return $type->getName() === McpPrincipalContext::class;
+    }
+    if ($type instanceof \ReflectionUnionType
+      || $type instanceof \ReflectionIntersectionType) {
+      foreach ($type->getTypes() as $inner) {
+        if ($this->typeAcceptsPrincipalContext($inner)) {
+          return TRUE;
+        }
+      }
+      return FALSE;
+    }
+    return FALSE;
   }
 
   /**
