@@ -83,6 +83,7 @@ final class DownstreamContractTool extends McpGovernedToolBase implements Config
       return ExecutableResult::failure($this->t('Downstream contract tool refused.'));
     }
     // Downstream tools read these inherited properties directly.
+    $this->principalContext();
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('Downstream contract tool refused.'));
@@ -91,6 +92,7 @@ final class DownstreamContractTool extends McpGovernedToolBase implements Config
       && $this->governanceRequestStack !== NULL
       && $this->governanceDlp !== NULL
       && $this->governanceClassification !== NULL
+      && $this->governancePrincipalDispatcher !== NULL
       && $this->governanceReadiness->evaluate(
         McpGovernedSurface::Tool,
         $this->currentUser,

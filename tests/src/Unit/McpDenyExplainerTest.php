@@ -82,4 +82,30 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertStringContainsString('Add a Consumer', $explained->nextStep);
   }
 
+  /**
+   * Spoofed identity arguments stay denied.
+   *
+   * @covers ::explain
+   */
+  public function testReservedIdentityArgumentStaysDenied(): void {
+    $explained = (new McpDenyExplainer())->explain(
+      'Tool arguments must not carry identity or tenant keys (user). Identity comes from the validated token context.',
+    );
+    $this->assertSame('reserved_identity_argument', $explained->ruleId);
+    $this->assertFalse($explained->widenAppropriate);
+  }
+
+  /**
+   * A missing tenant claim on a network call stays denied.
+   *
+   * @covers ::explain
+   */
+  public function testMissingTenantClaimStaysDenied(): void {
+    $explained = (new McpDenyExplainer())->explain(
+      'Network calls require a tenant claim on the validated token (DEV-839).',
+    );
+    $this->assertSame('missing_tenant_claim', $explained->ruleId);
+    $this->assertFalse($explained->widenAppropriate);
+  }
+
 }

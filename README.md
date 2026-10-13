@@ -29,6 +29,14 @@ install). An admin's direct cookie-session Drupal UI is never governed. The
 omitting it, and a non-agent user cannot be governed by adding it. The
 `anonymous` and `authenticated` roles can never be governed.
 
+Governed tool dispatch builds an immutable principal + tenant context from
+the validated token (subject, client/azp, act chain, scopes, tenant claim)
+and passes it to handlers as a separate parameter. Tools must not read
+identity or tenant from arguments. Reserved keys (`user`, `uid`,
+`principal`, `tenant`, `tenant_id`, `act`, `on_behalf_of`) are rejected
+before dispatch. A network call whose token omits the tenant claim fails
+closed. Grant tables are not an identity source.
+
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight
 enabled profile whose roles it holds, else the shipped `default` profile), which
 defines its operation gates, entity allow/deny lists, and redacted fields. Manage

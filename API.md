@@ -121,7 +121,13 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 (`$governancePolicyResolver`, `$governanceAccessChecker`,
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
 `$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`,
-`$governanceExfiltrationGuard`). `$governanceExfiltrationGuard` measures the
+`$governanceExfiltrationGuard`, `$governancePrincipalDispatcher`).
+`principalContext()` returns the frozen
+principal + tenant context built from the validated token at the request
+boundary (DEV-844 / DEV-839). Tools must never read identity or tenant from
+arguments; reserved keys (`user`, `uid`, `principal`, `tenant`,
+`tenant_id`, `act`, `on_behalf_of`) are rejected before dispatch.
+`$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.
 Each one carries `@api` in its

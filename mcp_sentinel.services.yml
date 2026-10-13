@@ -180,6 +180,26 @@ services:
       - '@config.factory'
       - '@request_stack'
 
+  mcp_sentinel.principal_context_factory:
+    class: Drupal\mcp_sentinel\Service\McpPrincipalContextFactory
+    arguments:
+      - '@request_stack'
+      - '@mcp_sentinel.oauth_context'
+      - '@current_user'
+
+  mcp_sentinel.principal_context_dispatcher:
+    class: Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher
+    arguments:
+      - '@mcp_sentinel.principal_context_factory'
+      - '@request_stack'
+
+  mcp_sentinel.principal_context_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber
+    arguments:
+      - '@mcp_sentinel.principal_context_factory'
+    tags:
+      - { name: event_subscriber }
+
   mcp_sentinel.deny_explainer:
     class: Drupal\mcp_sentinel\Service\McpDenyExplainer
 

@@ -64,6 +64,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'create',
     'discoveryAccess',
     'execute',
+    'principalContext',
   ];
 
   /**
@@ -76,6 +77,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'governanceDlp',
     'governanceExfiltrationGuard',
     'governancePolicyResolver',
+    'governancePrincipalDispatcher',
     'governanceReadiness',
     'governanceRequestStack',
     'governanceRequiredScope',

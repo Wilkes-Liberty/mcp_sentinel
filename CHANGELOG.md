@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- DEV-844: Governed tool dispatch builds an immutable principal + tenant
+  context from the validated token at the request boundary and passes it
+  to handlers as a separate parameter (`handler(args, ctx)`). Tools must
+  not read identity or tenant from arguments. Reserved identity keys
+  (`user`, `uid`, `principal`, `tenant`, `tenant_id`, `act`,
+  `on_behalf_of`) are rejected before dispatch. A network call whose
+  token omits the tenant claim (DEV-839) fails closed. Grant tables are
+  not an identity source; their retirement is a later slice.
+
 ## [2.34.1] - 2026-10-12
 
 ### Fixed

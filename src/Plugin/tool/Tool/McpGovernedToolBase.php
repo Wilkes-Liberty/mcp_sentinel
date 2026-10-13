@@ -8,6 +8,7 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
@@ -15,7 +16,9 @@ use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolBase;
 use Drupal\tool\Tool\ToolDefinition;
@@ -143,6 +146,13 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpExfiltrationGuard $governanceExfiltrationGuard = NULL;
 
   /**
+   * Frozen principal + tenant dispatch (NULL in unit tests).
+   *
+   * @api
+   */
+  protected ?McpPrincipalContextDispatcher $governancePrincipalDispatcher = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -166,6 +176,9 @@ abstract class McpGovernedToolBase extends ToolBase {
     $instance->governanceExfiltrationGuard = $container->has('mcp_sentinel.exfiltration_guard')
       ? $container->get('mcp_sentinel.exfiltration_guard')
       : NULL;
+    $instance->governancePrincipalDispatcher = $container->has('mcp_sentinel.principal_context_dispatcher')
+      ? $container->get('mcp_sentinel.principal_context_dispatcher')
+      : NULL;
     return $instance;
   }
 
@@ -173,10 +186,87 @@ abstract class McpGovernedToolBase extends ToolBase {
    * {@inheritdoc}
    */
   public function execute(): static {
+    $denied = $this->refuseIdentitySpoofBeforeDispatch();
+    if ($denied !== NULL) {
+      $this->result = $denied;
+      return $this;
+    }
     parent::execute();
     $this->applyDlpToResult();
     $this->markUntrustedRead();
     return $this;
+  }
+
+  /**
+   * Frozen principal + tenant context for this call.
+   *
+   * Identity is never taken from tool arguments. Downstream tools that
+   * need the acting principal or tenant must call this helper (or take
+   * the context parameter from McpPrincipalContextDispatcher::dispatch).
+   *
+   * @api
+   */
+  protected function principalContext(): McpPrincipalContext {
+    $request = $this->governanceRequestStack?->getCurrentRequest();
+    $existing = $request?->attributes->get(McpPrincipalContext::REQUEST_ATTRIBUTE);
+    if ($existing instanceof McpPrincipalContext) {
+      return $existing;
+    }
+    if ($this->governancePrincipalDispatcher !== NULL) {
+      $ctx = $this->governancePrincipalDispatcher->context();
+      $request?->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
+      return $ctx;
+    }
+    return new McpPrincipalContext('', '', '', [], '', [], FALSE);
+  }
+
+  /**
+   * Rejects reserved identity keys and a missing network tenant.
+   *
+   * Runs before ToolBase::execute() so a spoofed argument never reaches
+   * doExecute(). The official handler shape is handler(args, ctx) on
+   * McpPrincipalContextDispatcher.
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when the call is refused, or NULL to proceed.
+   */
+  private function refuseIdentitySpoofBeforeDispatch(): ?ExecutableResult {
+    if ($this->governancePrincipalDispatcher === NULL) {
+      return NULL;
+    }
+    $arguments = $this->identityArgumentMap();
+    try {
+      $this->governancePrincipalDispatcher->assertDispatchAllowed($arguments);
+      $ctx = $this->governancePrincipalDispatcher->context();
+      $this->governanceRequestStack?->getCurrentRequest()?->attributes->set(
+        McpPrincipalContext::REQUEST_ATTRIBUTE,
+        $ctx,
+      );
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $message = $e->getMessage();
+      if ($this->governanceDenyExplainer !== NULL) {
+        $message = $this->governanceDenyExplainer->annotate($message);
+      }
+      return ExecutableResult::failure($this->t('@message', [
+        '@message' => $message,
+      ]));
+    }
+    return NULL;
+  }
+
+  /**
+   * Caller-supplied arguments visible before Tool API schema filtering.
+   *
+   * @return array<string, mixed>
+   *   Top-level argument map.
+   */
+  private function identityArgumentMap(): array {
+    $request = $this->governanceRequestStack?->getCurrentRequest();
+    if ($request === NULL) {
+      return [];
+    }
+    return McpPrincipalContextDispatcher::rawArgumentsFromRequest($request);
   }
 
   /**

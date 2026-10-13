@@ -41,6 +41,26 @@ final class McpDenyExplainer {
       ? ' Edit policy profile "' . $profileId . '".'
       : ' Edit the active MCP policy profile.';
 
+    if (str_contains($reason, 'reserved_identity_argument')
+      || str_contains($reason, 'must not carry identity or tenant keys')) {
+      return new McpDenyExplanation(
+        'reserved_identity_argument',
+        'identity argument rejected',
+        FALSE,
+        'Remove identity and tenant keys from tool arguments. Tenant and principal come only from the token.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'missing_tenant_claim')
+      || str_contains($reason, 'require a tenant claim')) {
+      return new McpDenyExplanation(
+        'missing_tenant_claim',
+        'tenant claim missing',
+        FALSE,
+        'Issue the agent token with a tenant claim (DEV-839). Never pass tenant as a tool argument.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'classification_egress_denied')) {
       return new McpDenyExplanation(
         'classification_egress_denied',

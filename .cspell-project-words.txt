@@ -157,3 +157,5 @@ xaxis
 yaxis
 SCMI
 unregistered
+azp
+Paladin

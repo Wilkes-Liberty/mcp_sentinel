@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Drupal\mcp_sentinel\Exception;
+
+/**
+ * Refuses a tool call before dispatch for an identity/tenant violation.
+ */
+final class McpPrincipalContextDeniedException extends \RuntimeException {
+
+  /**
+   * Reserved identity or tenant key in tool arguments.
+   */
+  public const RESERVED_IDENTITY_ARGUMENT = 'reserved_identity_argument';
+
+  /**
+   * Network call whose validated token has no tenant claim.
+   */
+  public const MISSING_TENANT_CLAIM = 'missing_tenant_claim';
+
+  /**
+   * Constructs a fail-closed refusal.
+   *
+   * @param string $reasonCode
+   *   Stable machine reason.
+   * @param string $message
+   *   Operator- and agent-facing text. Must not contain secrets.
+   */
+  public function __construct(
+    public readonly string $reasonCode,
+    string $message,
+  ) {
+    parent::__construct($message);
+  }
+
+}
