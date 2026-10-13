@@ -217,7 +217,7 @@ abstract class McpGovernedToolBase extends ToolBase {
       $request?->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
       return $ctx;
     }
-    return new McpPrincipalContext('', '', '', [], '', [], FALSE);
+    return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
   }
 
   /**

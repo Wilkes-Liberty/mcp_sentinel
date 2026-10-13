@@ -152,6 +152,50 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
+   * Nested and case-variant reserved keys are rejected before dispatch.
+   */
+  public function testNestedAndCaseVariantReservedKeysRejected(): void {
+    $this->pushNetworkToken([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+      'scope' => 'mcp_read',
+    ]);
+    $ran = FALSE;
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
+          return $ctx->subject();
+        },
+        ['note' => 'ok', 'meta' => ['filters' => ['USER' => '2']]],
+      );
+      $this->fail('A nested reserved identity key must be rejected before dispatch.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESERVED_IDENTITY_ARGUMENT,
+        $e->reasonCode,
+      );
+      $this->assertStringContainsString('meta.filters.USER', $e->getMessage());
+    }
+
+    $tool = $this->executeProbe(
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+        'tenant' => 'tenant-a',
+      ],
+      ['params' => ['arguments' => ['note' => 'x', 'wrap' => ['Tenant' => 'evil']]]],
+    );
+    $this->assertFalse($tool->getResultStatus());
+    $this->assertStringContainsString('wrap.Tenant', (string) $tool->getResultMessage());
+  }
+
+  /**
    * A tool that tries to mutate the frozen context fails.
    */
   public function testToolAttemptingToMutateCtxFails(): void {
@@ -212,6 +256,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    */
   public function testNormalCallReceivesTokenPrincipalAndTenant(): void {
     $this->pushNetworkToken([
+      'iss' => 'https://idp.example/realms/agents',
       'sub' => 'human-1',
       'azp' => 'agent-client',
       'client_id' => 'agent-client',
@@ -227,6 +272,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
           'tenant' => $ctx->tenant(),
           'scopes' => $ctx->scopes(),
           'act' => $ctx->actChain(),
+          'principal_key' => $ctx->principalKey(),
+          'human_key' => $ctx->humanKey(),
           'args' => $args,
         ];
       },
@@ -237,10 +284,22 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertSame('tenant-a', $seen['tenant']);
     $this->assertSame(['mcp_read', 'mcp_write'], $seen['scopes']);
     $this->assertSame(['agent-1', 'agent-2'], $seen['act']);
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-1',
+      $seen['principal_key'],
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      $seen['human_key'],
+    );
     $this->assertSame(['note' => 'ok'], $seen['args']);
+    $keys = $this->container->get('mcp_sentinel.principal_key');
+    $this->assertSame($seen['principal_key'], $keys->principalKey());
+    $this->assertSame($seen['human_key'], $keys->humanKey());
 
     $tool = $this->executeProbe(
       [
+        'iss' => 'https://idp.example/realms/agents',
         'sub' => 'human-1',
         'azp' => 'agent-client',
         'tenant' => 'tenant-a',
@@ -257,6 +316,14 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertSame('agent-client', $data['azp']);
     $this->assertSame(['agent-1'], $data['act']);
     $this->assertTrue($data['network']);
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-1',
+      $data['principal_key'],
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      $data['human_key'],
+    );
   }
 
   /**

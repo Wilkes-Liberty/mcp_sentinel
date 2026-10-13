@@ -12,9 +12,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   to handlers as a separate parameter (`handler(args, ctx)`). Tools must
   not read identity or tenant from arguments. Reserved identity keys
   (`user`, `uid`, `principal`, `tenant`, `tenant_id`, `act`,
-  `on_behalf_of`) are rejected before dispatch. A network call whose
-  token omits the tenant claim (DEV-839) fails closed. Grant tables are
-  not an identity source; their retirement is a later slice.
+  `on_behalf_of`) are rejected before dispatch, including nested maps
+  and case variants. The frozen context exposes a shared principal key
+  (`iss|sub|actor`, actor = immediate `act.sub` or else azp/client id)
+  and a human key (`iss|sub`) via `principalKey()` / `humanKey()` and
+  the `mcp_sentinel.principal_key` service for rate limits, budgets,
+  and kill. A network call whose token omits the tenant claim (DEV-839)
+  fails closed. Grant tables are not an identity source; their
+  retirement is a later slice.
 
 ## [2.34.1] - 2026-10-12
 

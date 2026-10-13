@@ -193,6 +193,11 @@ services:
       - '@mcp_sentinel.principal_context_factory'
       - '@request_stack'
 
+  mcp_sentinel.principal_key:
+    class: Drupal\mcp_sentinel\Service\McpPrincipalKey
+    arguments:
+      - '@mcp_sentinel.principal_context_factory'
+
   mcp_sentinel.principal_context_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber
     arguments:

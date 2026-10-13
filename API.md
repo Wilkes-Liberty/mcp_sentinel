@@ -124,9 +124,13 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `$governanceExfiltrationGuard`, `$governancePrincipalDispatcher`).
 `principalContext()` returns the frozen
 principal + tenant context built from the validated token at the request
-boundary (DEV-844 / DEV-839). Tools must never read identity or tenant from
-arguments; reserved keys (`user`, `uid`, `principal`, `tenant`,
-`tenant_id`, `act`, `on_behalf_of`) are rejected before dispatch.
+boundary (DEV-844 / DEV-839). `principalKey()` is `iss|sub|actor` (actor
+= immediate `act.sub`, else azp/client id); `humanKey()` is `iss|sub`.
+Import `mcp_sentinel.principal_key` from rate limits, budgets, and kill.
+Tools must never read identity or tenant from arguments; reserved keys
+(`user`, `uid`, `principal`, `tenant`, `tenant_id`, `act`,
+`on_behalf_of`) are rejected before dispatch, including nested maps and
+case variants.
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.

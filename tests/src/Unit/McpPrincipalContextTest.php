@@ -44,21 +44,117 @@ final class McpPrincipalContextTest extends UnitTestCase {
   }
 
   /**
+   * Nested maps and case variants are reserved-key hits.
+   *
+   * @covers ::reservedKeysIn
+   */
+  public function testReservedKeysCatchNestedAndCaseVariants(): void {
+    $this->assertSame(
+      ['meta.filters.USER', 'wrap.Tenant_Id', 'On_Behalf_Of'],
+      McpPrincipalContext::reservedKeysIn([
+        'note' => 'ok',
+        'meta' => [
+          'filters' => ['USER' => '2'],
+        ],
+        'wrap' => ['Tenant_Id' => 'evil'],
+        'On_Behalf_Of' => 'agent-x',
+      ]),
+    );
+    $this->assertSame(
+      ['items.0.tenant', 'items.1.act'],
+      McpPrincipalContext::reservedKeysIn([
+        'items' => [
+          ['tenant' => 'evil'],
+          ['act' => ['sub' => 'spoof']],
+        ],
+      ]),
+    );
+  }
+
+  /**
+   * A non-delegated token keys on iss|sub|azp.
+   *
+   * @covers ::principalKey
+   * @covers ::humanKey
+   */
+  public function testNonDelegatedTokenPrincipalKeyUsesAzp(): void {
+    $ctx = $this->context();
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-client',
+      $ctx->principalKey(),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      $ctx->humanKey(),
+    );
+  }
+
+  /**
+   * A delegated token keys on the immediate act.sub, not azp.
+   *
+   * @covers ::principalKey
+   * @covers ::humanKey
+   */
+  public function testDelegatedTokenPrincipalKeyUsesImmediateActSub(): void {
+    $ctx = $this->context(actChain: ['agent-1', 'agent-2']);
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-1',
+      $ctx->principalKey(),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      $ctx->humanKey(),
+    );
+  }
+
+  /**
+   * When azp is empty the non-delegated actor is the client id.
+   *
+   * @covers ::principalKey
+   */
+  public function testNonDelegatedTokenFallsBackToClientId(): void {
+    $ctx = $this->context(clientId: 'client-only', azp: '');
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|client-only',
+      $ctx->principalKey(),
+    );
+  }
+
+  /**
    * A tool cannot mutate the frozen context.
    */
   public function testContextIsImmutable(): void {
-    $ctx = new McpPrincipalContext(
-      'human-1',
-      'agent-client',
-      'agent-client',
-      ['mcp_read'],
-      'tenant-a',
-      ['agent-1'],
-      TRUE,
-    );
+    $ctx = $this->context();
     $this->expectException(\Error::class);
     // @phpstan-ignore-next-line
     $ctx->tenant = 'tenant-b';
+  }
+
+  /**
+   * Builds a frozen context for key tests.
+   *
+   * @param list<string> $actChain
+   *   Delegation chain, outermost first.
+   * @param string $clientId
+   *   OAuth client id.
+   * @param string $azp
+   *   Authorized party.
+   */
+  private function context(
+    array $actChain = [],
+    string $clientId = 'agent-client',
+    string $azp = 'agent-client',
+  ): McpPrincipalContext {
+    return new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'human-1',
+      $clientId,
+      $azp,
+      ['mcp_read'],
+      'tenant-a',
+      $actChain,
+      TRUE,
+    );
   }
 
 }

@@ -54,6 +54,9 @@ final class PrincipalContextProbeTool extends McpGovernedToolBase {
       'tenant' => $ctx->tenant(),
       'act' => $ctx->actChain(),
       'network' => $ctx->isNetwork(),
+      'issuer' => $ctx->issuer(),
+      'principal_key' => $ctx->principalKey(),
+      'human_key' => $ctx->humanKey(),
       'mutation' => $mutation,
     ]);
   }

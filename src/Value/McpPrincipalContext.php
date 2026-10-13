@@ -41,9 +41,9 @@ final readonly class McpPrincipalContext {
   /**
    * Identity and tenant keys that must never appear in tool arguments.
    *
-   * Checked case-insensitively on the top-level argument map before
-   * dispatch. Keep this list in one place so a later key cannot be
-   * added in only one caller.
+   * Checked case-insensitively at every nesting depth before dispatch.
+   * Keep this list in one place so a later key cannot be added in only
+   * one caller.
    */
   public const RESERVED_IDENTITY_KEYS = [
     'user',
@@ -58,6 +58,8 @@ final readonly class McpPrincipalContext {
   /**
    * Constructs a frozen context.
    *
+   * @param string $issuer
+   *   Token issuer (iss).
    * @param string $subject
    *   Token subject (sub). The original human principal when act is
    *   present.
@@ -76,6 +78,7 @@ final readonly class McpPrincipalContext {
    *   TRUE when this context was built for a network call.
    */
   public function __construct(
+    private string $issuer,
     private string $subject,
     private string $clientId,
     private string $azp,
@@ -84,6 +87,13 @@ final readonly class McpPrincipalContext {
     private array $actChain,
     private bool $network,
   ) {}
+
+  /**
+   * Token issuer (iss).
+   */
+  public function issuer(): string {
+    return $this->issuer;
+  }
 
   /**
    * Token subject.
@@ -141,26 +151,82 @@ final readonly class McpPrincipalContext {
   }
 
   /**
-   * Reserved identity keys present on a top-level argument map.
+   * Shared principal key: iss|sub|actor.
+   *
+   * Actor is the immediate act.sub when a delegation chain exists,
+   * otherwise azp/client id. Same string as McpPrincipalKey.
+   */
+  public function principalKey(): string {
+    $chain = $this->actChain;
+    $actor = ($chain !== [] && $chain[0] !== '')
+      ? $chain[0]
+      : ($this->azp !== '' ? $this->azp : $this->clientId);
+    return $this->issuer . '|' . $this->subject . '|' . $actor;
+  }
+
+  /**
+   * Human principal key: iss|sub (no actor).
+   *
+   * Same string as McpPrincipalKey::humanKey().
+   */
+  public function humanKey(): string {
+    return $this->issuer . '|' . $this->subject;
+  }
+
+  /**
+   * Reserved identity keys present in an argument map.
+   *
+   * Walks nested arrays. Matching is case-insensitive. Reported paths
+   * keep the caller's original casing and use dotted nesting
+   * (`meta.filters.USER`).
    *
    * @param array<string, mixed> $arguments
    *   Caller-supplied tool arguments.
    *
    * @return list<string>
-   *   Matching reserved keys, in the order they appear in the constant.
+   *   Matching paths, grouped in RESERVED_IDENTITY_KEYS order.
    */
   public static function reservedKeysIn(array $arguments): array {
+    $foundByReserved = [];
+    self::collectReservedKeys($arguments, '', $foundByReserved);
     $found = [];
-    $incoming = [];
-    foreach (array_keys($arguments) as $key) {
-      $incoming[strtolower((string) $key)] = (string) $key;
-    }
     foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
-      if (isset($incoming[$reserved])) {
-        $found[] = $incoming[$reserved];
+      if (!isset($foundByReserved[$reserved])) {
+        continue;
+      }
+      foreach ($foundByReserved[$reserved] as $path) {
+        $found[] = $path;
       }
     }
     return $found;
+  }
+
+  /**
+   * Collects reserved keys at every nesting depth.
+   *
+   * @param array<mixed> $arguments
+   *   Argument map or nested list.
+   * @param string $prefix
+   *   Dotted path to this map.
+   * @param array<string, list<string>> $foundByReserved
+   *   Accumulator keyed by the reserved name.
+   */
+  private static function collectReservedKeys(
+    array $arguments,
+    string $prefix,
+    array &$foundByReserved,
+  ): void {
+    foreach ($arguments as $key => $value) {
+      $name = (string) $key;
+      $path = $prefix === '' ? $name : $prefix . '.' . $name;
+      $normalized = strtolower($name);
+      if (in_array($normalized, self::RESERVED_IDENTITY_KEYS, TRUE)) {
+        $foundByReserved[$normalized][] = $path;
+      }
+      if (is_array($value)) {
+        self::collectReservedKeys($value, $path, $foundByReserved);
+      }
+    }
   }
 
 }

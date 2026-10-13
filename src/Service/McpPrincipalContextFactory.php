@@ -68,8 +68,10 @@ final class McpPrincipalContextFactory {
     }
     $tenant = $this->stringClaim($claims, ['tenant']);
     $actChain = $this->actChain($claims['act'] ?? NULL);
+    $issuer = $this->stringClaim($claims, ['iss', 'issuer']);
 
     return new McpPrincipalContext(
+      $issuer,
       $subject,
       $clientId,
       $azp,

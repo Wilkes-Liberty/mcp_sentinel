@@ -30,12 +30,16 @@ omitting it, and a non-agent user cannot be governed by adding it. The
 `anonymous` and `authenticated` roles can never be governed.
 
 Governed tool dispatch builds an immutable principal + tenant context from
-the validated token (subject, client/azp, act chain, scopes, tenant claim)
-and passes it to handlers as a separate parameter. Tools must not read
-identity or tenant from arguments. Reserved keys (`user`, `uid`,
+the validated token (issuer, subject, client/azp, act chain, scopes, tenant
+claim) and passes it to handlers as a separate parameter. Tools must not
+read identity or tenant from arguments. Reserved keys (`user`, `uid`,
 `principal`, `tenant`, `tenant_id`, `act`, `on_behalf_of`) are rejected
-before dispatch. A network call whose token omits the tenant claim fails
-closed. Grant tables are not an identity source.
+before dispatch, including nested maps and case variants. The shared
+principal key is `iss|sub|actor` (actor = immediate `act.sub`, else
+azp/client id); the human key is `iss|sub`. Import
+`mcp_sentinel.principal_key` for rate limits, budgets, and kill. A
+network call whose token omits the tenant claim fails closed. Grant
+tables are not an identity source.
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight
 enabled profile whose roles it holds, else the shipped `default` profile), which
