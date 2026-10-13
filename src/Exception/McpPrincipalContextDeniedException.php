@@ -40,6 +40,11 @@ final class McpPrincipalContextDeniedException extends \RuntimeException {
   public const LOOKALIKE_CHECK_UNAVAILABLE = 'lookalike_check_unavailable';
 
   /**
+   * Token issuer is not Paladin (DEV-843; no non-IdP path).
+   */
+  public const NON_IDP_ISSUER = 'non_idp_issuer';
+
+  /**
    * Constructs a fail-closed refusal.
    *
    * @param string $reasonCode

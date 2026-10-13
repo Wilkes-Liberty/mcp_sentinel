@@ -7,9 +7,13 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
+use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -580,39 +584,46 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
-   * A sealed token minted with iss/sub/azp/tenant passes the preflight.
+   * A reminted sealed-token issuer is refused on every governed surface.
    *
-   * This is the claim shape McpSealedTokenAuthProvider stamps after
-   * McpSealedTokenManager::verify(), so a sealed token re-minted with a
-   * tenant is a usable governed caller again.
+   * Paladin is the sole issuer (DEV-843). iss
+   * urn:mcp-sentinel:sealed-token is not an IdP path, even when the
+   * operator typed a tenant onto the reminted token.
    */
-  public function testSealedTokenWithTenantIsAdmitted(): void {
+  public function testSealedTokenIssuerIsRefused(): void {
+    $ran = FALSE;
     $this->pushSealedToken([
       'client_id' => 'agent-client',
       'scopes' => ['mcp_read'],
       'jti' => 'jti-1',
-      'iss' => 'urn:mcp-sentinel:sealed-token',
+      'iss' => McpSealedTokenManager::ISSUER,
       'sub' => 'c2b8c8d6-0000-4000-8000-000000000001',
       'azp' => 'agent-client',
       'tenant' => 'tenant-a',
     ]);
-    $seen = $this->dispatcher()->dispatch(
-      static function (array $args, McpPrincipalContext $ctx): array {
-        return [
-          'tenant' => $ctx->tenant(),
-          'key' => $ctx->principalKey(),
-          'network' => $ctx->isNetwork(),
-        ];
-      },
-      ['note' => 'ok'],
-    );
-    $this->assertSame('tenant-a', $seen['tenant']);
+    try {
+      $this->dispatcher()->dispatch(
+        static function (array $args, McpPrincipalContext $ctx) use (&$ran): string {
+          $ran = TRUE;
+          return $ctx->tenant();
+        },
+        ['note' => 'ok'],
+      );
+      $this->fail('A reminted sealed-token issuer must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertFalse($ran);
+      $this->assertSame(
+        McpPrincipalContextDeniedException::NON_IDP_ISSUER,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
     $this->assertSame(
-      'urn:mcp-sentinel:sealed-token|c2b8c8d6-0000-4000-8000-000000000001|agent-client',
-      $seen['key'],
+      McpPrincipalContextDeniedException::NON_IDP_ISSUER,
+      $meta['reason'],
     );
-    $this->assertTrue($seen['network']);
-    $this->assertSame(0, $this->deniedAccessCount());
   }
 
   /**
@@ -697,9 +708,9 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $leftover = $stack->getMainRequest();
     $this->assertNotNull($leftover);
     $this->assertSame($leftover, $stack->getCurrentRequest());
-    $this->container->get('mcp_sentinel.principal_context_holder')
-      ->resetForTest();
-    $job = $this->container->get('mcp_sentinel.principal_context_job');
+    $holder = $this->container->get('mcp_sentinel.principal_context_holder');
+    $holder->resetForTest();
+    $job = new McpPrincipalContextJob($holder);
     $stamp = function (string $sub) use ($leftover): void {
       $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
         'iss' => 'https://idp.example/realms/agents',
@@ -771,6 +782,70 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       );
     }
     $this->restoreRequestStack($popped);
+  }
+
+  /**
+   * Drush PRE/POST_COMMAND_HOOK reset the job principal per invocation.
+   *
+   * Drush does not deliver ConsoleEvents to Drupal's event_dispatcher,
+   * so the Symfony Console subscriber never runs for Drush.
+   */
+  public function testDrushHooksResetPerInvocation(): void {
+    $stack = $this->container->get('request_stack');
+    $popped = [];
+    while ($stack->getCurrentRequest() !== NULL
+      && $stack->getCurrentRequest() !== $stack->getMainRequest()) {
+      $popped[] = $stack->pop();
+    }
+    $leftover = $stack->getMainRequest();
+    $this->assertNotNull($leftover);
+    $holder = $this->container->get('mcp_sentinel.principal_context_holder');
+    $holder->resetForTest();
+    $commands = new McpPrincipalContextCommands($holder);
+    $stamp = function (string $sub) use ($leftover): void {
+      $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => $sub,
+        'azp' => 'agent-client',
+        'tenant' => 'tenant-a',
+      ]);
+    };
+
+    $commands->preCommand();
+    $stamp('human-1');
+    $first = $this->dispatcher()->dispatch(
+      static function (array $args, McpPrincipalContext $ctx): string {
+        return $ctx->subject();
+      },
+      ['note' => 'ok'],
+      'mcp_sentinel_principal_context_probe',
+    );
+    $this->assertSame('human-1', $first);
+
+    $commands->postCommand();
+    $this->assertNull($holder->get());
+
+    $commands->preCommand();
+    $stamp('human-2');
+    $second = $this->dispatcher()->dispatch(
+      static function (array $args, McpPrincipalContext $ctx): string {
+        return $ctx->subject();
+      },
+      ['note' => 'ok'],
+      'mcp_sentinel_principal_context_probe',
+    );
+    $this->assertSame('human-2', $second);
+    $commands->postCommand();
+    $this->assertNull($holder->get());
+    $this->restoreRequestStack($popped);
+  }
+
+  /**
+   * The job helper is not a public container service.
+   */
+  public function testJobServiceIsNotPublic(): void {
+    $this->expectException(ServiceNotFoundException::class);
+    $this->container->get('mcp_sentinel.principal_context_job');
   }
 
   /**

@@ -96,8 +96,8 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
    */
   protected function reservedNestedMapAllowlists(array $values): array {
     $bundle = $values['bundle'] ?? '';
-    if (!is_string($bundle) || $bundle === '') {
-      return [];
+    if (!is_string($bundle)) {
+      $bundle = '';
     }
     return [
       'fields' => $this->fieldReservedAllowlist->forBundle('media', $bundle),

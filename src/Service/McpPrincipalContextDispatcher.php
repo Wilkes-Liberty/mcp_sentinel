@@ -114,7 +114,7 @@ final class McpPrincipalContextDispatcher {
     $ctx = $this->factory->fromCurrentRequest();
     $request = $this->requestStack->getCurrentRequest();
     try {
-      if ($this->isCliJob($request)) {
+      if ($this->holder->inJobScope() || $this->isCliJob($request)) {
         $this->holder->sealForJob($ctx);
       }
       elseif ($request !== NULL) {
@@ -251,6 +251,13 @@ final class McpPrincipalContextDispatcher {
   private function assertContextAllowed(McpPrincipalContext $ctx, string $toolId): void {
     if (!$this->guard->required()) {
       return;
+    }
+    if ($ctx->issuer() === McpSealedTokenManager::ISSUER) {
+      $this->deny(
+        $toolId,
+        McpPrincipalContextDeniedException::NON_IDP_ISSUER,
+        'Paladin is the sole issuer for governed tools (DEV-843).',
+      );
     }
     if ($ctx->isNetwork() && $ctx->tenant() === '') {
       $this->deny(

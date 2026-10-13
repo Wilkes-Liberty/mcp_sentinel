@@ -16,7 +16,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
   There is no interim path for sealed-token sites: governed tools
   fail closed until Paladin tokens are in place. Re-minting a sealed
-  token is not a compatibility mode. Drush, GraphQL, JSON:API,
+  token is not a compatibility mode; `iss`
+  `urn:mcp-sentinel:sealed-token` is refused (`non_idp_issuer`).
+  Drush, GraphQL, JSON:API,
   and Context entry points are not covered by this guard
   ([DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927)).
   Denial `denied_access` rows are always written via `logAlways()`;
@@ -60,9 +62,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   nothing; subrequests cannot reseal a different principal.
   Queue workers reset the job principal per item and Drush
   commands per invocation through the internal
-  `mcp_sentinel.principal_context_job` service (`@internal`; not a
-  public API). `resetForJob()` / `sealForJob()` on the holder are
-  internal. Reserved-key matching strips all `\\p{Cf}` and variation
+  `mcp_sentinel.principal_context_job` service (`@internal`,
+  `public: false`). begin() pushes a nested job overlay over a
+  request-sealed web-cron state and restores that seal after the
+  item. Drush resets via PRE/POST_COMMAND_HOOK (Drush does not
+  deliver ConsoleEvents to Drupal's event_dispatcher).
+  `resetForJob()` / `sealForJob()` on the holder are internal. Reserved-key matching strips all `\\p{Cf}` and variation
   selectors and runs non-ASCII keys through one process-wide
   Spoofchecker plus a process-wide reserved-fold set (UTS #39). Key
   parts treat all Unicode whitespace (including NBSP) as whitespace
@@ -76,7 +81,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   EntityFieldManager lists that field on the target bundle and it is
   not a user reference. Owner/author fields (`uid`, `owner`,
   `revision_uid`, `revision_user`) and every user-reference field
-  stay refused; `NEVER_EXEMPT_IDENTITY_KEYS` are never allowed.
+  stay refused even when the target bundle is unknown;
+  `NEVER_EXEMPT_IDENTITY_KEYS` are never allowed. An unknown
+  bundle never widens the fields-map allowance.
   `config_set:data` stays fully scanned: legitimate config trees
   that contain reserved-word keys (`user.mail` `subject`, Views
   `user`/`uid` options) are refused via the MCP tool by design.

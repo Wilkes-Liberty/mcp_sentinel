@@ -196,16 +196,24 @@ tokens with `iss`, `sub`, `azp` (or RFC 8693 `act.sub`), and
 `tenant`. **There is no interim path for sealed-token sites.**
 Governed tools fail closed until Paladin tokens are in place.
 `client_id`/`scopes`/`jti`-only sealed tokens are refused
-(`missing_principal` / `missing_tenant_claim`). Re-minting a sealed
-token is not a compatibility mode and is not a substitute for
-Paladin. For local stdio development, mint a Paladin token with
-those claims and pass it on the connector channel the same way a
+(`missing_principal` / `missing_tenant_claim`). A reminted sealed
+token whose `iss` is `urn:mcp-sentinel:sealed-token` is refused
+on every governed surface (`non_idp_issuer`), even when an
+operator typed a tenant onto it. Re-minting a sealed token is
+not a compatibility mode and is not a substitute for Paladin.
+For local stdio development, mint a Paladin token with those
+claims and pass it on the connector channel the same way a
 network agent would.
 Queue workers reset the job principal per item and Drush commands
 per invocation through the internal
-`mcp_sentinel.principal_context_job` service (`@internal`, not a
-public API). Do not call `resetForJob()` / `sealForJob()` from site
-code; those holder methods are internal. Uncovered entry points
+`mcp_sentinel.principal_context_job` service (`@internal`,
+`public: false`). The job helper pushes a nested overlay over a
+request-sealed web-cron state and restores that seal after the
+item; it never mutates the request seal. Drush resets via
+PRE/POST_COMMAND_HOOK because Drush does not deliver
+ConsoleEvents to Drupal's event_dispatcher. Do not call
+`resetForJob()` / `sealForJob()` from site code; those holder
+methods are internal. Uncovered entry points
 (Drush as a governed-tool surface, GraphQL, JSON:API, Context)
 are tracked in
 [DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927).

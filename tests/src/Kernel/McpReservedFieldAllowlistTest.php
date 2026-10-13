@@ -9,6 +9,7 @@ use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpNodeOperationsTool;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
@@ -135,6 +136,37 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
 
     $article = $service->forBundle('node', 'article');
     $this->assertNotContains('subject', $article['allow']);
+  }
+
+  /**
+   * An unknown bundle still refuses owner and revision_* keys.
+   */
+  public function testUnknownBundleStillRefusesOwnerKeys(): void {
+    $service = $this->container->get('mcp_sentinel.entity_field_reserved_allowlist');
+    foreach (['node', 'media'] as $entityType) {
+      $rules = $service->forBundle($entityType, '');
+      $this->assertSame([], $rules['allow'], $entityType);
+      foreach (McpPrincipalContext::OWNER_IDENTITY_FIELD_KEYS as $key) {
+        $this->assertContains($key, $rules['refuse'], $entityType . ':' . $key);
+      }
+    }
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_node_operations');
+    self::assertInstanceOf(McpNodeOperationsTool::class, $tool);
+    $tool->setInputValue('action', 'create');
+    $tool->setInputValue('bundle', '');
+    $tool->setInputValue('title', 'Unknown-bundle probe');
+    $tool->setInputValue('published', FALSE);
+    $tool->setInputValue('fields', [
+      'revision_uid' => 1,
+      'owner' => 1,
+    ]);
+    $tool->execute();
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertStringContainsString('fields.revision_uid', $message);
+    $this->assertStringContainsString('fields.owner', $message);
   }
 
   /**

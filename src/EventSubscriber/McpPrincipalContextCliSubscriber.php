@@ -11,7 +11,11 @@ use Symfony\Component\Console\Event\ConsoleEvent;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
- * Resets the job principal at the start and end of a Drush invocation.
+ * Resets the job principal for Symfony Console (core/scripts).
+ *
+ * Drush does not deliver ConsoleEvents to Drupal's event_dispatcher.
+ * Per-invocation Drush reset is
+ * McpPrincipalContextCommands (PRE/POST_COMMAND_HOOK).
  *
  * @internal Queue items are reset in the worker, not here.
  */

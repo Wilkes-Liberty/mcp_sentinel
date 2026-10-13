@@ -233,6 +233,38 @@ final class McpPrincipalContextTest extends UnitTestCase {
   }
 
   /**
+   * An unknown-bundle refuse list still catches owner/revision_* keys.
+   *
+   * Empty nested-map rules (the old unknown-bundle return) skip those
+   * keys because they are not in RESERVED_IDENTITY_KEYS.
+   *
+   * @covers ::reservedKeysIn
+   */
+  public function testUnknownBundleRefuseListCatchesOwnerKeys(): void {
+    $fields = [
+      'fields' => [
+        'revision_uid' => 1,
+        'revision_user' => 1,
+        'owner' => 1,
+      ],
+    ];
+    $this->assertSame(
+      [],
+      McpPrincipalContext::reservedKeysIn($fields),
+    );
+    $unknown = [
+      'fields' => [
+        'allow' => [],
+        'refuse' => McpPrincipalContext::OWNER_IDENTITY_FIELD_KEYS,
+      ],
+    ];
+    $found = McpPrincipalContext::reservedKeysIn($fields, [], $unknown);
+    $this->assertContains('fields.revision_uid', $found);
+    $this->assertContains('fields.revision_user', $found);
+    $this->assertContains('fields.owner', $found);
+  }
+
+  /**
    * A non-delegated token keys on iss|sub|azp.
    *
    * @covers ::principalKey

@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\mcp_sentinel\Support\McpSettableClock;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\key\Entity\Key;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
@@ -14,6 +15,7 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests the McpWebhookWorker delivery, retry, backoff and SSRF guard.
@@ -138,6 +140,65 @@ final class McpWebhookWorkerTest extends KernelTestBase {
     $this->assertSame('1', (string) $row['attempts']);
     $this->assertSame('200', (string) $row['last_response_code']);
     $this->assertCount(1, $history);
+  }
+
+  /**
+   * A queue item under a sealed web-cron request must not throw.
+   *
+   * /cron/{key} and admin Run cron seal the HTTP request. The worker
+   * pushes a job overlay and restores that seal after the item.
+   *
+   * @covers ::processItem
+   */
+  public function testQueueItemRunsUnderSealedWebCronRequest(): void {
+    $stack = $this->container->get('request_stack');
+    $cron = Request::create('/cron/test-key');
+    $holder = $this->container->get('mcp_sentinel.principal_context_holder');
+    $holder->resetForTest();
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $cron->setSession($master->getSession());
+    }
+    $stack->push($cron);
+    $cronCtx = new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'cron-human',
+      'cron-client',
+      'cron-client',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      TRUE,
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'cron-human',
+        'azp' => 'cron-client',
+      ],
+    );
+    $holder->seal($cronCtx, $cron);
+    $this->assertSame($cronCtx, $holder->get());
+
+    $id = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200, [], 'ok')], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+
+    $row = $this->loadRow($id);
+    $this->assertSame('sent', $row['status']);
+    $this->assertCount(1, $history);
+    $restored = $holder->get();
+    $this->assertSame($cronCtx, $restored);
+    $this->assertSame('cron-human', $restored->subject());
+    $this->assertFalse($holder->inJobScope());
   }
 
   /**

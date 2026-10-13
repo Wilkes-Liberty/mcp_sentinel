@@ -15,8 +15,10 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * attribute. A subrequest cannot reseal a different principal. A
  * long-running CLI worker resets through the internal
  * mcp_sentinel.principal_context_job service (not this class) per
- * message so the first context is never reused. sealForJob() and
- * resetForJob() are @internal.
+ * message so the first context is never reused. A web-cron HTTP
+ * request is already sealed; the job service pushes a nested job
+ * overlay that never mutates that request seal and restores it
+ * after the item. sealForJob() and resetForJob() are @internal.
  */
 final class McpPrincipalContextHolder {
 
@@ -34,6 +36,16 @@ final class McpPrincipalContextHolder {
    * Request (or job sentinel) this context is sealed to.
    */
   private mixed $sealedFor = NULL;
+
+  /**
+   * TRUE while a job overlay is active over the request seal.
+   */
+  private bool $inJobScope = FALSE;
+
+  /**
+   * Job-overlay context. Independent of the request seal.
+   */
+  private ?McpPrincipalContext $jobContext = NULL;
 
   /**
    * Constructs the holder.
@@ -111,7 +123,8 @@ final class McpPrincipalContextHolder {
    * Internal: called by the dispatcher. Runners reset through
    * mcp_sentinel.principal_context_job, not this method. A second
    * seal without resetForJob() is refused so a worker cannot reuse
-   * the first message's principal.
+   * the first message's principal. While a job scope is active the
+   * overlay is written; the request seal is not mutated.
    *
    * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
    *   The frozen context for this job.
@@ -120,6 +133,16 @@ final class McpPrincipalContextHolder {
    *   When a job is already sealed.
    */
   public function sealForJob(McpPrincipalContext $ctx): void {
+    if ($this->inJobScope) {
+      if ($this->jobContext !== NULL) {
+        throw new McpPrincipalContextDeniedException(
+          McpPrincipalContextDeniedException::RESEAL_REFUSED,
+          'CLI/worker principal context is already sealed. Call resetForJob() per message.',
+        );
+      }
+      $this->jobContext = $ctx;
+      return;
+    }
     $current = $this->requestStack->getCurrentRequest();
     if ($current !== NULL && $this->sealedFor === $current) {
       if ($this->context !== NULL
@@ -142,17 +165,60 @@ final class McpPrincipalContextHolder {
   }
 
   /**
+   * Pushes a job overlay over the current seal.
+   *
+   * A request-sealed HTTP principal (web cron) is left untouched.
+   * A leftover JOB_TOKEN seal from a previous CLI item is cleared
+   * so the next item can seal its own principal. A second begin()
+   * without leaveJobScope() clears only the overlay.
+   *
+   * @internal Called by mcp_sentinel.principal_context_job.
+   */
+  public function enterJobScope(): void {
+    $this->inJobScope = TRUE;
+    $this->jobContext = NULL;
+    if ($this->sealedFor === self::JOB_TOKEN) {
+      $this->context = NULL;
+      $this->sealedFor = NULL;
+    }
+  }
+
+  /**
+   * Drops the job overlay and restores the request seal.
+   *
+   * @internal Called by mcp_sentinel.principal_context_job.
+   */
+  public function leaveJobScope(): void {
+    $this->inJobScope = FALSE;
+    $this->jobContext = NULL;
+  }
+
+  /**
+   * Whether a job overlay is currently active.
+   *
+   * @internal The dispatcher seals via sealForJob() while TRUE.
+   */
+  public function inJobScope(): bool {
+    return $this->inJobScope;
+  }
+
+  /**
    * Clears the seal so the next CLI/queue message can seal again.
    *
    * Internal: called by mcp_sentinel.principal_context_job. Not a
-   * public API. Refused while an HTTP request's own seal is current.
-   * A leftover Drupal CLI bootstrap request is not an inbound HTTP
-   * seal, so a job may reset.
+   * public API. While a job scope is active, only the overlay is
+   * cleared. Refused while an HTTP request's own seal is current
+   * and no job scope is open. A leftover Drupal CLI bootstrap
+   * request is not an inbound HTTP seal, so a job may reset.
    *
    * @throws \LogicException
    *   When an HTTP request's sealed principal is current.
    */
   public function resetForJob(): void {
+    if ($this->inJobScope) {
+      $this->jobContext = NULL;
+      return;
+    }
     if ($this->requestStack->getCurrentRequest() !== NULL
       && $this->sealedFor !== NULL
       && $this->sealedFor !== self::JOB_TOKEN) {
@@ -167,11 +233,16 @@ final class McpPrincipalContextHolder {
   /**
    * The sealed context, or NULL if none has been sealed for this call.
    *
-   * A context sealed for another HTTP request is not returned after
-   * that request leaves the stack. A job seal is visible even when a
-   * leftover CLI bootstrap request is still on the stack.
+   * While a job scope is open the overlay is returned (NULL until
+   * that item seals). A context sealed for another HTTP request is
+   * not returned after that request leaves the stack. A job seal is
+   * visible even when a leftover CLI bootstrap request is still on
+   * the stack.
    */
   public function get(): ?McpPrincipalContext {
+    if ($this->inJobScope) {
+      return $this->jobContext;
+    }
     if ($this->context === NULL) {
       return NULL;
     }
@@ -203,6 +274,8 @@ final class McpPrincipalContextHolder {
     }
     $this->context = NULL;
     $this->sealedFor = NULL;
+    $this->inJobScope = FALSE;
+    $this->jobContext = NULL;
   }
 
   /**

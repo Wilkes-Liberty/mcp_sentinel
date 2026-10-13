@@ -213,6 +213,61 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
+   * A job scope overlays a request seal and restores it after leave.
+   *
+   * @covers ::enterJobScope
+   * @covers ::leaveJobScope
+   * @covers ::sealForJob
+   * @covers ::get
+   */
+  public function testJobScopeOverlaysRequestSealWithoutMutatingIt(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/cron/test-key');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $cron = $this->ctx('cron-human', 'cron-client');
+    $holder->seal($cron, $request);
+    $this->assertSame($cron, $holder->get());
+
+    $holder->enterJobScope();
+    $this->assertTrue($holder->inJobScope());
+    $this->assertNull($holder->get());
+    $holder->sealForJob($this->ctx('job-human', 'job-client'));
+    $this->assertSame('job-human', $holder->get()?->subject());
+
+    $holder->leaveJobScope();
+    $this->assertFalse($holder->inJobScope());
+    $restored = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame($cron, $restored);
+    $this->assertSame('cron-human', $restored->subject());
+  }
+
+  /**
+   * Sequential enterJobScope() without leave clears only the overlay.
+   *
+   * @covers ::enterJobScope
+   * @covers ::sealForJob
+   */
+  public function testSequentialEnterJobScopeClearsOverlayOnly(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/cron/test-key');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $cron = $this->ctx('cron-human', 'cron-client');
+    $holder->seal($cron, $request);
+
+    $holder->enterJobScope();
+    $holder->sealForJob($this->ctx('job-1', 'job-client'));
+    $holder->enterJobScope();
+    $this->assertNull($holder->get());
+    $holder->sealForJob($this->ctx('job-2', 'job-client'));
+    $this->assertSame('job-2', $holder->get()?->subject());
+    $holder->leaveJobScope();
+    $this->assertSame($cron, $holder->get());
+  }
+
+  /**
    * Builds a context that can compose a principal key.
    */
   private function ctx(string $sub, string $azp): McpPrincipalContext {

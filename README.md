@@ -61,12 +61,15 @@ Grant tables are not an identity source.
 Cookie sessions, role-fallback, claimless stdio calls, and sealed
 tokens minted without a tenant are refused. There is no bypass and
 **no interim path for sealed-token sites**: governed tools fail
-closed until Paladin tokens are in place. Callers must use
-Paladin-issued tokens that carry `iss`, `sub`, `azp` (or
-`act.sub`), and `tenant`. For stdio development, mint that token
-and send it on the connector channel. Queue and Drush runners
-reset through the internal
-`mcp_sentinel.principal_context_job` service, not the holder.
+closed until Paladin tokens are in place. Re-minted sealed tokens
+(`iss` `urn:mcp-sentinel:sealed-token`) are refused
+(`non_idp_issuer`). Callers must use Paladin-issued tokens that
+carry `iss`, `sub`, `azp` (or `act.sub`), and `tenant`. For stdio
+development, mint that token and send it on the connector channel.
+Queue and Drush runners reset through the internal
+`mcp_sentinel.principal_context_job` service (`public: false`),
+not the holder. Drush resets via PRE/POST_COMMAND_HOOK; Drupal's
+event_dispatcher does not receive Drush ConsoleEvents.
 See [`API.md`](API.md#migration-paladin-tokens-required-dev-844).
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight

@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -42,6 +43,30 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     });
     $this->assertSame('human-2', $seen);
     $this->assertNull($holder->get());
+  }
+
+  /**
+   * Run() overlays a request seal and restores it after the item.
+   *
+   * @covers ::run
+   * @covers ::begin
+   * @covers ::end
+   */
+  public function testRunOverlaysHttpSealAndRestoresIt(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/cron/test-key');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $cron = $this->ctx('cron-human', 'cron-client');
+    $holder->seal($cron, $request);
+    $job = new McpPrincipalContextJob($holder);
+    $seen = $job->run(function () use ($holder): string {
+      $this->assertNull($holder->get());
+      $holder->sealForJob($this->ctx('job-human', 'job-client'));
+      return (string) $holder->get()?->subject();
+    });
+    $this->assertSame('job-human', $seen);
+    $this->assertSame($cron, $holder->get());
   }
 
   /**

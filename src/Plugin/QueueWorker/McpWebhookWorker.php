@@ -226,7 +226,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $container->get('key.repository'),
       $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
-      $container->get('mcp_sentinel.principal_context_job'),
+      new McpPrincipalContextJob(
+        $container->get('mcp_sentinel.principal_context_holder'),
+      ),
     );
   }
 

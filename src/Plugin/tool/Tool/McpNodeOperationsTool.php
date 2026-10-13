@@ -116,9 +116,6 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
    */
   protected function reservedNestedMapAllowlists(array $values): array {
     $bundle = $this->bundleForReservedFields($values);
-    if ($bundle === '') {
-      return [];
-    }
     return [
       'fields' => $this->fieldReservedAllowlist->forBundle('node', $bundle),
     ];

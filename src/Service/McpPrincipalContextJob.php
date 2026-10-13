@@ -8,8 +8,10 @@ namespace Drupal\mcp_sentinel\Service;
  * Resets the sealed principal at CLI, queue, and Drush job boundaries.
  *
  * @internal Not a public API. Queue workers call begin()/end() per
- *   item. Drush commands call them per invocation. Site code must
- *   not reset a sealed HTTP principal through the holder.
+ *   item. Drush commands call them per invocation. begin() pushes a
+ *   nested job overlay over a request-sealed state (web cron) and
+ *   never mutates that seal. Site code must not reset a sealed HTTP
+ *   principal through the holder.
  */
 final class McpPrincipalContextJob {
 
@@ -24,17 +26,20 @@ final class McpPrincipalContextJob {
   ) {}
 
   /**
-   * Clears any previous job seal so this item can seal its own principal.
+   * Opens a job overlay so this item can seal its own principal.
+   *
+   * A request-sealed HTTP principal (web cron) is not mutated.
+   * Sequential begin() without end() clears only the overlay.
    */
   public function begin(): void {
-    $this->holder->resetForJob();
+    $this->holder->enterJobScope();
   }
 
   /**
-   * Clears this item's seal so the next item cannot reuse it.
+   * Drops the job overlay and restores any request seal.
    */
   public function end(): void {
-    $this->holder->resetForJob();
+    $this->holder->leaveJobScope();
   }
 
   /**
