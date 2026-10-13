@@ -19,6 +19,11 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class McpPrincipalContextHolder {
 
   /**
+   * Token used when a CLI / queue job is sealed.
+   */
+  private const JOB_TOKEN = 'job';
+
+  /**
    * The sealed context, or NULL before the first seal.
    */
   private ?McpPrincipalContext $context = NULL;
@@ -111,7 +116,7 @@ final class McpPrincipalContextHolder {
       );
     }
     $this->context = $ctx;
-    $this->sealedFor = 'job';
+    $this->sealedFor = self::JOB_TOKEN;
   }
 
   /**
@@ -125,10 +130,24 @@ final class McpPrincipalContextHolder {
   }
 
   /**
-   * The sealed context, or NULL if none has been sealed.
+   * The sealed context, or NULL if none has been sealed for this call.
+   *
+   * A context sealed for another HTTP request is not returned after
+   * that request leaves the stack. CLI readers only see a job seal.
    */
   public function get(): ?McpPrincipalContext {
-    return $this->context;
+    if ($this->context === NULL) {
+      return NULL;
+    }
+    $current = $this->requestStack->getCurrentRequest();
+    $main = $this->requestStack->getMainRequest();
+    if ($current !== NULL) {
+      if ($this->sealedFor === $current || $this->sealedFor === $main) {
+        return $this->context;
+      }
+      return NULL;
+    }
+    return $this->sealedFor === self::JOB_TOKEN ? $this->context : NULL;
   }
 
   /**

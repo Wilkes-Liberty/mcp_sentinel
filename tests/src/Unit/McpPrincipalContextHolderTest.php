@@ -87,6 +87,26 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
+   * get() does not return a principal after its request leaves the stack.
+   *
+   * @covers ::get
+   */
+  public function testGetIgnoresSealFromRequestNoLongerOnStack(): void {
+    $stack = new RequestStack();
+    $first = Request::create('/one');
+    $stack->push($first);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($this->ctx('human-1', 'agent-a'), $first);
+    $stack->pop();
+    $this->assertNull($holder->get());
+    $second = Request::create('/two');
+    $stack->push($second);
+    $this->assertNull($holder->get());
+    $holder->seal($this->ctx('human-2', 'agent-b'), $second);
+    $this->assertSame('human-2', $holder->get()?->subject());
+  }
+
+  /**
    * A CLI worker must resetForJob() between messages.
    *
    * @covers ::sealForJob
