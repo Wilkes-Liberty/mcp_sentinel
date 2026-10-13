@@ -43,8 +43,14 @@ values, invalid UTF-8, or a `|` fail closed). The human key is
 `iss|sub`. Import `mcp_sentinel.principal_key` (`fromClaims()`) for
 rate limits, budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json`. A network or sealed-token
-HTTP call whose token omits the tenant claim fails closed. Grant tables
-are not an identity source.
+HTTP call whose token omits the tenant claim fails closed. Denial
+`denied_access` rows are always written; `audit_enabled` gates allow
+rows only. Nested `fields` maps on node and media write tools allow
+a real content field that collides with a reserved word only when
+EntityFieldManager defines it on the target bundle and it is not a
+user reference. Owner/author and user-reference fields stay refused.
+`config_set:data` stays fully scanned. Grant tables are not an
+identity source.
 
 ### Breaking: Paladin tokens required for governed tools
 

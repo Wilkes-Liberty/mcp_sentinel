@@ -20,10 +20,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is the connector/auth slice, so until it lands a sealed token minted
   with a tenant is the only admitted caller. Drush, GraphQL, JSON:API,
   and Context entry points are not covered by this guard (follow-up
-  tickets). Principal denials are written with `logAlways()`, the same
-  as break-glass, so `audit_enabled: false` cannot hide them.
-  `ext-intl` is now a declared Composer requirement: the module already
-  needed it for `Normalizer`, and look-alike detection has no fallback.
+  tickets). Denial `denied_access` rows are always written;
+  `audit_enabled` gates allow rows only. `ext-intl` is now a declared
+  Composer requirement: the module already needed it for `Normalizer`,
+  and look-alike detection has no fallback.
 
 ### Added
 - DEV-844: Governed tool dispatch builds an immutable principal + tenant
@@ -67,7 +67,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reject invalid UTF-8. The guard has no environment kill switch;
   tests inject `McpPrincipalContextGuard::disableForTest()` under
   PHPUnit only. Grant tables are not an identity source; their
-  retirement is a later slice.
+  retirement is a later slice. Denial `denied_access` rows are always
+  written; `audit_enabled` gates allow rows only. Nested `fields`
+  maps on node_operations and media_create allow a reserved
+  content-field name (`subject`, `scope`, `actor`, …) only when
+  EntityFieldManager lists that field on the target bundle and it is
+  not a user reference. Owner/author fields (`uid`, `owner`,
+  `revision_uid`, `revision_user`) and every user-reference field
+  stay refused; `NEVER_EXEMPT_IDENTITY_KEYS` are never allowed.
+  `config_set:data` stays fully scanned.
 - Sealed tokens carry a principal. `McpSealedTokenManager::verify()`
   returns `iss` (`urn:mcp-sentinel:sealed-token`), `sub` (the
   designated Consumer owner's UUID), `azp` (the client_id), and

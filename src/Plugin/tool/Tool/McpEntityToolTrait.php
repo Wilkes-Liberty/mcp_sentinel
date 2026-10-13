@@ -60,7 +60,8 @@ trait McpEntityToolTrait {
    * Only called from explicit Tool execution paths (not from entity access
    * hooks) so volume is bounded to the requests an agent explicitly sends.
    * The audit_log_reads toggle is intentionally ignored; denied_access is a
-   * security event that must always be recorded when audit_enabled is true.
+   * security event that is always written. audit_enabled gates allow rows
+   * only.
    *
    * JSON:API / GraphQL denial logging is a future enhancement (F10 v2).
    *

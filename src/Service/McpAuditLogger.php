@@ -36,8 +36,10 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * The chain itself now lives in the audit_chain module: hashing, HMAC signing,
  * at-rest encryption and verification are its responsibility, and this class is
- * the MCP-specific policy in front of it — which operations are suppressed
- * (reads, unless audit_log_reads is on), what a change diff looks like, and how
+ * the MCP-specific policy in front of it — which allow operations are
+ * suppressed when audit_enabled is off, that denied_access rows are always
+ * written, that reads are suppressed unless audit_log_reads is on, what a
+ * change diff looks like, and how
  * redaction and DLP apply to it. That split is the point of the extraction: a
  * tamper-evident audit trail is not an AI-governance feature, and personnel
  * reads or break-glass logins should not have to install this module to get
@@ -236,6 +238,9 @@ class McpAuditLogger {
   /**
    * Logs an MCP operation.
    *
+   * Denied-access rows are always written. audit_enabled gates allow rows
+   * only.
+   *
    * @param string $operation
    *   A short operation identifier (e.g. 'entity_save', 'entity_delete').
    * @param array $metadata
@@ -246,7 +251,8 @@ class McpAuditLogger {
    */
   public function log(string $operation, array $metadata = []): void {
     $config = $this->configFactory->get('mcp_sentinel.settings');
-    if (!$config->get('audit_enabled')) {
+    // Denials are always written. audit_enabled gates allow rows only.
+    if ($operation !== 'denied_access' && !$config->get('audit_enabled')) {
       return;
     }
     // Read operations are suppressed unless audit_log_reads is on. This covers
@@ -264,7 +270,8 @@ class McpAuditLogger {
   /**
    * Records one governed entity read, once per type+id in this request.
    *
-   * Honours audit_enabled and audit_log_reads through log(). The entity
+   * Honours audit_enabled (allow rows) and audit_log_reads through log().
+   * The entity
    * identity is written to the chain columns the bulk-read detector
    * queries (entity_type + entity_id via metadata id).
    *

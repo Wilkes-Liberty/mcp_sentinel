@@ -450,6 +450,36 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
+   * A denial row is written even when audit_enabled is off.
+   */
+  public function testDenialAuditWrittenWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    $tool = $this->executeProbe(
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+        'tenant' => 'tenant-a',
+      ],
+      ['params' => ['arguments' => ['note' => 'ok']]],
+      'ok',
+      ['user' => '2'],
+    );
+    $this->assertFalse($tool->getResultStatus());
+    $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('mcp_sentinel_principal_context_probe', $meta['tool']);
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-client',
+      $meta['principal_key'],
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      $meta['human_key'],
+    );
+  }
+
+  /**
    * A declared subject input can be exempted; sub cannot.
    */
   public function testDeclaredInputExceptionAndNeverExempt(): void {
@@ -487,6 +517,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       ],
       $collisions['maps'],
     );
+    // node/media fields maps use a field-definition allowlist. config_set
+    // data stays fully scanned.
   }
 
   /**

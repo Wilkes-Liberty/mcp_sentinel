@@ -89,6 +89,20 @@ final readonly class McpPrincipalContext {
   ];
 
   /**
+   * Owner/author field names that stay refused in entity `fields` maps.
+   *
+   * The author comes from the token principal, never tool arguments.
+   * Also refuse any field whose definition is an entity_reference to
+   * `user` (see McpEntityFieldReservedAllowlist).
+   */
+  public const OWNER_IDENTITY_FIELD_KEYS = [
+    'uid',
+    'owner',
+    'revision_uid',
+    'revision_user',
+  ];
+
+  /**
    * Constructs a frozen context.
    *
    * @param string $issuer
@@ -325,6 +339,12 @@ final readonly class McpPrincipalContext {
    *   Caller-supplied tool arguments.
    * @param list<string> $topLevelExceptions
    *   Declared input names that may carry a false-positive reserved word.
+   * @param array<string, array{allow?: list<string>, refuse?: list<string>}> $nestedMapRules
+   *   Per-map field-definition rules. Keys are top-level map input
+   *   names (`fields`). allow: reserved content fields that may appear
+   *   as immediate children. refuse: owner/author and user-reference
+   *   field names. NEVER_EXEMPT_IDENTITY_KEYS are never allowed.
+   *   config_set `data` must omit rules so it stays fully scanned.
    *
    * @return list<string>
    *   Matching paths, grouped in RESERVED_IDENTITY_KEYS order.
@@ -332,6 +352,7 @@ final readonly class McpPrincipalContext {
   public static function reservedKeysIn(
     array $arguments,
     array $topLevelExceptions = [],
+    array $nestedMapRules = [],
   ): array {
     $reservedNorms = [];
     foreach (self::RESERVED_IDENTITY_KEYS as $reserved) {
@@ -348,6 +369,24 @@ final readonly class McpPrincipalContext {
         $exceptionNorms[$norm] = TRUE;
       }
     }
+    $mapRules = [];
+    foreach ($nestedMapRules as $mapName => $rules) {
+      $allowNorms = [];
+      foreach ($rules['allow'] ?? [] as $name) {
+        $norm = self::normalizeKey((string) $name);
+        if (!isset($neverExempt[$norm])) {
+          $allowNorms[$norm] = TRUE;
+        }
+      }
+      $refuseNorms = [];
+      foreach ($rules['refuse'] ?? [] as $name) {
+        $refuseNorms[self::normalizeKey((string) $name)] = TRUE;
+      }
+      $mapRules[(string) $mapName] = [
+        'allow' => $allowNorms,
+        'refuse' => $refuseNorms,
+      ];
+    }
     $foundByReserved = [];
     self::collectReservedKeys(
       $arguments,
@@ -355,6 +394,8 @@ final readonly class McpPrincipalContext {
       $foundByReserved,
       $reservedNorms,
       $exceptionNorms,
+      $neverExempt,
+      $mapRules,
     );
     $found = [];
     $seenNorm = [];
@@ -365,6 +406,25 @@ final readonly class McpPrincipalContext {
       }
       $seenNorm[$norm] = TRUE;
       foreach ($foundByReserved[$norm] as $path) {
+        $found[] = $path;
+      }
+    }
+    foreach (self::OWNER_IDENTITY_FIELD_KEYS as $owner) {
+      $norm = self::normalizeKey($owner);
+      if (isset($seenNorm[$norm]) || !isset($foundByReserved[$norm])) {
+        continue;
+      }
+      $seenNorm[$norm] = TRUE;
+      foreach ($foundByReserved[$norm] as $path) {
+        $found[] = $path;
+      }
+    }
+    foreach ($foundByReserved as $norm => $paths) {
+      if (isset($seenNorm[$norm])) {
+        continue;
+      }
+      $seenNorm[$norm] = TRUE;
+      foreach ($paths as $path) {
         $found[] = $path;
       }
     }
@@ -384,6 +444,10 @@ final readonly class McpPrincipalContext {
    *   Normalized reserved names.
    * @param array<string, true> $exceptionNorms
    *   Top-level declared-input exceptions.
+   * @param array<string, true> $neverExempt
+   *   Normalized never-exempt identity keys.
+   * @param array<string, array{allow: array<string, true>, refuse: array<string, true>}> $mapRules
+   *   Rules keyed by the parent map path (e.g. fields).
    */
   private static function collectReservedKeys(
     array $arguments,
@@ -391,14 +455,28 @@ final readonly class McpPrincipalContext {
     array &$foundByReserved,
     array $reservedNorms,
     array $exceptionNorms,
+    array $neverExempt = [],
+    array $mapRules = [],
   ): void {
+    $rules = $mapRules[$prefix] ?? NULL;
     foreach ($arguments as $key => $value) {
       $name = (string) $key;
       $path = $prefix === '' ? $name : $prefix . '.' . $name;
       $normalized = self::normalizeKey($name);
-      $exempt = $prefix === '' && isset($exceptionNorms[$normalized]);
-      if (isset($reservedNorms[$normalized]) && !$exempt) {
-        $foundByReserved[$normalized][] = $path;
+      $isReserved = isset($reservedNorms[$normalized]);
+      if ($rules !== NULL) {
+        $forbidden = isset($neverExempt[$normalized])
+          || isset($rules['refuse'][$normalized])
+          || ($isReserved && !isset($rules['allow'][$normalized]));
+        if ($forbidden) {
+          $foundByReserved[$normalized][] = $path;
+        }
+      }
+      else {
+        $exempt = $prefix === '' && isset($exceptionNorms[$normalized]);
+        if ($isReserved && !$exempt) {
+          $foundByReserved[$normalized][] = $path;
+        }
       }
       $nested = self::nestedMap($value);
       if ($nested !== NULL) {
@@ -408,6 +486,8 @@ final readonly class McpPrincipalContext {
           $foundByReserved,
           $reservedNorms,
           [],
+          $neverExempt,
+          $mapRules,
         );
       }
     }

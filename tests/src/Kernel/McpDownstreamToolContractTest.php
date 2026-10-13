@@ -66,6 +66,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'execute',
     'principalContext',
     'reservedArgumentExceptions',
+    'reservedNestedMapAllowlists',
   ];
 
   /**

@@ -123,6 +123,8 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`,
 `$governanceExfiltrationGuard`, `$governancePrincipalDispatcher`,
 `$governanceAuditLogger`).
+`reservedNestedMapAllowlists()` returns field-definition rules for
+a `fields` map (empty on tools that do not write entities).
 `principalContext()` returns the frozen
 principal + tenant context sealed at the request boundary
 (DEV-844 / DEV-839). It throws when the dispatcher is missing or no
@@ -155,16 +157,25 @@ there is no weaker fallback.
 A subclass may override `reservedArgumentExceptions()` to exempt a
 **declared schema input** that is not in
 `NEVER_EXEMPT_IDENTITY_KEYS` (`sub`, `iss`, `azp`, tenant, `act`,
-`principal`, `on_behalf_of`, `client_id`, `user_id`). Nested keys
-and JSON inside strings are never exempted. Every denial writes a
-`denied_access` audit row with `principal_key` and `human_key` (or
-`unverified` plus the reason) and the real tool id, through
-`logAlways()`, so `audit_enabled: false` cannot hide a principal
-denial. `X-MCP-Client` is recorded only as the self-reported
-`mcp_client` label. Network and sealed-token HTTP calls require a
-tenant claim. The dispatcher validates and returns the context the
-holder sealed at the request boundary, not a rebuild from request
-attributes.
+`principal`, `on_behalf_of`, `client_id`, `user_id`). JSON inside
+strings is never scanned. Nested `fields` maps on node_operations
+and media_create use a field-definition allowlist: a reserved
+content-field name (`subject`, `scope`, `actor`, or `user` when it
+is not a user reference) is allowed only when it is a real field
+on the target entity type/bundle and is not an `entity_reference`
+to `user`. Owner/author fields (`uid`, `owner`, `revision_uid`,
+`revision_user`) and every user-reference field stay refused — the
+author comes from the token principal, never args.
+`NEVER_EXEMPT_IDENTITY_KEYS` are never allowed even if a field
+with that name exists. `config_set:data` stays fully scanned (no
+allowlist). Every denial writes a `denied_access` audit row with
+`principal_key` and `human_key` (or `unverified` plus the reason)
+and the real tool id. Denial rows are always written;
+`audit_enabled` gates allow rows only. `X-MCP-Client` is recorded
+only as the self-reported `mcp_client` label. Network and
+sealed-token HTTP calls require a tenant claim. The dispatcher
+validates and returns the context the holder sealed at the
+request boundary, not a rebuild from request attributes.
 
 ### Migration: Paladin tokens required (DEV-844)
 

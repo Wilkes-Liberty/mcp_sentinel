@@ -233,6 +233,28 @@ final class McpAuditLoggerTest extends KernelTestBase {
   }
 
   /**
+   * Denied-access rows are written when audit_enabled is off.
+   *
+   * @covers ::log
+   */
+  public function testDeniedAccessLoggedWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    $this->container->get('mcp_sentinel.audit_logger')->log('denied_access', [
+      'tool' => 'mcp_sentinel_principal_context_probe',
+      'principal_key' => 'iss|sub|azp',
+      'human_key' => 'iss|sub',
+    ]);
+
+    $count = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $count);
+  }
+
+  /**
    * @covers ::pruneOldEntries
    */
   public function testPruneOldEntries(): void {

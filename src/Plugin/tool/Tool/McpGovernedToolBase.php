@@ -235,7 +235,8 @@ abstract class McpGovernedToolBase extends ToolBase {
    * Declared schema input names exempted from reserved-key matching.
    *
    * Top-level declared inputs only. NEVER_EXEMPT_IDENTITY_KEYS cannot
-   * be exempted. Nested keys are never exempted. Override in a
+   * be exempted. Nested keys use reservedNestedMapAllowlists() when
+   * the tool has a field-definition-tied `fields` map. Override in a
    * subclass after review.
    *
    * @return list<string>
@@ -244,6 +245,25 @@ abstract class McpGovernedToolBase extends ToolBase {
    * @api
    */
   protected function reservedArgumentExceptions(): array {
+    return [];
+  }
+
+  /**
+   * Field-definition rules for nested maps such as `fields`.
+   *
+   * Node and media write tools override this. config_set must not:
+   * its `data` map stays fully scanned. NEVER_EXEMPT_IDENTITY_KEYS
+   * cannot be allowed.
+   *
+   * @param array<string, mixed> $values
+   *   The exact doExecute() argument map.
+   *
+   * @return array<string, array{allow?: list<string>, refuse?: list<string>}>
+   *   Rules keyed by map input name.
+   *
+   * @api
+   */
+  protected function reservedNestedMapAllowlists(array $values): array {
     return [];
   }
 
@@ -301,11 +321,13 @@ abstract class McpGovernedToolBase extends ToolBase {
     }
     $arguments = $this->getExecutableValues(TRUE);
     $exceptions = $this->reviewedReservedExceptions();
+    $nested = $this->reservedNestedMapAllowlists($arguments);
     try {
       $this->governancePrincipalDispatcher->admit(
         $arguments,
         $this->getPluginId(),
         $exceptions,
+        $nested,
       );
     }
     catch (McpPrincipalContextDeniedException $e) {

@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Exception\RequirementsException;
@@ -74,6 +75,11 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
   protected McpPolicyResolver $policyResolver;
 
   /**
+   * Field-definition allowlist for the fields map.
+   */
+  protected McpEntityFieldReservedAllowlist $fieldReservedAllowlist;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -81,7 +87,21 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
     $instance->entityTypeManager = $container->get('entity_type.manager');
     $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
+    $instance->fieldReservedAllowlist = $container->get('mcp_sentinel.entity_field_reserved_allowlist');
     return $instance;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function reservedNestedMapAllowlists(array $values): array {
+    $bundle = $values['bundle'] ?? '';
+    if (!is_string($bundle) || $bundle === '') {
+      return [];
+    }
+    return [
+      'fields' => $this->fieldReservedAllowlist->forBundle('media', $bundle),
+    ];
   }
 
   /**

@@ -208,6 +208,11 @@ services:
     arguments:
       - '@mcp_sentinel.principal_context_factory'
 
+  mcp_sentinel.entity_field_reserved_allowlist:
+    class: Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist
+    arguments:
+      - '@entity_field.manager'
+
   mcp_sentinel.principal_context_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber
     arguments:

@@ -168,6 +168,71 @@ final class McpPrincipalContextTest extends UnitTestCase {
   }
 
   /**
+   * A fields-map allowlist accepts a real subject and refuses uid/sub.
+   *
+   * @covers ::reservedKeysIn
+   */
+  public function testFieldsMapAllowlistHonorsFieldDefinitions(): void {
+    $rules = [
+      'fields' => [
+        'allow' => ['subject'],
+        'refuse' => ['uid', 'owner', 'revision_uid', 'revision_user', 'actor'],
+      ],
+    ];
+    $this->assertSame(
+      [],
+      McpPrincipalContext::reservedKeysIn(
+        ['fields' => ['subject' => 'Hello', 'body' => 'ok']],
+        [],
+        $rules,
+      ),
+    );
+    $this->assertSame(
+      ['fields.uid'],
+      McpPrincipalContext::reservedKeysIn(
+        ['fields' => ['uid' => 2]],
+        [],
+        $rules,
+      ),
+    );
+    $this->assertSame(
+      ['fields.actor'],
+      McpPrincipalContext::reservedKeysIn(
+        ['fields' => ['actor' => 2]],
+        [],
+        $rules,
+      ),
+    );
+    $this->assertSame(
+      ['fields.subject'],
+      McpPrincipalContext::reservedKeysIn(
+        ['fields' => ['subject' => 'Nope']],
+        [],
+        [],
+      ),
+    );
+    $this->assertSame(
+      ['fields.sub'],
+      McpPrincipalContext::reservedKeysIn(
+        ['fields' => ['sub' => 'spoof', 'subject' => 'Hello']],
+        [],
+        [
+          'fields' => [
+            'allow' => ['subject', 'sub'],
+            'refuse' => [],
+          ],
+        ],
+      ),
+    );
+    $this->assertSame(
+      ['data.uid', 'data.subject'],
+      McpPrincipalContext::reservedKeysIn(
+        ['data' => ['subject' => 'x', 'uid' => 1]],
+      ),
+    );
+  }
+
+  /**
    * A non-delegated token keys on iss|sub|azp.
    *
    * @covers ::principalKey

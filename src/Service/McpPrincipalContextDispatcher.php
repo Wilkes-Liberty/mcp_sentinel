@@ -18,8 +18,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * passed to the handler / doExecute() — never a raw HTTP body. A
  * network or sealed-token HTTP call without a tenant claim fails
  * closed. Every denial writes a denied_access audit row that carries
- * the verified principal keys (or an unverified marker), through
- * logAlways() so audit_enabled cannot hide it.
+ * the verified principal keys (or an unverified marker). Denial rows
+ * are always written; audit_enabled gates allow rows only.
  */
 final class McpPrincipalContextDispatcher {
 
@@ -56,6 +56,8 @@ final class McpPrincipalContextDispatcher {
    *   Real tool plugin id for the audit row.
    * @param list<string> $reservedExceptions
    *   Declared schema input names that may be exempted.
+   * @param array<string, array{allow?: list<string>, refuse?: list<string>}> $nestedMapRules
+   *   Field-definition rules for named nested maps (e.g. fields).
    *
    * @return mixed
    *   Whatever the handler returns.
@@ -68,8 +70,14 @@ final class McpPrincipalContextDispatcher {
     array $arguments,
     string $toolId = 'mcp_principal_dispatch',
     array $reservedExceptions = [],
+    array $nestedMapRules = [],
   ): mixed {
-    $ctx = $this->admit($arguments, $toolId, $reservedExceptions);
+    $ctx = $this->admit(
+      $arguments,
+      $toolId,
+      $reservedExceptions,
+      $nestedMapRules,
+    );
     return $handler($arguments, $ctx);
   }
 
@@ -82,6 +90,8 @@ final class McpPrincipalContextDispatcher {
    *   Real tool plugin id for the audit row.
    * @param list<string> $reservedExceptions
    *   Declared schema input names that may be exempted.
+   * @param array<string, array{allow?: list<string>, refuse?: list<string>}> $nestedMapRules
+   *   Field-definition rules for named nested maps (e.g. fields).
    *
    * @return \Drupal\mcp_sentinel\Value\McpPrincipalContext
    *   The sealed context.
@@ -93,8 +103,14 @@ final class McpPrincipalContextDispatcher {
     array $arguments,
     string $toolId,
     array $reservedExceptions = [],
+    array $nestedMapRules = [],
   ): McpPrincipalContext {
-    $this->assertArgumentsAllowed($arguments, $toolId, $reservedExceptions);
+    $this->assertArgumentsAllowed(
+      $arguments,
+      $toolId,
+      $reservedExceptions,
+      $nestedMapRules,
+    );
     $ctx = $this->factory->fromCurrentRequest();
     $request = $this->requestStack->getCurrentRequest();
     try {
@@ -152,6 +168,8 @@ final class McpPrincipalContextDispatcher {
    *   Real tool plugin id for the audit row.
    * @param list<string> $reservedExceptions
    *   Declared schema input names that may be exempted.
+   * @param array<string, array{allow?: list<string>, refuse?: list<string>}> $nestedMapRules
+   *   Field-definition rules for named nested maps (e.g. fields).
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    *   When the guard is on and the call is not allowed.
@@ -160,8 +178,14 @@ final class McpPrincipalContextDispatcher {
     array $arguments,
     string $toolId,
     array $reservedExceptions = [],
+    array $nestedMapRules = [],
   ): void {
-    $this->assertArgumentsAllowed($arguments, $toolId, $reservedExceptions);
+    $this->assertArgumentsAllowed(
+      $arguments,
+      $toolId,
+      $reservedExceptions,
+      $nestedMapRules,
+    );
     $this->assertContextAllowed(
       $this->holder->get() ?? $this->factory->fromCurrentRequest(),
       $toolId,
@@ -177,6 +201,8 @@ final class McpPrincipalContextDispatcher {
    *   Real tool plugin id for the audit row.
    * @param list<string> $reservedExceptions
    *   Declared schema input names that may be exempted.
+   * @param array<string, array{allow?: list<string>, refuse?: list<string>}> $nestedMapRules
+   *   Field-definition rules for named nested maps (e.g. fields).
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    *   When the guard is on and a reserved key is present.
@@ -185,6 +211,7 @@ final class McpPrincipalContextDispatcher {
     array $arguments,
     string $toolId,
     array $reservedExceptions,
+    array $nestedMapRules = [],
   ): void {
     if (!$this->guard->required()) {
       return;
@@ -192,6 +219,7 @@ final class McpPrincipalContextDispatcher {
     $reserved = McpPrincipalContext::reservedKeysIn(
       $arguments,
       $reservedExceptions,
+      $nestedMapRules,
     );
     if ($reserved !== []) {
       $this->deny(
