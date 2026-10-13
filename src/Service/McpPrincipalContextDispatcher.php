@@ -111,10 +111,22 @@ final class McpPrincipalContextDispatcher {
       $reservedExceptions,
       $nestedMapRules,
     );
+    if ($this->holder->inJobScope()) {
+      $sealed = $this->holder->get();
+      if (!$sealed instanceof McpPrincipalContext) {
+        $this->deny(
+          $toolId,
+          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+          'A job overlay has no sealed principal. Identity is not read from the request.',
+        );
+      }
+      $this->assertContextAllowed($sealed, $toolId);
+      return $sealed;
+    }
     $ctx = $this->factory->fromCurrentRequest();
     $request = $this->requestStack->getCurrentRequest();
     try {
-      if ($this->holder->inJobScope() || $this->isCliJob($request)) {
+      if ($this->isCliJob($request)) {
         $this->holder->sealForJob($ctx);
       }
       elseif ($request !== NULL) {
@@ -186,6 +198,18 @@ final class McpPrincipalContextDispatcher {
       $reservedExceptions,
       $nestedMapRules,
     );
+    if ($this->holder->inJobScope()) {
+      $sealed = $this->holder->get();
+      if (!$sealed instanceof McpPrincipalContext) {
+        $this->deny(
+          $toolId,
+          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+          'A job overlay has no sealed principal. Identity is not read from the request.',
+        );
+      }
+      $this->assertContextAllowed($sealed, $toolId);
+      return;
+    }
     $this->assertContextAllowed(
       $this->holder->get() ?? $this->factory->fromCurrentRequest(),
       $toolId,
@@ -252,7 +276,7 @@ final class McpPrincipalContextDispatcher {
     if (!$this->guard->required()) {
       return;
     }
-    if ($ctx->issuer() === McpSealedTokenManager::ISSUER) {
+    if ($ctx->fromSealedToken()) {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::NON_IDP_ISSUER,
@@ -282,8 +306,21 @@ final class McpPrincipalContextDispatcher {
 
   /**
    * Frozen context for the current request (factory rebuild, not the slot).
+   *
+   * Inside a job overlay this is the job seal only; the request is
+   * not read.
    */
   public function context(): McpPrincipalContext {
+    if ($this->holder->inJobScope()) {
+      $sealed = $this->holder->get();
+      if ($sealed instanceof McpPrincipalContext) {
+        return $sealed;
+      }
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        'A job overlay has no sealed principal. Identity is not read from the request.',
+      );
+    }
     return $this->factory->fromCurrentRequest();
   }
 
@@ -319,7 +356,7 @@ final class McpPrincipalContextDispatcher {
       self::denialAuditMetadata(
         $toolId,
         $reasonCode,
-        $this->holder->get() ?? $this->factory->fromCurrentRequest(),
+        $this->auditContext(),
       ),
     );
   }
@@ -371,6 +408,20 @@ final class McpPrincipalContextDispatcher {
       }
     }
     return $meta;
+  }
+
+  /**
+   * Context for a denial row. Never reads the request inside an overlay.
+   */
+  private function auditContext(): McpPrincipalContext {
+    $held = $this->holder->get();
+    if ($held instanceof McpPrincipalContext) {
+      return $held;
+    }
+    if ($this->holder->inJobScope()) {
+      return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
+    }
+    return $this->factory->fromCurrentRequest();
   }
 
   /**

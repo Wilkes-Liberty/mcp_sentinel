@@ -30,6 +30,8 @@ final class McpPrincipalContextJob {
    *
    * A request-sealed HTTP principal (web cron) is not mutated.
    * Sequential begin() without end() clears only the overlay.
+   * Refused from arbitrary HTTP code; queue workers and Drush
+   * commands are the allowed callers.
    */
   public function begin(): void {
     $this->holder->enterJobScope();

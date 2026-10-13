@@ -196,11 +196,14 @@ tokens with `iss`, `sub`, `azp` (or RFC 8693 `act.sub`), and
 `tenant`. **There is no interim path for sealed-token sites.**
 Governed tools fail closed until Paladin tokens are in place.
 `client_id`/`scopes`/`jti`-only sealed tokens are refused
-(`missing_principal` / `missing_tenant_claim`). A reminted sealed
-token whose `iss` is `urn:mcp-sentinel:sealed-token` is refused
-on every governed surface (`non_idp_issuer`), even when an
-operator typed a tenant onto it. Re-minting a sealed token is
-not a compatibility mode and is not a substitute for Paladin.
+(`missing_principal` / `missing_tenant_claim`). Sealed tokens
+(the sealed-token auth provider) are refused for governed Tool
+plugins only (`non_idp_issuer`), even when an operator typed a
+tenant onto them. Other surfaces (Drush as a governed-tool
+surface, GraphQL, JSON:API, Context) are tracked in
+[DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927).
+Re-minting a sealed token is not a compatibility mode and is
+not a substitute for Paladin.
 For local stdio development, mint a Paladin token with those
 claims and pass it on the connector channel the same way a
 network agent would.

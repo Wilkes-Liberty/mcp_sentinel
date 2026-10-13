@@ -127,6 +127,8 @@ final readonly class McpPrincipalContext {
    * @param array<string, mixed> $keyClaims
    *   Token claims used to compose principal keys (iss, sub, azp,
    *   act). Empty when the context was built without a token.
+   * @param bool $sealedToken
+   *   TRUE when the sealed-token auth provider produced the claims.
    */
   public function __construct(
     private string $issuer,
@@ -138,6 +140,7 @@ final readonly class McpPrincipalContext {
     private array $actChain,
     private bool $network,
     private array $keyClaims = [],
+    private bool $sealedToken = FALSE,
   ) {}
 
   /**
@@ -200,6 +203,16 @@ final readonly class McpPrincipalContext {
    */
   public function isNetwork(): bool {
     return $this->network;
+  }
+
+  /**
+   * TRUE when claims came from the sealed-token auth provider.
+   *
+   * Provenance, not the iss string. Paladin is the sole issuer
+   * for governed tools (DEV-843).
+   */
+  public function fromSealedToken(): bool {
+    return $this->sealedToken;
   }
 
   /**

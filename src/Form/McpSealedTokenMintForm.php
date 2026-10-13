@@ -86,7 +86,7 @@ final class McpSealedTokenMintForm extends FormBase {
     $form['tenant'] = [
       '#type' => 'textfield',
       '#title' => $this->t('Tenant'),
-      '#description' => $this->t('Sealed into the token as its tenant claim. Governed tools refuse a sealed token that carries no tenant.'),
+      '#description' => $this->t('Sealed into the token as its tenant claim. Governed Tool plugins refuse sealed tokens (DEV-843); Paladin is the sole issuer. A tenant does not make this token a governed caller.'),
       '#required' => TRUE,
       '#maxlength' => McpSealedTokenManager::MAX_TENANT_LENGTH,
     ];

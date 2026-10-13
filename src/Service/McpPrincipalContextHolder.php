@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\Core\Queue\QueueWorkerInterface;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -173,8 +174,19 @@ final class McpPrincipalContextHolder {
    * without leaveJobScope() clears only the overlay.
    *
    * @internal Called by mcp_sentinel.principal_context_job.
+   *
+   * @throws \LogicException
+   *   When an HTTP request's sealed principal is current and the
+   *   caller is not a queue worker or Drush command.
    */
   public function enterJobScope(): void {
+    if ($this->hasInboundHttpSeal()
+      && !$this->calledFromInternalJobPath()) {
+      throw new \LogicException(
+        'enterJobScope() is for CLI/queue workers; an HTTP '
+        . 'request cannot open a job overlay.',
+      );
+    }
     $this->inJobScope = TRUE;
     $this->jobContext = NULL;
     if ($this->sealedFor === self::JOB_TOKEN) {
@@ -276,6 +288,37 @@ final class McpPrincipalContextHolder {
     $this->sealedFor = NULL;
     $this->inJobScope = FALSE;
     $this->jobContext = NULL;
+  }
+
+  /**
+   * TRUE when this process holds an inbound HTTP request seal.
+   */
+  private function hasInboundHttpSeal(): bool {
+    return $this->requestStack->getCurrentRequest() !== NULL
+      && $this->sealedFor !== NULL
+      && $this->sealedFor !== self::JOB_TOKEN;
+  }
+
+  /**
+   * TRUE when a queue worker or Drush command opened this scope.
+   *
+   * Arbitrary HTTP controllers are refused even if they construct
+   * McpPrincipalContextJob themselves.
+   */
+  private function calledFromInternalJobPath(): bool {
+    foreach (debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 20) as $frame) {
+      $class = $frame['class'] ?? '';
+      if ($class === '') {
+        continue;
+      }
+      if (str_starts_with($class, 'Drupal\\mcp_sentinel\\Drush\\')) {
+        return TRUE;
+      }
+      if (is_a($class, QueueWorkerInterface::class, TRUE)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
   /**

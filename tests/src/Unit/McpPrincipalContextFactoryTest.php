@@ -131,6 +131,31 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $ctx = $factory->fromRequest($request);
     $this->assertTrue($ctx->isNetwork());
     $this->assertSame('', $ctx->tenant());
+    $this->assertTrue($ctx->fromSealedToken());
+  }
+
+  /**
+   * Paladin claims are not sealed-token provenance.
+   *
+   * @covers ::fromRequest
+   */
+  public function testPaladinClaimsAreNotSealedTokenProvenance(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+    ]);
+    $ctx = $factory->fromRequest($request);
+    $this->assertFalse($ctx->fromSealedToken());
   }
 
 }

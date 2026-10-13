@@ -6,7 +6,9 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\Tests\mcp_sentinel\Support\McpJobScopeQueueStub;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -229,16 +231,16 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
     $holder->seal($cron, $request);
     $this->assertSame($cron, $holder->get());
 
-    $holder->enterJobScope();
+    $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
+    $stub->begin();
     $this->assertTrue($holder->inJobScope());
     $this->assertNull($holder->get());
     $holder->sealForJob($this->ctx('job-human', 'job-client'));
     $this->assertSame('job-human', $holder->get()?->subject());
 
-    $holder->leaveJobScope();
+    $stub->end();
     $this->assertFalse($holder->inJobScope());
     $restored = $holder->get();
-    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
     $this->assertSame($cron, $restored);
     $this->assertSame('cron-human', $restored->subject());
   }
@@ -257,14 +259,30 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
     $cron = $this->ctx('cron-human', 'cron-client');
     $holder->seal($cron, $request);
 
-    $holder->enterJobScope();
+    $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
+    $stub->begin();
     $holder->sealForJob($this->ctx('job-1', 'job-client'));
-    $holder->enterJobScope();
+    $stub->begin();
     $this->assertNull($holder->get());
     $holder->sealForJob($this->ctx('job-2', 'job-client'));
     $this->assertSame('job-2', $holder->get()?->subject());
-    $holder->leaveJobScope();
+    $stub->end();
     $this->assertSame($cron, $holder->get());
+  }
+
+  /**
+   * A plain HTTP caller cannot open a job overlay.
+   *
+   * @covers ::enterJobScope
+   */
+  public function testEnterJobScopeFromHttpCallerIsRefused(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($this->ctx('human-1', 'agent-a'), $request);
+    $this->expectException(\LogicException::class);
+    $holder->enterJobScope();
   }
 
   /**

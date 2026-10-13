@@ -16,8 +16,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
   There is no interim path for sealed-token sites: governed tools
   fail closed until Paladin tokens are in place. Re-minting a sealed
-  token is not a compatibility mode; `iss`
-  `urn:mcp-sentinel:sealed-token` is refused (`non_idp_issuer`).
+  token is not a compatibility mode; the sealed-token auth
+  provider is refused for governed Tool plugins (`non_idp_issuer`).
   Drush, GraphQL, JSON:API,
   and Context entry points are not covered by this guard
   ([DEV-927](https://wilkesliberty.atlassian.net/browse/DEV-927)).

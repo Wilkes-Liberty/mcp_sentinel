@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\Tests\mcp_sentinel\Support\McpJobScopeQueueStub;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -60,13 +61,30 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     $cron = $this->ctx('cron-human', 'cron-client');
     $holder->seal($cron, $request);
     $job = new McpPrincipalContextJob($holder);
-    $seen = $job->run(function () use ($holder): string {
+    $stub = new McpJobScopeQueueStub($job);
+    $seen = $stub->processItem(function () use ($holder): string {
       $this->assertNull($holder->get());
       $holder->sealForJob($this->ctx('job-human', 'job-client'));
       return (string) $holder->get()?->subject();
     });
     $this->assertSame('job-human', $seen);
     $this->assertSame($cron, $holder->get());
+  }
+
+  /**
+   * Begin() from a plain HTTP caller is refused.
+   *
+   * @covers ::begin
+   */
+  public function testBeginFromHttpCallerIsRefused(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($this->ctx('human-1', 'agent-a'), $request);
+    $job = new McpPrincipalContextJob($holder);
+    $this->expectException(\LogicException::class);
+    $job->begin();
   }
 
   /**
