@@ -60,11 +60,18 @@ final class McpPrincipalContextHolder {
    *   The current request object.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
-   *   When a subrequest tries to reseal a different principal.
+   *   When a subrequest tries to reseal a different principal, or when
+   *   a job is already sealed.
    */
   public function seal(McpPrincipalContext $ctx, mixed $token): void {
     if ($this->sealedFor === $token) {
       return;
+    }
+    if ($this->sealedFor === self::JOB_TOKEN) {
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        'CLI/worker principal context is already sealed. Call resetForJob() per message.',
+      );
     }
     if ($this->context === NULL) {
       $this->context = $ctx;
@@ -113,6 +120,17 @@ final class McpPrincipalContextHolder {
    *   When a job is already sealed.
    */
   public function sealForJob(McpPrincipalContext $ctx): void {
+    $current = $this->requestStack->getCurrentRequest();
+    if ($current !== NULL && $this->sealedFor === $current) {
+      if ($this->context !== NULL
+        && $this->identityOf($this->context) !== $this->identityOf($ctx)) {
+        throw new McpPrincipalContextDeniedException(
+          McpPrincipalContextDeniedException::RESEAL_REFUSED,
+          'A subrequest cannot reseal a different principal.',
+        );
+      }
+      return;
+    }
     if ($this->context !== NULL) {
       throw new McpPrincipalContextDeniedException(
         McpPrincipalContextDeniedException::RESEAL_REFUSED,
@@ -127,15 +145,17 @@ final class McpPrincipalContextHolder {
    * Clears the seal so the next CLI/queue message can seal again.
    *
    * Long-running workers call this at the start of each job. It is
-   * refused while an HTTP request is on the stack: code running inside
-   * a request cannot clear the request's sealed principal and reseal
-   * another one.
+   * refused while an HTTP request's own seal is current: code running
+   * inside that request cannot clear it. A leftover Drupal CLI
+   * bootstrap request is not an inbound HTTP seal, so a job may reset.
    *
    * @throws \LogicException
-   *   When an HTTP request is current.
+   *   When an HTTP request's sealed principal is current.
    */
   public function resetForJob(): void {
-    if ($this->requestStack->getCurrentRequest() !== NULL) {
+    if ($this->requestStack->getCurrentRequest() !== NULL
+      && $this->sealedFor !== NULL
+      && $this->sealedFor !== self::JOB_TOKEN) {
       throw new \LogicException(
         'resetForJob() is for CLI/queue workers; an HTTP request cannot reset its sealed principal.',
       );
@@ -148,11 +168,15 @@ final class McpPrincipalContextHolder {
    * The sealed context, or NULL if none has been sealed for this call.
    *
    * A context sealed for another HTTP request is not returned after
-   * that request leaves the stack. CLI readers only see a job seal.
+   * that request leaves the stack. A job seal is visible even when a
+   * leftover CLI bootstrap request is still on the stack.
    */
   public function get(): ?McpPrincipalContext {
     if ($this->context === NULL) {
       return NULL;
+    }
+    if ($this->sealedFor === self::JOB_TOKEN) {
+      return $this->context;
     }
     $current = $this->requestStack->getCurrentRequest();
     $main = $this->requestStack->getMainRequest();
@@ -162,7 +186,7 @@ final class McpPrincipalContextHolder {
       }
       return NULL;
     }
-    return $this->sealedFor === self::JOB_TOKEN ? $this->context : NULL;
+    return NULL;
   }
 
   /**

@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -97,11 +98,11 @@ final class McpPrincipalContextDispatcher {
     $ctx = $this->factory->fromCurrentRequest();
     $request = $this->requestStack->getCurrentRequest();
     try {
-      if ($request !== NULL) {
-        $this->holder->seal($ctx, $request);
-      }
-      else {
+      if ($this->isCliJob($request)) {
         $this->holder->sealForJob($ctx);
+      }
+      elseif ($request !== NULL) {
+        $this->holder->seal($ctx, $request);
       }
     }
     catch (McpPrincipalContextDeniedException $e) {
@@ -116,6 +117,27 @@ final class McpPrincipalContextDispatcher {
     $sealed = $this->holder->get() ?? $ctx;
     $this->assertContextAllowed($sealed, $toolId);
     return $sealed;
+  }
+
+  /**
+   * Leftover Drupal CLI/Drush/queue request, or no request at all.
+   *
+   * Drush and queue workers keep a process-lifetime bootstrap request
+   * on the stack. That object is not an inbound HTTP call, so a second
+   * message must go through sealForJob() (resetForJob() required).
+   *
+   * @param \Symfony\Component\HttpFoundation\Request|null $request
+   *   The current request, or NULL when the stack is empty.
+   *
+   * @return bool
+   *   TRUE when the holder must seal via sealForJob().
+   */
+  private function isCliJob(?Request $request): bool {
+    if ($request === NULL) {
+      return TRUE;
+    }
+    return PHP_SAPI === 'cli'
+      && $request === $this->requestStack->getMainRequest();
   }
 
   /**

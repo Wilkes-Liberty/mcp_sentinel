@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -55,9 +58,41 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       return;
     }
     $request = $event->getRequest();
+    if ($this->isLeftoverCliRequest($request)) {
+      return;
+    }
     $ctx = $this->factory->fromRequest($request);
-    $this->holder->seal($ctx, $request);
+    try {
+      $this->holder->seal($ctx, $request);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      if ($e->reasonCode !== McpPrincipalContextDeniedException::RESEAL_REFUSED) {
+        throw $e;
+      }
+      $sealed = $this->holder->get();
+      if ($sealed instanceof McpPrincipalContext) {
+        $ctx = $sealed;
+      }
+    }
     $request->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
+  }
+
+  /**
+   * Drupal Drush/queue leftover: not an inbound Paladin HTTP call.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The current request.
+   *
+   * @return bool
+   *   TRUE when this is a claimless CLI bootstrap request.
+   */
+  private function isLeftoverCliRequest(Request $request): bool {
+    if (PHP_SAPI !== 'cli') {
+      return FALSE;
+    }
+    return !$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      && !$request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)
+      && $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE) !== TRUE;
   }
 
 }

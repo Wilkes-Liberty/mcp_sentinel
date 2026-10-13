@@ -143,6 +143,76 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
+   * A leftover Drupal CLI request still requires resetForJob().
+   *
+   * @covers ::sealForJob
+   * @covers ::resetForJob
+   */
+  public function testLeftoverCliRequestRequiresResetBetweenMessages(): void {
+    $stack = new RequestStack();
+    $leftover = Request::create('/');
+    $stack->push($leftover);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
+    try {
+      $holder->sealForJob($this->ctx('human-2', 'agent-b'));
+      $this->fail('A leftover CLI request must not reuse the first principal.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame('human-1', $holder->get()?->subject());
+    $holder->resetForJob();
+    $holder->sealForJob($this->ctx('human-2', 'agent-b'));
+    $this->assertSame('human-2', $holder->get()?->subject());
+  }
+
+  /**
+   * An HTTP seal cannot replace a job that is already sealed.
+   *
+   * @covers ::seal
+   * @covers ::sealForJob
+   */
+  public function testHttpSealDoesNotOverwriteJobPrincipal(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
+    try {
+      $holder->seal($this->ctx('human-2', 'agent-b'), $request);
+      $this->fail('An HTTP seal must not replace a sealed job principal.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        $e->reasonCode,
+      );
+    }
+    $this->assertSame('human-1', $holder->get()?->subject());
+  }
+
+  /**
+   * sealForJob() keeps a principal already sealed for the current request.
+   *
+   * @covers ::seal
+   * @covers ::sealForJob
+   */
+  public function testSealForJobKeepsAlreadySealedHttpRequest(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $first = $this->ctx('human-1', 'agent-a');
+    $holder->seal($first, $request);
+    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
+    $this->assertSame($first, $holder->get());
+  }
+
+  /**
    * Builds a context that can compose a principal key.
    */
   private function ctx(string $sub, string $azp): McpPrincipalContext {
