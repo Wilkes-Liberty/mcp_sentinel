@@ -95,6 +95,10 @@ final class DownstreamContractTool extends McpGovernedToolBase implements Config
       && $this->governanceDlp !== NULL
       && $this->governanceClassification !== NULL
       && $this->governancePrincipalDispatcher !== NULL
+      && $this->governanceDenyExplainer !== NULL
+      && $this->governanceExfiltrationGuard !== NULL
+      && $this->governanceAuditLogger !== NULL
+      && $this->governanceRateLimiter !== NULL
       && $exceptions === []
       && $nested === []
       && $this->governanceReadiness->evaluate(

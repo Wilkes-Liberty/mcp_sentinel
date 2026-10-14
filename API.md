@@ -122,7 +122,7 @@ and `checkGovernedDiscoveryAccess()` hooks, the final `checkAccess()` and
 `$governanceReadiness`, `$governanceRequiredScope`, `$governanceRequestStack`,
 `$governanceDlp`, `$governanceClassification`, `$governanceDenyExplainer`,
 `$governanceExfiltrationGuard`, `$governancePrincipalDispatcher`,
-`$governanceAuditLogger`).
+`$governanceAuditLogger`, `$governanceRateLimiter`).
 `reservedNestedMapAllowlists()` returns field-definition rules for
 a `fields` map (empty on tools that do not write entities).
 `principalContext()` returns the frozen

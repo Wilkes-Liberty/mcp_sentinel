@@ -83,6 +83,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stamps all of them on the request. `mint()` takes an optional
   tenant and the mint form requires one.
 
+### Changed
+- Governed tool plugins resolve deny-explainer, exfiltration-guard,
+  audit-logger, and rate-limiter services once in
+  `McpGovernedToolBase::create()` (`$governanceDenyExplainer`,
+  `$governanceExfiltrationGuard`, `$governanceAuditLogger`, and the new
+  `$governanceRateLimiter`). `McpEntityToolTrait` helpers use those
+  properties. `McpStatusToolBase` no longer duplicates the
+  exfiltration-guard field. Denial messages, audit rows, and
+  rate-limit outcomes are unchanged.
+
 ## [2.34.1] - 2026-10-12
 
 ### Fixed

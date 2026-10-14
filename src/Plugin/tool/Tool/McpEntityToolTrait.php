@@ -43,13 +43,13 @@ trait McpEntityToolTrait {
     $reason = $result instanceof AccessResultReasonInterface && $result->getReason()
       ? (string) $result->getReason()
       : 'denied by policy';
-    if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
+    if ($this->governanceDenyExplainer !== NULL) {
       $profileId = NULL;
       if (isset($this->governancePolicyResolver)) {
         $profile = $this->governancePolicyResolver->resolve();
         $profileId = $profile?->id();
       }
-      $reason = \Drupal::service('mcp_sentinel.deny_explainer')->annotate($reason, $profileId);
+      $reason = $this->governanceDenyExplainer->annotate($reason, $profileId);
     }
     return $reason;
   }
@@ -85,13 +85,20 @@ trait McpEntityToolTrait {
     string $operation,
     string $reason,
   ): void {
-    \Drupal::service('mcp_sentinel.audit_logger')->log('denied_access', [
-      'tool'        => $toolId,
-      'entity_type' => $entityType,
-      'id'          => $entityId,
-      'operation'   => $operation,
-      'reason'      => $reason,
-    ]);
+    $logger = $this->governanceAuditLogger;
+    if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
+      // Deploy-window: subclass create() has not assigned this property.
+      $logger = \Drupal::service('mcp_sentinel.audit_logger');
+    }
+    if ($logger !== NULL) {
+      $logger->log('denied_access', [
+        'tool'        => $toolId,
+        'entity_type' => $entityType,
+        'id'          => $entityId,
+        'operation'   => $operation,
+        'reason'      => $reason,
+      ]);
+    }
   }
 
   /**
@@ -131,16 +138,27 @@ trait McpEntityToolTrait {
     McpPolicyProfileInterface $profile,
     string $toolId,
   ): ?ExecutableResult {
-    /** @var \Drupal\mcp_sentinel\Service\McpRateLimiter $limiter */
-    $limiter = \Drupal::service('mcp_sentinel.rate_limiter');
+    $limiter = $this->governanceRateLimiter;
+    if ($limiter === NULL && \Drupal::hasService('mcp_sentinel.rate_limiter')) {
+      // Deploy-window: subclass create() has not assigned this property.
+      $limiter = \Drupal::service('mcp_sentinel.rate_limiter');
+    }
+    if ($limiter === NULL) {
+      return NULL;
+    }
     $uid = (int) $this->currentUser->id();
     if (!$limiter->check($profile, $uid, $toolId)) {
-      \Drupal::service('mcp_sentinel.audit_logger')->log(
-        'rate_limit_exceeded', ['tool' => $toolId],
-      );
+      $logger = $this->governanceAuditLogger;
+      if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
+        // Deploy-window: subclass create() has not assigned this property.
+        $logger = \Drupal::service('mcp_sentinel.audit_logger');
+      }
+      if ($logger !== NULL) {
+        $logger->log('rate_limit_exceeded', ['tool' => $toolId]);
+      }
       $message = $this->t('Rate limit exceeded. Retry after the current window expires.');
-      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
-        $annotated = \Drupal::service('mcp_sentinel.deny_explainer')->annotate((string) $message);
+      if ($this->governanceDenyExplainer !== NULL) {
+        $annotated = $this->governanceDenyExplainer->annotate((string) $message);
         $message = $this->t('@message', ['@message' => $annotated]);
       }
       return ExecutableResult::failure($message);
@@ -171,8 +189,10 @@ trait McpEntityToolTrait {
     array $results,
     McpPolicyProfileInterface $profile,
   ): array {
-    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
-    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    $guard = $this->governanceExfiltrationGuard;
+    if ($guard === NULL) {
+      return $results;
+    }
     [$capped, $truncated] = $guard->capResults($results['succeeded'] ?? [], $profile);
     $results['succeeded'] = $capped;
     if ($truncated) {
@@ -206,8 +226,10 @@ trait McpEntityToolTrait {
     string $serialized,
     McpPolicyProfileInterface $profile,
   ): ?ExecutableResult {
-    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
-    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    $guard = $this->governanceExfiltrationGuard;
+    if ($guard === NULL) {
+      return NULL;
+    }
     $bytes = strlen($serialized);
     if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
       $message = $this->t(
@@ -217,8 +239,8 @@ trait McpEntityToolTrait {
           '@cap'   => $guard->effectiveResponseSizeCap($profile),
         ]
       );
-      if (\Drupal::hasService('mcp_sentinel.deny_explainer')) {
-        $annotated = \Drupal::service('mcp_sentinel.deny_explainer')->annotate((string) $message);
+      if ($this->governanceDenyExplainer !== NULL) {
+        $annotated = $this->governanceDenyExplainer->annotate((string) $message);
         $message = $this->t('@message', ['@message' => $annotated]);
       }
       return ExecutableResult::failure($message);
@@ -255,8 +277,10 @@ trait McpEntityToolTrait {
     array $results,
     McpPolicyProfileInterface $profile,
   ): array {
-    /** @var \Drupal\mcp_sentinel\Service\McpExfiltrationGuard $guard */
-    $guard = \Drupal::service('mcp_sentinel.exfiltration_guard');
+    $guard = $this->governanceExfiltrationGuard;
+    if ($guard === NULL) {
+      return $results;
+    }
     $cap = $guard->effectiveResponseSizeCap($profile);
     if ($cap <= 0) {
       return $results;
