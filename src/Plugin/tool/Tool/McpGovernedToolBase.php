@@ -18,6 +18,7 @@ use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\tool\ExecutableResult;
@@ -161,6 +162,13 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpAuditLogger $governanceAuditLogger = NULL;
 
   /**
+   * Per-profile flood limiter (NULL in unit tests).
+   *
+   * @api
+   */
+  protected ?McpRateLimiter $governanceRateLimiter = NULL;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -189,6 +197,9 @@ abstract class McpGovernedToolBase extends ToolBase {
       : NULL;
     $instance->governanceAuditLogger = $container->has('mcp_sentinel.audit_logger')
       ? $container->get('mcp_sentinel.audit_logger')
+      : NULL;
+    $instance->governanceRateLimiter = $container->has('mcp_sentinel.rate_limiter')
+      ? $container->get('mcp_sentinel.rate_limiter')
       : NULL;
     return $instance;
   }
