@@ -82,10 +82,13 @@ final class McpSentinelSqlCommands extends DrushCommands {
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'", description: 'Run a governed query under the default profile.')]
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query --profile=readonly 'SELECT COUNT(*) FROM node_field_data'", description: 'Run a governed query under a named profile.')]
   public function sqlQuery(string $query = '', array $options = ['profile' => NULL]): int {
-    // Drush has no validated bearer. A local invocation stays on the
-    // profile SQL guard. hasSealedContext() is false under the deny-only
-    // job overlay, so this path uses the sealed or audit context only
-    // when a request principal is visible outside that overlay.
+    // Drush has no validated bearer. A local operator invocation stays
+    // on the profile SQL guard. Shipped PRE/POST hooks always open a
+    // deny-only overlay, so hasSealedContext() is false and this
+    // branch does not run for `drush mcp-sentinel:sql-query`. It
+    // remains for a runner that sealed a principal outside that
+    // overlay (kernel tests, or a future hop token that seals before
+    // this command).
     if ($this->principalDispatcher->hasSealedContext()) {
       try {
         $this->principalDispatcher->assertDispatchAllowed([], 'mcp-sentinel:sql-query');

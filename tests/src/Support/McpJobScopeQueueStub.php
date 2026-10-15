@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Support;
 
 use Drupal\Core\Queue\QueueWorkerBase;
+use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 
 /**
@@ -16,6 +17,13 @@ final class McpJobScopeQueueStub extends QueueWorkerBase {
    * Internal job-boundary helper.
    */
   protected McpPrincipalContextJob $job;
+
+  /**
+   * Handles for begin() calls that have not yet been ended.
+   *
+   * @var list<\Drupal\mcp_sentinel\Service\McpJobScopeHandle>
+   */
+  private array $handles = [];
 
   /**
    * Constructs the stub.
@@ -44,14 +52,18 @@ final class McpJobScopeQueueStub extends QueueWorkerBase {
    * Opens a job overlay through the queue-worker path.
    */
   public function begin(): void {
-    $this->job->begin();
+    $this->handles[] = $this->job->begin();
   }
 
   /**
    * Closes the job overlay through the queue-worker path.
    */
   public function end(): void {
-    $this->job->end();
+    $handle = array_pop($this->handles);
+    if (!$handle instanceof McpJobScopeHandle) {
+      throw new \LogicException('end() requires a matching begin().');
+    }
+    $this->job->end($handle);
   }
 
 }

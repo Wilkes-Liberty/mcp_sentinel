@@ -45,7 +45,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     $job = new McpPrincipalContextJob($holder);
     $dispatcher = $this->dispatcher($stack, $holder);
 
-    $job->begin();
+    $first = $job->begin();
     try {
       $dispatcher->admit([], 'tool-a');
       $this->fail('The first overlay item must refuse.');
@@ -60,10 +60,10 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
         $e->reasonCode,
       );
     }
-    $job->end();
+    $job->end($first);
 
     $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-2', 'agent-b'));
-    $job->begin();
+    $second = $job->begin();
     try {
       $dispatcher->admit([], 'tool-b');
       $this->fail('The second overlay item must refuse.');
@@ -78,7 +78,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
         $e->reasonCode,
       );
     }
-    $job->end();
+    $job->end($second);
     $this->assertFalse($holder->inJobScope());
   }
 

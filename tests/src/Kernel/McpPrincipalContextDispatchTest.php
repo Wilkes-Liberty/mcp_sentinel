@@ -816,7 +816,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     };
 
     $before = $this->deniedAccessCount();
-    $job->begin();
+    $first = $job->begin();
     $stamp('human-1');
     $ran = FALSE;
     try {
@@ -843,8 +843,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     }
     $this->assertSame($before + 1, $this->deniedAccessCount());
 
-    $job->end();
-    $job->begin();
+    $job->end($first);
+    $secondHandle = $job->begin();
     $stamp('human-2');
     $ran = FALSE;
     try {
@@ -870,7 +870,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       );
     }
     $this->assertSame($before + 2, $this->deniedAccessCount());
-    $job->end();
+    $job->end($secondHandle);
     $this->assertFalse($holder->inJobScope());
     $this->assertNull($holder->get());
     $this->restoreRequestStack($popped);
@@ -1007,6 +1007,38 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    * An anonymous queue worker cannot admit a caller-built principal.
    */
   public function testAnonymousQueueWorkerCannotForgePrincipal(): void {
+    $meta = $this->forgedOverlayDenyMetadata();
+    $this->assertSame('unverified', $meta['id']);
+    $this->assertArrayNotHasKey('sub', $meta);
+    $this->assertArrayNotHasKey('tenant', $meta);
+    $this->assertArrayNotHasKey('azp', $meta);
+    $restored = $this->holder()->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame('cron-human', $restored->subject());
+  }
+
+  /**
+   * A forged overlay identity does not appear on the deny row.
+   *
+   * Separate from the unverified-id assertions so a red run that
+   * only drops the in-scope seal() no-op can fail these needles
+   * without stopping at cron-human vs unverified.
+   */
+  public function testAnonymousQueueWorkerForgedIdentityIsAbsentFromDenyRow(): void {
+    $meta = $this->forgedOverlayDenyMetadata();
+    $rowJson = json_encode($meta, JSON_THROW_ON_ERROR);
+    foreach (['forged-sub', 'tenant-evil', 'evil.example', 'forged-azp'] as $needle) {
+      $this->assertStringNotContainsString($needle, $rowJson);
+    }
+  }
+
+  /**
+   * Runs the forge worker and returns the resulting deny-row metadata.
+   *
+   * @return array<string, mixed>
+   *   Decoded denied_access metadata, including entity id.
+   */
+  private function forgedOverlayDenyMetadata(): array {
     $request = $this->pushNetworkToken([
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'cron-human',
@@ -1123,19 +1155,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       $caught->reasonCode,
     );
     $this->assertSame($before + 1, $this->deniedAccessCount());
-    $meta = $this->lastDenialMetadata();
-    $this->assertSame('unverified', $meta['id']);
-    $this->assertArrayNotHasKey('sub', $meta);
-    $this->assertArrayNotHasKey('tenant', $meta);
-    $this->assertArrayNotHasKey('azp', $meta);
-    $rowJson = json_encode($meta, JSON_THROW_ON_ERROR);
-    foreach (['forged-sub', 'tenant-evil', 'evil.example', 'forged-azp'] as $needle) {
-      $this->assertStringNotContainsString($needle, $rowJson);
-    }
-    $restored = $holder->get();
-    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
-    $this->assertSame('cron-human', $restored->subject());
     $this->assertFalse($holder->inJobScope());
+    return $this->lastDenialMetadata();
   }
 
   /**
@@ -1151,7 +1172,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $holder = $this->holder();
     $job = new McpPrincipalContextJob($holder);
     $before = $this->deniedAccessCount();
-    $job->begin();
+    $handle = $job->begin();
     try {
       $this->dispatcher()->context();
       $this->fail('context() under an overlay must be refused.');
@@ -1163,7 +1184,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       );
     }
     $this->assertSame($before + 1, $this->deniedAccessCount());
-    $job->end();
+    $job->end($handle);
   }
 
   /**
@@ -1187,6 +1208,13 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
         $e->reasonCode,
       );
     }
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('unverified', $meta['id']);
+    $this->assertArrayNotHasKey('sub', $meta);
+    $this->assertArrayNotHasKey('tenant', $meta);
+    $this->assertArrayNotHasKey('azp', $meta);
+    $rowJson = json_encode($meta, JSON_THROW_ON_ERROR);
+    $this->assertStringNotContainsString('human-1', $rowJson);
   }
 
   /**

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
+use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Symfony\Component\Console\ConsoleEvents;
 use Symfony\Component\Console\Event\ConsoleCommandEvent;
@@ -20,6 +21,11 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * @internal Queue items open the overlay in the worker, not here.
  */
 final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface {
+
+  /**
+   * Handle for the overlay opened by onCommand().
+   */
+  private ?McpJobScopeHandle $handle = NULL;
 
   /**
    * Constructs the subscriber.
@@ -49,7 +55,7 @@ final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface
    */
   public function onCommand(ConsoleCommandEvent $event): void {
     if ($this->isOurCommand($event)) {
-      $this->job->begin();
+      $this->handle = $this->job->begin();
     }
   }
 
@@ -60,9 +66,16 @@ final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface
    *   The console terminate event.
    */
   public function onTerminate(ConsoleEvent $event): void {
-    if ($this->isOurCommand($event)) {
-      $this->job->end();
+    if ($this->handle === NULL) {
+      return;
     }
+    // The handle is the close token. The command name is re-checked
+    // so TERMINATE still names the invocation COMMAND opened.
+    if (!$this->isOurCommand($event)) {
+      return;
+    }
+    $this->job->end($this->handle);
+    $this->handle = NULL;
   }
 
   /**

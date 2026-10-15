@@ -207,7 +207,8 @@ accepts a context object from callers. Governed tools refuse
 (`missing_principal`) while that overlay is open until a hop
 token (DEV-844) supplies a Paladin principal. The overlay is
 opened through `mcp_sentinel.principal_context_job`
-(`begin()` / `end()` / `run()`). `enterJobScope()` returns a
+(`begin()` / `end($handle)` / `run()`). `end()` requires the
+handle `begin()` returned. `enterJobScope()` returns a
 scope handle; `leaveJobScope()` is refused unless the caller
 presents that matching handle. Site code must not call either
 method. The holder service is `public: false`.

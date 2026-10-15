@@ -6,15 +6,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-- First-party governed tools no longer re-inject `policyResolver`,
-  `accessChecker`, `auditLogger`, or `classification`. They use the
-  `$governance*` properties `McpGovernedToolBase::create()` already
-  assigns. Unused `setSealedManifest()` is removed from the approval
-  request and admin-grant entities; callers set the `manifest` field.
-  `mcp_sentinel_help()` and `INSTALL.md` state the 3.0 fail-closed
-  trust model.
-
 ## [3.0.1] - 2026-10-15
 
 ### Security
@@ -44,10 +35,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is a no-op while a job overlay is open, so it is not a
   forgery path. Callers that used `resetForJob()` per CLI/queue
   message must use `mcp_sentinel.principal_context_job`
-  (`begin()` / `end()` or `run()`). Site code must not call
+  (`begin()` / `end($handle)` or `run()`). `end()` requires the
+  handle `begin()` returned. Site code must not call
   `enterJobScope()` / `leaveJobScope()`.
 - Governed Tool plugins refuse sealed tokens even when minted again
   with a tenant. Paladin is the sole issuer.
+- Unused `setSealedManifest()` is removed from the approval
+  request and admin-grant entities ([#297](https://github.com/Wilkes-Liberty/mcp_sentinel/pull/297));
+  callers set the `manifest` field.
+
+### Changed
+- [#297](https://github.com/Wilkes-Liberty/mcp_sentinel/pull/297):
+  First-party governed tools no longer re-inject `policyResolver`,
+  `accessChecker`, `auditLogger`, or `classification`. They use the
+  `$governance*` properties `McpGovernedToolBase::create()` already
+  assigns. `mcp_sentinel_help()` and `INSTALL.md` state the 3.0
+  fail-closed trust model.
 
 ## [3.0.0] - 2026-10-15
 

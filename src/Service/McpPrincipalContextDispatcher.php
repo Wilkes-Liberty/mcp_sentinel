@@ -412,17 +412,17 @@ final class McpPrincipalContextDispatcher {
   }
 
   /**
-   * Context for a denial row. Never reads the request inside an overlay.
+   * Context for a denial row. Never a live request rebuild.
+   *
+   * The sealed context when one is visible. Otherwise an empty
+   * deny-only context: no identity from request attributes.
    */
   private function auditContext(): McpPrincipalContext {
     $held = $this->holder->get();
     if ($held instanceof McpPrincipalContext) {
       return $held;
     }
-    if ($this->holder->inJobScope()) {
-      return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
-    }
-    return $this->factory->fromCurrentRequest();
+    return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
   }
 
   /**

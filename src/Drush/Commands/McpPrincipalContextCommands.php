@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
 use Consolidation\AnnotatedCommand\Hooks\HookManager;
+use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
@@ -30,6 +31,11 @@ final class McpPrincipalContextCommands extends DrushCommands {
   use AutowireTrait;
 
   /**
+   * Handle for the overlay opened by preCommand().
+   */
+  private ?McpJobScopeHandle $handle = NULL;
+
+  /**
    * Constructs the Drush hook command file.
    *
    * Autowire reaches the public job helper. The holder is
@@ -50,7 +56,7 @@ final class McpPrincipalContextCommands extends DrushCommands {
    */
   #[CLI\Hook(type: HookManager::PRE_COMMAND_HOOK, target: '*')]
   public function preCommand(): void {
-    $this->job->begin();
+    $this->handle = $this->job->begin();
   }
 
   /**
@@ -58,7 +64,13 @@ final class McpPrincipalContextCommands extends DrushCommands {
    */
   #[CLI\Hook(type: HookManager::POST_COMMAND_HOOK, target: '*')]
   public function postCommand(): void {
-    $this->job->end();
+    if ($this->handle === NULL) {
+      throw new \LogicException(
+        'postCommand() requires a matching preCommand().',
+      );
+    }
+    $this->job->end($this->handle);
+    $this->handle = NULL;
   }
 
 }

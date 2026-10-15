@@ -121,10 +121,33 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     $holder->seal($this->ctx('cron-human', 'cron-client'), $request);
     $job = new McpPrincipalContextJob($holder);
     $this->assertTrue($job->hasSealedContext());
-    $job->begin();
+    $handle = $job->begin();
     $this->assertFalse($job->hasSealedContext());
-    $job->end();
+    $job->end($handle);
     $this->assertTrue($job->hasSealedContext());
+  }
+
+  /**
+   * End() is refused without the matching begin handle.
+   *
+   * @covers ::end
+   */
+  public function testEndRequiresMatchingHandle(): void {
+    $holder = new McpPrincipalContextHolder(new RequestStack());
+    $job = new McpPrincipalContextJob($holder);
+    $outer = $job->begin();
+    $inner = $job->begin();
+    try {
+      $job->end($outer);
+      $this->fail('end() must refuse a handle that is not innermost.');
+    }
+    catch (\LogicException $e) {
+      $this->assertStringContainsString('matching begin()', $e->getMessage());
+    }
+    $this->assertTrue($holder->inJobScope());
+    $job->end($inner);
+    $job->end($outer);
+    $this->assertFalse($holder->inJobScope());
   }
 
   /**

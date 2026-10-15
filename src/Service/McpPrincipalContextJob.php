@@ -11,12 +11,14 @@ use Psr\Log\NullLogger;
 /**
  * Opens a deny-only overlay at CLI, queue, and Drush job boundaries.
  *
- * @internal Not a public API. Queue workers call begin()/release() per
- *   item. Drush commands call begin()/end() per invocation. begin()
- *   pushes a deny-only overlay over a request-sealed state (web cron)
- *   and never mutates that seal. Governed tools refuse while the
- *   overlay is open. Site code must not reset a sealed HTTP principal
- *   through the holder.
+ * @internal Not a public API. Queue workers call begin()/release() or
+ *   run() per item. Drush and console callers call begin()/end() per
+ *   invocation and must pass the handle begin() returned. run() cannot
+ *   cover PRE/POST hooks: those bookend a command they do not wrap.
+ *   begin() pushes a deny-only overlay over a request-sealed state
+ *   (web cron) and never mutates that seal. Governed tools refuse
+ *   while the overlay is open. Site code must not reset a sealed HTTP
+ *   principal through the holder.
  */
 final class McpPrincipalContextJob {
 
@@ -47,7 +49,7 @@ final class McpPrincipalContextJob {
    * Governed tools refuse until a hop token is available.
    *
    * @return \Drupal\mcp_sentinel\Service\McpJobScopeHandle
-   *   Token that leaveJobScope() / release() must present.
+   *   Token that end() / leaveJobScope() / release() must present.
    */
   public function begin(): McpJobScopeHandle {
     $handle = $this->holder->enterJobScope();
@@ -58,16 +60,22 @@ final class McpPrincipalContextJob {
   /**
    * Drops the matching job overlay and restores any request seal.
    *
+   * @param \Drupal\mcp_sentinel\Service\McpJobScopeHandle $handle
+   *   The token returned by the matching begin().
+   *
    * @throws \LogicException
-   *   When end() has no matching begin().
+   *   When $handle is not the innermost begin() still open.
    */
-  public function end(): void {
-    $handle = array_pop($this->handles);
-    if ($handle === NULL) {
+  public function end(McpJobScopeHandle $handle): void {
+    $top = $this->handles === []
+      ? NULL
+      : $this->handles[array_key_last($this->handles)];
+    if ($top !== $handle) {
       throw new \LogicException(
-        'end() requires a matching begin().',
+        'end() requires the handle returned by the matching begin().',
       );
     }
+    array_pop($this->handles);
     $this->holder->leaveJobScope($handle);
   }
 
