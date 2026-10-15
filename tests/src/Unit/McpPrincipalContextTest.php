@@ -233,6 +233,33 @@ final class McpPrincipalContextTest extends UnitTestCase {
   }
 
   /**
+   * Sealed-token provenance is stored on the context.
+   *
+   * @covers ::fromSealedToken
+   */
+  public function testFromSealedTokenProvenance(): void {
+    $plain = $this->context();
+    $this->assertFalse($plain->fromSealedToken());
+    $sealed = new McpPrincipalContext(
+      'urn:mcp-sentinel:sealed-token',
+      'human-1',
+      'agent-client',
+      'agent-client',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      TRUE,
+      [
+        'iss' => 'urn:mcp-sentinel:sealed-token',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+      ],
+      TRUE,
+    );
+    $this->assertTrue($sealed->fromSealedToken());
+  }
+
+  /**
    * A non-delegated token keys on iss|sub|azp.
    *
    * @covers ::principalKey

@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\Tests\mcp_sentinel\Support\McpJobScopeQueueStub;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -14,7 +17,7 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
- * Holder seals per request and requires resetForJob() on CLI workers.
+ * Holder seals per request and hides that seal under a deny-only overlay.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder
  *
@@ -107,109 +110,179 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * A CLI worker must resetForJob() between messages.
+   * Seal during an overlay is a no-op and does not mutate the request.
    *
-   * @covers ::sealForJob
-   * @covers ::resetForJob
+   * @covers ::enterJobScope
+   * @covers ::leaveJobScope
+   * @covers ::seal
+   * @covers ::get
    */
-  public function testResetForJobIsRefusedDuringRequest(): void {
+  public function testOverlaySealIsNoopAndRestoresRequestSeal(): void {
     $stack = new RequestStack();
-    $stack->push(Request::create('/mcp', 'POST'));
+    $request = Request::create('/cron/test-key');
+    $stack->push($request);
     $holder = new McpPrincipalContextHolder($stack);
-    $holder->seal($this->ctx('human-1', 'agent-client'), $stack->getCurrentRequest());
-    $this->expectException(\LogicException::class);
-    $holder->resetForJob();
+    $cron = $this->ctx('cron-human', 'cron-client');
+    $holder->seal($cron, $request);
+
+    $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
+    $stub->begin();
+    $this->assertTrue($holder->inJobScope());
+    $hidden = $holder->get();
+    $this->assertNull($hidden);
+    $holder->seal($this->ctx('job-human', 'job-client'), $request);
+    $stillHidden = $holder->get();
+    $this->assertNull($stillHidden);
+
+    $stub->end();
+    $this->assertFalse($holder->inJobScope());
+    $restored = $holder->get();
+    $this->assertSame($cron, $restored);
+    $this->assertSame('cron-human', $restored->subject());
   }
 
   /**
-   * A second CLI seal without resetForJob() is refused.
+   * Sequential enterJobScope() stays in the overlay.
+   *
+   * @covers ::enterJobScope
    */
-  public function testCliJobRequiresResetBetweenMessages(): void {
+  public function testSequentialEnterJobScopeStaysInOverlay(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/cron/test-key');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $cron = $this->ctx('cron-human', 'cron-client');
+    $holder->seal($cron, $request);
+
+    $stub = new McpJobScopeQueueStub(new McpPrincipalContextJob($holder));
+    $stub->begin();
+    $hidden = $holder->get();
+    $this->assertNull($hidden);
+    $stub->begin();
+    $this->assertTrue($holder->inJobScope());
+    $stillHidden = $holder->get();
+    $this->assertNull($stillHidden);
+    $stub->end();
+    $this->assertTrue($holder->inJobScope());
+    $stub->end();
+    $this->assertSame($cron, $holder->get());
+  }
+
+  /**
+   * LeaveJobScope() is refused without the matching enter handle.
+   *
+   * @covers ::enterJobScope
+   * @covers ::leaveJobScope
+   */
+  public function testLeaveJobScopeRequiresMatchingHandle(): void {
     $holder = new McpPrincipalContextHolder(new RequestStack());
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
+    $inner = $holder->enterJobScope();
     try {
-      $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-      $this->fail('A second CLI seal without resetForJob must be refused.');
+      $holder->leaveJobScope(new McpJobScopeHandle());
+      $this->fail('A forged handle must be refused.');
     }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
-        $e->reasonCode,
+    catch (\LogicException $e) {
+      $this->assertStringContainsString(
+        'matching enterJobScope',
+        $e->getMessage(),
       );
     }
-    $holder->resetForJob();
-    $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-    $this->assertSame('human-2', $holder->get()?->subject());
+    $this->assertTrue($holder->inJobScope());
+    $outer = $holder->enterJobScope();
+    try {
+      $holder->leaveJobScope($inner);
+      $this->fail('An outer handle must not close the inner overlay.');
+    }
+    catch (\LogicException $e) {
+      $this->assertStringContainsString(
+        'matching enterJobScope',
+        $e->getMessage(),
+      );
+    }
+    $holder->leaveJobScope($outer);
+    $this->assertTrue($holder->inJobScope());
+    $holder->leaveJobScope($inner);
+    $this->assertFalse($holder->inJobScope());
   }
 
   /**
-   * A leftover Drupal CLI request still requires resetForJob().
+   * SealForJob() and resetForJob() are gone; mixed/object/parent count.
    *
-   * @covers ::sealForJob
-   * @covers ::resetForJob
+   * Fails if any public method other than seal() can accept a
+   * caller-built principal context, including mixed, object, or a
+   * parent type of McpPrincipalContext.
    */
-  public function testLeftoverCliRequestRequiresResetBetweenMessages(): void {
-    $stack = new RequestStack();
-    $leftover = Request::create('/');
-    $stack->push($leftover);
-    $holder = new McpPrincipalContextHolder($stack);
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    try {
-      $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-      $this->fail('A leftover CLI request must not reuse the first principal.');
+  public function testPublicMethodsDoNotAcceptCallerBuiltContext(): void {
+    $class = new \ReflectionClass(McpPrincipalContextHolder::class);
+    $this->assertFalse($class->hasMethod('sealForJob'));
+    $this->assertFalse($class->hasMethod('resetForJob'));
+    $accepted = [];
+    foreach ($class->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+      if ($method->getDeclaringClass()->getName() !== $class->getName()) {
+        continue;
+      }
+      if ($method->getName() === 'seal') {
+        continue;
+      }
+      foreach ($method->getParameters() as $parameter) {
+        if ($this->parameterAcceptsPrincipalContext($parameter)) {
+          $accepted[] = $method->getName() . '::$' . $parameter->getName();
+        }
+      }
     }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
-        $e->reasonCode,
-      );
-    }
-    $this->assertSame('human-1', $holder->get()?->subject());
-    $holder->resetForJob();
-    $holder->sealForJob($this->ctx('human-2', 'agent-b'));
-    $this->assertSame('human-2', $holder->get()?->subject());
+    $this->assertSame([], $accepted);
   }
 
   /**
-   * An HTTP seal cannot replace a job that is already sealed.
+   * Whether a parameter is typed as or accepts McpPrincipalContext.
    *
-   * @covers ::seal
-   * @covers ::sealForJob
+   * Mixed, object, untyped, and parent types are treated as accepting.
+   *
+   * @param \ReflectionParameter $parameter
+   *   The parameter.
+   *
+   * @return bool
+   *   TRUE when the parameter can take a principal context.
    */
-  public function testHttpSealDoesNotOverwriteJobPrincipal(): void {
-    $stack = new RequestStack();
-    $request = Request::create('/mcp');
-    $stack->push($request);
-    $holder = new McpPrincipalContextHolder($stack);
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    try {
-      $holder->seal($this->ctx('human-2', 'agent-b'), $request);
-      $this->fail('An HTTP seal must not replace a sealed job principal.');
+  private function parameterAcceptsPrincipalContext(\ReflectionParameter $parameter): bool {
+    $type = $parameter->getType();
+    if ($type === NULL) {
+      return TRUE;
     }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->assertSame(
-        McpPrincipalContextDeniedException::RESEAL_REFUSED,
-        $e->reasonCode,
-      );
-    }
-    $this->assertSame('human-1', $holder->get()?->subject());
+    return $this->typeAcceptsPrincipalContext($type);
   }
 
   /**
-   * A job seal keeps a principal already sealed for the current request.
+   * Whether a reflected type includes McpPrincipalContext.
    *
-   * @covers ::seal
-   * @covers ::sealForJob
+   * @param \ReflectionType $type
+   *   The parameter type.
+   *
+   * @return bool
+   *   TRUE when the type includes McpPrincipalContext.
    */
-  public function testSealForJobKeepsAlreadySealedHttpRequest(): void {
-    $stack = new RequestStack();
-    $request = Request::create('/mcp');
-    $stack->push($request);
-    $holder = new McpPrincipalContextHolder($stack);
-    $first = $this->ctx('human-1', 'agent-a');
-    $holder->seal($first, $request);
-    $holder->sealForJob($this->ctx('human-1', 'agent-a'));
-    $this->assertSame($first, $holder->get());
+  private function typeAcceptsPrincipalContext(\ReflectionType $type): bool {
+    if ($type instanceof \ReflectionNamedType) {
+      $name = $type->getName();
+      if ($name === 'mixed' || $name === 'object') {
+        return TRUE;
+      }
+      if ($name === McpPrincipalContext::class) {
+        return TRUE;
+      }
+      return class_exists($name)
+        && is_a(McpPrincipalContext::class, $name, TRUE);
+    }
+    if ($type instanceof \ReflectionUnionType
+      || $type instanceof \ReflectionIntersectionType) {
+      foreach ($type->getTypes() as $inner) {
+        if ($this->typeAcceptsPrincipalContext($inner)) {
+          return TRUE;
+        }
+      }
+      return FALSE;
+    }
+    return FALSE;
   }
 
   /**

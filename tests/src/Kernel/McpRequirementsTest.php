@@ -102,6 +102,7 @@ final class McpRequirementsTest extends KernelTestBase {
 
     $requirements = mcp_sentinel_requirements('runtime');
     $this->assertArrayNotHasKey('mcp_sentinel_not_governing', $requirements);
+    $this->assertArrayNotHasKey('mcp_sentinel_spoofchecker', $requirements);
   }
 
   /**

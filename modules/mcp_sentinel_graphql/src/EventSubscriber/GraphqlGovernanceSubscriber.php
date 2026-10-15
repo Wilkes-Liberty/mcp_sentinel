@@ -106,6 +106,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       throw new Error('A verified principal is required.');
     }
     try {
+      // Sealed or deny-only audit context; never a live request rebuild.
       $this->principalDispatcher->assertDispatchAllowed([], 'graphql');
     }
     catch (McpPrincipalContextDeniedException $e) {

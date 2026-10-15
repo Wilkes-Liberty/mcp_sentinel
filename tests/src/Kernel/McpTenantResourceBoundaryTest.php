@@ -11,6 +11,8 @@ use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\EntityStorageException;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpTenantResourceBoundary;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\node\Entity\Node;
@@ -160,7 +162,7 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
     $kept = $storage->load($id);
     $this->assertSame('fixture-a-kept', $kept->label());
 
-    $this->container->get('mcp_sentinel.principal_context_holder')->resetForTest();
+    $this->principalContextHolder()->resetForTest();
     $this->container->get('entity_type.manager')
       ->getAccessControlHandler('node')
       ->resetCache();
@@ -257,7 +259,7 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
       'scope' => 'mcp_read mcp_write',
     ]);
     $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
-    $holder = $this->container->get('mcp_sentinel.principal_context_holder');
+    $holder = $this->principalContextHolder();
     $holder->resetForTest();
     $stack = $this->container->get('request_stack');
     $current = $stack->getCurrentRequest();
@@ -278,6 +280,18 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
    */
   private function reason(AccessResultInterface $result): string {
     return $result instanceof AccessResultReasonInterface ? $result->getReason() : '';
+  }
+
+  /**
+   * The private holder, reached through the public dispatcher.
+   */
+  private function principalContextHolder(): McpPrincipalContextHolder {
+    $ref = new \ReflectionProperty(McpPrincipalContextDispatcher::class, 'holder');
+    $holder = $ref->getValue($this->container->get('mcp_sentinel.principal_context_dispatcher'));
+    if (!$holder instanceof McpPrincipalContextHolder) {
+      throw new \LogicException('Dispatcher holder is not McpPrincipalContextHolder.');
+    }
+    return $holder;
   }
 
   /**

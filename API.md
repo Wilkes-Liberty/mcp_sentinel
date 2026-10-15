@@ -192,18 +192,30 @@ request boundary, not a rebuild from request attributes.
 Governed Tool plugins no longer accept cookie sessions, role-fallback
 accounts, or claimless stdio. There is no bypass. Issue Paladin
 tokens with `iss`, `sub`, `azp` (or RFC 8693 `act.sub`), and
-`tenant`. Sealed tokens now verify to `iss`
-(`urn:mcp-sentinel:sealed-token`), `sub` (the Consumer owner's UUID),
-`azp` (the client_id), and `tenant`; a token minted before this
-release has no tenant and is refused, so re-mint it with one. For
-local stdio development, mint a Paladin token with those claims and
-pass it on the connector channel the same way a network agent would.
-A custom CLI/queue runner that supplies claims and constructs a
-context must call
-`mcp_sentinel.principal_context_holder::resetForJob()` at the start
-of each message; the call is refused while an HTTP request is
-current, and no shipped runner needs it because a no-request call has
-no claim source.
+`tenant`. **There is no interim path for sealed-token sites.**
+Governed tools fail closed until Paladin tokens are in place.
+Sealed tokens (the sealed-token auth provider, or `iss`
+`urn:mcp-sentinel:sealed-token`) are refused for governed Tool
+plugins (`non_idp_issuer`). Re-minting a sealed token is not a
+compatibility mode.
+For local stdio development, mint a Paladin token with those
+claims and pass it on the connector channel the same way a
+network agent would.
+Queue and Drush open a deny-only overlay that hides the request
+seal and never stores a caller-built context. There is no API that
+accepts a context object from callers. Governed tools refuse
+(`missing_principal`) while that overlay is open until a hop
+token (DEV-844) supplies a Paladin principal. The overlay is
+opened through `mcp_sentinel.principal_context_job`
+(`begin()` / `end($handle)` / `run()`). `end()` requires the
+handle `begin()` returned. `enterJobScope()` returns a
+scope handle; `leaveJobScope()` is refused unless the caller
+presents that matching handle. Site code must not call either
+method. The holder service is `public: false`.
+`sealForJob()` and `resetForJob()` are removed. Drush opens the
+overlay via PRE/POST_COMMAND_HOOK (`*` — every command). A
+Drush-hosted stdio server is therefore never admitted for
+governed tools.
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.
