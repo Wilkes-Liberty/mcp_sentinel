@@ -107,6 +107,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
       $this->container->get('entity_type.manager'),
       $this->container->get('mcp_sentinel.policy_resolver'),
       $this->container->get('mcp_sentinel.governed_sql'),
+      $this->container->get('mcp_sentinel.principal_context_dispatcher'),
     );
 
     $logger = new DrushLoggerManager();
@@ -115,6 +116,37 @@ final class McpRawSqlCommandTest extends KernelTestBase {
 
     $this->output = new BufferedOutput();
     $this->commands->setOutput($this->output);
+  }
+
+  /**
+   * Governed SQL refuses before the SQL guard when no principal is sealed.
+   */
+  public function testSqlQueryDeniedWithoutPrincipal(): void {
+    $this->dropStampedPrincipal();
+    $result = $this->commands->sqlQuery('SELECT nid FROM node_field_data');
+    $this->assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $result);
+    $operations = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['operation'])
+      ->execute()
+      ->fetchCol();
+    $this->assertContains('denied_access', $operations);
+    $this->assertNotContains('raw_sql_query', $operations);
+    $this->assertNotContains('raw_sql_denied', $operations);
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $metadata = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame('mcp-sentinel:sql-query', $metadata['tool']);
+    $this->assertSame('missing_principal', $metadata['reason']);
+    $this->assertSame('', $this->output->fetch());
   }
 
   /**

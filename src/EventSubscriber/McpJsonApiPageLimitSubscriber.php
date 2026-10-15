@@ -9,9 +9,11 @@ use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\jsonapi\ResourceType\ResourceType;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpReadBudgetResolver;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -74,6 +76,9 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *   Classification egress ceilings (d.o #3616540 part 2). Nullable for the
    *   deploy window in which the cached container still passes six arguments;
    *   without it no ceiling is evaluated here, exactly the previous behavior.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
+   *   Principal and tenant gate. Nullable only while a cached container
+   *   still has the previous argument list; a missing dispatcher fails closed.
    */
   public function __construct(
     private readonly McpAccessChecker $accessChecker,
@@ -83,6 +88,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     private readonly McpReadBudgetResolver $budgets,
     private readonly McpAuditLogger $auditLogger,
     private readonly ?McpClassificationResolver $classification = NULL,
+    private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
   ) {}
 
   /**
@@ -150,6 +156,10 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         'MCP source governance is not ready: active_profile_missing.',
       );
     }
+
+    // Same principal and tenant gate as governed tools. A role-fallback
+    // session is not a principal. Denial is audited inside the dispatcher.
+    $this->requirePrincipal($surface->value);
 
     // IP allowlist: deny the whole JSON:API request (collection, individual or
     // write) when the client IP is not permitted. An empty allowed_ips list
@@ -294,6 +304,27 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
           $cap,
         ),
       );
+    }
+  }
+
+  /**
+   * Refuses a governed call that has no verified principal or tenant.
+   *
+   * @param string $surfaceId
+   *   Surface name recorded on the denial row.
+   *
+   * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+   *   When the principal gate refuses the call.
+   */
+  private function requirePrincipal(string $surfaceId): void {
+    if ($this->principalDispatcher === NULL) {
+      throw new AccessDeniedHttpException('A verified principal is required.');
+    }
+    try {
+      $this->principalDispatcher->assertDispatchAllowed([], $surfaceId);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      throw new AccessDeniedHttpException($e->getMessage(), $e);
     }
   }
 
