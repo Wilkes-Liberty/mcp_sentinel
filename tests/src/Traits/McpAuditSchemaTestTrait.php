@@ -31,7 +31,7 @@ trait McpAuditSchemaTestTrait {
   }
 
   /**
-   * Stamps a complete Paladin token so execute() is not refused.
+   * Seeds a tool-request principal without changing the main OAuth channel.
    *
    * Kernel tool tests that never set claims still need a verified
    * principal. Does not overwrite Paladin or sealed-token claims a
@@ -47,6 +47,13 @@ trait McpAuditSchemaTestTrait {
     if ($request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
       || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)) {
       return;
+    }
+    // Keep this principal-only fixture off the main authentication request.
+    // Role and OAuth tests retain their own channel; tool dispatch reads the
+    // current request. Real provider integration uses main-request claims.
+    if ($request === $stack->getMainRequest()) {
+      $request = $request->duplicate();
+      $stack->push($request);
     }
     $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
       'iss' => 'https://idp.example/realms/agents',
