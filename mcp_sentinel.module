@@ -276,6 +276,11 @@ function mcp_sentinel_page_top(array &$page): void {
  * because the original (pre-change) field values are still available here.
  */
 function mcp_sentinel_entity_presave(EntityInterface $entity): void {
+  // Save does not consult hook_entity_access(). Refuse a different
+  // tenant before any write precondition or audit row.
+  \Drupal::service('mcp_sentinel.tenant_resource_boundary')
+    ->assertSameTenant($entity);
+
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
   if (!$resolver->isGoverned()) {
     return;
@@ -482,6 +487,8 @@ function _mcp_sentinel_log_entity_save(EntityInterface $entity, string $operatio
  * fail gracefully.
  */
 function mcp_sentinel_entity_predelete(EntityInterface $entity): void {
+  \Drupal::service('mcp_sentinel.tenant_resource_boundary')
+    ->assertSameTenant($entity);
   if (!$entity instanceof ContentEntityInterface) {
     return;
   }
@@ -575,6 +582,7 @@ function _mcp_sentinel_evidence_gate(ContentEntityInterface $entity, string $act
  * stashed paragraph — a no-op for ordinary inserts.
  */
 function mcp_sentinel_entity_insert(EntityInterface $entity): void {
+  \Drupal::service('mcp_sentinel.tenant_resource_boundary')->claimNew($entity);
   \Drupal::service('mcp_sentinel.composite_redirect')->onPostSave($entity);
   _mcp_sentinel_log_entity_save($entity, 'create');
   _mcp_sentinel_scheduled_publish_gate()?->auditSaved($entity);
@@ -662,16 +670,26 @@ function mcp_sentinel_entity_access(
   $scheduled = _mcp_sentinel_scheduled_publish_gate()?->entityAccess($entity, $operation, $account)
     ?? AccessResult::neutral();
 
+  /** @var \Drupal\mcp_sentinel\Service\McpTenantResourceBoundary $boundary */
+  $boundary = \Drupal::service('mcp_sentinel.tenant_resource_boundary');
+  $tenant_denial = $boundary->denyOtherTenant($entity, $operation);
+  if ($tenant_denial !== NULL) {
+    return $tenant_denial->orIf($scheduled);
+  }
+
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
   $profile = $resolver->resolve($account);
   if ($profile === NULL) {
-    return AccessResult::neutral()->addCacheContexts(['user.roles', 'oauth2_scopes'])->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list'])
-      ->orIf($scheduled);
+    $result = AccessResult::neutral()
+      ->addCacheContexts(['user.roles', 'oauth2_scopes'])
+      ->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list']);
+    return $boundary->varyByTenant($result)->orIf($scheduled);
   }
   /** @var \Drupal\mcp_sentinel\Service\McpAccessChecker $checker */
   $checker = \Drupal::service('mcp_sentinel.access_checker');
-  return $checker->checkEntityAccess($entity, $operation, $profile)->addCacheContexts(['user.roles', 'oauth2_scopes'])
-    ->orIf($scheduled);
+  $result = $checker->checkEntityAccess($entity, $operation, $profile)
+    ->addCacheContexts(['user.roles', 'oauth2_scopes']);
+  return $boundary->varyByTenant($result)->orIf($scheduled);
 }
 
 /**

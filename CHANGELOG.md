@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- A governed agent that creates a content entity records that entity's
+  tenant. A later governed read, update, or delete by a different
+  tenant is refused, and the refusal is not cached. Content with no
+  ownership row keeps the access it already had. The user entity is
+  not recorded. A tenant longer than 128 characters fails closed.
+
 ### Changed
 - First-party governed tools no longer re-inject `policyResolver`,
   `accessChecker`, `auditLogger`, or `classification`. They use the

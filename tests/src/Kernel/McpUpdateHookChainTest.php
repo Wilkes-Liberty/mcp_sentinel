@@ -918,6 +918,27 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10029 creates the tenant ownership table and is idempotent.
+   */
+  public function testUpdate10029CreatesTenantResourceTable(): void {
+    $schema = $this->container->get('database')->schema();
+    if ($schema->tableExists('mcp_sentinel_tenant_resource')) {
+      $schema->dropTable('mcp_sentinel_tenant_resource');
+    }
+    $this->assertFalse($schema->tableExists('mcp_sentinel_tenant_resource'));
+
+    $message = mcp_sentinel_update_10029();
+    $this->assertStringContainsString(
+      'Created mcp_sentinel_tenant_resource',
+      $message,
+    );
+    $this->assertTrue($schema->tableExists('mcp_sentinel_tenant_resource'));
+
+    $again = mcp_sentinel_update_10029();
+    $this->assertStringContainsString('already exists', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it
