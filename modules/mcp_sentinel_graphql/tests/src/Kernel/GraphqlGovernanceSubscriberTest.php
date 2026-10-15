@@ -356,6 +356,9 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $request->setSession($master->getSession());
     }
     $stack->push($request);
+    // The audit fixture sealed a principal on an earlier request. Seal
+    // it onto this request so the operation gate admits the call.
+    $this->stampDefaultPrincipalContext();
 
     $this->subscriber()->onOperation($this->makeEvent('mutation'));
     $this->assertSame(
