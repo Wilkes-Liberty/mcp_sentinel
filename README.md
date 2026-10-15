@@ -32,9 +32,12 @@ omitting it, and a non-agent user cannot be governed by adding it. The
 Governed tool dispatch (`McpGovernedToolBase` only) builds an immutable
 principal + tenant context from the validated token and passes it to
 handlers as a separate parameter. Tools must not read identity or
-tenant from arguments. GraphQL operations, `/drupal-mcp/context`,
-and `drush mcp-sentinel:sql-query` run the same check. JSON:API and
-GraphQL HTTP run it when the request carries a validated bearer. Other
+tenant from arguments. GraphQL operations and `/drupal-mcp/context`
+run the same check. JSON:API and GraphQL HTTP run it when the request
+carries a validated bearer. `drush mcp-sentinel:sql-query` is an
+operator command: Drush has no bearer, so a local invocation stays on
+the profile SQL guard. A runner that already sealed a job principal
+is refused when that seal has no principal or tenant. Other
 `mcp-sentinel:*` commands stay operator commands. `drush sql:query`
 still cannot be governed, because its bootstrap never loads the
 module. A Simple OAuth bearer is copied onto
@@ -67,9 +70,11 @@ Cookie sessions, role-fallback, claimless stdio calls, and sealed
 tokens minted without a tenant are refused on governed tools.
 JSON:API and GraphQL HTTP apply that refusal only when the request
 already carries a validated bearer; a role-fallback session on those
-paths is unchanged. GraphQL operations, `/drupal-mcp/context`, and
-`drush mcp-sentinel:sql-query` refuse a call with no verified
-principal. There is no bypass on those paths. Callers
+paths is unchanged. GraphQL operations and `/drupal-mcp/context`
+refuse a call with no verified principal. There is no bypass on those
+paths. `drush mcp-sentinel:sql-query` does not invent a principal
+from its options; a local invocation stays on the profile SQL guard,
+and a sealed job principal is still checked. Callers
 must use tokens that carry `iss`, `sub`, `azp` (or
 `act.sub`), and `tenant`, or a sealed token re-minted with a tenant.
 `sub` must not be the Drupal user id.
@@ -1349,7 +1354,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
-| `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. Refused without a verified principal and tenant, and unless the profile sets `allow_raw_sql`; every attempt is audited. |
+| `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. A local invocation has no bearer and is refused unless the profile sets `allow_raw_sql`. A sealed job principal is still checked. Every attempt is audited. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
 | `drush mcp-sentinel:audit-purge` | Delete audit entries past the retention window (also runs on cron). |
 | `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |

@@ -4,18 +4,23 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
-## Context, GraphQL operations, and governed SQL require a principal
+## Context and GraphQL operations require a principal
 
 A role-fallback session is no longer enough on these paths. Each one
 refuses the call unless the request has a verified principal and tenant:
 
 - GraphQL operations
 - `/drupal-mcp/context` (the readiness probe is unchanged)
-- `drush mcp-sentinel:sql-query`
 
 JSON:API and the GraphQL HTTP seam require that principal only when
 the request already carries a validated bearer. A role-fallback
 session on those two paths is unchanged.
+
+`drush mcp-sentinel:sql-query` does not take a bearer. A local
+invocation stays on the profile SQL guard (`allow_raw_sql` still
+ships off). A process that already sealed a job principal is refused
+when that seal has no principal or tenant. Do not pass `iss`, `sub`,
+or `tenant` as command options.
 
 The principal is `iss`, a `sub` that is not the Drupal user id, `azp`
 or top-level `act.sub`, and `tenant`. A sealed token minted with a

@@ -105,6 +105,21 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
   }
 
   /**
+   * A missing audit table still returns the JSON denial, not a 500.
+   */
+  public function testContextDenialSurvivesAuditOutage(): void {
+    $this->switchToGovernedUser();
+    $this->dropStampedPrincipal();
+    $this->container->get('database')->schema()->dropTable('audit_chain_log');
+    $response = McpContextController::create($this->container)->context();
+    $this->assertSame(403, $response->getStatusCode());
+    $payload = json_decode((string) $response->getContent(), TRUE);
+    $this->assertIsArray($payload);
+    $this->assertSame('missing_principal', $payload['reason']);
+    $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+  }
+
+  /**
    * Role fallback makes the surface ready without supplying a principal.
    */
   private function switchToGovernedUser(): void {
