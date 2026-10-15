@@ -114,12 +114,6 @@ final class McpPrincipalContextDispatcher {
     array $reservedExceptions = [],
     array $nestedMapRules = [],
   ): McpPrincipalContext {
-    $this->assertArgumentsAllowed(
-      $arguments,
-      $toolId,
-      $reservedExceptions,
-      $nestedMapRules,
-    );
     if ($this->holder->inJobScope()) {
       $this->deny(
         $toolId,
@@ -127,17 +121,13 @@ final class McpPrincipalContextDispatcher {
         self::OVERLAY_REFUSED,
       );
     }
-    $ctx = $this->factory->fromCurrentRequest();
-    $request = $this->requestStack->getCurrentRequest();
-    try {
-      if ($request !== NULL) {
-        $this->holder->seal($ctx, $request);
-      }
-    }
-    catch (McpPrincipalContextDeniedException $e) {
-      $this->writeDenialAudit($toolId, $e->reasonCode);
-      throw $e;
-    }
+    $this->sealOnceFromRequest($toolId);
+    $this->assertArgumentsAllowed(
+      $arguments,
+      $toolId,
+      $reservedExceptions,
+      $nestedMapRules,
+    );
     // Hand out the sealed slot only. Never fall back to a rebuild
     // from attributes that may have been replaced since the seal.
     $sealed = $this->holder->get();
@@ -177,12 +167,6 @@ final class McpPrincipalContextDispatcher {
     array $reservedExceptions = [],
     array $nestedMapRules = [],
   ): void {
-    $this->assertArgumentsAllowed(
-      $arguments,
-      $toolId,
-      $reservedExceptions,
-      $nestedMapRules,
-    );
     if ($this->holder->inJobScope()) {
       $this->deny(
         $toolId,
@@ -190,16 +174,13 @@ final class McpPrincipalContextDispatcher {
         self::OVERLAY_REFUSED,
       );
     }
-    $request = $this->requestStack->getCurrentRequest();
-    if ($this->holder->get() === NULL && $request !== NULL) {
-      try {
-        $this->holder->seal($this->factory->fromCurrentRequest(), $request);
-      }
-      catch (McpPrincipalContextDeniedException $e) {
-        $this->writeDenialAudit($toolId, $e->reasonCode);
-        throw $e;
-      }
-    }
+    $this->sealOnceFromRequest($toolId);
+    $this->assertArgumentsAllowed(
+      $arguments,
+      $toolId,
+      $reservedExceptions,
+      $nestedMapRules,
+    );
     $sealed = $this->holder->get();
     if (!$sealed instanceof McpPrincipalContext) {
       $this->deny(
@@ -243,12 +224,7 @@ final class McpPrincipalContextDispatcher {
       );
     }
     catch (McpPrincipalContextDeniedException $e) {
-      $this->deny(
-        $toolId,
-        $e->reasonCode,
-        $e->getMessage(),
-        $this->argumentDenialContext(),
-      );
+      $this->deny($toolId, $e->reasonCode, $e->getMessage());
     }
     if ($reserved !== []) {
       $this->deny(
@@ -257,8 +233,34 @@ final class McpPrincipalContextDispatcher {
         'Tool arguments must not carry identity or tenant keys ('
         . implode(', ', $reserved)
         . '). Identity comes from the validated token context.',
-        $this->argumentDenialContext(),
       );
+    }
+  }
+
+  /**
+   * Seals once from the current request when the holder is empty.
+   *
+   * Callers run this before reserved-key checks so a denial row can
+   * name the sealed principal. Never rebuilds from live attributes
+   * after a seal.
+   *
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the request cannot be sealed.
+   */
+  private function sealOnceFromRequest(string $toolId): void {
+    $request = $this->requestStack->getCurrentRequest();
+    if ($this->holder->get() !== NULL || $request === NULL) {
+      return;
+    }
+    try {
+      $this->holder->seal($this->factory->fromCurrentRequest(), $request);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->writeDenialAudit($toolId, $e->reasonCode);
+      throw $e;
     }
   }
 
@@ -383,27 +385,6 @@ final class McpPrincipalContextDispatcher {
   }
 
   /**
-   * Caller named on a reserved-key denial.
-   *
-   * That check runs before seal(). A job overlay contributes no
-   * identity. Otherwise the validated token on the request is the
-   * caller, so the row names them.
-   *
-   * @return \Drupal\mcp_sentinel\Value\McpPrincipalContext
-   *   Context for the denial row.
-   */
-  private function argumentDenialContext(): McpPrincipalContext {
-    if ($this->holder->inJobScope()) {
-      return $this->emptyDenialContext();
-    }
-    $held = $this->holder->get();
-    if ($held instanceof McpPrincipalContext) {
-      return $held;
-    }
-    return $this->factory->fromCurrentRequest();
-  }
-
-  /**
    * Denial context with no principal.
    *
    * @return \Drupal\mcp_sentinel\Value\McpPrincipalContext
@@ -494,29 +475,15 @@ final class McpPrincipalContextDispatcher {
    * receives the access exception and can return 403 or a non-zero
    * exit instead of an uncaught 500. A failed write is logged.
    *
-   * @param string $toolId
-   *   Real tool plugin id for the audit row.
-   * @param string $reasonCode
-   *   Denial reason.
-   * @param string $message
-   *   Exception message.
-   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext|null $auditContext
-   *   Row context. The sealed or empty context when omitted.
-   *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
   private function deny(
     string $toolId,
     string $reasonCode,
     string $message,
-    ?McpPrincipalContext $auditContext = NULL,
   ): never {
     try {
-      $this->logDenial(
-        $toolId,
-        $reasonCode,
-        $auditContext ?? $this->auditContext(),
-      );
+      $this->logDenial($toolId, $reasonCode, $this->auditContext());
     }
     catch (\Throwable $e) {
       $this->logger->error(
