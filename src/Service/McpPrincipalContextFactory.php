@@ -82,7 +82,27 @@ final class McpPrincipalContextFactory {
       $actChain,
       $network,
       $keyClaims,
+      $this->fromSealedTokenProvider($request),
     );
+  }
+
+  /**
+   * TRUE when claims came from the sealed-token auth provider.
+   *
+   * Paladin CLAIMS_ATTRIBUTE wins when both attributes are present.
+   */
+  private function fromSealedTokenProvider(?Request $request): bool {
+    if ($request === NULL) {
+      return FALSE;
+    }
+    $paladin = $request->attributes->get(
+      McpPrincipalContext::CLAIMS_ATTRIBUTE,
+    );
+    if (is_array($paladin)) {
+      return FALSE;
+    }
+    $sealed = $request->attributes->get(McpOauthContext::SEALED_ATTRIBUTE);
+    return is_array($sealed);
   }
 
   /**

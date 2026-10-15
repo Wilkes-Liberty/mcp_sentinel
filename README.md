@@ -75,12 +75,13 @@ refuse a call with no verified principal. There is no bypass on those
 paths. `drush mcp-sentinel:sql-query` does not invent a principal
 from its options; a local invocation stays on the profile SQL guard,
 and a sealed job principal is still checked. Callers
-must use tokens that carry `iss`, `sub`, `azp` (or
-`act.sub`), and `tenant`, or a sealed token re-minted with a tenant.
-`sub` must not be the Drupal user id.
-For stdio development, mint that token and send it on the connector
-channel. A custom CLI worker that supplies claims calls
-`mcp_sentinel.principal_context_holder::resetForJob()` per message.
+must use Paladin tokens that carry `iss`, `sub`, `azp` (or
+`act.sub`), and `tenant`. Sealed tokens are refused for governed
+Tool plugins (`non_idp_issuer`). `sub` must not be the Drupal user id.
+For stdio development, mint that Paladin token and send it on the
+connector channel. Queue and Drush open a deny-only overlay per
+item through `mcp_sentinel.principal_context_job`;
+`sealForJob()` / `resetForJob()` are removed.
 See [`API.md`](API.md#migration-paladin-tokens-required-dev-844).
 
 Each governed agent is matched to an **`mcp_policy_profile`** (the highest-weight

@@ -340,6 +340,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       throw new AccessDeniedHttpException('A verified principal is required.');
     }
     try {
+      // Sealed or deny-only audit context; never a live request rebuild.
       $this->principalDispatcher->assertDispatchAllowed([], $surfaceId);
     }
     catch (McpPrincipalContextDeniedException $e) {

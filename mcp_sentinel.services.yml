@@ -185,8 +185,18 @@ services:
 
   mcp_sentinel.principal_context_holder:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextHolder
+    public: false
     arguments:
       - '@request_stack'
+
+  mcp_sentinel.lookalike_checker:
+    class: Drupal\mcp_sentinel\Service\McpLookalikeChecker
+
+  mcp_sentinel.principal_context_job:
+    class: Drupal\mcp_sentinel\Service\McpPrincipalContextJob
+    arguments:
+      - '@mcp_sentinel.principal_context_holder'
+      - '@logger.channel.mcp_sentinel'
 
   mcp_sentinel.principal_context_factory:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextFactory
@@ -202,6 +212,7 @@ services:
       - '@mcp_sentinel.principal_context_guard'
       - '@mcp_sentinel.principal_context_holder'
       - '@mcp_sentinel.audit_logger'
+      - '@logger.channel.mcp_sentinel'
 
   mcp_sentinel.principal_key:
     class: Drupal\mcp_sentinel\Service\McpPrincipalKey
@@ -234,6 +245,13 @@ services:
     arguments:
       - '@mcp_sentinel.principal_context_factory'
       - '@mcp_sentinel.principal_context_holder'
+    tags:
+      - { name: event_subscriber }
+
+  mcp_sentinel.principal_context_cli_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextCliSubscriber
+    arguments:
+      - '@mcp_sentinel.principal_context_job'
     tags:
       - { name: event_subscriber }
 

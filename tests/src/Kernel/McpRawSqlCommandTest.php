@@ -157,7 +157,7 @@ final class McpRawSqlCommandTest extends KernelTestBase {
     if ($stack->getCurrentRequest() === NULL) {
       $stack->push($request);
     }
-    $this->container->get('mcp_sentinel.principal_context_holder')->seal(
+    $this->principalContextHolder()->seal(
       new McpPrincipalContext('', '', '', '', [], '', [], FALSE, []),
       $request,
     );

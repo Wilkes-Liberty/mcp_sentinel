@@ -4,16 +4,22 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\mcp_sentinel\Support\McpSettableClock;
-use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\key\Entity\Key;
+use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests the McpWebhookWorker delivery, retry, backoff and SSRF guard.
@@ -115,6 +121,18 @@ final class McpWebhookWorkerTest extends KernelTestBase {
   }
 
   /**
+   * The private holder, reached through the public dispatcher.
+   */
+  private function holder(): McpPrincipalContextHolder {
+    $ref = new \ReflectionProperty(McpPrincipalContextDispatcher::class, 'holder');
+    $holder = $ref->getValue($this->container->get('mcp_sentinel.principal_context_dispatcher'));
+    if (!$holder instanceof McpPrincipalContextHolder) {
+      $this->fail('Dispatcher holder is not McpPrincipalContextHolder.');
+    }
+    return $holder;
+  }
+
+  /**
    * A 200 response marks the row sent.
    *
    * @covers ::processItem
@@ -138,6 +156,163 @@ final class McpWebhookWorkerTest extends KernelTestBase {
     $this->assertSame('1', (string) $row['attempts']);
     $this->assertSame('200', (string) $row['last_response_code']);
     $this->assertCount(1, $history);
+  }
+
+  /**
+   * A queue item under a sealed web-cron request must not throw.
+   *
+   * /cron/{key} and admin Run cron seal the HTTP request. The worker
+   * pushes a job overlay and restores that seal after the item.
+   *
+   * @covers ::processItem
+   */
+  public function testQueueItemRunsUnderSealedWebCronRequest(): void {
+    $stack = $this->container->get('request_stack');
+    $cron = Request::create('/cron/test-key');
+    $holder = $this->holder();
+    $holder->resetForTest();
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $cron->setSession($master->getSession());
+    }
+    $stack->push($cron);
+    $cronCtx = new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'cron-human',
+      'cron-client',
+      'cron-client',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      TRUE,
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'cron-human',
+        'azp' => 'cron-client',
+      ],
+    );
+    $holder->seal($cronCtx, $cron);
+    $this->assertSame($cronCtx, $holder->get());
+
+    $id = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200, [], 'ok')], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ]);
+
+    $row = $this->loadRow($id);
+    $this->assertSame('sent', $row['status']);
+    $this->assertCount(1, $history);
+    $restored = $holder->get();
+    $this->assertSame($cronCtx, $restored);
+    $this->assertSame('cron-human', $restored->subject());
+    $this->assertFalse($holder->inJobScope());
+  }
+
+  /**
+   * A second queue item enters and leaves its own scope.
+   *
+   * @covers ::processItem
+   */
+  public function testSecondQueueItemDoesNotThrowResealRefused(): void {
+    $id1 = $this->seedRow();
+    $id2 = $this->seedRow();
+    $history = [];
+    $worker = $this->buildWorker([
+      new Response(200, [], 'ok'),
+      new Response(200, [], 'ok'),
+    ], $history);
+    $item = static fn (int $id): array => [
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.entity.presave',
+      'payload' => '{}',
+    ];
+    $worker->processItem($item($id1));
+    $worker->processItem($item($id2));
+    $this->assertSame('sent', $this->loadRow($id1)['status']);
+    $this->assertSame('sent', $this->loadRow($id2)['status']);
+    $this->assertCount(2, $history);
+    $this->assertFalse($this->holder()->inJobScope());
+  }
+
+  /**
+   * An exception inside a queue item still restores the HTTP seal.
+   *
+   * @covers ::processItem
+   */
+  public function testQueueItemExceptionRestoresHttpSeal(): void {
+    $stack = $this->container->get('request_stack');
+    $cron = Request::create('/cron/test-key');
+    $holder = $this->holder();
+    $holder->resetForTest();
+    $master = $stack->getCurrentRequest();
+    if ($master !== NULL && $master->hasSession()) {
+      $cron->setSession($master->getSession());
+    }
+    $stack->push($cron);
+    $cronCtx = new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'cron-human',
+      'cron-client',
+      'cron-client',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      TRUE,
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'cron-human',
+        'azp' => 'cron-client',
+      ],
+    );
+    $holder->seal($cronCtx, $cron);
+
+    $id = $this->seedRow();
+    $time = $this->createMock(TimeInterface::class);
+    $time->method('getRequestTime')
+      ->willThrowException(new \RuntimeException('clock failed'));
+    $worker = new McpWebhookWorker(
+      [],
+      'mcp_sentinel_webhook_delivery',
+      [],
+      $this->container->get('database'),
+      $this->container->get('http_client'),
+      $this->container->get('key.repository'),
+      $time,
+      $this->container->get('logger.channel.mcp_sentinel'),
+      new McpPrincipalContextJob($holder),
+    );
+    try {
+      $worker->processItem([
+        'delivery_id' => $id,
+        'endpoint' => [
+          'id' => 'ep1',
+          'url' => 'https://example.com/hook',
+          'secret_key' => '',
+        ],
+        'event_name' => 'mcp.entity.presave',
+        'payload' => '{}',
+      ]);
+      $this->fail('The throwing clock must escape processItem.');
+    }
+    catch (\RuntimeException $e) {
+      $this->assertSame('clock failed', $e->getMessage());
+    }
+    $this->assertSame($cronCtx, $holder->get());
+    $this->assertFalse($holder->inJobScope());
   }
 
   /**
