@@ -15,6 +15,40 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mcp_sentinel_help()` and `INSTALL.md` state the 3.0 fail-closed
   trust model.
 
+## [3.0.1] - 2026-10-15
+
+### Security
+- [DEV-844](https://wilkesliberty.atlassian.net/browse/DEV-844):
+  Carry the #291 review-fix end state that never landed on the
+  3.0.0 tag. Queue and Drush open a deny-only job overlay
+  (`enterJobScope()` / `leaveJobScope()` with a matching handle).
+  Governed tools refuse (`missing_principal`) under that overlay;
+  no identity is inherited from a web-cron request principal.
+  Each Drush or queue item enters and leaves its own scope, so a
+  second item does not throw `RESEAL_REFUSED`. If an item leaves
+  a scope open, the worker's `finally` unwinds to its own handle
+  and logs; it does not throw. `context()` and
+  `assertDispatchAllowed()` use the sealed or audit context and
+  never rebuild from live request attributes. Sealed tokens are
+  refused for governed Tool plugins by provenance or by
+  `iss` `urn:mcp-sentinel:sealed-token` (`non_idp_issuer`). A
+  missing `ext-intl` / `Spoofchecker` is a `hook_requirements`
+  ERROR and governed calls fail closed
+  (`lookalike_check_unavailable`) with an audit row, not an
+  uncaught 500. `deny()` still catches an audit-write failure
+  (#295) and now logs it; the denial is never silent.
+
+### Breaking
+- `McpPrincipalContextHolder::sealForJob()` and `resetForJob()`
+  are removed. The holder service is `public: false`. `seal()`
+  is a no-op while a job overlay is open, so it is not a
+  forgery path. Callers that used `resetForJob()` per CLI/queue
+  message must use `mcp_sentinel.principal_context_job`
+  (`begin()` / `end()` or `run()`). Site code must not call
+  `enterJobScope()` / `leaveJobScope()`.
+- Governed Tool plugins refuse sealed tokens even when reminted
+  with a tenant. Paladin is the sole issuer (DEV-843).
+
 ## [3.0.0] - 2026-10-15
 
 ### Breaking
@@ -25,12 +59,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role-fallback, and claimless stdio/CLI calls to those tools are
   denied the same way. There is no bypass. Callers must present a
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
-  Sealed tokens minted before this release carry no tenant: re-mint
-  them with one (the mint form now requires it) and they work again.
+  Sealed tokens minted before this release carry no tenant: 3.0.0
+  reminted them with one (the mint form now requires it). 3.0.1
+  refuses reminted sealed tokens for governed Tool plugins; see
+  [3.0.1].
   A Simple OAuth bearer is stamped only when the resource server has
   accepted it and the payload is already a full principal; see
-  Changed. Until that stamp or a sealed token with a tenant is
-  present, a governed call is refused. Denial `denied_access` rows
+  Changed. Until that stamp is present, a governed call is
+  refused. 3.0.0 still admitted a reminted sealed token; 3.0.1
+  does not. Denial `denied_access` rows
   are always written;
   `audit_enabled` gates allow rows only. `ext-intl` is now a declared
   Composer requirement: the module already needed it for `Normalizer`,
@@ -2957,7 +2994,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.1...1.x
+[3.0.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.0...3.0.1
 [3.0.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.1...3.0.0
 [2.34.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.0...2.34.1
 [2.34.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.33.0...2.34.0
