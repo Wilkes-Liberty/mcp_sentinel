@@ -362,7 +362,21 @@ final class McpPrincipalContextDispatcher {
   }
 
   /**
+   * Whether a principal is already sealed for this request or job.
+   *
+   * A local operator command has none. A runner that called seal()
+   * or sealForJob() does, and the gate then applies to that seal.
+   */
+  public function hasSealedContext(): bool {
+    return $this->holder->get() instanceof McpPrincipalContext;
+  }
+
+  /**
    * Writes a denied_access row and throws.
+   *
+   * An audit outage must not replace the denial. The caller still
+   * receives the access exception and can return 403 or a non-zero
+   * exit instead of an uncaught 500.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
@@ -371,7 +385,12 @@ final class McpPrincipalContextDispatcher {
     string $reasonCode,
     string $message,
   ): never {
-    $this->writeDenialAudit($toolId, $reasonCode);
+    try {
+      $this->writeDenialAudit($toolId, $reasonCode);
+    }
+    catch (\Throwable) {
+      // The decision is the denial. Losing the row does not admit the call.
+    }
     throw new McpPrincipalContextDeniedException($reasonCode, $message);
   }
 

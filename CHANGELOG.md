@@ -91,18 +91,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A Simple OAuth bearer is copied onto `mcp_sentinel.token_claims` only
   after that module's resource server accepts the same bearer and the
   verified payload already contains `iss`, a `sub` that is not the
-  Drupal user id, `azp` or top-level `act.sub`, and `tenant`. The
-  Drupal user id is never written as `sub`. A rejected bearer is not
-  read. A payload that is not a full principal is left unstamped, so
-  Simple OAuth scope and client fallback still applies and a governed
-  call still fails closed. Sealed tokens are unchanged. A JSON:API
-  or GraphQL HTTP call refuses a missing principal only when the
-  request already carries a validated bearer. A role-fallback session
-  on those paths is unchanged. GraphQL operations,
-  `/drupal-mcp/context`, and `drush mcp-sentinel:sql-query` refuse a
-  call that has no verified principal or tenant. Other
-  `mcp-sentinel:*` commands stay operator commands. `drush sql:query`,
-  `sql:cli`, `sql:dump`, and `php:eval` still cannot be governed.
+  Drupal user id, `azp` or top-level `act.sub`, a client id (`azp`,
+  `client_id`, or simple_oauth's `aud`), and `tenant`. The Drupal
+  user id is never written as `sub`. A rejected bearer is not read.
+  A payload that is not a full principal, or that names no OAuth
+  client, is left unstamped, so Simple OAuth scope and client
+  fallback still applies and a governed call still fails closed.
+  Sealed tokens are unchanged. A JSON:API or GraphQL HTTP call
+  refuses a missing principal only when the request already carries
+  a validated bearer. A role-fallback session on those paths is
+  unchanged. GraphQL operations and `/drupal-mcp/context` refuse a
+  call that has no verified principal or tenant. If writing the
+  denial row fails, the caller still gets that denial rather than
+  an uncaught error. `drush mcp-sentinel:sql-query` has no bearer:
+  a local invocation stays on the profile SQL guard, and a sealed
+  job principal is still checked. Other `mcp-sentinel:*` commands
+  stay operator commands. `drush sql:query`, `sql:cli`, `sql:dump`,
+  and `php:eval` still cannot be governed.
 - Governed tool plugins resolve deny-explainer, exfiltration-guard,
   audit-logger, and rate-limiter services once in
   `McpGovernedToolBase::create()` (`$governanceDenyExplainer`,

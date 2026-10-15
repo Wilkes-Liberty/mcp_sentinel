@@ -125,24 +125,43 @@ final class McpVerifiedOauthClaimsTest extends UnitTestCase {
   }
 
   /**
-   * Top-level act.sub is the actor when azp is absent.
+   * An actor claim without a client id is not published.
+   *
+   * Publishing it would hide the Simple OAuth consumer.
    *
    * @covers ::attributeFor
    */
-  public function testActSubIsPublishedAsActor(): void {
-    $published = McpVerifiedOauthClaims::attributeFor([
+  public function testActorWithoutClientIsNotPublished(): void {
+    $this->assertNull(McpVerifiedOauthClaims::attributeFor([
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'human-9',
       'tenant' => 'tenant-9',
       'act' => ['sub' => 'agent-bot', 'subject' => 'ignored'],
       'scopes' => ['mcp_read', '', 3, 'mcp_write'],
+    ], ''));
+  }
+
+  /**
+   * The token audience supplies the client id when azp is absent.
+   *
+   * @covers ::attributeFor
+   */
+  public function testAudienceSuppliesTheClientId(): void {
+    $published = McpVerifiedOauthClaims::attributeFor([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-9',
+      'tenant' => 'tenant-9',
+      'aud' => ['', 'client-9'],
+      'act' => ['sub' => 'agent-bot'],
+      'scope' => 'mcp_read',
     ], '');
     $this->assertSame([
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'human-9',
       'tenant' => 'tenant-9',
-      'act' => ['sub' => 'agent-bot', 'subject' => 'ignored'],
-      'scopes' => ['mcp_read', 'mcp_write'],
+      'client_id' => 'client-9',
+      'act' => ['sub' => 'agent-bot'],
+      'scopes' => ['mcp_read'],
     ], $published);
   }
 

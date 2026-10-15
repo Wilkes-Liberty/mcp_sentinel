@@ -13,6 +13,7 @@ use Drupal\tool\Tool\ToolInterface;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpSqlQueryTool;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelSqlCommands;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -22,6 +23,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Psr\Log\NullLogger;
 use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Kernel tests for the governed raw-SQL command (issue #64).
@@ -119,34 +121,54 @@ final class McpRawSqlCommandTest extends KernelTestBase {
   }
 
   /**
-   * Governed SQL refuses before the SQL guard when no principal is sealed.
+   * A local Drush invocation has no token, so the profile guard decides.
    */
-  public function testSqlQueryDeniedWithoutPrincipal(): void {
+  public function testUnsealedCliUsesTheProfileGuard(): void {
     $this->dropStampedPrincipal();
     $result = $this->commands->sqlQuery('SELECT nid FROM node_field_data');
     $this->assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $result);
-    $operations = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l', ['operation'])
-      ->execute()
-      ->fetchCol();
-    $this->assertContains('denied_access', $operations);
-    $this->assertNotContains('raw_sql_query', $operations);
-    $this->assertNotContains('raw_sql_denied', $operations);
-    $row = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l', ['metadata'])
-      ->condition('l.operation', 'denied_access')
-      ->orderBy('l.id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertIsArray($row);
-    $metadata = $this->container->get('mcp_sentinel.audit_logger')
-      ->decodeMetadata((string) $row['metadata']);
-    $this->assertSame('mcp-sentinel:sql-query', $metadata['tool']);
-    $this->assertSame('missing_principal', $metadata['reason']);
     $this->assertSame('', $this->output->fetch());
+    $rows = $this->auditRows();
+    $this->assertCount(1, $rows);
+    $this->assertSame('raw_sql_denied', $rows[0]['operation']);
+  }
+
+  /**
+   * The connector SSH path can run once the profile allows raw SQL.
+   */
+  public function testUnsealedCliRunsWhenRawSqlIsAllowed(): void {
+    $this->dropStampedPrincipal();
+    $this->setRawSqlCapability(TRUE);
+    $result = $this->commands->sqlQuery('SELECT nid, title FROM node_field_data');
+    $this->assertSame(McpSentinelSqlCommands::EXIT_SUCCESS, $result, $this->refusalDiagnostic());
+    $payload = json_decode(trim($this->output->fetch()), TRUE);
+    $this->assertIsArray($payload);
+    $this->assertCount(2, $payload['rows']);
+  }
+
+  /**
+   * A runner that sealed an empty principal is refused before any SQL.
+   */
+  public function testSealedEmptyPrincipalIsRefused(): void {
+    $this->dropStampedPrincipal();
+    $this->setRawSqlCapability(TRUE);
+    $stack = $this->container->get('request_stack');
+    $request = $stack->getCurrentRequest() ?? Request::create('/');
+    if ($stack->getCurrentRequest() === NULL) {
+      $stack->push($request);
+    }
+    $this->container->get('mcp_sentinel.principal_context_holder')->seal(
+      new McpPrincipalContext('', '', '', '', [], '', [], FALSE, []),
+      $request,
+    );
+    $result = $this->commands->sqlQuery('SELECT nid FROM node_field_data');
+    $this->assertSame(McpSentinelSqlCommands::EXIT_FAILURE, $result);
+    $this->assertSame('', $this->output->fetch());
+    $rows = $this->auditRows();
+    $this->assertCount(1, $rows);
+    $this->assertSame('denied_access', $rows[0]['operation']);
+    $this->assertSame('missing_principal', $rows[0]['metadata']['reason']);
+    $this->assertSame('mcp-sentinel:sql-query', $rows[0]['metadata']['tool']);
   }
 
   /**

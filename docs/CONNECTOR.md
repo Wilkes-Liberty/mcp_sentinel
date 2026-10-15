@@ -361,7 +361,10 @@ hook in any module runs on its path. Anything holding the SSH key can therefore
 read every table regardless of policy, which is why the connector no longer
 uses it.
 
-The governed replacement is `drush mcp-sentinel:sql-query`. Enabling it takes a
+The governed replacement is `drush mcp-sentinel:sql-query`. The SSH
+command has no bearer, so the profile SQL guard is what applies. A
+process that already sealed a job principal is still refused when that
+seal has no principal or tenant. Enabling the command takes a
 deliberate change on **both** sides:
 
 ```bash

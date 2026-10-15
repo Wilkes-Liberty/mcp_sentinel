@@ -10,8 +10,9 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
  * Selects the request-attribute map from an already-verified token payload.
  *
  * The Drupal user id is not a subject. A payload that cannot form a
- * principal key, or that has no tenant, is not published: publishing a
- * partial map would suppress the Simple OAuth credential fallback.
+ * principal key, has no tenant, or names no OAuth client is not
+ * published: publishing a partial map would suppress the Simple OAuth
+ * credential fallback.
  */
 final class McpVerifiedOauthClaims {
 
@@ -35,8 +36,13 @@ final class McpVerifiedOauthClaims {
     }
     $azp = self::stringClaim($claims, 'azp');
     $clientId = self::stringClaim($claims, 'client_id');
+    if ($azp === '' && $clientId === '') {
+      // simple_oauth puts the consumer id in aud and will not let this
+      // module overwrite that registered claim.
+      $clientId = self::audienceClientId($claims);
+    }
     $tenant = self::stringClaim($claims, 'tenant');
-    if ($iss === '' || $sub === '' || $tenant === '') {
+    if ($iss === '' || $sub === '' || $tenant === '' || ($azp === '' && $clientId === '')) {
       return NULL;
     }
 
@@ -67,6 +73,28 @@ final class McpVerifiedOauthClaims {
       $out['scopes'] = $scopes;
     }
     return $out;
+  }
+
+  /**
+   * First non-empty audience string, the simple_oauth client id.
+   *
+   * @param array<string, mixed> $claims
+   *   Verified payload.
+   */
+  private static function audienceClientId(array $claims): string {
+    $aud = $claims['aud'] ?? NULL;
+    if (is_string($aud)) {
+      return $aud;
+    }
+    if (!is_array($aud)) {
+      return '';
+    }
+    foreach ($aud as $value) {
+      if (is_string($value) && $value !== '') {
+        return $value;
+      }
+    }
+    return '';
   }
 
   /**

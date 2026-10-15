@@ -7,7 +7,6 @@ namespace Drupal\mcp_sentinel\Drush\Commands;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
-use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpSqlRefusal;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpGovernedSql;
@@ -83,12 +82,17 @@ final class McpSentinelSqlCommands extends DrushCommands {
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'", description: 'Run a governed query under the default profile.')]
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query --profile=readonly 'SELECT COUNT(*) FROM node_field_data'", description: 'Run a governed query under a named profile.')]
   public function sqlQuery(string $query = '', array $options = ['profile' => NULL]): int {
-    try {
-      $this->principalDispatcher->assertDispatchAllowed([], 'mcp-sentinel:sql-query');
-    }
-    catch (McpPrincipalContextDeniedException $exception) {
-      $this->logger()->error($exception->getMessage());
-      return self::EXIT_FAILURE;
+    // Drush has no validated bearer. A local invocation stays on the
+    // profile SQL guard. A runner that already sealed a job principal
+    // is still refused when that seal has no principal or tenant.
+    if ($this->principalDispatcher->hasSealedContext()) {
+      try {
+        $this->principalDispatcher->assertDispatchAllowed([], 'mcp-sentinel:sql-query');
+      }
+      catch (\Throwable $exception) {
+        $this->logger()->error($exception->getMessage());
+        return self::EXIT_FAILURE;
+      }
     }
     $profile = $this->resolveProfile((string) ($options['profile'] ?? ''));
     try {

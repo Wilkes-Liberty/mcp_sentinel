@@ -130,14 +130,19 @@ principal + tenant context sealed at the request boundary
 (DEV-844 / DEV-839). It throws when the dispatcher is missing or no
 principal is sealed; it never returns an empty context and never
 reads the request attribute. The tool guard applies **only** to
-`McpGovernedToolBase` subclasses. GraphQL operations,
-`/drupal-mcp/context`, and `drush mcp-sentinel:sql-query` call
+`McpGovernedToolBase` subclasses. GraphQL operations and
+`/drupal-mcp/context` call
 `McpPrincipalContextDispatcher::assertDispatchAllowed()` with an
 empty argument list before their own gates. JSON:API and the GraphQL
 HTTP seam do that only when the request carries a validated bearer;
 a role-fallback session is unchanged. They are not admitted
-through `admit()`/`dispatch()`. Other `mcp-sentinel:*` commands are
-not gated. `principalKey()` is
+through `admit()`/`dispatch()`. `drush mcp-sentinel:sql-query` calls
+that check only when `hasSealedContext()` is already true; a local
+invocation has no bearer and stays on the profile SQL guard. Other
+`mcp-sentinel:*` commands are not gated. An audit-append failure
+during a denial still raises
+`McpPrincipalContextDeniedException`; it does not become an uncaught
+500. `principalKey()` is
 `iss|sub|actor` (actor = top-level `act.sub` per RFC 8693, else
 `azp`; never `client_id` or `act.subject`); `humanKey()` is
 `iss|sub`. Missing iss/sub/azp/`act.sub`, a `|`, Unicode
@@ -408,7 +413,7 @@ content **publishing**. Both layers are additive and default to the safe value
 | `mcp-sentinel:status` | Source-contract readiness plus policy, audit, lock, and config-guard state. Exits non-zero whenever the connector-facing source contract is not ready; a ready contract does not claim healthy posture, effective policy, or durable evidence. |
 | `mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Secure-install evidence document. Posture always; hostile-input probes with `--live`. Never persists. Skipped checks fail the run. |
 | `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
-| `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only governed raw-SQL path. Refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement; every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
+| `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only raw-SQL path this module can see. A local invocation has no bearer and is refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement. A sealed job principal is still checked. Every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
 | `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. OAuth is required unless `--allow-unauthenticated-development` is passed. `--require-oauth` is accepted and does nothing; it is kept so scripts written for earlier releases still run. |
 | `mcp-sentinel:agent-provision <tier> --env=<env>` | Idempotently provision a tier's role, dedicated agent account, and OAuth consumer (deterministic `client_id` = `<tier>-<env>`). Secrets stay a human action. |
 | `mcp-sentinel:break-glass <uid>` | Raise an always-gated approval request to grant the time-boxed `mcp_admin` role (auto-revoked at `break_glass_ttl_seconds`). |
