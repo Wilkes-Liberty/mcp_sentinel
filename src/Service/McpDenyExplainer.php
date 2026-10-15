@@ -78,7 +78,27 @@ final class McpDenyExplainer {
         'reseal_refused',
         'principal reseal refused',
         FALSE,
-        'A subrequest cannot change the sealed principal. CLI workers must call resetForJob() per message.',
+        'A subrequest cannot change the sealed principal. Queue and Drush open a deny-only overlay per item.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'lookalike_check_unavailable')
+      || str_contains($reason, 'requires ext-intl Spoofchecker')) {
+      return new McpDenyExplanation(
+        'lookalike_check_unavailable',
+        'look-alike check unavailable',
+        FALSE,
+        'Install PHP ext-intl so Spoofchecker can detect reserved-key look-alikes. Governed calls fail closed until it is present.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'non_idp_issuer')
+      || str_contains($reason, 'sole issuer')) {
+      return new McpDenyExplanation(
+        'non_idp_issuer',
+        'non-IdP issuer',
+        FALSE,
+        'Paladin is the sole issuer for governed tools. Sealed tokens are refused by provenance or by iss urn:mcp-sentinel:sealed-token.',
         'Stay denied.',
       );
     }

@@ -246,6 +246,7 @@ class McpContextController extends ControllerBase {
       );
     }
     try {
+      // Sealed or deny-only audit context; never a live request rebuild.
       $this->principalDispatcher->assertDispatchAllowed([], 'context');
     }
     catch (McpPrincipalContextDeniedException $e) {
