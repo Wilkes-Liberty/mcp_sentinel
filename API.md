@@ -640,3 +640,22 @@ drafts add these inventory fields (#3626610, #3626879, #3626919):
 - `meta.pending` / `meta.multi_pending` and `meta.notices[]` with code
   `multi_pending_publish` warn that publishing one pending language in the
   Drupal UI drops the others. The same listing appears on the status report.
+
+## Verified bearer claims and OAuth admission
+
+An authentication provider may set `mcp_sentinel.token_claims` only after its
+issuer, audience, subject, binding and scope checks succeed. Supply verified
+`iss`, `sub`, `azp`, `client_id`, `tenant`, optional nested `act`, and the issuer's
+space-separated `scope` or string-list `scopes`. Never decode an unverified JWT
+or accept caller arguments as that source. No tenant default is permitted.
+
+The OAuth context snapshots the main request's grant on first use. Client
+identity resolves from `client_id`, then `client`, then `azp`; it must still be
+explicitly designated in `agent_oauth_clients`. Tool scopes are exact names:
+`mcp_read`, `mcp_write`, `mcp_config_read` and `mcp_config`. A scope does not
+implicitly grant a different scope. Malformed claims do not fall back to a
+sealed token or Simple OAuth account. Subrequests cannot replace the grant.
+The principal dispatcher separately requires a valid principal and tenant.
+
+This transports authority; resource handlers must still enforce tenant
+ownership. It does not establish resource isolation by itself.

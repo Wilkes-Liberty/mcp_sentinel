@@ -6,15 +6,17 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
 use Drupal\simple_oauth\Oauth2ScopeInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Reads the validated OAuth channel (consumer + scopes) for the current req.
  *
- * This is the single seam between MCP Sentinel and simple_oauth. It reports
- * whether the current request was authenticated via an OAuth access token
+ * This is the seam between MCP Sentinel and validated OAuth providers.
+ * It reports whether the current request used a validated OAuth access token
  * that marks the agent channel — a designated consumer client_id or one of
  * the configured agent scopes.
  *
@@ -46,6 +48,13 @@ class McpOauthContext {
   private bool $verificationChannel = FALSE;
 
   /**
+   * First verified Paladin grant per main request; never shared between calls.
+   *
+   * @var \WeakMap<\Symfony\Component\HttpFoundation\Request, array<array-key, mixed>>
+   */
+  private \WeakMap $paladinGrants;
+
+  /**
    * Constructs the OAuth context service.
    *
    * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
@@ -53,14 +62,16 @@ class McpOauthContext {
    * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
    *   The config factory.
    * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
-   *   Request stack used to read sealed-token claims. Optional so existing
+   *   Request stack used to read verified request claims. Optional so existing
    *   two-argument constructions in tests keep working.
    */
   public function __construct(
     private readonly AccountProxyInterface $currentUser,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly ?RequestStack $requestStack = NULL,
-  ) {}
+  ) {
+    $this->paladinGrants = new \WeakMap();
+  }
 
   /**
    * Marks (or clears) the current process as the governed agent channel.
@@ -82,6 +93,19 @@ class McpOauthContext {
    *   The scope names, or an empty array when the request is not OAuth.
    */
   public function scopes(): array {
+    $claims = $this->paladinClaims();
+    if ($claims !== NULL) {
+      if (array_key_exists('scopes', $claims)) {
+        $scopes = $claims['scopes'];
+        return is_array($scopes)
+          ? array_values(array_filter($scopes, 'is_string')) : [];
+      }
+      $scope = $claims['scope'] ?? NULL;
+      return is_string($scope)
+        ? array_values(array_filter(
+          explode(' ', $scope), static fn(string $name): bool => $name !== '',
+        )) : [];
+    }
     $sealed = $this->sealedClaims();
     if ($sealed !== NULL) {
       $scopes = $sealed['scopes'] ?? [];
@@ -109,6 +133,16 @@ class McpOauthContext {
    *   The consumer client_id string, or NULL.
    */
   public function clientId(): ?string {
+    $claims = $this->paladinClaims();
+    if ($claims !== NULL) {
+      foreach (['client_id', 'client', 'azp'] as $name) {
+        $value = $claims[$name] ?? NULL;
+        if (is_string($value) && $value !== '') {
+          return $value;
+        }
+      }
+      return NULL;
+    }
     $sealed = $this->sealedClaims();
     if ($sealed !== NULL && isset($sealed['client_id']) && is_string($sealed['client_id']) && $sealed['client_id'] !== '') {
       return $sealed['client_id'];
@@ -121,7 +155,8 @@ class McpOauthContext {
    * Whether the current account came from a validated OAuth access token.
    */
   public function isOauthRequest(): bool {
-    return $this->tokenAuthUser() !== NULL || $this->sealedClaims() !== NULL;
+    return $this->paladinClaims() !== NULL
+      || $this->tokenAuthUser() !== NULL || $this->sealedClaims() !== NULL;
   }
 
   /**
@@ -192,9 +227,33 @@ class McpOauthContext {
   }
 
   /**
+   * Snapshots only the authentication layer's verified main-request attribute.
+   *
+   * Presence suppresses legacy fallback even when the value is malformed.
+   * Missing attributes are not cached: authentication may not have run yet.
+   *
+   * @return array<array-key, mixed>|null
+   *   Verified claims, or NULL when this is not a Paladin request.
+   */
+  private function paladinClaims(): ?array {
+    $request = $this->requestStack?->getMainRequest();
+    if (!$request instanceof Request) {
+      return NULL;
+    }
+    if (isset($this->paladinGrants[$request])) {
+      return $this->paladinGrants[$request];
+    }
+    if (!$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)) {
+      return NULL;
+    }
+    $claims = $request->attributes->get(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    return $this->paladinGrants[$request] = is_array($claims) ? $claims : [];
+  }
+
+  /**
    * Claims from a verified sealed token on this request, if any.
    *
-   * @return array<string, mixed>|null
+   * @return array<array-key, mixed>|null
    *   client_id, scopes, jti — or NULL when this is not a sealed-token request.
    */
   private function sealedClaims(): ?array {

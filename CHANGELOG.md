@@ -84,6 +84,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tenant and the mint form requires one.
 
 ### Changed
+- [#3630908](https://www.drupal.org/project/mcp_sentinel/issues/3630908):
+  Use server-verified request claims for OAuth client designation and exact
+  tool scopes. Freeze that grant per main request, refuse malformed-claim
+  fallback to legacy credentials, and retain the client allowlist requirement.
 - Governed tool plugins resolve deny-explainer, exfiltration-guard,
   audit-logger, and rate-limiter services once in
   `McpGovernedToolBase::create()` (`$governanceDenyExplainer`,
