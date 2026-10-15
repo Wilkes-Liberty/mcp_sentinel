@@ -72,16 +72,18 @@ mcp_sentinel.settings:
             label: 'Allow internal/private IP (internal or VPN endpoints only; HTTPS still required)'
     kill_switch_default_ttl:
       type: integer
-      label: 'Default agent kill-block lifetime in seconds (24 h)'
+      label: 'Default agent kill-block lifetime in seconds (24 h, max 7 d)'
       constraints:
         Range:
           min: 1
+          max: 604800
     kill_switch_max_ttl:
       type: integer
-      label: 'Maximum agent kill-block lifetime in seconds (7 d)'
+      label: 'Maximum agent kill-block lifetime in seconds (7 d; cannot be raised)'
       constraints:
         Range:
           min: 1
+          max: 604800
     kill_switch_confirm_window:
       type: integer
       label: 'Two-person confirm window in seconds (15 min default)'

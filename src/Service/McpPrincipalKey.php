@@ -186,12 +186,99 @@ final class McpPrincipalKey {
   }
 
   /**
+   * Canonical iss|sub|actor from an operator-supplied principal key.
+   *
+   * Uses the same part rules and error codes as fromClaims() /
+   * tests/fixtures/principal-key-vectors.json. Extra '|' is
+   * invalid_separator; too few parts is invalid_part.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When the key cannot be composed.
+   */
+  public static function parsePrincipalKey(string $key): string {
+    $parts = self::splitKey($key, 2);
+    $missing = [
+      McpPrincipalKeyException::MISSING_ISS,
+      McpPrincipalKeyException::MISSING_SUB,
+      McpPrincipalKeyException::MISSING_AZP,
+    ];
+    $names = ['iss', 'sub', 'actor'];
+    foreach ($parts as $i => $part) {
+      if ($part === '') {
+        throw new McpPrincipalKeyException(
+          $missing[$i],
+          'Principal key requires a ' . $names[$i] . ' claim.',
+        );
+      }
+      self::assertSafePart($part);
+    }
+    return implode(self::SEPARATOR, $parts);
+  }
+
+  /**
+   * Canonical iss|sub from an operator-supplied human key.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When the key cannot be composed.
+   */
+  public static function parseHumanKey(string $key): string {
+    $parts = self::splitKey($key, 1);
+    $missing = [
+      McpPrincipalKeyException::MISSING_ISS,
+      McpPrincipalKeyException::MISSING_SUB,
+    ];
+    $names = ['iss', 'sub'];
+    foreach ($parts as $i => $part) {
+      if ($part === '') {
+        throw new McpPrincipalKeyException(
+          $missing[$i],
+          'Principal key requires a ' . $names[$i] . ' claim.',
+        );
+      }
+      self::assertSafePart($part);
+    }
+    return implode(self::SEPARATOR, $parts);
+  }
+
+  /**
+   * Splits a composed key into the expected number of parts.
+   *
+   * @return list<string>
+   *   Parts.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When UTF-8 is invalid or the separator count is wrong.
+   */
+  private static function splitKey(string $key, int $separators): array {
+    if (!mb_check_encoding($key, 'UTF-8')) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::INVALID_UTF8,
+        'Principal-key claims must be valid UTF-8.',
+      );
+    }
+    $found = substr_count($key, self::SEPARATOR);
+    if ($found > $separators) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::INVALID_SEPARATOR,
+        'Principal-key claims must not contain "|".',
+      );
+    }
+    if ($found < $separators) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::INVALID_PART,
+        'The kill selector does not match the principal-key shape.',
+      );
+    }
+    return explode(self::SEPARATOR, $key);
+  }
+
+  /**
    * Rejects '|', control characters, whitespace-only, and over-long parts.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
    *   When the part cannot appear in a key.
    */
-  private static function assertSafePart(string $part): void {
+  public static function assertSafePart(string $part): void {
     if (!mb_check_encoding($part, 'UTF-8')) {
       throw new McpPrincipalKeyException(
         McpPrincipalKeyException::INVALID_UTF8,

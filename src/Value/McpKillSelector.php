@@ -10,6 +10,9 @@ use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 
 /**
  * One kill-registry target: principal_key, human_key, or tenant.
+ *
+ * Principal and human keys are canonicalized with McpPrincipalKey
+ * using the same rules and error codes as principal-key-vectors.json.
  */
 final readonly class McpKillSelector {
 
@@ -55,49 +58,41 @@ final readonly class McpKillSelector {
   }
 
   /**
-   * Principal-key selector.
+   * Principal-key selector (iss|sub|actor).
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When the key fails the principal-key vector rules.
    */
   public static function principalKey(string $key): self {
-    self::assertKeyShape($key, 2);
-    return new self(McpKillSelectorType::PrincipalKey, $key);
+    return new self(
+      McpKillSelectorType::PrincipalKey,
+      McpPrincipalKey::parsePrincipalKey($key),
+    );
   }
 
   /**
-   * Human-key selector (all agents of this person).
+   * Human-key selector (iss|sub: every agent of this person).
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When the key fails the principal-key vector rules.
    */
   public static function humanKey(string $key): self {
-    self::assertKeyShape($key, 1);
-    return new self(McpKillSelectorType::HumanKey, $key);
+    return new self(
+      McpKillSelectorType::HumanKey,
+      McpPrincipalKey::parseHumanKey($key),
+    );
   }
 
   /**
    * Tenant-wide selector.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When the tenant fails a principal-key part rule (same codes as
+   *   tests/fixtures/principal-key-vectors.json).
    */
   public static function tenant(string $tenant): self {
+    McpPrincipalKey::assertSafePart($tenant);
     return new self(McpKillSelectorType::Tenant, $tenant);
-  }
-
-  /**
-   * Rejects a key that does not have the expected number of '|'.
-   *
-   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   */
-  private static function assertKeyShape(string $key, int $separators): void {
-    $parts = explode(McpPrincipalKey::SEPARATOR, $key);
-    if (count($parts) !== $separators + 1) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::INVALID_SELECTOR,
-        'The kill selector does not match the principal-key shape.',
-      );
-    }
-    foreach ($parts as $part) {
-      if ($part === '') {
-        throw new McpKillSwitchException(
-          McpKillSwitchException::INVALID_SELECTOR,
-          'The kill selector has an empty part.',
-        );
-      }
-    }
   }
 
 }

@@ -10,19 +10,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Agent kill switch core (DEV-846). A durable kill-block registry keyed
   by `iss|sub|actor`, `iss|sub` (every agent of this person), or tenant
   is checked on every `admit()` before `doExecute`. A killed principal
-  is refused with the same generic deny as an invalid principal; the
-  `denied_access` row records `principal_killed`. Default block TTL is
-  24 h, capped at 7 d; re-killing extends `block_until` up to that cap.
-  Mass kills (more than one principal, or any `human_key` / tenant
-  selector) and every un-kill stay pending until a distinct operator
-  account confirms within a configurable window (default 15 min). Same
-  account confirming twice is refused. In-flight governed writes
-  re-check the registry before commit and roll back. Queue and Drush
-  job scopes refuse a carried killed principal. Operator commands:
-  `mcp-sentinel:kill`, `:kill-confirm`, `:unkill`, `:kill-status`,
-  behind the restricted permission `administer agent kill switch`.
-  Paladin token revocation, `/mcp` kill-block writes, connector chain
-  reach, and the live Paladin latency proof are out of scope.
+  is refused with the same generic deny as an invalid principal or a
+  job overlay; the `denied_access` row records `principal_killed`.
+  Default block TTL is 24 h. A requested or configured TTL above 7 d
+  is a validation error (not clamped); the maximum cannot be configured
+  upward. Re-killing a key that is already killed keeps it killed and
+  may only extend `block_until` up to 7 d from now. A mass-kill request
+  that touches a killed key leaves it killed. Mass kills (more than one
+  principal, or any `human_key` / tenant selector) and every un-kill
+  stay pending until a distinct *verified* operator identity confirms
+  within a configurable window (default 15 min): Paladin `iss|sub` from
+  the sealed principal, or a Drush assertion bound to the OS process
+  (not `--uid` / `currentUser`). Same identity confirming twice is
+  refused. Confirm without a verified identity fails closed. In-flight
+  governed writes re-check the registry before commit and roll back
+  (config SAVE reverts first). Queue and Drush job scopes refuse a
+  carried killed principal. Expiry writes run from `hook_cron`; admit
+  treats an elapsed `block_until` as not blocking without writing.
+  Operator commands: `mcp-sentinel:kill`, `:kill-confirm`, `:unkill`,
+  `:kill-status`, behind the restricted permission
+  `administer agent kill switch`. Paladin token revocation, `/mcp`
+  kill-block writes, connector chain reach, live Paladin latency
+  proof, and cancellation of already-queued webhook deliveries are
+  out of scope. Known limitation: deliveries already in
+  `mcp_sentinel_webhook_delivery` still run after a kill until
+  DEV-846 job cancellation; an operator purges that queue (or the
+  webhook delivery log) when those sends must not go out.
 
 ## [3.1.0] - 2026-10-15
 

@@ -222,20 +222,34 @@ governed tools.
 `mcp_sentinel.kill_switch` is the operator API and the registry
 `admit()` and governed writes consult. Selectors are
 `McpKillSelector::principalKey()`, `humanKey()` (every agent of this
-person), and `tenant()`. A single principal kill is immediate. A mass
-kill and every un-kill wait for the named second person (secondary
-account holder). Confirm windows default to 15 minutes. Kill-block TTL
-defaults to 24 hours and cannot exceed 7 days. Audit operations
-`agent_kill`, `agent_kill_confirm`, `agent_kill_expire`,
-`agent_unkill_request`, and `agent_unkill` go through `logAlways()`
-and never include tokens. Callers of `admit()` never see a distinct
-killed signal. Queue workers may pass `principal_key` / `human_key` /
-`tenant` on the item; `McpPrincipalContextJob::beginCarrying()`
-attaches those keys for the kill check without sealing identity.
+person), and `tenant()`, canonicalized with `McpPrincipalKey` (same
+rules and error codes as `tests/fixtures/principal-key-vectors.json`).
+A single principal kill is immediate. A mass kill and every un-kill
+wait for the named second person (secondary account holder), each
+bound to a verified operator identity: Paladin `iss|sub` from the
+sealed principal context, or a Drush assertion HMAC of the OS process
+identity. `drush --user` / `--uid` sets `currentUser` for the
+`administer agent kill switch` permission only; that uid is not
+trusted for the two-person rule. Confirm without a verified identity
+fails closed. Confirm windows default to 15 minutes. Kill-block TTL
+defaults to 24 hours. A TTL above 7 days is a validation error and
+cannot be configured upward. A killed row is never downgraded to
+`kill_pending`. Audit operations `agent_kill`, `agent_kill_confirm`,
+`agent_kill_expire`, `agent_unkill_request`, and `agent_unkill` go
+through `logAlways()` and never include tokens. Callers of `admit()`
+never see a distinct killed or overlay signal (same code, message,
+and exception shape); the deny row holds the reason. Queue keys
+carried for the kill check are written as `unverified` on deny rows.
+Queue workers may pass `principal_key` / `human_key` / `tenant` on
+the item; `McpPrincipalContextJob::beginCarrying()` attaches those
+keys for the kill check without sealing identity. Already-queued
+webhook deliveries still run after a kill; purge
+`mcp_sentinel_webhook_delivery` until DEV-846 job cancellation.
 The unavailable-confirmer rule is not decided:
 `hook_mcp_sentinel_kill_unavailable_confirmer` and
 `McpKillUnavailableConfirmerEvent` are the operator-decision points
-and must not weaken the two-person rule.
+and must not weaken the two-person rule. `expireDue()` runs from
+`hook_cron`.
 
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and

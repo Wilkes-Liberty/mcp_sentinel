@@ -4,21 +4,26 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Config\ConfigException;
 use Drupal\Core\Entity\EntityStorageException;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Enum\McpKillBlockStatus;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
+use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
+use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -39,6 +44,7 @@ use Symfony\Component\HttpFoundation\Request;
 final class McpKillSwitchTest extends KernelTestBase {
 
   use McpAuditSchemaTestTrait;
+  use McpGovernedRequestTrait;
   use UserCreationTrait;
 
   /**
@@ -110,7 +116,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->killSwitch()->kill(
       [$this->principalSelector('subject-a', 'agent-a')],
       'compromise',
-      $this->operatorA,
+      $this->paladinA(),
     );
     try {
       $this->dispatcher()->admit(['note' => 'ok'], 'mcp_kill_probe');
@@ -146,7 +152,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->killSwitch()->kill(
       [$this->principalSelector('subject-a', 'agent-a')],
       'mid-write',
-      $this->operatorA,
+      $this->paladinA(),
     );
     $node->setTitle('after-kill');
     try {
@@ -175,7 +181,7 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testJobScopeWithKilledPrincipalRefused(): void {
     $selector = $this->principalSelector('subject-job', 'agent-job');
-    $this->killSwitch()->kill([$selector], 'queued work', $this->operatorA);
+    $this->killSwitch()->kill([$selector], 'queued work', $this->paladinA());
     $job = new McpPrincipalContextJob($this->principalContextHolder());
     $handle = $job->beginCarrying($selector->key, self::ISS . '|subject-job', 'tenant-a');
     try {
@@ -193,34 +199,39 @@ final class McpKillSwitchTest extends KernelTestBase {
       );
     }
     $job->end($handle);
-    $this->assertSame(
-      McpKillSwitch::DENY_REASON,
-      $this->lastAuditMetadata('denied_access')['reason'],
-    );
+    $meta = $this->lastAuditMetadata('denied_access');
+    $this->assertSame(McpKillSwitch::DENY_REASON, $meta['reason']);
+    $this->assertSame('unverified', $meta['principal_key']);
+    $this->assertSame('unverified', $meta['human_key']);
   }
 
   /**
-   * Default TTL is 24 h; a request above 7 d is capped. Re-kill extends.
+   * Default TTL is 24 h; a request above 7 d is refused. Re-kill extends.
    */
   public function testTtlDefaultAndCapAndExtension(): void {
     $selector = $this->principalSelector('subject-ttl', 'agent-ttl');
-    $first = $this->killSwitch()->kill([$selector], 'ttl-default', $this->operatorA);
+    $first = $this->killSwitch()->kill([$selector], 'ttl-default', $this->paladinA());
     $this->assertSame(McpKillTtl::DEFAULT, $first->ttl);
     $now = (int) $this->container->get('datetime.time')->getRequestTime();
     $this->assertGreaterThanOrEqual($now + McpKillTtl::DEFAULT - 1, $first->blockUntil);
 
-    $capped = $this->killSwitch()->kill(
-      [$this->principalSelector('subject-cap', 'agent-cap')],
-      'ttl-cap',
-      $this->operatorA,
-      McpKillTtl::MAX + 86400,
-    );
-    $this->assertSame(McpKillTtl::MAX, $capped->ttl);
+    try {
+      $this->killSwitch()->kill(
+        [$this->principalSelector('subject-cap', 'agent-cap')],
+        'ttl-cap',
+        $this->paladinA(),
+        McpKillTtl::MAX + 86400,
+      );
+      $this->fail('A TTL above 7 d must be a validation error.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::INVALID_TTL, $e->reasonCode);
+    }
 
     $extended = $this->killSwitch()->kill(
       [$selector],
       'ttl-extend',
-      $this->operatorA,
+      $this->paladinA(),
       McpKillTtl::MAX,
     );
     $this->assertSame(McpKillTtl::MAX, $extended->ttl);
@@ -233,16 +244,16 @@ final class McpKillSwitchTest extends KernelTestBase {
   public function testExpiryRestoresAccess(): void {
     $selector = $this->principalSelector('subject-exp', 'agent-exp');
     $this->sealSubject('subject-exp', 'agent-exp');
-    $this->killSwitch()->kill([$selector], 'short', $this->operatorA, 60);
+    $this->killSwitch()->kill([$selector], 'short', $this->paladinA(), 60);
     $this->expectGenericDeny();
 
     $this->container->get('database')->update(McpKillSwitch::TABLE)
       ->fields(['block_until' => 1])
       ->condition('selector_hash', $selector->hash())
       ->execute();
-    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
     $this->assertFalse($this->killSwitch()->isKilled($selector->key));
     $this->assertSame('subject-exp', $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject());
+    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
     $this->assertSame('ttl', $this->lastAuditMetadata(McpKillSwitch::AUDIT_EXPIRE)['reason']);
   }
 
@@ -252,7 +263,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   public function testMassKillStaysPendingWithoutSecondOperator(): void {
     $one = $this->principalSelector('subject-m1', 'agent-m1');
     $two = $this->principalSelector('subject-m2', 'agent-m2');
-    $result = $this->killSwitch()->kill([$one, $two], 'mass', $this->operatorA);
+    $result = $this->killSwitch()->kill([$one, $two], 'mass', $this->paladinA());
     $this->assertTrue($result->needsConfirm);
     $this->assertSame(McpKillBlockStatus::KillPending, $result->status);
     $this->assertFalse($this->killSwitch()->isKilled($one->key));
@@ -265,10 +276,10 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testSameAccountConfirmRefused(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-mass');
-    $result = $this->killSwitch()->kill([$human], 'all agents of this person', $this->operatorA);
+    $result = $this->killSwitch()->kill([$human], 'all agents of this person', $this->paladinA());
     $this->assertTrue($result->needsConfirm);
     try {
-      $this->killSwitch()->confirm($result->batchId, $this->operatorA);
+      $this->killSwitch()->confirm($result->batchId, $this->paladinA());
       $this->fail('The same operator account must not confirm.');
     }
     catch (McpKillSwitchException $e) {
@@ -282,22 +293,22 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testUnkillNeedsTwoOperators(): void {
     $selector = $this->principalSelector('subject-u', 'agent-u');
-    $this->killSwitch()->kill([$selector], 'kill', $this->operatorA);
+    $this->killSwitch()->kill([$selector], 'kill', $this->paladinA());
     $pending = $this->killSwitch()->requestUnkill(
       [$selector],
       'restore',
-      $this->operatorA,
+      $this->paladinA(),
     );
     $this->assertTrue($pending->needsConfirm);
     $this->assertTrue($this->killSwitch()->isKilled($selector->key));
     try {
-      $this->killSwitch()->confirmUnkill($pending->batchId, $this->operatorA);
+      $this->killSwitch()->confirmUnkill($pending->batchId, $this->paladinA());
       $this->fail('Un-kill must not complete with one operator.');
     }
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
     }
-    $done = $this->killSwitch()->confirmUnkill($pending->batchId, $this->operatorB);
+    $done = $this->killSwitch()->confirmUnkill($pending->batchId, $this->paladinB());
     $this->assertFalse($done->needsConfirm);
     $this->assertFalse($this->killSwitch()->isKilled($selector->key));
   }
@@ -307,26 +318,26 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testAuditRowForEachTransition(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-audit');
-    $kill = $this->killSwitch()->kill([$human], 'audit-kill', $this->operatorA);
-    $this->assertSame($this->operatorA, $this->lastAuditMetadata(McpKillSwitch::AUDIT_KILL)['actor']);
+    $kill = $this->killSwitch()->kill([$human], 'audit-kill', $this->paladinA());
+    $this->assertSame($this->paladinA()->storageId(), $this->lastAuditMetadata(McpKillSwitch::AUDIT_KILL)['actor']);
     $this->assertSame('', $this->lastAuditMetadata(McpKillSwitch::AUDIT_KILL)['second_confirmer']);
 
-    $this->killSwitch()->confirm($kill->batchId, $this->operatorB);
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
     $confirm = $this->lastAuditMetadata(McpKillSwitch::AUDIT_CONFIRM);
-    $this->assertSame($this->operatorB, $confirm['actor']);
-    $this->assertSame($this->operatorB, $confirm['second_confirmer']);
+    $this->assertSame($this->paladinB()->storageId(), $confirm['actor']);
+    $this->assertSame($this->paladinB()->storageId(), $confirm['second_confirmer']);
     $this->assertArrayNotHasKey('token', $confirm);
     $this->assertArrayNotHasKey('access_token', $confirm);
 
-    $unkill = $this->killSwitch()->requestUnkill([$human], 'audit-unkill', $this->operatorA);
+    $unkill = $this->killSwitch()->requestUnkill([$human], 'audit-unkill', $this->paladinA());
     $this->assertSame(
-      $this->operatorA,
+      $this->paladinA()->storageId(),
       $this->lastAuditMetadata(McpKillSwitch::AUDIT_UNKILL_REQUEST)['actor'],
     );
 
-    $this->killSwitch()->confirmUnkill($unkill->batchId, $this->operatorB);
+    $this->killSwitch()->confirmUnkill($unkill->batchId, $this->paladinB());
     $this->assertSame(
-      $this->operatorB,
+      $this->paladinB()->storageId(),
       $this->lastAuditMetadata(McpKillSwitch::AUDIT_UNKILL)['second_confirmer'],
     );
   }
@@ -336,7 +347,7 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testUnavailableConfirmerDoesNotWeakenTwoPersonRule(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-unavailable');
-    $result = $this->killSwitch()->kill([$human], 'pending', $this->operatorA);
+    $result = $this->killSwitch()->kill([$human], 'pending', $this->paladinA());
     $this->container->get('database')->update(McpKillSwitch::TABLE)
       ->fields(['confirm_until' => 1])
       ->condition('batch_id', $result->batchId)
@@ -358,7 +369,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->killSwitch()->kill(
       [$this->principalSelector('subject-a', 'agent-a')],
       'red-run',
-      $this->operatorA,
+      $this->paladinA(),
     );
     $this->container->get('mcp_sentinel.principal_context_guard')->disableForTest();
     $seen = $this->dispatcher()->admit(['note' => 'ok'], 'probe');
@@ -377,6 +388,191 @@ final class McpKillSwitchTest extends KernelTestBase {
     }
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::PERMISSION_DENIED, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Re-killing an already-killed key stays killed and still blocks.
+   */
+  public function testRepeatKillOnKilledKeyStaysKilled(): void {
+    $selector = $this->principalSelector('subject-repeat', 'agent-repeat');
+    $this->sealSubject('subject-repeat', 'agent-repeat');
+    $first = $this->killSwitch()->kill([$selector], 'first', $this->paladinA());
+    $this->assertSame(McpKillBlockStatus::Killed, $first->status);
+    $again = $this->killSwitch()->kill([$selector], 'again', $this->paladinA(), McpKillTtl::MAX);
+    $this->assertSame(McpKillBlockStatus::Killed, $again->status);
+    $row = $this->killSwitch()->status($selector);
+    $this->assertIsArray($row);
+    $this->assertSame(McpKillBlockStatus::Killed->value, $row['status']);
+    $this->expectGenericDeny();
+  }
+
+  /**
+   * Re-requesting a mass kill on a killed key leaves it killed.
+   */
+  public function testReRequestMassKillOnKilledKeyStaysKilled(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-mass-keep');
+    $this->sealSubject('subject-mass-keep', 'agent-mass-keep');
+    $pending = $this->killSwitch()->kill([$human], 'mass', $this->paladinA());
+    $this->killSwitch()->confirm($pending->batchId, $this->paladinB());
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->killSwitch()->kill([$human], 'mass-again', $this->paladinA());
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame(McpKillBlockStatus::Killed->value, $row['status']);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->expectGenericDeny();
+  }
+
+  /**
+   * A mass kill that includes a killed key leaves that key killed.
+   */
+  public function testMassKillTouchingKilledKeyLeavesItKilled(): void {
+    $killed = $this->principalSelector('subject-keep', 'agent-keep');
+    $other = $this->principalSelector('subject-other', 'agent-other');
+    $this->sealSubject('subject-keep', 'agent-keep');
+    $this->killSwitch()->kill([$killed], 'already', $this->paladinA());
+    $mass = $this->killSwitch()->kill(
+      [$killed, $other],
+      'mass-includes-killed',
+      $this->paladinA(),
+    );
+    $this->assertTrue($mass->needsConfirm);
+    $row = $this->killSwitch()->status($killed);
+    $this->assertIsArray($row);
+    $this->assertSame(McpKillBlockStatus::Killed->value, $row['status']);
+    $this->assertTrue($this->killSwitch()->isKilled($killed->key));
+    $this->expectGenericDeny();
+  }
+
+  /**
+   * A killed principal's config save is reverted, matching denied-name.
+   */
+  public function testKilledConfigSaveReverts(): void {
+    $this->installEntitySchema('consumer');
+    $this->installEntitySchema('oauth2_token');
+    $this->enableRoleFallbackGovernance();
+    if (Role::load('mcp_api') === NULL) {
+      Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
+    }
+    $account = User::create(['name' => 'killed-config-agent', 'status' => 1]);
+    $account->addRole('mcp_api');
+    $account->save();
+    $this->container->get('current_user')->setAccount($account);
+    $this->sealSubject('subject-cfg', 'agent-cfg');
+    $this->killSwitch()->kill(
+      [$this->principalSelector('subject-cfg', 'agent-cfg')],
+      'config-kill',
+      $this->paladinA(),
+    );
+    $original = $this->config('system.site')->get('name');
+    try {
+      $this->config('system.site')->set('name', 'killed-write')->save();
+      $this->fail('A killed principal must not persist a config write.');
+    }
+    catch (ConfigException $e) {
+      $this->assertSame(
+        McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+        $e->getMessage(),
+      );
+    }
+    $this->container->get('config.factory')->reset('system.site');
+    $this->assertSame($original, $this->config('system.site')->get('name'));
+  }
+
+  /**
+   * The same shell posing as two Drupal account ids is refused.
+   */
+  public function testSameShellPosingAsTwoAccountIdsIsRefused(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-accounts');
+    $asUidA = McpOperatorIdentity::fromDrupalUid($this->operatorA);
+    $asUidB = McpOperatorIdentity::fromDrupalUid($this->operatorB);
+    try {
+      $result = $this->killSwitch()->kill([$human], 'uid-pose', $asUidA);
+      $this->killSwitch()->confirm($result->batchId, $asUidB);
+      $this->fail(
+        'The same shell posing as two Drupal account ids must be refused.',
+      );
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+    }
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Two distinct Paladin operators can confirm a mass kill.
+   */
+  public function testTwoDistinctVerifiedOperatorsSucceed(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-two-ops');
+    $kill = $this->killSwitch()->kill([$human], 'mass', $this->paladinA());
+    $done = $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * A Drush assertion ignores Drupal uid: one shell is one operator.
+   */
+  public function testDrushAssertionIgnoresDrupalUid(): void {
+    $factory = $this->container->get('mcp_sentinel.operator_identity');
+    $firstAccount = User::load((int) $this->operatorA);
+    $secondAccount = User::load((int) $this->operatorB);
+    $this->assertInstanceOf(User::class, $firstAccount);
+    $this->assertInstanceOf(User::class, $secondAccount);
+    $this->container->get('current_user')->setAccount($firstAccount);
+    $asA = $factory->fromDrushAssertion();
+    $this->container->get('current_user')->setAccount($secondAccount);
+    $asB = $factory->fromDrushAssertion();
+    $this->assertTrue($asA->equals($asB));
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-shell');
+    $kill = $this->killSwitch()->kill([$human], 'shell', $asA);
+    try {
+      $this->killSwitch()->confirm($kill->batchId, $asB);
+      $this->fail('The same shell must not confirm by switching Drupal accounts.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Operator selectors use principal-key vector error codes.
+   */
+  public function testSelectorUsesPrincipalKeyVectorCodes(): void {
+    try {
+      McpKillSelector::principalKey(self::ISS . '|sub|act|extra');
+      $this->fail('An extra pipe must use the vector invalid_separator code.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::INVALID_SEPARATOR, $e->reasonCode);
+    }
+    try {
+      McpKillSelector::humanKey("iss|\x80");
+      $this->fail('Invalid UTF-8 must use the vector invalid_utf8 code.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::INVALID_UTF8, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Configured max TTL above 7 d is refused rather than applied.
+   */
+  public function testConfiguredMaxTtlAbove7DaysIsRefused(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('kill_switch_max_ttl', McpKillTtl::MAX + 1)
+      ->save();
+    try {
+      $this->killSwitch()->kill(
+        [$this->principalSelector('subject-cfg-ttl', 'agent-cfg-ttl')],
+        'too-long',
+        $this->paladinA(),
+      );
+      $this->fail('A configured max TTL above 7 d must be a validation error.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::INVALID_TTL, $e->reasonCode);
     }
   }
 
@@ -410,6 +606,20 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   private function principalSelector(string $sub, string $azp): McpKillSelector {
     return McpKillSelector::principalKey(self::ISS . '|' . $sub . '|' . $azp);
+  }
+
+  /**
+   * First verified Paladin operator.
+   */
+  private function paladinA(): McpOperatorIdentity {
+    return McpOperatorIdentity::paladin(self::ISS . '|operator-a');
+  }
+
+  /**
+   * Named second person (secondary account holder), Paladin identity.
+   */
+  private function paladinB(): McpOperatorIdentity {
+    return McpOperatorIdentity::paladin(self::ISS . '|operator-b');
   }
 
   /**

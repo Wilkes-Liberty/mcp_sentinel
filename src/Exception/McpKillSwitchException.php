@@ -45,6 +45,11 @@ final class McpKillSwitchException extends \RuntimeException {
   public const MISSING_OPERATOR = 'missing_operator';
 
   /**
+   * Confirm or kill lacked a Paladin or Drush-assertion identity.
+   */
+  public const UNVERIFIED_OPERATOR = 'unverified_operator';
+
+  /**
    * Reason is required and must not look like a token.
    */
   public const INVALID_REASON = 'invalid_reason';

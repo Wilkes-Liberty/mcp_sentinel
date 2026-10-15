@@ -64,6 +64,25 @@ user reference. Owner/author and user-reference fields stay refused.
 `config_set:data` stays fully scanned. Grant tables are not an
 identity source.
 
+### Agent kill switch (DEV-846)
+
+A durable kill-block registry (`mcp_sentinel.kill_switch`) keyed by
+`iss|sub|actor`, `iss|sub`, or tenant is checked on every governed
+`admit()` and again before a governed write commits. Callers see the
+same generic deny as a missing principal. Two-person confirm uses a
+verified Paladin `iss|sub` or a Drush assertion bound to the OS
+process; `drush --uid` is permission-only and is not an operator
+identity.
+
+**Known limitation (pending DEV-846 job cancellation):** a kill does
+not cancel webhook deliveries already in the
+`mcp_sentinel_webhook_delivery` queue. Those items still run. After a
+kill, an operator who must stop those sends purges the queue
+(`drush queue:delete mcp_sentinel_webhook_delivery`) or deletes /
+fails the pending rows in the webhook delivery log
+(`/admin/reports/mcp-sentinel/webhooks`). New admits and in-flight
+governed writes are refused.
+
 ### Breaking: Paladin tokens required for governed tools
 
 Cookie sessions, role-fallback, claimless stdio calls, and sealed
@@ -1082,6 +1101,10 @@ hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
 ```
 
 ### Retry behavior
+
+A kill-block does not cancel items already in this queue (DEV-846 job
+cancellation is pending). Purge `mcp_sentinel_webhook_delivery` after
+a kill when those deliveries must not go out.
 
 Delivery runs in the `mcp_sentinel_webhook_delivery` QueueWorker (processed on
 cron). A non-2xx response or network error schedules a retry: **5 attempts**

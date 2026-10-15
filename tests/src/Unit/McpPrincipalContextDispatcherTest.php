@@ -173,6 +173,74 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
+   * Overlay and kill refusals are the same code, message, and exception class.
+   *
+   * @covers ::admit
+   */
+  public function testKilledAndOverlayRefusalsAreIndistinguishable(): void {
+    $stack = new RequestStack();
+    $holder = new McpPrincipalContextHolder($stack);
+    $job = new McpPrincipalContextJob($holder);
+    $handle = $job->beginCarrying(
+      'https://idp.example/realms/agents|subject-a|agent-a',
+      'https://idp.example/realms/agents|subject-a',
+      'tenant-a',
+    );
+
+    $overlayMeta = [];
+    $overlayAudit = $this->createMock(McpAuditLogger::class);
+    $overlayAudit->method('logAlways')->willReturnCallback(
+      static function (string $op, array $meta) use (&$overlayMeta): void {
+        if ($op === 'denied_access') {
+          $overlayMeta = $meta;
+        }
+      },
+    );
+    $overlayKill = $this->createMock(McpKillEnforcerInterface::class);
+    $overlayKill->method('isContextKilled')->willReturn(FALSE);
+    $overlayDispatcher = $this->dispatcher($stack, $holder, $overlayAudit, NULL, $overlayKill);
+    try {
+      $overlayDispatcher->admit(['note' => 'ok'], 'tool-a');
+      $this->fail('A job overlay must refuse.');
+    }
+    catch (McpPrincipalContextDeniedException $overlay) {
+      $killMeta = [];
+      $killAudit = $this->createMock(McpAuditLogger::class);
+      $killAudit->method('logAlways')->willReturnCallback(
+        static function (string $op, array $meta) use (&$killMeta): void {
+          if ($op === 'denied_access') {
+            $killMeta = $meta;
+          }
+        },
+      );
+      $killSwitch = $this->createMock(McpKillEnforcerInterface::class);
+      $killSwitch->method('isContextKilled')->willReturn(TRUE);
+      $killDispatcher = $this->dispatcher($stack, $holder, $killAudit, NULL, $killSwitch);
+      try {
+        $killDispatcher->admit(['note' => 'ok'], 'tool-a');
+        $this->fail('A killed carried principal must be refused.');
+      }
+      catch (McpPrincipalContextDeniedException $killed) {
+        $this->assertSame($overlay->reasonCode, $killed->reasonCode);
+        $this->assertSame($overlay->getMessage(), $killed->getMessage());
+        $this->assertSame(
+          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+          $overlay->reasonCode,
+        );
+        $this->assertSame(
+          McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+          $overlay->getMessage(),
+        );
+        $this->assertSame('job_overlay', $overlayMeta['reason'] ?? '');
+        $this->assertSame('principal_killed', $killMeta['reason'] ?? '');
+        $this->assertSame('unverified', $killMeta['principal_key'] ?? '');
+        $this->assertSame('unverified', $overlayMeta['principal_key'] ?? '');
+      }
+    }
+    $job->end($handle);
+  }
+
+  /**
    * Builds a dispatcher over a real factory and the given holder.
    */
   private function dispatcher(

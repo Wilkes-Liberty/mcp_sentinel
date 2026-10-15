@@ -15,8 +15,9 @@ interface McpKillEnforcerInterface {
   /**
    * Whether any of the keys currently has an active kill-block.
    *
-   * Missing storage fails closed (treated as killed). Expired rows
-   * do not block.
+   * Missing storage fails closed (treated as killed). An elapsed
+   * block_until does not block and is not written here; expiry
+   * writes run from hook_cron.
    *
    * @param string $principalKey
    *   Principal key (iss|sub|actor), or empty.

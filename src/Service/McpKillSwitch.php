@@ -22,6 +22,7 @@ use Drupal\mcp_sentinel\Value\McpCarriedPrincipal;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
+use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 
 /**
@@ -29,8 +30,11 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  *
  * Storage is keyed by principal_key (iss|sub|actor), human_key
  * (iss|sub, all agents of this person), or tenant. Writes are
- * transactional. Re-killing extends block_until up to the 7 d cap.
- * Tokens never appear in audit metadata.
+ * transactional. A killed row is never downgraded to kill_pending.
+ * Re-killing stays killed and may extend block_until up to 7 d
+ * from now. Two-person confirm binds Paladin iss|sub or a Drush
+ * OS assertion, never a Drupal uid. Tokens never appear in audit
+ * metadata. expireDue() runs from hook_cron, not admit() or save.
  */
 final class McpKillSwitch implements McpKillEnforcerInterface {
 
@@ -75,6 +79,43 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const DENY_REASON = 'principal_killed';
 
   /**
+   * PHPUnit-only: allow writeKillRow to replace killed with kill_pending.
+   */
+  public const WEAKEN_DOWNGRADE_KILLED = 'downgrade_killed';
+
+  /**
+   * PHPUnit-only: skip the distinct-operator check.
+   */
+  public const WEAKEN_SKIP_DISTINCT_OPERATOR = 'skip_distinct_operator';
+
+  /**
+   * PHPUnit-only: treat killed rows as blocking after block_until.
+   */
+  public const WEAKEN_IGNORE_BLOCK_UNTIL = 'ignore_block_until';
+
+  /**
+   * PHPUnit-only: accept a TTL above 7 d.
+   */
+  public const WEAKEN_SKIP_TTL_CAP = 'skip_ttl_cap';
+
+  /**
+   * PHPUnit-only: skip kill-switch audit rows.
+   */
+  public const WEAKEN_SKIP_AUDIT = 'skip_audit';
+
+  /**
+   * PHPUnit-only: treat Drupal uid strings as operator identities.
+   */
+  public const WEAKEN_TRUST_UID = 'trust_uid';
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * @var array<string, true>
+   */
+  private array $weakenForTest = [];
+
+  /**
    * Constructs the registry.
    *
    * @param \Drupal\Core\Database\Connection $connection
@@ -115,7 +156,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if (!$this->tableReady()) {
       return TRUE;
     }
-    $this->expireDue();
     $hashes = $this->lookupHashes($principalKey, $humanKey, $tenant);
     if ($hashes === []) {
       return FALSE;
@@ -134,6 +174,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         return TRUE;
       }
       if ($status->isBlocking((int) $row['block_until'], $now)) {
+        return TRUE;
+      }
+      if ($this->weakened(self::WEAKEN_IGNORE_BLOCK_UNTIL)
+        && ($status === McpKillBlockStatus::Killed
+          || $status === McpKillBlockStatus::UnkillPending)) {
         return TRUE;
       }
     }
@@ -218,8 +263,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Targets. Empty is refused.
    * @param string $reason
    *   Operator reason. Must not contain a token.
-   * @param string $operatorId
-   *   Account id of the operator. Never a username.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Verified Paladin or Drush-assertion identity. Never a Drupal uid.
    * @param int|null $ttl
    *   Requested lifetime in seconds, or NULL for the default.
    *
@@ -228,8 +273,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  public function kill(array $selectors, string $reason, string $operatorId, ?int $ttl = NULL): McpKillSwitchResult {
-    $this->assertWritable($operatorId, $reason);
+  public function kill(array $selectors, string $reason, McpOperatorIdentity $operator, ?int $ttl = NULL): McpKillSwitchResult {
+    $this->assertWritable($operator, $reason);
     $selectors = $this->uniqueSelectors($selectors);
     if ($selectors === []) {
       throw new McpKillSwitchException(
@@ -237,13 +282,14 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'A kill requires at least one selector.',
       );
     }
-    $ttl = McpKillTtl::resolve($ttl, $this->defaultTtl(), $this->maxTtl());
+    $ttl = $this->resolveTtl($ttl);
     $now = $this->time->getRequestTime();
     $blockUntil = McpKillTtl::blockUntil($now, $ttl);
     $mass = $this->isMass($selectors);
     $status = $mass ? McpKillBlockStatus::KillPending : McpKillBlockStatus::Killed;
     $batchId = $this->uuid->generate();
     $confirmUntil = $mass ? $now + $this->confirmWindow() : 0;
+    $operatorId = $operator->storageId();
 
     $txn = $this->connection->startTransaction();
     try {
@@ -294,12 +340,17 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   /**
    * Second operator confirms a pending mass kill.
    *
+   * @param string $batchId
+   *   Batch id from a pending mass kill.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Distinct verified confirmer.
+   *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  public function confirm(string $batchId, string $operatorId): McpKillSwitchResult {
-    $this->assertOperatorId($operatorId);
+  public function confirm(string $batchId, McpOperatorIdentity $operator): McpKillSwitchResult {
+    $this->assertOperatorIdentity($operator);
     $this->requireTable();
-    $this->expireDue();
+    $operatorId = $operator->storageId();
     $now = $this->time->getRequestTime();
 
     $txn = $this->connection->startTransaction();
@@ -385,13 +436,13 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Targets currently killed.
    * @param string $reason
    *   Operator reason.
-   * @param string $operatorId
-   *   Account id of the operator.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Verified Paladin or Drush-assertion identity.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  public function requestUnkill(array $selectors, string $reason, string $operatorId): McpKillSwitchResult {
-    $this->assertWritable($operatorId, $reason);
+  public function requestUnkill(array $selectors, string $reason, McpOperatorIdentity $operator): McpKillSwitchResult {
+    $this->assertWritable($operator, $reason);
     $selectors = $this->uniqueSelectors($selectors);
     if ($selectors === []) {
       throw new McpKillSwitchException(
@@ -400,7 +451,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       );
     }
     $now = $this->time->getRequestTime();
-    $this->expireDue();
+    $operatorId = $operator->storageId();
     $batchId = $this->uuid->generate();
     $confirmUntil = $now + $this->confirmWindow();
     $ttl = 0;
@@ -478,12 +529,17 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   /**
    * Second operator confirms an un-kill.
    *
+   * @param string $batchId
+   *   Batch id from a pending un-kill.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Distinct verified confirmer.
+   *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  public function confirmUnkill(string $batchId, string $operatorId): McpKillSwitchResult {
-    $this->assertOperatorId($operatorId);
+  public function confirmUnkill(string $batchId, McpOperatorIdentity $operator): McpKillSwitchResult {
+    $this->assertOperatorIdentity($operator);
     $this->requireTable();
-    $this->expireDue();
+    $operatorId = $operator->storageId();
     $now = $this->time->getRequestTime();
 
     $txn = $this->connection->startTransaction();
@@ -566,16 +622,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Current row for a selector, after applying due expiry.
+   * Current row for a selector. Does not write expiry.
    *
    * @return array<string, mixed>|null
-   *   Associative row, or NULL when absent / not blocking.
+   *   Associative row, or NULL when absent.
    */
   public function status(McpKillSelector $selector): ?array {
     if (!$this->tableReady()) {
       return NULL;
     }
-    $this->expireDue();
     $row = $this->connection->select(self::TABLE, 'k')
       ->fields('k')
       ->condition('selector_hash', $selector->hash())
@@ -587,6 +642,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
 
   /**
    * Expires due kill-blocks and elapsed confirm windows.
+   *
+   * Called from hook_cron. admit() and governed saves treat an
+   * elapsed block_until as not blocking without writing.
    *
    * @return int
    *   Rows transitioned.
@@ -614,15 +672,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       $ctx ?? $empty,
     );
     if ($carried !== NULL) {
-      if ($carried->principalKey !== '') {
-        $meta['principal_key'] = $carried->principalKey;
-      }
-      if ($carried->humanKey !== '') {
-        $meta['human_key'] = $carried->humanKey;
-      }
-      if ($carried->tenant !== '') {
-        $meta['tenant'] = $carried->tenant;
-      }
+      $meta['principal_key'] = 'unverified';
+      $meta['human_key'] = 'unverified';
+      $meta['principal_unverified'] = 'carried_queue_key';
     }
     $this->auditLogger->logSurvivingRollback('denied_access', $meta, TRUE);
   }
@@ -706,8 +758,26 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($existing !== NULL) {
       $existingStatus = McpKillBlockStatus::tryFrom((string) $existing['status']);
       $newUntil = max((int) $existing['block_until'], $blockUntil);
-      $cap = $now + $this->maxTtl();
-      $newUntil = min($newUntil, $cap);
+      $cap = $now + McpKillTtl::MAX;
+      if ($newUntil > $cap) {
+        $newUntil = $cap;
+      }
+      $existingBlocking = $existingStatus !== NULL
+        && $existingStatus->isBlocking((int) $existing['block_until'], $now);
+      $newBlocking = $status->isBlocking($blockUntil, $now);
+      if ($existingBlocking && !$newBlocking
+        && !$this->weakened(self::WEAKEN_DOWNGRADE_KILLED)) {
+        $this->connection->update(self::TABLE)
+          ->fields([
+            'block_until' => $newUntil,
+            'ttl' => max((int) $existing['ttl'], $ttl),
+            'reason' => $reason,
+            'changed' => $now,
+          ])
+          ->condition('selector_hash', $selector->hash())
+          ->execute();
+        return;
+      }
       $fields = [
         'status' => $status->value,
         'batch_id' => $batchId,
@@ -1015,6 +1085,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Actor, selector, reason, TTL, confirmer.
    */
   private function auditTransition(string $operation, array $metadata): void {
+    if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
+      return;
+    }
     $this->auditLogger->logAlways($operation, $metadata);
   }
 
@@ -1087,18 +1160,55 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
+   * Requested TTL, or the configured default. Never above 7 d.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function resolveTtl(?int $requested): int {
+    if ($this->weakened(self::WEAKEN_SKIP_TTL_CAP)) {
+      $ttl = $requested ?? McpKillTtl::DEFAULT;
+      if ($ttl <= 0) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::INVALID_TTL,
+          'Kill-block TTL must be a positive number of seconds.',
+        );
+      }
+      return $ttl;
+    }
+    return McpKillTtl::resolve($requested, $this->defaultTtl(), $this->maxTtl());
+  }
+
+  /**
    * Configured default TTL.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   *   When the configured default exceeds 7 d.
    */
   private function defaultTtl(): int {
     $value = (int) ($this->configFactory->get('mcp_sentinel.settings')->get('kill_switch_default_ttl') ?? McpKillTtl::DEFAULT);
+    if ($value > McpKillTtl::MAX) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_TTL,
+        'Kill-block TTL cannot exceed 7 days.',
+      );
+    }
     return $value > 0 ? $value : McpKillTtl::DEFAULT;
   }
 
   /**
-   * Configured maximum TTL.
+   * Configured maximum TTL. Cannot be raised above 7 d.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   *   When the configured maximum exceeds 7 d.
    */
   private function maxTtl(): int {
     $value = (int) ($this->configFactory->get('mcp_sentinel.settings')->get('kill_switch_max_ttl') ?? McpKillTtl::MAX);
+    if ($value > McpKillTtl::MAX) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_TTL,
+        'Kill-block TTL cannot exceed 7 days.',
+      );
+    }
     return $value > 0 ? $value : McpKillTtl::MAX;
   }
 
@@ -1111,40 +1221,49 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Operator id and reason gates shared by mutating commands.
+   * Operator identity and reason gates shared by mutating commands.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  private function assertWritable(string $operatorId, string $reason): void {
-    $this->assertOperatorId($operatorId);
+  private function assertWritable(McpOperatorIdentity $operator, string $reason): void {
+    $this->assertOperatorIdentity($operator);
     $this->assertReason($reason);
     $this->requireTable();
   }
 
   /**
-   * Non-anonymous operator account id.
+   * Verified Paladin or Drush-assertion identity. Fail closed otherwise.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  private function assertOperatorId(string $operatorId): void {
-    if ($operatorId === '' || $operatorId === '0') {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::MISSING_OPERATOR,
-        'An operator account is required.',
-      );
+  private function assertOperatorIdentity(McpOperatorIdentity $operator): void {
+    if ($operator->isVerified()) {
+      return;
     }
+    if ($this->weakened(self::WEAKEN_TRUST_UID)
+      && $operator->kind === McpOperatorIdentity::KIND_UID
+      && $operator->id !== '' && $operator->id !== '0') {
+      return;
+    }
+    throw new McpKillSwitchException(
+      McpKillSwitchException::UNVERIFIED_OPERATOR,
+      'A verified operator identity is required.',
+    );
   }
 
   /**
-   * Distinct confirmer. Same account twice is refused.
+   * Distinct confirmer. Same verified identity twice is refused.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function assertDistinctOperator(string $first, string $second): void {
+    if ($this->weakened(self::WEAKEN_SKIP_DISTINCT_OPERATOR)) {
+      return;
+    }
     if ($first === '' || $second === '') {
       throw new McpKillSwitchException(
-        McpKillSwitchException::SAME_OPERATOR,
-        'The named second person (secondary account holder) must be a distinct operator account.',
+        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        'A verified operator identity is required.',
       );
     }
     $same = strlen($first) === strlen($second) && hash_equals($first, $second);
@@ -1154,6 +1273,34 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'The named second person (secondary account holder) must be a distinct operator account.',
       );
     }
+  }
+
+  /**
+   * PHPUnit-only injection that disables one kill-switch invariant.
+   *
+   * Impossible outside the PHPUnit process. Used so two-person, TTL,
+   * expiry, audit, P0 never-downgrade, and uid-identity tests can fail.
+   *
+   * @param string $flag
+   *   One of the WEAKEN_* constants.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Kill-switch weaken flags can be set only under PHPUnit.',
+      );
+    }
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
   }
 
   /**

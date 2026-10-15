@@ -11,7 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
- * Kill-block TTL default and 7 d cap (DEV-846).
+ * Kill-block TTL default and 7 d refuse-not-clamp (DEV-846).
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Value\McpKillTtl
  *
@@ -32,13 +32,33 @@ final class McpKillTtlTest extends UnitTestCase {
   }
 
   /**
-   * A requested TTL above 7 d is capped.
+   * A requested TTL above 7 d is refused, not clamped.
    *
    * @covers ::resolve
    */
-  public function testRequestedTtlIsCappedAt7Days(): void {
-    $this->assertSame(McpKillTtl::MAX, McpKillTtl::resolve(McpKillTtl::MAX + 1));
-    $this->assertSame(McpKillTtl::MAX, McpKillTtl::resolve(10 * 86400));
+  public function testRequestedTtlAbove7DaysIsRefused(): void {
+    try {
+      McpKillTtl::resolve(McpKillTtl::MAX + 1);
+      $this->fail('A TTL above 7 d must be refused.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::INVALID_TTL, $e->reasonCode);
+    }
+  }
+
+  /**
+   * A configured max above 7 d is refused.
+   *
+   * @covers ::resolve
+   */
+  public function testConfiguredMaxAbove7DaysIsRefused(): void {
+    try {
+      McpKillTtl::resolve(NULL, McpKillTtl::DEFAULT, McpKillTtl::MAX + 1);
+      $this->fail('A configured max above 7 d must be refused.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::INVALID_TTL, $e->reasonCode);
+    }
   }
 
   /**
@@ -48,6 +68,7 @@ final class McpKillTtlTest extends UnitTestCase {
    */
   public function testRequestedTtlBelowCapIsKept(): void {
     $this->assertSame(3600, McpKillTtl::resolve(3600));
+    $this->assertSame(McpKillTtl::MAX, McpKillTtl::resolve(McpKillTtl::MAX));
   }
 
   /**

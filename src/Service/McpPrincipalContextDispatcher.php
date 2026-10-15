@@ -24,10 +24,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class McpPrincipalContextDispatcher {
 
   /**
-   * Overlay refuse until a hop token supplies a Paladin principal.
+   * Deny-row reason under a job overlay. Never sent to the caller.
    */
-  private const OVERLAY_REFUSED = 'Governed tools refuse under queue '
-    . 'and Drush until a hop token supplies a Paladin principal.';
+  private const OVERLAY_DENY_REASON = 'job_overlay';
 
   /**
    * Caller-facing refusal used for both a missing principal and a kill.
@@ -129,7 +128,8 @@ final class McpPrincipalContextDispatcher {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-        self::OVERLAY_REFUSED,
+        self::GENERIC_REFUSAL,
+        self::OVERLAY_DENY_REASON,
       );
     }
     $this->sealOnceFromRequest($toolId);
@@ -184,7 +184,8 @@ final class McpPrincipalContextDispatcher {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-        self::OVERLAY_REFUSED,
+        self::GENERIC_REFUSAL,
+        self::OVERLAY_DENY_REASON,
       );
     }
     $this->sealOnceFromRequest($toolId);
@@ -334,7 +335,8 @@ final class McpPrincipalContextDispatcher {
       $this->deny(
         'mcp_principal_context',
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-        self::OVERLAY_REFUSED,
+        self::GENERIC_REFUSAL,
+        self::OVERLAY_DENY_REASON,
       );
     }
     $sealed = $this->holder->get();
@@ -397,15 +399,9 @@ final class McpPrincipalContextDispatcher {
     $metadata = self::denialAuditMetadata($toolId, $reasonCode, $ctx);
     $carried = $this->holder->carriedPrincipal();
     if ($carried !== NULL) {
-      if ($carried->principalKey !== '') {
-        $metadata['principal_key'] = $carried->principalKey;
-      }
-      if ($carried->humanKey !== '') {
-        $metadata['human_key'] = $carried->humanKey;
-      }
-      if ($carried->tenant !== '') {
-        $metadata['tenant'] = $carried->tenant;
-      }
+      $metadata['principal_key'] = 'unverified';
+      $metadata['human_key'] = 'unverified';
+      $metadata['principal_unverified'] = 'carried_queue_key';
     }
     $this->auditLogger->logAlways('denied_access', $metadata);
   }

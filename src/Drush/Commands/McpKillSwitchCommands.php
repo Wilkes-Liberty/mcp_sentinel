@@ -6,9 +6,12 @@ namespace Drupal\mcp_sentinel\Drush\Commands;
 
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
+use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
+use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -18,6 +21,17 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * Operator commands for the agent kill switch (DEV-846).
  *
  * No UI in this slice. Permission: administer agent kill switch.
+ *
+ * currentUser is the Drupal account Drush bootstrap set from --user /
+ * --uid (or the site owner). That account is used only for the
+ * restricted permission check. It is not a verified operator
+ * identity: anyone with shell access can pass --uid=2 then --uid=3
+ * and appear as two accounts. The two-person rule binds each
+ * approval to a Paladin human key (iss|sub) from the sealed
+ * principal context, or to a Drush assertion HMAC of the OS
+ * process identity (effective uid and login name) with the site
+ * private key. --uid cannot change that assertion. Without a
+ * verified identity, confirm is refused (fail closed).
  */
 final class McpKillSwitchCommands extends DrushCommands {
 
@@ -29,13 +43,17 @@ final class McpKillSwitchCommands extends DrushCommands {
    * @param \Drupal\mcp_sentinel\Service\McpKillSwitch $killSwitch
    *   Kill registry.
    * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
-   *   Operator account. Must hold the restricted permission.
+   *   Drupal account for permission only. Not the two-person identity.
+   * @param \Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory $operatorIdentities
+   *   Paladin or Drush-assertion identity resolver.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
     private readonly McpKillSwitch $killSwitch,
     #[Autowire(service: 'current_user')]
     private readonly AccountProxyInterface $currentUser,
+    #[Autowire(service: 'mcp_sentinel.operator_identity')]
+    private readonly McpOperatorIdentityFactory $operatorIdentities,
   ) {
     parent::__construct();
   }
@@ -70,13 +88,13 @@ final class McpKillSwitchCommands extends DrushCommands {
       $result = $this->killSwitch->kill(
         $selectors,
         (string) $options['reason'],
-        $this->operatorId(),
+        $this->operatorIdentity(),
         $ttl,
       );
       $this->printResult($result);
       return self::EXIT_SUCCESS;
     }
-    catch (McpKillSwitchException $e) {
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
       $this->logger()->error($e->getMessage());
       return self::EXIT_FAILURE;
     }
@@ -93,11 +111,11 @@ final class McpKillSwitchCommands extends DrushCommands {
       return $denied;
     }
     try {
-      $result = $this->killSwitch->confirm($batch, $this->operatorId());
+      $result = $this->killSwitch->confirm($batch, $this->operatorIdentity());
       $this->printResult($result);
       return self::EXIT_SUCCESS;
     }
-    catch (McpKillSwitchException $e) {
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
       $this->logger()->error($e->getMessage());
       return self::EXIT_FAILURE;
     }
@@ -129,19 +147,19 @@ final class McpKillSwitchCommands extends DrushCommands {
     try {
       $confirmBatch = trim((string) ($options['confirm-batch'] ?? ''));
       if ($confirmBatch !== '') {
-        $result = $this->killSwitch->confirmUnkill($confirmBatch, $this->operatorId());
+        $result = $this->killSwitch->confirmUnkill($confirmBatch, $this->operatorIdentity());
         $this->printResult($result);
         return self::EXIT_SUCCESS;
       }
       $result = $this->killSwitch->requestUnkill(
         $this->selectorsFromOptions($options),
         (string) $options['reason'],
-        $this->operatorId(),
+        $this->operatorIdentity(),
       );
       $this->printResult($result);
       return self::EXIT_SUCCESS;
     }
-    catch (McpKillSwitchException $e) {
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
       $this->logger()->error($e->getMessage());
       return self::EXIT_FAILURE;
     }
@@ -192,7 +210,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       );
       return self::EXIT_SUCCESS;
     }
-    catch (McpKillSwitchException $e) {
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
       $this->logger()->error($e->getMessage());
       return self::EXIT_FAILURE;
     }
@@ -208,6 +226,7 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Selectors.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
    */
   private function selectorsFromOptions(array $options): array {
     $selectors = [];
@@ -267,7 +286,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Restricted-permission gate.
+   * Restricted-permission gate. Uses currentUser, not operator identity.
    */
   private function requirePermission(): ?int {
     try {
@@ -281,10 +300,12 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Operator account id. Never a username.
+   * Verified Paladin or Drush-assertion identity. Never currentUser->id().
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  private function operatorId(): string {
-    return (string) $this->currentUser->id();
+  private function operatorIdentity(): McpOperatorIdentity {
+    return $this->operatorIdentities->forDrushCommand();
   }
 
 }

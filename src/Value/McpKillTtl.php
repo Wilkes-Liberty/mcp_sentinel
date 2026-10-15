@@ -9,8 +9,9 @@ use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 /**
  * Kill-block TTL bounds (DEV-846, operator-approved).
  *
- * Default 24 h, maximum 7 d. Re-killing extends block_until up to
- * the maximum from now.
+ * Default 24 h, maximum 7 d. A requested or configured TTL above
+ * 7 d is a validation error. The maximum cannot be configured
+ * upward. Re-killing may extend block_until up to 7 d from now.
  */
 final class McpKillTtl {
 
@@ -32,20 +33,35 @@ final class McpKillTtl {
   /**
    * Resolves a requested TTL against the configured default and cap.
    *
+   * Does not clamp. Values above 7 d, or above the configured max
+   * when that max is at most 7 d, are refused.
+   *
    * @param int|null $requested
    *   Seconds requested by the operator, or NULL for the default.
    * @param int $default
-   *   Configured default (usually DEFAULT).
+   *   Configured default (usually DEFAULT). Must not exceed MAX.
    * @param int $max
-   *   Configured maximum (usually MAX).
+   *   Configured maximum. Must not exceed MAX.
    *
    * @return int
-   *   Seconds that will actually be applied, never above $max.
+   *   Seconds that will actually be applied.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When the resolved value is not a positive lifetime.
+   *   When the value is not a positive lifetime at or below 7 d.
    */
   public static function resolve(?int $requested, int $default = self::DEFAULT, int $max = self::MAX): int {
+    if ($max > self::MAX || $default > self::MAX) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_TTL,
+        'Kill-block TTL cannot exceed 7 days.',
+      );
+    }
+    if ($max <= 0 || $default <= 0) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_TTL,
+        'Kill-block TTL must be a positive number of seconds.',
+      );
+    }
     $ttl = $requested ?? $default;
     if ($ttl <= 0) {
       throw new McpKillSwitchException(
@@ -53,8 +69,13 @@ final class McpKillTtl {
         'Kill-block TTL must be a positive number of seconds.',
       );
     }
-    $max = max(1, $max);
-    return min($ttl, $max);
+    if ($ttl > self::MAX || $ttl > $max) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_TTL,
+        'Kill-block TTL cannot exceed 7 days.',
+      );
+    }
+    return $ttl;
   }
 
   /**

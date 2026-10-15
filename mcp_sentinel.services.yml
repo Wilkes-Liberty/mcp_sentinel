@@ -223,6 +223,12 @@ services:
       - '@module_handler'
       - '@uuid'
 
+  mcp_sentinel.operator_identity:
+    class: Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory
+    arguments:
+      - '@mcp_sentinel.principal_context_holder'
+      - '@private_key'
+
   mcp_sentinel.principal_context_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher
     arguments:
