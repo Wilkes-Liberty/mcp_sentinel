@@ -9,8 +9,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [3.0.1] - 2026-10-15
 
 ### Security
-- [DEV-844](https://wilkesliberty.atlassian.net/browse/DEV-844):
-  Carry the #291 review-fix end state that never landed on the
+- Carry the #291 review-fix end state that never landed on the
   3.0.0 tag. Queue and Drush open a deny-only job overlay
   (`enterJobScope()` / `leaveJobScope()` with a matching handle).
   Governed tools refuse (`missing_principal`) under that overlay;
@@ -41,12 +40,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Governed Tool plugins refuse sealed tokens even when minted again
   with a tenant. Paladin is the sole issuer.
 - Unused `setSealedManifest()` is removed from the approval
-  request and admin-grant entities ([#297](https://github.com/Wilkes-Liberty/mcp_sentinel/pull/297));
-  callers set the `manifest` field.
+  request and admin-grant entities. Callers set the `manifest`
+  field.
 
 ### Changed
-- [#297](https://github.com/Wilkes-Liberty/mcp_sentinel/pull/297):
-  First-party governed tools no longer re-inject `policyResolver`,
+- First-party governed tools no longer re-inject `policyResolver`,
   `accessChecker`, `auditLogger`, or `classification`. They use the
   `$governance*` properties `McpGovernedToolBase::create()` already
   assigns. `mcp_sentinel_help()` and `INSTALL.md` state the 3.0
