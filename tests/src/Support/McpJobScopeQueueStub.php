@@ -21,9 +21,13 @@ final class McpJobScopeQueueStub extends QueueWorkerBase {
   /**
    * Handles for begin() calls that have not yet been ended.
    *
+   * Protected because QueueWorkerBase uses
+   * DependencySerializationTrait, which cannot see private
+   * properties.
+   *
    * @var list<\Drupal\mcp_sentinel\Service\McpJobScopeHandle>
    */
-  private array $handles = [];
+  protected array $handles = [];
 
   /**
    * Constructs the stub.

@@ -243,7 +243,12 @@ final class McpPrincipalContextDispatcher {
       );
     }
     catch (McpPrincipalContextDeniedException $e) {
-      $this->deny($toolId, $e->reasonCode, $e->getMessage());
+      $this->deny(
+        $toolId,
+        $e->reasonCode,
+        $e->getMessage(),
+        $this->argumentDenialContext(),
+      );
     }
     if ($reserved !== []) {
       $this->deny(
@@ -252,6 +257,7 @@ final class McpPrincipalContextDispatcher {
         'Tool arguments must not carry identity or tenant keys ('
         . implode(', ', $reserved)
         . '). Identity comes from the validated token context.',
+        $this->argumentDenialContext(),
       );
     }
   }
@@ -352,14 +358,59 @@ final class McpPrincipalContextDispatcher {
    * records it as mcp_client, labeled self-reported only.
    */
   public function writeDenialAudit(string $toolId, string $reasonCode): void {
+    $this->logDenial($toolId, $reasonCode, $this->auditContext());
+  }
+
+  /**
+   * Writes one denied_access row for $ctx.
+   *
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   * @param string $reasonCode
+   *   Denial reason.
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
+   *   Principal recorded on the row.
+   */
+  private function logDenial(
+    string $toolId,
+    string $reasonCode,
+    McpPrincipalContext $ctx,
+  ): void {
     $this->auditLogger->logAlways(
       'denied_access',
-      self::denialAuditMetadata(
-        $toolId,
-        $reasonCode,
-        $this->auditContext(),
-      ),
+      self::denialAuditMetadata($toolId, $reasonCode, $ctx),
     );
+  }
+
+  /**
+   * Caller named on a reserved-key denial.
+   *
+   * That check runs before seal(). A job overlay contributes no
+   * identity. Otherwise the validated token on the request is the
+   * caller, so the row names them.
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpPrincipalContext
+   *   Context for the denial row.
+   */
+  private function argumentDenialContext(): McpPrincipalContext {
+    if ($this->holder->inJobScope()) {
+      return $this->emptyDenialContext();
+    }
+    $held = $this->holder->get();
+    if ($held instanceof McpPrincipalContext) {
+      return $held;
+    }
+    return $this->factory->fromCurrentRequest();
+  }
+
+  /**
+   * Denial context with no principal.
+   *
+   * @return \Drupal\mcp_sentinel\Value\McpPrincipalContext
+   *   An empty context.
+   */
+  private function emptyDenialContext(): McpPrincipalContext {
+    return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
   }
 
   /**
@@ -422,7 +473,7 @@ final class McpPrincipalContextDispatcher {
     if ($held instanceof McpPrincipalContext) {
       return $held;
     }
-    return new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
+    return $this->emptyDenialContext();
   }
 
   /**
@@ -443,15 +494,29 @@ final class McpPrincipalContextDispatcher {
    * receives the access exception and can return 403 or a non-zero
    * exit instead of an uncaught 500. A failed write is logged.
    *
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   * @param string $reasonCode
+   *   Denial reason.
+   * @param string $message
+   *   Exception message.
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext|null $auditContext
+   *   Row context. The sealed or empty context when omitted.
+   *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
   private function deny(
     string $toolId,
     string $reasonCode,
     string $message,
+    ?McpPrincipalContext $auditContext = NULL,
   ): never {
     try {
-      $this->writeDenialAudit($toolId, $reasonCode);
+      $this->logDenial(
+        $toolId,
+        $reasonCode,
+        $auditContext ?? $this->auditContext(),
+      );
     }
     catch (\Throwable $e) {
       $this->logger->error(
