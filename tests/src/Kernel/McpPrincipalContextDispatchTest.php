@@ -1355,15 +1355,18 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   private function lastDenialMetadata(): array {
     $row = $this->container->get('database')
       ->select('audit_chain_log', 'l')
-      ->fields('l', ['metadata'])
+      ->fields('l', ['entity_id', 'metadata'])
       ->condition('l.operation', 'denied_access')
       ->orderBy('l.id', 'DESC')
       ->range(0, 1)
       ->execute()
       ->fetchAssoc();
     $this->assertIsArray($row);
-    return $this->container->get('mcp_sentinel.audit_logger')
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
+    // Audit Chain lifts metadata.id onto entity_id and strips it.
+    $meta['id'] = (string) $row['entity_id'];
+    return $meta;
   }
 
   /**
