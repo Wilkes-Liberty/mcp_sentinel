@@ -213,11 +213,13 @@ services:
     arguments:
       - '@entity_field.manager'
 
+  # simple_oauth is a dependency, but KernelTestBase does not enable
+  # dependencies on its own. A missing factory leaves the bearer unstamped.
   mcp_sentinel.oauth_claims_validator:
     class: Drupal\mcp_sentinel\Authentication\McpSimpleOauthBearerValidator
     arguments:
-      - '@simple_oauth.server.resource_server.factory'
-      - '@psr7.http_message_factory'
+      - '@?simple_oauth.server.resource_server.factory'
+      - '@?psr7.http_message_factory'
 
   mcp_sentinel.oauth_claims_subscriber:
     class: Drupal\mcp_sentinel\EventSubscriber\McpOauthClaimsSubscriber

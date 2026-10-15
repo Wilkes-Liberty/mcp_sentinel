@@ -95,9 +95,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Drupal user id is never written as `sub`. A rejected bearer is not
   read. A payload that is not a full principal is left unstamped, so
   Simple OAuth scope and client fallback still applies and a governed
-  call still fails closed. Sealed tokens are unchanged. JSON:API,
-  GraphQL, `/drupal-mcp/context`, and `drush mcp-sentinel:sql-query`
-  now refuse a call that has no verified principal or tenant. Other
+  call still fails closed. Sealed tokens are unchanged. A JSON:API
+  or GraphQL HTTP call refuses a missing principal only when the
+  request already carries a validated bearer. A role-fallback session
+  on those paths is unchanged. GraphQL operations,
+  `/drupal-mcp/context`, and `drush mcp-sentinel:sql-query` refuse a
+  call that has no verified principal or tenant. Other
   `mcp-sentinel:*` commands stay operator commands. `drush sql:query`,
   `sql:cli`, `sql:dump`, and `php:eval` still cannot be governed.
 - Governed tool plugins resolve deny-explainer, exfiltration-guard,

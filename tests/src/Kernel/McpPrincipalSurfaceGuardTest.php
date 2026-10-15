@@ -13,13 +13,13 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
-use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
- * JSON:API, GraphQL HTTP, and context refuse a call with no principal.
+ * Context refuses a role-fallback call that has no principal.
  *
- * Role fallback can make readiness ready. That is not a principal.
+ * JSON:API and GraphQL HTTP keep role fallback as the local-dev path.
+ * The principal gate on those seams runs only for a validated bearer.
  * The kernel audit fixture seals one; these tests drop it first.
  *
  * @group mcp_sentinel
@@ -71,29 +71,16 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
   }
 
   /**
-   * JSON:API and GraphQL HTTP deny and audit when no principal is sealed.
+   * Role-fallback JSON:API and GraphQL HTTP do not require a token principal.
    */
-  public function testHttpSurfacesDenyWithoutPrincipal(): void {
+  public function testHttpRoleFallbackDoesNotRequirePrincipal(): void {
     $this->switchToGovernedUser();
     $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
-    $surfaces = [
-      '/jsonapi/node/article' => 'jsonapi',
-      '/graphql' => 'graphql',
-    ];
-    foreach ($surfaces as $path => $surface) {
+    foreach (['/jsonapi/node/article', '/graphql'] as $path) {
       $this->dropStampedPrincipal();
       $before = $this->deniedAccessCount();
-      try {
-        $subscriber->onRequest($this->requestEvent($path));
-        $this->fail($path . ' was admitted without a principal.');
-      }
-      catch (AccessDeniedHttpException $exception) {
-        $this->assertStringContainsString('verified principal', $exception->getMessage());
-      }
-      $this->assertSame($before + 1, $this->deniedAccessCount());
-      $metadata = $this->lastDenialMetadata();
-      $this->assertSame($surface, $metadata['tool']);
-      $this->assertSame('missing_principal', $metadata['reason']);
+      $subscriber->onRequest($this->requestEvent($path));
+      $this->assertSame($before, $this->deniedAccessCount(), $path);
     }
   }
 

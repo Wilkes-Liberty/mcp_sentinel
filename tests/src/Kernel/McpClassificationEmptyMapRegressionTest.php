@@ -166,8 +166,10 @@ final class McpClassificationEmptyMapRegressionTest extends KernelTestBase {
     if ($this->container->get('mcp_sentinel.raw_sql_guard')->check('SELECT nid, title FROM node_field_data', $profile) !== []) {
       $refused[] = 'raw_sql';
     }
-    // Context endpoint.
+    // Context endpoint. The probe request is not the sealed fixture
+    // request, so seal that same principal onto it before the call.
     $this->pushRequest(Request::create('/drupal-mcp/context'));
+    $this->stampDefaultPrincipalContext();
     $context = McpContextController::create($this->container)->context();
     $payload = json_decode((string) $context->getContent(), TRUE);
     if ($context->getStatusCode() !== 200 || !isset($payload['content_types']['memo'])) {

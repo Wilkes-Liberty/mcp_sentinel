@@ -71,6 +71,7 @@ final class McpContextControllerTest extends KernelTestBase {
    */
   public function testContextOmitsDrupalVersion(): void {
     $this->switchToDevelopmentGovernedUser();
+    $this->stampDefaultPrincipalContext();
     $controller = McpContextController::create($this->container);
     $payload = json_decode($controller->context()->getContent(), TRUE);
 
@@ -209,6 +210,7 @@ final class McpContextControllerTest extends KernelTestBase {
 
     $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
     $this->switchToDevelopmentGovernedUser();
+    $this->stampDefaultPrincipalContext();
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(200, $response->getStatusCode());
     $payload = json_decode((string) $response->getContent(), TRUE);
@@ -359,6 +361,7 @@ final class McpContextControllerTest extends KernelTestBase {
    */
   public function testContextRefusedUnderEmergencyDeny(): void {
     $this->switchToDevelopmentGovernedUser();
+    $this->stampDefaultPrincipalContext();
     $this->container->get('mcp_sentinel.policy_bundle_registry')->emergencyDeny();
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(403, $response->getStatusCode());

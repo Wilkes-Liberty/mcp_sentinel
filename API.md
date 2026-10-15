@@ -130,10 +130,12 @@ principal + tenant context sealed at the request boundary
 (DEV-844 / DEV-839). It throws when the dispatcher is missing or no
 principal is sealed; it never returns an empty context and never
 reads the request attribute. The tool guard applies **only** to
-`McpGovernedToolBase` subclasses. JSON:API, GraphQL,
+`McpGovernedToolBase` subclasses. GraphQL operations,
 `/drupal-mcp/context`, and `drush mcp-sentinel:sql-query` call
 `McpPrincipalContextDispatcher::assertDispatchAllowed()` with an
-empty argument list before their own gates. They are not admitted
+empty argument list before their own gates. JSON:API and the GraphQL
+HTTP seam do that only when the request carries a validated bearer;
+a role-fallback session is unchanged. They are not admitted
 through `admit()`/`dispatch()`. Other `mcp-sentinel:*` commands are
 not gated. `principalKey()` is
 `iss|sub|actor` (actor = top-level `act.sub` per RFC 8693, else

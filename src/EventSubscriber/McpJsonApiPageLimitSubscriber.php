@@ -13,7 +13,10 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpReadBudgetResolver;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -157,9 +160,11 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       );
     }
 
-    // Same principal and tenant gate as governed tools. A role-fallback
-    // session is not a principal. Denial is audited inside the dispatcher.
-    $this->requirePrincipal($surface->value);
+    // A validated bearer must carry a principal. Role fallback is the
+    // local-dev path and has no token, so it stays governed by its profile.
+    if ($this->requestCarriesValidatedToken($request)) {
+      $this->requirePrincipal($surface->value);
+    }
 
     // IP allowlist: deny the whole JSON:API request (collection, individual or
     // write) when the client IP is not permitted. An empty allowed_ips list
@@ -305,6 +310,20 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         ),
       );
     }
+  }
+
+  /**
+   * Whether this request authenticated with a validated bearer.
+   *
+   * Paladin claims, a sealed token, or a simple_oauth token user. A
+   * role-fallback session has none of these.
+   */
+  private function requestCarriesValidatedToken(Request $request): bool {
+    if ($request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)) {
+      return TRUE;
+    }
+    return $this->currentUser->getAccount() instanceof TokenAuthUserInterface;
   }
 
   /**

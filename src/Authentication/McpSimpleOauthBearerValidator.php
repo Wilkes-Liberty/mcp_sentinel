@@ -21,8 +21,8 @@ use Symfony\Component\HttpFoundation\Request;
 final class McpSimpleOauthBearerValidator implements McpValidatedBearerClaimsInterface {
 
   public function __construct(
-    private readonly ResourceServerFactoryInterface $resourceServers,
-    private readonly HttpMessageFactoryInterface $httpMessages,
+    private readonly ?ResourceServerFactoryInterface $resourceServers,
+    private readonly ?HttpMessageFactoryInterface $httpMessages,
   ) {}
 
   /**
@@ -40,6 +40,9 @@ final class McpSimpleOauthBearerValidator implements McpValidatedBearerClaimsInt
    * Whether the resource server accepts this request's bearer.
    */
   private function resourceServerAccepts(Request $request): bool {
+    if ($this->resourceServers === NULL || $this->httpMessages === NULL) {
+      return FALSE;
+    }
     try {
       $this->resourceServers->get()->validateAuthenticatedRequest(
         $this->httpMessages->createRequest($request),
@@ -82,8 +85,7 @@ final class McpSimpleOauthBearerValidator implements McpValidatedBearerClaimsInt
     if (!$token instanceof UnencryptedToken) {
       return NULL;
     }
-    $claims = $token->claims()->all();
-    return is_array($claims) ? $claims : NULL;
+    return $token->claims()->all();
   }
 
 }

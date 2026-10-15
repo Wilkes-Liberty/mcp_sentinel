@@ -262,6 +262,7 @@ final class McpIpAllowlistToolGateTest extends KernelTestBase {
     // Sets the governed account as the current user (used by the resolver).
     $this->createGovernedAccount();
     $this->pushRequest('192.0.2.1');
+    $this->stampDefaultPrincipalContext();
 
     $controller = McpContextController::create($this->container);
     $response = $controller->context();
@@ -287,6 +288,7 @@ final class McpIpAllowlistToolGateTest extends KernelTestBase {
     // Sets the governed account as the current user (used by the resolver).
     $this->createGovernedAccount();
     $this->pushRequest('203.0.113.42');
+    $this->stampDefaultPrincipalContext();
 
     $controller = McpContextController::create($this->container);
     $response = $controller->context();

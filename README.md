@@ -32,8 +32,9 @@ omitting it, and a non-agent user cannot be governed by adding it. The
 Governed tool dispatch (`McpGovernedToolBase` only) builds an immutable
 principal + tenant context from the validated token and passes it to
 handlers as a separate parameter. Tools must not read identity or
-tenant from arguments. The same check runs on JSON:API, GraphQL,
-`/drupal-mcp/context`, and `drush mcp-sentinel:sql-query`. Other
+tenant from arguments. GraphQL operations, `/drupal-mcp/context`,
+and `drush mcp-sentinel:sql-query` run the same check. JSON:API and
+GraphQL HTTP run it when the request carries a validated bearer. Other
 `mcp-sentinel:*` commands stay operator commands. `drush sql:query`
 still cannot be governed, because its bootstrap never loads the
 module. A Simple OAuth bearer is copied onto
@@ -63,9 +64,12 @@ identity source.
 ### Breaking: Paladin tokens required for governed tools
 
 Cookie sessions, role-fallback, claimless stdio calls, and sealed
-tokens minted without a tenant are refused on governed tools, and the
-same refusal now applies to JSON:API, GraphQL, `/drupal-mcp/context`,
-and `drush mcp-sentinel:sql-query`. There is no bypass. Callers
+tokens minted without a tenant are refused on governed tools.
+JSON:API and GraphQL HTTP apply that refusal only when the request
+already carries a validated bearer; a role-fallback session on those
+paths is unchanged. GraphQL operations, `/drupal-mcp/context`, and
+`drush mcp-sentinel:sql-query` refuse a call with no verified
+principal. There is no bypass on those paths. Callers
 must use tokens that carry `iss`, `sub`, `azp` (or
 `act.sub`), and `tenant`, or a sealed token re-minted with a tenant.
 `sub` must not be the Drupal user id.
