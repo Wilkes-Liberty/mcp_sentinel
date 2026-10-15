@@ -6,8 +6,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-15
+
 ### Breaking
-- DEV-844: Governed Tool plugins (`McpGovernedToolBase` only) refuse a
+- Governed Tool plugins (`McpGovernedToolBase` only) refuse a
   call that has no Paladin-issued principal. Sealed tokens that carry
   only `client_id`, `scopes`, and `jti` are denied
   (`missing_principal` / `missing_tenant_claim`). Session,
@@ -26,7 +28,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and look-alike detection has no fallback.
 
 ### Added
-- DEV-844: Governed tool dispatch builds an immutable principal + tenant
+- Governed tool dispatch builds an immutable principal + tenant
   context from the validated token at the request boundary and passes it
   to handlers as a separate parameter (`handler(args, ctx)`). Tools must
   not read identity or tenant from arguments. The reserved-key and
@@ -49,7 +51,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `|` are rejected. Shared vectors live in
   `tests/fixtures/principal-key-vectors.json` (the Node connector
   will test a JS twin against the same file). Network and
-  sealed-token HTTP calls require a tenant claim (DEV-839). Every
+  sealed-token HTTP calls require a tenant claim. Every
   denial writes a `denied_access` audit row that carries the
   verified `principal_key` and `human_key` (or `unverified` plus the
   reason) and the real tool id. `X-MCP-Client` stays a labeled
@@ -2946,7 +2948,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.0...1.x
+[3.0.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.1...3.0.0
 [2.34.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.0...2.34.1
 [2.34.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.33.0...2.34.0
 [2.33.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.32.0...2.33.0
