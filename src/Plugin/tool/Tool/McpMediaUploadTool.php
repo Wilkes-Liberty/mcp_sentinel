@@ -6,9 +6,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Exception\RequirementsException;
 use Drupal\tool\ExecutableResult;
@@ -65,16 +63,6 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel access checker.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
-   * The MCP Sentinel policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
-
-  /**
    * Field-definition allowlist for the fields map.
    */
   protected McpEntityFieldReservedAllowlist $fieldReservedAllowlist;
@@ -85,8 +73,6 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->entityTypeManager = $container->get('entity_type.manager');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->fieldReservedAllowlist = $container->get('mcp_sentinel.entity_field_reserved_allowlist');
     return $instance;
   }
@@ -135,14 +121,14 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
       'uid' => $this->currentUser->id(),
     ]);
 
-    $profile = $this->policyResolver->resolve($this->currentUser);
+    $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_media_create')) {
       return $rateLimited;
     }
-    $policyResult = $this->accessChecker->checkEntityAccess($media, 'create', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($media, 'create', $profile);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_media_create', 'media', '(new)', 'create', $reason);
       return ExecutableResult::failure($this->t('MCP Sentinel denied media creation: @reason', ['@reason' => $reason]));

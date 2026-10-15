@@ -208,6 +208,8 @@ full explanation and spoofing-protection details.
 
 ## Updating
 
+From 3.0, incomplete source-contract wiring and a missing Paladin principal fail closed.
+
 After pulling a new release, run database updates and rebuild caches:
 
 ```bash

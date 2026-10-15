@@ -64,16 +64,6 @@ interface McpApprovalRequestInterface extends ContentEntityInterface {
   public function getSealedManifest(): string;
 
   /**
-   * Stores the sealed action-manifest JSON.
-   *
-   * @param string $manifest
-   *   Sealed JSON from McpActionManifest::toJson().
-   *
-   * @return $this
-   */
-  public function setSealedManifest(string $manifest): static;
-
-  /**
    * Gets the current status (pending/approved/denied).
    */
   public function getStatus(): string;

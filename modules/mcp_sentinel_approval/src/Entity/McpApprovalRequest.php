@@ -155,14 +155,6 @@ final class McpApprovalRequest extends ContentEntityBase implements McpApprovalR
   /**
    * {@inheritdoc}
    */
-  public function setSealedManifest(string $manifest): static {
-    $this->set('manifest', $manifest);
-    return $this;
-  }
-
-  /**
-   * {@inheritdoc}
-   */
   public function getStatus(): string {
     return (string) $this->get('status')->value;
   }

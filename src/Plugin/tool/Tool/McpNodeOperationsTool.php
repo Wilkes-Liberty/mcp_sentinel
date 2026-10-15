@@ -7,10 +7,8 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\node\NodeInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -79,19 +77,9 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel access checker.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
    * The MCP Sentinel content lock service.
    */
   protected McpContentLock $contentLock;
-
-  /**
-   * The MCP Sentinel policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
 
   /**
    * Field-definition allowlist for the fields map.
@@ -104,9 +92,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->entityTypeManager = $container->get('entity_type.manager');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->contentLock = $container->get('mcp_sentinel.content_lock');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->fieldReservedAllowlist = $container->get('mcp_sentinel.entity_field_reserved_allowlist');
     return $instance;
   }
@@ -130,7 +116,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
   protected function doExecute(array $values): ExecutableResult {
     // Resolve the profile and enforce the rate limit before any business logic
     // so throttled agents are blocked regardless of input validity.
-    $profile = $this->policyResolver->resolve($this->currentUser);
+    $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
@@ -167,7 +153,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
       'uid' => $this->currentUser->id(),
     ]);
 
-    $policyResult = $this->accessChecker->checkEntityAccess($node, 'create', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'create', $profile);
     if ($policy = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', '(new)', 'create', $policy);
       return ExecutableResult::failure($this->t('MCP Sentinel denied node creation: @reason', ['@reason' => $policy]));
@@ -200,7 +186,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
     if ($this->contentLock->conflictsForActor('node', (string) $node->id(), $node)) {
       return ExecutableResult::failure($this->t('Node @id is locked against MCP writes by another actor (a human may be editing it).', ['@id' => $node->id()]));
     }
-    $policyResult = $this->accessChecker->checkEntityAccess($node, 'update', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'update', $profile);
     if ($policy = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', (string) $node->id(), 'update', $policy);
       return ExecutableResult::failure($this->t('MCP Sentinel denied the update: @reason', ['@reason' => $policy]));

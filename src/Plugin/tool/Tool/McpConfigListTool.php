@@ -6,9 +6,6 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
-use Drupal\mcp_sentinel\Service\McpAuditLogger;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -49,29 +46,11 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
   protected ConfigFactoryInterface $configFactory;
 
   /**
-   * The MCP Sentinel access checker.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
-   * The MCP Sentinel policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
-
-  /**
-   * The MCP Sentinel audit logger.
-   */
-  protected McpAuditLogger $auditLogger;
-
-  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->configFactory = $container->get('config.factory');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
-    $instance->auditLogger = $container->get('mcp_sentinel.audit_logger');
     return $instance;
   }
 
@@ -80,7 +59,7 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
    */
   protected function doExecute(array $values): ExecutableResult {
     $prefix = trim((string) ($values['prefix'] ?? ''));
-    $profile = $this->policyResolver->resolve($this->currentUser);
+    $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
@@ -98,7 +77,7 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
     $tags = [];
     $names = array_values(array_filter(
       $names,
-      fn (string $name): bool => $this->accessChecker->checkConfigTypePolicy($name, $profile, $tags) === NULL,
+      fn (string $name): bool => $this->governanceAccessChecker->checkConfigTypePolicy($name, $profile, $tags) === NULL,
     ));
 
     $names = $this->applyResultCap([
@@ -107,7 +86,7 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
       'queued' => [],
     ], $profile)['succeeded'];
 
-    $this->auditLogger->log('config_list', [
+    $this->governanceAuditLogger?->log('config_list', [
       'entity_type' => 'config',
       'id' => $prefix,
     ]);

@@ -43,6 +43,7 @@ final class McpHelpTest extends BrowserTestBase {
     // Known phrases from mcp_sentinel_help().
     $assert->pageTextContains('governance layer');
     $assert->pageTextContains('Trust model');
+    $assert->pageTextContains('fails closed');
     $assert->pageTextContains('Tamper-evident audit log');
     // The help page links to the settings and audit routes.
     $assert->linkByHrefExists('/admin/config/services/mcp-sentinel');

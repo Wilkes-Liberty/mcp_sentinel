@@ -41,14 +41,4 @@ interface McpAdminGrantInterface extends ContentEntityInterface {
    */
   public function getSealedManifest(): string;
 
-  /**
-   * Stores the HMAC-sealed grant manifest.
-   *
-   * @param string $manifest
-   *   Sealed JSON.
-   *
-   * @return $this
-   */
-  public function setSealedManifest(string $manifest): static;
-
 }
