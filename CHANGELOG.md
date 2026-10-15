@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-15
+
 ### Added
 - A governed agent that creates a content entity records that entity's
   tenant. A later governed read, update, or delete by a different
