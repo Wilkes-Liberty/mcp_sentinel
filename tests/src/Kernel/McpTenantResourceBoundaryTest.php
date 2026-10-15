@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Core\Access\AccessException;
+use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\EntityStorageException;
+use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpTenantResourceBoundary;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -152,12 +154,10 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
 
     $this->sealTenant(self::TENANT_A, 'subject-a');
     $owned = $storage->load($id);
-    $this->assertInstanceOf(Node::class, $owned);
     $owned->setTitle('fixture-a-kept');
     $owned->save();
     $storage->resetCache([$id]);
     $kept = $storage->load($id);
-    $this->assertInstanceOf(Node::class, $kept);
     $this->assertSame('fixture-a-kept', $kept->label());
 
     $this->container->get('mcp_sentinel.principal_context_holder')->resetForTest();
@@ -283,11 +283,15 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
   /**
    * Node access for one operation.
    */
-  private function nodeAccess(Node $node, string $operation, User $account): AccessResultInterface {
+  private function nodeAccess(
+    Node $node,
+    string $operation,
+    AccountInterface $account,
+  ): AccessResult {
     $result = $this->container->get('entity_type.manager')
       ->getAccessControlHandler('node')
       ->access($node, $operation, $account, TRUE);
-    $this->assertInstanceOf(AccessResultInterface::class, $result);
+    $this->assertInstanceOf(AccessResult::class, $result);
     return $result;
   }
 
