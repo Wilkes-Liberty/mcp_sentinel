@@ -320,8 +320,7 @@ final class McpDlpPathBehaviourTest extends KernelTestBase {
         }
       }
     }
-    $this->container->get('mcp_sentinel.principal_context_holder')
-      ->resetForTest();
+    $this->principalContextHolder()->resetForTest();
     $stack->push($request);
   }
 

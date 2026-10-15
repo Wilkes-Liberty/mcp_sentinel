@@ -9,7 +9,6 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
-use Drupal\mcp_sentinel\Service\McpLookalikeChecker;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
@@ -771,7 +770,6 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    */
   public function testLookalikeCheckUnavailableFailsClosed(): void {
     $checker = $this->container->get('mcp_sentinel.lookalike_checker');
-    $this->assertInstanceOf(McpLookalikeChecker::class, $checker);
     $checker->disableForTest();
     $tool = $this->executeProbe(
       [
@@ -893,8 +891,10 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $holder = $this->holder();
     $holder->resetForTest();
     $commands = new McpPrincipalContextCommands(
-      $holder,
-      $this->createMock(LoggerInterface::class),
+      new McpPrincipalContextJob(
+        $holder,
+        $this->createMock(LoggerInterface::class),
+      ),
     );
     $leftover->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
       'iss' => 'https://idp.example/realms/agents',
@@ -1205,21 +1205,10 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
-   * The private holder, via the public dispatcher when get() is refused.
+   * The private holder, reached through the public dispatcher.
    */
   private function holder(): McpPrincipalContextHolder {
-    try {
-      $service = $this->container->get('mcp_sentinel.principal_context_holder');
-      if ($service instanceof McpPrincipalContextHolder) {
-        return $service;
-      }
-    }
-    catch (\Throwable) {
-    }
-    $ref = new \ReflectionProperty(McpPrincipalContextDispatcher::class, 'holder');
-    $holder = $ref->getValue($this->dispatcher());
-    $this->assertInstanceOf(McpPrincipalContextHolder::class, $holder);
-    return $holder;
+    return $this->principalContextHolder();
   }
 
   /**

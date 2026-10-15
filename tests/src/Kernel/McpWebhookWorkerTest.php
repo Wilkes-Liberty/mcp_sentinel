@@ -121,20 +121,14 @@ final class McpWebhookWorkerTest extends KernelTestBase {
   }
 
   /**
-   * The private holder, via the public dispatcher when get() is refused.
+   * The private holder, reached through the public dispatcher.
    */
   private function holder(): McpPrincipalContextHolder {
-    try {
-      $service = $this->container->get('mcp_sentinel.principal_context_holder');
-      if ($service instanceof McpPrincipalContextHolder) {
-        return $service;
-      }
-    }
-    catch (\Throwable) {
-    }
     $ref = new \ReflectionProperty(McpPrincipalContextDispatcher::class, 'holder');
     $holder = $ref->getValue($this->container->get('mcp_sentinel.principal_context_dispatcher'));
-    $this->assertInstanceOf(McpPrincipalContextHolder::class, $holder);
+    if (!$holder instanceof McpPrincipalContextHolder) {
+      $this->fail('Dispatcher holder is not McpPrincipalContextHolder.');
+    }
     return $holder;
   }
 

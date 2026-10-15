@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -61,11 +63,23 @@ trait McpAuditSchemaTestTrait {
       'azp' => 'kernel-test-client',
       'tenant' => 'kernel-test',
     ]);
-    $holder = $this->container->get('mcp_sentinel.principal_context_holder');
+    $holder = $this->principalContextHolder();
     $holder->resetForTest();
     $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
       ->fromRequest($request);
     $holder->seal($ctx, $request);
+  }
+
+  /**
+   * The private holder, reached through the public dispatcher.
+   */
+  protected function principalContextHolder(): McpPrincipalContextHolder {
+    $ref = new \ReflectionProperty(McpPrincipalContextDispatcher::class, 'holder');
+    $holder = $ref->getValue($this->container->get('mcp_sentinel.principal_context_dispatcher'));
+    if (!$holder instanceof McpPrincipalContextHolder) {
+      throw new \LogicException('Dispatcher holder is not McpPrincipalContextHolder.');
+    }
+    return $holder;
   }
 
   /**
@@ -76,8 +90,7 @@ trait McpAuditSchemaTestTrait {
    * claims on the current request, or the dispatcher admits the call.
    */
   protected function dropStampedPrincipal(): void {
-    $this->container->get('mcp_sentinel.principal_context_holder')
-      ->resetForTest();
+    $this->principalContextHolder()->resetForTest();
     $stack = $this->container->get('request_stack');
     $request = $stack->getCurrentRequest();
     if ($request === NULL) {

@@ -235,7 +235,6 @@ final class McpPrincipalContextDispatcher {
     if (!$this->guard->required()) {
       return;
     }
-    $reserved = [];
     try {
       $reserved = McpPrincipalContext::reservedKeysIn(
         $arguments,

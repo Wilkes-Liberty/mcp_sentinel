@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
 use Consolidation\AnnotatedCommand\Hooks\HookManager;
-use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
-use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
@@ -32,28 +30,19 @@ final class McpPrincipalContextCommands extends DrushCommands {
   use AutowireTrait;
 
   /**
-   * Internal job-boundary helper.
-   */
-  private readonly McpPrincipalContextJob $job;
-
-  /**
    * Constructs the Drush hook command file.
    *
-   * The job service is private; construct it from the holder.
+   * Autowire reaches the public job helper. The holder is
+   * public:false and is not retrieved from the container here.
    *
-   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
-   *   The write-once sealed context.
-   * @param \Psr\Log\LoggerInterface $logger
-   *   Logs leftover overlays if a command leaves a scope open.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextJob $job
+   *   Opens and closes the deny-only overlay for this invocation.
    */
   public function __construct(
-    #[Autowire(service: 'mcp_sentinel.principal_context_holder')]
-    McpPrincipalContextHolder $holder,
-    #[Autowire(service: 'logger.channel.mcp_sentinel')]
-    LoggerInterface $logger,
+    #[Autowire(service: 'mcp_sentinel.principal_context_job')]
+    private readonly McpPrincipalContextJob $job,
   ) {
     parent::__construct();
-    $this->job = new McpPrincipalContextJob($holder, $logger);
   }
 
   /**

@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -32,8 +33,10 @@ final class McpPrincipalContextDrushCommandsTest extends UnitTestCase {
   public function testHooksOpenDenyOnlyOverlay(): void {
     $holder = new McpPrincipalContextHolder(new RequestStack());
     $commands = new McpPrincipalContextCommands(
-      $holder,
-      $this->createMock(LoggerInterface::class),
+      new McpPrincipalContextJob(
+        $holder,
+        $this->createMock(LoggerInterface::class),
+      ),
     );
     $commands->preCommand();
     $this->assertTrue($holder->inJobScope());
@@ -52,8 +55,10 @@ final class McpPrincipalContextDrushCommandsTest extends UnitTestCase {
   public function testSecondInvocationDoesNotThrowResealRefused(): void {
     $holder = new McpPrincipalContextHolder(new RequestStack());
     $commands = new McpPrincipalContextCommands(
-      $holder,
-      $this->createMock(LoggerInterface::class),
+      new McpPrincipalContextJob(
+        $holder,
+        $this->createMock(LoggerInterface::class),
+      ),
     );
     $commands->preCommand();
     $commands->postCommand();
