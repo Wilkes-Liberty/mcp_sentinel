@@ -36,9 +36,9 @@ final class McpSimpleOauthBearerValidatorTest extends UnitTestCase {
     $validator = $this->validator($factory, $this->messages());
 
     $this->assertNull($validator->validatedClaims(Request::create('/jsonapi')));
-    $basic = Request::create('/jsonapi');
-    $basic->headers->set('Authorization', 'Basic dXNlcjpwYXNz');
-    $this->assertNull($validator->validatedClaims($basic));
+    $other = Request::create('/jsonapi');
+    $other->headers->set('Authorization', 'Token not-a-bearer');
+    $this->assertNull($validator->validatedClaims($other));
   }
 
   /**
