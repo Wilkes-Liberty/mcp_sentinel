@@ -59,7 +59,7 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
     }
     if (!class_exists(McpAuthorizationDeniedEvent::class)) {
       // McpDeferredAuditAttributionTest covers the logger on every version.
-      $this->markTestSkipped('Needs the MCP Server authorization-denied event, which is not in an MCP Server release yet.');
+      $this->markTestSkipped('Needs an MCP Server version with the authorization-denied event.');
     }
     $this->installEntitySchema('user');
     $this->installEntitySchema('consumer');
@@ -148,6 +148,9 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
     $dispatcher->addListener(RequestEvent::class, static function (RequestEvent $event): void {
       $request = $event->getRequest();
       if ($request instanceof CallToolRequest && $request->name === 'denied_fixture') {
+        // Exercise the legacy denial transport only when its event exists.
+        // MCP Server beta6 removes the event; setUp() skips that version.
+        // @phpstan-ignore new.deprecatedClass, method.deprecatedClass
         throw new McpAuthorizationDeniedException('Private diagnostic must not leak', 403);
       }
     });
