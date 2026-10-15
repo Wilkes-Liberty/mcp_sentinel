@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Agent kill switch core (DEV-846). A durable kill-block registry keyed
+  by `iss|sub|actor`, `iss|sub` (every agent of this person), or tenant
+  is checked on every `admit()` before `doExecute`. A killed principal
+  is refused with the same generic deny as an invalid principal; the
+  `denied_access` row records `principal_killed`. Default block TTL is
+  24 h, capped at 7 d; re-killing extends `block_until` up to that cap.
+  Mass kills (more than one principal, or any `human_key` / tenant
+  selector) and every un-kill stay pending until a distinct operator
+  account confirms within a configurable window (default 15 min). Same
+  account confirming twice is refused. In-flight governed writes
+  re-check the registry before commit and roll back. Queue and Drush
+  job scopes refuse a carried killed principal. Operator commands:
+  `mcp-sentinel:kill`, `:kill-confirm`, `:unkill`, `:kill-status`,
+  behind the restricted permission `administer agent kill switch`.
+  Paladin token revocation, `/mcp` kill-block writes, connector chain
+  reach, and the live Paladin latency proof are out of scope.
+
 ## [3.1.0] - 2026-10-15
 
 ### Added

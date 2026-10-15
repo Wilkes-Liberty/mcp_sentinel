@@ -151,6 +151,31 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
   }
 
   /**
+   * BeginCarrying attaches kill-check keys without sealing identity.
+   *
+   * @covers ::beginCarrying
+   */
+  public function testBeginCarryingAttachesKeysWithoutSealingIdentity(): void {
+    $holder = new McpPrincipalContextHolder(new RequestStack());
+    $job = new McpPrincipalContextJob($holder);
+    $handle = $job->beginCarrying(
+      'https://idp.example/realms/agents|subject-a|agent-a',
+      'https://idp.example/realms/agents|subject-a',
+      'tenant-a',
+    );
+    $this->assertTrue($holder->inJobScope());
+    $this->assertNull($holder->get());
+    $carried = $holder->carriedPrincipal();
+    $this->assertNotNull($carried);
+    $this->assertSame(
+      'https://idp.example/realms/agents|subject-a|agent-a',
+      $carried->principalKey,
+    );
+    $job->end($handle);
+    $this->assertNull($holder->carriedPrincipal());
+  }
+
+  /**
    * Builds a context that can compose a principal key.
    */
   private function ctx(string $sub, string $azp): McpPrincipalContext {

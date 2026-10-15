@@ -11,6 +11,7 @@ use Drupal\Core\Config\ConfigException;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\StorageInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpKillEnforcerInterface;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Psr\Log\LoggerInterface;
@@ -57,6 +58,8 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
    *   escape-hatch permission.
    * @param \Psr\Log\LoggerInterface $logger
    *   The mcp_sentinel logger channel.
+   * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
+   *   Kill registry re-checked on a governed config write (DEV-846).
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,
@@ -65,6 +68,7 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
     private readonly StorageInterface $configStorage,
     private readonly McpRoleAssertions $roleAssertions,
     private readonly LoggerInterface $logger,
+    private readonly McpKillEnforcerInterface $killSwitch,
   ) {}
 
   /**
@@ -157,6 +161,7 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
     if (!$this->policyResolver->isGoverned()) {
       return;
     }
+    $this->killSwitch->assertNotKilledAtCommit();
     $profile = $this->policyResolver->resolve();
     if ($profile === NULL) {
       return;

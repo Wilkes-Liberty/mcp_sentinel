@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\mcp_sentinel\Value\McpCarriedPrincipal;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -54,6 +55,32 @@ final class McpPrincipalContextJob {
   public function begin(): McpJobScopeHandle {
     $handle = $this->holder->enterJobScope();
     $this->handles[] = $handle;
+    return $handle;
+  }
+
+  /**
+   * Opens a deny-only overlay that carries keys for kill checks.
+   *
+   * Identity is still not inherited. A killed carried principal is
+   * refused at admit() with the same generic deny as an invalid
+   * principal (DEV-846).
+   *
+   * @param string $principalKey
+   *   Principal key (iss|sub|actor) from the queued work.
+   * @param string $humanKey
+   *   Person key (iss|sub), or empty.
+   * @param string $tenant
+   *   Tenant claim, or empty.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpJobScopeHandle
+   *   Token that end() / release() must present.
+   */
+  public function beginCarrying(string $principalKey, string $humanKey = '', string $tenant = ''): McpJobScopeHandle {
+    $handle = $this->begin();
+    $this->holder->carryPrincipal(
+      $handle,
+      new McpCarriedPrincipal($principalKey, $humanKey, $tenant),
+    );
     return $handle;
   }
 

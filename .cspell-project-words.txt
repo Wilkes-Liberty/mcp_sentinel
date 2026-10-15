@@ -167,3 +167,5 @@ forgeable
 
 subrequest
 subrequests
+unkill
+confirmer

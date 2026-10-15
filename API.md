@@ -216,6 +216,27 @@ method. The holder service is `public: false`.
 overlay via PRE/POST_COMMAND_HOOK (`*` — every command). A
 Drush-hosted stdio server is therefore never admitted for
 governed tools.
+
+### Agent kill switch (DEV-846)
+
+`mcp_sentinel.kill_switch` is the operator API and the registry
+`admit()` and governed writes consult. Selectors are
+`McpKillSelector::principalKey()`, `humanKey()` (every agent of this
+person), and `tenant()`. A single principal kill is immediate. A mass
+kill and every un-kill wait for the named second person (secondary
+account holder). Confirm windows default to 15 minutes. Kill-block TTL
+defaults to 24 hours and cannot exceed 7 days. Audit operations
+`agent_kill`, `agent_kill_confirm`, `agent_kill_expire`,
+`agent_unkill_request`, and `agent_unkill` go through `logAlways()`
+and never include tokens. Callers of `admit()` never see a distinct
+killed signal. Queue workers may pass `principal_key` / `human_key` /
+`tenant` on the item; `McpPrincipalContextJob::beginCarrying()`
+attaches those keys for the kill check without sealing identity.
+The unavailable-confirmer rule is not decided:
+`hook_mcp_sentinel_kill_unavailable_confirmer` and
+`McpKillUnavailableConfirmerEvent` are the operator-decision points
+and must not weaken the two-person rule.
+
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
 refuses the result when that payload exceeds the profile response-size cap.

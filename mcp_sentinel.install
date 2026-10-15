@@ -103,6 +103,139 @@ function mcp_sentinel_schema(): array {
     'primary key' => ['entity_type', 'uuid'],
   ];
 
+  // Agent kill-block registry (DEV-846). Keyed by a hash of the
+  // selector because a principal_key can be 770 characters and will
+  // not fit a utf8mb4 unique index. selector_key stores the full
+  // iss|sub|actor, iss|sub, or tenant value.
+  $schema['mcp_sentinel_kill_block'] = [
+    'description' => 'Durable agent kill-block registry (DEV-846).',
+    'fields' => [
+      'selector_hash' => [
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+      ],
+      'selector_type' => [
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+      ],
+      'selector_key' => [
+        'type' => 'varchar',
+        'length' => 770,
+        'not null' => TRUE,
+      ],
+      'status' => [
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+      ],
+      'batch_id' => [
+        'type' => 'varchar',
+        'length' => 36,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'block_until' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'ttl' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'reason' => [
+        'type' => 'varchar',
+        'length' => 512,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'requested_by' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'requested_at' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'confirmed_by' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'confirmed_at' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'confirm_until' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'unkill_batch_id' => [
+        'type' => 'varchar',
+        'length' => 36,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'unkill_requested_by' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'unkill_requested_at' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'unkill_confirm_until' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'unkill_confirmed_by' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'unkill_confirmed_at' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'changed' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+    ],
+    'primary key' => ['selector_hash'],
+    'indexes' => [
+      'status_until' => ['status', 'block_until'],
+      'batch_id' => ['batch_id'],
+      'unkill_batch_id' => ['unkill_batch_id'],
+      'confirm_until' => ['confirm_until'],
+    ],
+  ];
+
   $schema['mcp_sentinel_sealed_token'] = [
     'description' => 'Metadata for short-lived sealed tokens. The secret is never stored.',
     'fields' => [
@@ -1448,4 +1581,43 @@ function mcp_sentinel_update_10029(): string {
   $spec = mcp_sentinel_schema()['mcp_sentinel_tenant_resource'];
   $schema->createTable('mcp_sentinel_tenant_resource', $spec);
   return 'Created mcp_sentinel_tenant_resource. A governed agent can read and change only content its own tenant created.';
+}
+
+/**
+ * Create the agent kill-block registry and seed TTL defaults (DEV-846).
+ */
+function mcp_sentinel_update_10030(): string {
+  $schema = \Drupal::database()->schema();
+  $messages = [];
+  if (!$schema->tableExists('mcp_sentinel_kill_block')) {
+    $spec = mcp_sentinel_schema()['mcp_sentinel_kill_block'];
+    $schema->createTable('mcp_sentinel_kill_block', $spec);
+    $messages[] = 'Created mcp_sentinel_kill_block.';
+  }
+  else {
+    $messages[] = 'mcp_sentinel_kill_block already exists.';
+  }
+
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $added = [];
+  if ($config->get('kill_switch_default_ttl') === NULL) {
+    $config->set('kill_switch_default_ttl', 86400);
+    $added[] = 'kill_switch_default_ttl (86400)';
+  }
+  if ($config->get('kill_switch_max_ttl') === NULL) {
+    $config->set('kill_switch_max_ttl', 604800);
+    $added[] = 'kill_switch_max_ttl (604800)';
+  }
+  if ($config->get('kill_switch_confirm_window') === NULL) {
+    $config->set('kill_switch_confirm_window', 900);
+    $added[] = 'kill_switch_confirm_window (900)';
+  }
+  if ($added !== []) {
+    $config->save();
+    $messages[] = 'Seeded ' . implode(', ', $added) . '.';
+  }
+  else {
+    $messages[] = 'Kill-switch TTL settings already present.';
+  }
+  return implode(' ', $messages);
 }

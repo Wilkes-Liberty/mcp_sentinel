@@ -30,6 +30,13 @@ final class McpPrincipalContextDispatcher {
     . 'and Drush until a hop token supplies a Paladin principal.';
 
   /**
+   * Caller-facing refusal used for both a missing principal and a kill.
+   *
+   * A killed principal must not produce a distinct signal (DEV-846).
+   */
+  public const GENERIC_REFUSAL = 'A verified principal context is required.';
+
+  /**
    * Constructs the dispatcher.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
@@ -44,6 +51,8 @@ final class McpPrincipalContextDispatcher {
    *   Writes denied_access rows.
    * @param \Psr\Log\LoggerInterface $logger
    *   Fallback when a denial audit write fails.
+   * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
+   *   Kill registry checked on every admit() before doExecute.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
@@ -52,6 +61,7 @@ final class McpPrincipalContextDispatcher {
     private readonly McpPrincipalContextHolder $holder,
     private readonly McpAuditLogger $auditLogger,
     private readonly LoggerInterface $logger,
+    private readonly McpKillEnforcerInterface $killSwitch,
   ) {}
 
   /**
@@ -115,6 +125,7 @@ final class McpPrincipalContextDispatcher {
     array $nestedMapRules = [],
   ): McpPrincipalContext {
     if ($this->holder->inJobScope()) {
+      $this->assertNotKilled($toolId);
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
@@ -135,10 +146,11 @@ final class McpPrincipalContextDispatcher {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-        'A verified principal context is required.',
+        self::GENERIC_REFUSAL,
       );
     }
     $this->assertContextAllowed($sealed, $toolId);
+    $this->assertNotKilled($toolId, $sealed);
     return $sealed;
   }
 
@@ -168,6 +180,7 @@ final class McpPrincipalContextDispatcher {
     array $nestedMapRules = [],
   ): void {
     if ($this->holder->inJobScope()) {
+      $this->assertNotKilled($toolId);
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
@@ -186,10 +199,11 @@ final class McpPrincipalContextDispatcher {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-        'A verified principal context is required.',
+        self::GENERIC_REFUSAL,
       );
     }
     $this->assertContextAllowed($sealed, $toolId);
+    $this->assertNotKilled($toolId, $sealed);
   }
 
   /**
@@ -316,6 +330,7 @@ final class McpPrincipalContextDispatcher {
    */
   public function context(): McpPrincipalContext {
     if ($this->holder->inJobScope()) {
+      $this->assertNotKilled('mcp_principal_context');
       $this->deny(
         'mcp_principal_context',
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
@@ -324,12 +339,13 @@ final class McpPrincipalContextDispatcher {
     }
     $sealed = $this->holder->get();
     if ($sealed instanceof McpPrincipalContext) {
+      $this->assertNotKilled('mcp_principal_context', $sealed);
       return $sealed;
     }
     $this->deny(
       'mcp_principal_context',
       McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-      'A verified principal context is required.',
+      self::GENERIC_REFUSAL,
     );
   }
 
@@ -346,7 +362,7 @@ final class McpPrincipalContextDispatcher {
     }
     throw new McpPrincipalContextDeniedException(
       McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
-      'A verified principal context is required.',
+      self::GENERIC_REFUSAL,
     );
   }
 
@@ -378,10 +394,20 @@ final class McpPrincipalContextDispatcher {
     string $reasonCode,
     McpPrincipalContext $ctx,
   ): void {
-    $this->auditLogger->logAlways(
-      'denied_access',
-      self::denialAuditMetadata($toolId, $reasonCode, $ctx),
-    );
+    $metadata = self::denialAuditMetadata($toolId, $reasonCode, $ctx);
+    $carried = $this->holder->carriedPrincipal();
+    if ($carried !== NULL) {
+      if ($carried->principalKey !== '') {
+        $metadata['principal_key'] = $carried->principalKey;
+      }
+      if ($carried->humanKey !== '') {
+        $metadata['human_key'] = $carried->humanKey;
+      }
+      if ($carried->tenant !== '') {
+        $metadata['tenant'] = $carried->tenant;
+      }
+    }
+    $this->auditLogger->logAlways('denied_access', $metadata);
   }
 
   /**
@@ -475,26 +501,61 @@ final class McpPrincipalContextDispatcher {
    * receives the access exception and can return 403 or a non-zero
    * exit instead of an uncaught 500. A failed write is logged.
    *
+   * $auditReason may differ from $reasonCode so a kill records
+   * principal_killed on the row while the caller still sees the
+   * generic missing-principal refusal (DEV-846).
+   *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
   private function deny(
     string $toolId,
     string $reasonCode,
     string $message,
+    ?string $auditReason = NULL,
   ): never {
+    $rowReason = $auditReason ?? $reasonCode;
     try {
-      $this->logDenial($toolId, $reasonCode, $this->auditContext());
+      $this->logDenial($toolId, $rowReason, $this->auditContext());
     }
     catch (\Throwable $e) {
       $this->logger->error(
         'Principal-context denial audit write failed (@reason): @message',
         [
-          '@reason' => $reasonCode,
+          '@reason' => $rowReason,
           '@message' => $e->getMessage(),
         ],
       );
     }
     throw new McpPrincipalContextDeniedException($reasonCode, $message);
+  }
+
+  /**
+   * Refuses a killed sealed or carried principal with a generic deny.
+   *
+   * Behind the principal-context guard so a red run that injects
+   * disableForTest() does not enforce the kill (DEV-846).
+   *
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext|null $ctx
+   *   Sealed context when one is visible.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   */
+  private function assertNotKilled(string $toolId, ?McpPrincipalContext $ctx = NULL): void {
+    if (!$this->guard->required()) {
+      return;
+    }
+    $carried = $this->holder->carriedPrincipal();
+    if (!$this->killSwitch->isContextKilled($ctx, $carried)) {
+      return;
+    }
+    $this->deny(
+      $toolId,
+      McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+      self::GENERIC_REFUSAL,
+      McpKillSwitch::DENY_REASON,
+    );
   }
 
 }

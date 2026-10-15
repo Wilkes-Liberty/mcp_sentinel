@@ -115,6 +115,9 @@ class McpEvidenceGuard {
    *   The database connection, used only to detect an active transaction so
    *   a receipt failure can distinguish fail-closed from uncertain. NULL is
    *   accepted for test construction, degrading to the uncertain branch.
+   * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface|null $killSwitch
+   *   Kill registry re-checked before the evidence precommit commits
+   *   with the mutation (DEV-846). Optional for test construction.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -128,6 +131,7 @@ class McpEvidenceGuard {
     private readonly McpOauthContext $oauthContext,
     private readonly RequestStack $requestStack,
     private readonly ?Connection $database = NULL,
+    private readonly ?McpKillEnforcerInterface $killSwitch = NULL,
   ) {}
 
   /**
@@ -290,6 +294,9 @@ class McpEvidenceGuard {
     if (!$this->signingKeyResolves()) {
       throw new \RuntimeException($this->messageFor(self::REASON_UNKEYED, $actionClass));
     }
+    // Kill-switch re-check alongside the signing-key re-check: a kill
+    // mid-request must take the precommit and the mutation down together.
+    $this->killSwitch?->assertNotKilledAtCommit();
     $this->pending[spl_object_id($entity)] = $correlation;
     $expected = [
       'target' => [
