@@ -29,6 +29,9 @@ trait McpAuditSchemaTestTrait {
         'locked' => 1,
       ])->execute();
     }
+    if (!$database->schema()->tableExists('mcp_sentinel_tenant_resource')) {
+      $this->installSchema('mcp_sentinel', ['mcp_sentinel_tenant_resource']);
+    }
     $this->stampDefaultPrincipalContext();
   }
 

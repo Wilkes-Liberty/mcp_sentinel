@@ -78,6 +78,31 @@ function mcp_sentinel_schema(): array {
     'indexes' => ['expires_at' => ['expires_at']],
   ];
 
+  // Tenant that owns a content entity created by a governed agent. Keyed by
+  // entity UUID so a later request from another tenant cannot read or change
+  // it. Rows are written only from the sealed token, never from tool input.
+  $schema['mcp_sentinel_tenant_resource'] = [
+    'description' => 'Tenant that owns content created by a governed agent.',
+    'fields' => [
+      'entity_type' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+      ],
+      'uuid' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+      ],
+      'tenant' => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+      ],
+    ],
+    'primary key' => ['entity_type', 'uuid'],
+  ];
+
   $schema['mcp_sentinel_sealed_token'] = [
     'description' => 'Metadata for short-lived sealed tokens. The secret is never stored.',
     'fields' => [
@@ -1410,4 +1435,17 @@ function mcp_sentinel_update_10028(): string {
   $config->save();
   return 'Added ' . implode(' and ', $added) . ' to mcp_sentinel.settings. '
     . 'Chain evidence goes stale exactly as before until an administrator raises them.';
+}
+
+/**
+ * Create the tenant ownership table for governed content.
+ */
+function mcp_sentinel_update_10029(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->tableExists('mcp_sentinel_tenant_resource')) {
+    return 'mcp_sentinel_tenant_resource already exists.';
+  }
+  $spec = mcp_sentinel_schema()['mcp_sentinel_tenant_resource'];
+  $schema->createTable('mcp_sentinel_tenant_resource', $spec);
+  return 'Created mcp_sentinel_tenant_resource. A governed agent can read and change only content its own tenant created.';
 }
