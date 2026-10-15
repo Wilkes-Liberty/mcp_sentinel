@@ -88,7 +88,7 @@ final class McpDenyExplainer {
         'lookalike_check_unavailable',
         'look-alike check unavailable',
         FALSE,
-        'Install PHP ext-intl so Spoofchecker can detect reserved-key look-alikes. Governed calls fail closed until it is present.',
+        'Install PHP ext-intl so Spoofchecker can detect reserved-key look-alike spellings. Governed calls fail closed until it is present.',
         'Stay denied.',
       );
     }

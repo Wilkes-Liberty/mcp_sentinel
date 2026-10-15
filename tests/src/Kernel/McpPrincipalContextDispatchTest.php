@@ -616,7 +616,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
         },
         ['note' => 'ok'],
       );
-      $this->fail('A reminted sealed token must not be a governed caller.');
+      $this->fail('A sealed token minted again must not be a governed caller.');
     }
     catch (McpPrincipalContextDeniedException $e) {
       $this->assertFalse($ran);

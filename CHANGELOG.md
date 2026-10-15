@@ -46,8 +46,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message must use `mcp_sentinel.principal_context_job`
   (`begin()` / `end()` or `run()`). Site code must not call
   `enterJobScope()` / `leaveJobScope()`.
-- Governed Tool plugins refuse sealed tokens even when reminted
-  with a tenant. Paladin is the sole issuer (DEV-843).
+- Governed Tool plugins refuse sealed tokens even when minted again
+  with a tenant. Paladin is the sole issuer.
 
 ## [3.0.0] - 2026-10-15
 
@@ -60,13 +60,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   denied the same way. There is no bypass. Callers must present a
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
   Sealed tokens minted before this release carry no tenant: 3.0.0
-  reminted them with one (the mint form now requires it). 3.0.1
-  refuses reminted sealed tokens for governed Tool plugins; see
+  minted them again with one (the mint form now requires it). 3.0.1
+  refuses sealed tokens minted again for governed Tool plugins; see
   [3.0.1].
   A Simple OAuth bearer is stamped only when the resource server has
   accepted it and the payload is already a full principal; see
   Changed. Until that stamp is present, a governed call is
-  refused. 3.0.0 still admitted a reminted sealed token; 3.0.1
+  refused. 3.0.0 still admitted a sealed token minted again; 3.0.1
   does not. Denial `denied_access` rows
   are always written;
   `audit_enabled` gates allow rows only. `ext-intl` is now a declared
