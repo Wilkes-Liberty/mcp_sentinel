@@ -60,6 +60,44 @@ final class McpGovernedToolBaseTest extends UnitTestCase {
   }
 
   /**
+   * First-party tools use the base governance* properties, not duplicates.
+   */
+  public function testFirstPartyToolsDoNotRedeclareGovernanceServices(): void {
+    $tools = [
+      McpConfigGetTool::class,
+      McpConfigListTool::class,
+      McpConfigSetTool::class,
+      McpNodeOperationsTool::class,
+      McpBulkOperationsTool::class,
+      McpMediaUploadTool::class,
+      McpWorkflowTransitionTool::class,
+      McpSiteContextTool::class,
+    ];
+    $duplicates = [
+      'accessChecker',
+      'auditLogger',
+      'classification',
+      'policyResolver',
+    ];
+
+    foreach ($tools as $tool) {
+      $own = [];
+      foreach ((new \ReflectionClass($tool))->getProperties() as $property) {
+        if ($property->getDeclaringClass()->getName() === $tool) {
+          $own[] = $property->getName();
+        }
+      }
+      foreach ($duplicates as $name) {
+        $this->assertNotContains(
+          $name,
+          $own,
+          $tool . ' must use the base governance* property, not $' . $name . '.',
+        );
+      }
+    }
+  }
+
+  /**
    * Successful Tool context is scanned through the shared DLP egress helper.
    */
   public function testGovernedExecuteAppliesDlpOnTheBase(): void {

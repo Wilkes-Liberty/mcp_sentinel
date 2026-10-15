@@ -118,12 +118,4 @@ final class McpAdminGrant extends ContentEntityBase implements McpAdminGrantInte
     return (string) ($this->get('manifest')->value ?? '');
   }
 
-  /**
-   * {@inheritdoc}
-   */
-  public function setSealedManifest(string $manifest): static {
-    $this->set('manifest', $manifest);
-    return $this;
-  }
-
 }

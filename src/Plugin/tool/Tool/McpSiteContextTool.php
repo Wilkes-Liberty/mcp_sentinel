@@ -8,7 +8,6 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -35,25 +34,11 @@ final class McpSiteContextTool extends McpGovernedToolBase {
   protected McpSiteSchemaBuilder $schemaBuilder;
 
   /**
-   * The policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
-
-  /**
-   * Classification egress ceilings (NULL only in the deploy window).
-   */
-  protected ?McpClassificationResolver $classification = NULL;
-
-  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->schemaBuilder = $container->get('mcp_sentinel.site_schema_builder');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
-    $instance->classification = $container->has('mcp_sentinel.classification')
-      ? $container->get('mcp_sentinel.classification')
-      : NULL;
     return $instance;
   }
 
@@ -65,13 +50,11 @@ final class McpSiteContextTool extends McpGovernedToolBase {
     // the same schema the context endpoint serves, judged against the Tool
     // ceiling — refused below the schema label, and over-ceiling bundles are
     // not described.
-    // The resolver is NULL only in the deploy window before the container
-    // rebuilds; no ceiling is evaluated then, exactly the previous behaviour.
-    $profile = $this->policyResolver->resolve();
-    $ceiling = ($profile === NULL || $this->classification === NULL)
+    $profile = $this->governancePolicyResolver?->resolve();
+    $ceiling = ($profile === NULL || $this->governanceClassification === NULL)
       ? NULL
-      : $this->classification->effectiveCeiling($profile, McpGovernedSurface::Tool);
-    if ($profile !== NULL && $this->classification?->schemaDenied($profile, McpGovernedSurface::Tool, $ceiling)) {
+      : $this->governanceClassification->effectiveCeiling($profile, McpGovernedSurface::Tool);
+    if ($profile !== NULL && $this->governanceClassification?->schemaDenied($profile, McpGovernedSurface::Tool, $ceiling)) {
       return ExecutableResult::failure($this->t("The site schema is classified above this principal's egress ceiling (@code).", [
         '@code' => McpClassificationResolver::DENIAL_CODE,
       ]));
@@ -95,8 +78,8 @@ final class McpSiteContextTool extends McpGovernedToolBase {
    * Mirrors the context endpoint through the resolver's shared rule.
    */
   private function describes(?McpPolicyProfileInterface $profile, ?string $ceiling, string $entity_type_id, string $bundle): bool {
-    return $this->classification === NULL
-      || $this->classification->describesBundle($profile, McpGovernedSurface::Tool, $ceiling, $entity_type_id, $bundle);
+    return $this->governanceClassification === NULL
+      || $this->governanceClassification->describesBundle($profile, McpGovernedSurface::Tool, $ceiling, $entity_type_id, $bundle);
   }
 
 }

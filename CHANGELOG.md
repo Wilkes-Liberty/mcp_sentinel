@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- First-party governed tools no longer re-inject `policyResolver`,
+  `accessChecker`, `auditLogger`, or `classification`. They use the
+  `$governance*` properties `McpGovernedToolBase::create()` already
+  assigns. Unused `setSealedManifest()` is removed from the approval
+  request and admin-grant entities; callers set the `manifest` field.
+  `mcp_sentinel_help()` and `INSTALL.md` state the 3.0 fail-closed
+  trust model.
+
 ## [3.0.0] - 2026-10-15
 
 ### Breaking

@@ -87,7 +87,6 @@ trait McpEntityToolTrait {
   ): void {
     $logger = $this->governanceAuditLogger;
     if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
-      // Deploy-window: subclass create() has not assigned this property.
       $logger = \Drupal::service('mcp_sentinel.audit_logger');
     }
     if ($logger !== NULL) {
@@ -140,7 +139,6 @@ trait McpEntityToolTrait {
   ): ?ExecutableResult {
     $limiter = $this->governanceRateLimiter;
     if ($limiter === NULL && \Drupal::hasService('mcp_sentinel.rate_limiter')) {
-      // Deploy-window: subclass create() has not assigned this property.
       $limiter = \Drupal::service('mcp_sentinel.rate_limiter');
     }
     if ($limiter === NULL) {
@@ -150,7 +148,6 @@ trait McpEntityToolTrait {
     if (!$limiter->check($profile, $uid, $toolId)) {
       $logger = $this->governanceAuditLogger;
       if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
-        // Deploy-window: subclass create() has not assigned this property.
         $logger = \Drupal::service('mcp_sentinel.audit_logger');
       }
       if ($logger !== NULL) {

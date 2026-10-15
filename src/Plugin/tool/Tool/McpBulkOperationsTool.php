@@ -8,9 +8,7 @@ use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveOpEvent;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolOperation;
@@ -70,19 +68,9 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel access checker.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
    * The MCP Sentinel content lock service.
    */
   protected McpContentLock $contentLock;
-
-  /**
-   * The MCP Sentinel policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
 
   /**
    * The Symfony event dispatcher.
@@ -99,9 +87,7 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->entityTypeManager = $container->get('entity_type.manager');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->contentLock = $container->get('mcp_sentinel.content_lock');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->eventDispatcher = $container->get('event_dispatcher');
     return $instance;
   }
@@ -129,7 +115,7 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
 
     // Resolve the governance profile once. An ungoverned account must be
     // rejected before any entity work — this is the most destructive tool.
-    $profileForRateLimit = $this->policyResolver->resolve($this->currentUser);
+    $profileForRateLimit = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profileForRateLimit === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
@@ -146,7 +132,7 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
         continue;
       }
       $profile = $profileForRateLimit;
-      $policyResult = $this->accessChecker->checkEntityAccess($entity, $entity_op, $profile);
+      $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, $entity_op, $profile);
       if ($reason = $this->denyReason($policyResult)) {
         $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $operation, $reason);
         $results['failed'][$id] = $reason;

@@ -7,10 +7,8 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -77,16 +75,6 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
   protected ConfigFactoryInterface $configFactory;
 
   /**
-   * The MCP Sentinel access checker.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
-   * The MCP Sentinel policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
-
-  /**
    * The event dispatcher.
    */
   protected EventDispatcherInterface $eventDispatcher;
@@ -107,8 +95,6 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->configFactory = $container->get('config.factory');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->eventDispatcher = $container->get('event_dispatcher');
     $instance->configWriteValidator = $container->get('mcp_sentinel.config_write_validator');
     $instance->configSecrets = $container->get('mcp_sentinel.config_secret_redactor');
@@ -127,14 +113,14 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     if (!is_array($data) || $data === []) {
       return ExecutableResult::failure($this->t('A non-empty map of config values is required.'));
     }
-    $profile = $this->policyResolver->resolve($this->currentUser);
+    $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_config_set')) {
       return $rateLimited;
     }
-    $policyResult = $this->accessChecker->checkConfigAccess($name, 'write', $profile);
+    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'write', $profile);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', $reason);
       return ExecutableResult::failure($this->t('MCP Sentinel denied the config write: @reason', ['@reason' => $reason]));

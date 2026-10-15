@@ -9,10 +9,8 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpModerationGate;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Exception\RequirementsException;
 use Drupal\tool\ExecutableResult;
@@ -63,19 +61,9 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel access checker.
-   */
-  protected McpAccessChecker $accessChecker;
-
-  /**
    * The MCP Sentinel content lock service.
    */
   protected McpContentLock $contentLock;
-
-  /**
-   * The MCP Sentinel policy resolver.
-   */
-  protected McpPolicyResolver $policyResolver;
 
   /**
    * The moderation information service, if Content Moderation is installed.
@@ -93,9 +81,7 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
     $instance->entityTypeManager = $container->get('entity_type.manager');
-    $instance->accessChecker = $container->get('mcp_sentinel.access_checker');
     $instance->contentLock = $container->get('mcp_sentinel.content_lock');
-    $instance->policyResolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->moderationGate = $container->get('mcp_sentinel.moderation_gate');
     // Content Moderation is optional; the service only exists when it is on.
     // @phpstan-ignore-next-line phpstan-drupal treats $container->has() as always true.
@@ -130,7 +116,7 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
     }
     // Resolve profile and enforce rate limit before any DB reads so that an
     // over-limit agent is throttled without paying the entity-load cost.
-    $profile = $this->policyResolver->resolve($this->currentUser);
+    $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
@@ -147,7 +133,7 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
     if ($this->contentLock->conflictsForActor($entity_type, $id, $entity)) {
       return ExecutableResult::failure($this->t('Entity @id is locked against MCP writes by another actor.', ['@id' => $id]));
     }
-    $policyResult = $this->accessChecker->checkEntityAccess($entity, 'update', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, 'update', $profile);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entity_type, $id, 'update', $reason);
       return ExecutableResult::failure($this->t('MCP Sentinel denied the transition: @reason', ['@reason' => $reason]));
