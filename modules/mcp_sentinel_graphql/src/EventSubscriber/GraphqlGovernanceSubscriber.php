@@ -12,9 +12,11 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\graphql\Event\OperationEvent;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use GraphQL\Error\Error;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -63,6 +65,9 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
    *   The request stack. Nullable for the deploy window in which the
    *   cached container still passes six arguments.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
+   *   Principal and tenant gate. Nullable only for a cached container that
+   *   predates it; a missing dispatcher fails closed on a governed operation.
    */
   public function __construct(
     private readonly McpAuditLogger $auditLogger,
@@ -72,6 +77,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     private readonly ?McpAccessChecker $accessChecker = NULL,
     private readonly ?CacheBackendInterface $graphqlResultsCache = NULL,
     private readonly ?RequestStack $requestStack = NULL,
+    private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
   ) {}
 
   /**
@@ -87,6 +93,24 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       OperationEvent::GRAPHQL_OPERATION_CACHE_HIT => 'onOperation',
       ConfigEvents::SAVE => 'onSettingsSave',
     ];
+  }
+
+  /**
+   * Refuses an operation that has no verified principal or tenant.
+   *
+   * @throws \GraphQL\Error\Error
+   *   When the principal gate refuses the operation.
+   */
+  private function requirePrincipal(): void {
+    if ($this->principalDispatcher === NULL) {
+      throw new Error('A verified principal is required.');
+    }
+    try {
+      $this->principalDispatcher->assertDispatchAllowed([], 'graphql');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      throw new Error($e->getMessage(), previous: $e);
+    }
   }
 
   /**
@@ -155,6 +179,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     if ($profile === NULL) {
       throw new Error('MCP source governance is not ready: active_profile_missing.');
     }
+    $this->requirePrincipal();
 
     $config = $this->configFactory->get('mcp_sentinel.settings');
 

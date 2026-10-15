@@ -68,4 +68,25 @@ trait McpAuditSchemaTestTrait {
     $holder->seal($ctx, $request);
   }
 
+  /**
+   * Drops the kernel fixture principal so a call can be refused.
+   *
+   * The audit-schema installer seals a principal for tool tests that
+   * never set claims. A denial test has to clear that seal and the
+   * claims on the current request, or the dispatcher admits the call.
+   */
+  protected function dropStampedPrincipal(): void {
+    $this->container->get('mcp_sentinel.principal_context_holder')
+      ->resetForTest();
+    $stack = $this->container->get('request_stack');
+    $request = $stack->getCurrentRequest();
+    if ($request === NULL) {
+      $request = Request::create('/');
+      $stack->push($request);
+    }
+    $request->attributes->remove(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    $request->attributes->remove(McpOauthContext::SEALED_ATTRIBUTE);
+    $request->attributes->remove(McpPrincipalContext::NETWORK_ATTRIBUTE);
+  }
+
 }

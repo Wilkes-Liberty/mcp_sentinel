@@ -9,5 +9,6 @@ services:
       - '@?mcp_sentinel.access_checker'
       - '@?cache.graphql.results'
       - '@request_stack'
+      - '@mcp_sentinel.principal_context_dispatcher'
     tags:
       - { name: event_subscriber }

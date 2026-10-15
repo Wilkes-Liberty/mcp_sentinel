@@ -16,11 +16,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Paladin token with `iss`, `sub`, `azp` (or `act.sub`), and `tenant`.
   Sealed tokens minted before this release carry no tenant: re-mint
   them with one (the mint form now requires it) and they work again.
-  Nothing in this release stamps Paladin claims on the request; that
-  is the connector/auth slice, so until it lands a sealed token minted
-  with a tenant is the only admitted caller. Drush, GraphQL, JSON:API,
-  and Context entry points are not covered by this guard (follow-up
-  tickets). Denial `denied_access` rows are always written;
+  A Simple OAuth bearer is stamped only when the resource server has
+  accepted it and the payload is already a full principal; see
+  Changed. Until that stamp or a sealed token with a tenant is
+  present, a governed call is refused. Denial `denied_access` rows
+  are always written;
   `audit_enabled` gates allow rows only. `ext-intl` is now a declared
   Composer requirement: the module already needed it for `Normalizer`,
   and look-alike detection has no fallback.
@@ -88,6 +88,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Use server-verified request claims for OAuth client designation and exact
   tool scopes. Freeze that grant per main request, refuse malformed-claim
   fallback to legacy credentials, and retain the client allowlist requirement.
+  A Simple OAuth bearer is copied onto `mcp_sentinel.token_claims` only
+  after that module's resource server accepts the same bearer and the
+  verified payload already contains `iss`, a `sub` that is not the
+  Drupal user id, `azp` or top-level `act.sub`, and `tenant`. The
+  Drupal user id is never written as `sub`. A rejected bearer is not
+  read. A payload that is not a full principal is left unstamped, so
+  Simple OAuth scope and client fallback still applies and a governed
+  call still fails closed. Sealed tokens are unchanged. A JSON:API
+  or GraphQL HTTP call refuses a missing principal only when the
+  request already carries a validated bearer. A role-fallback session
+  on those paths is unchanged. GraphQL operations,
+  `/drupal-mcp/context`, and `drush mcp-sentinel:sql-query` refuse a
+  call that has no verified principal or tenant. Other
+  `mcp-sentinel:*` commands stay operator commands. `drush sql:query`,
+  `sql:cli`, `sql:dump`, and `php:eval` still cannot be governed.
 - Governed tool plugins resolve deny-explainer, exfiltration-guard,
   audit-logger, and rate-limiter services once in
   `McpGovernedToolBase::create()` (`$governanceDenyExplainer`,

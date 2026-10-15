@@ -4,6 +4,36 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Context, GraphQL operations, and governed SQL require a principal
+
+A role-fallback session is no longer enough on these paths. Each one
+refuses the call unless the request has a verified principal and tenant:
+
+- GraphQL operations
+- `/drupal-mcp/context` (the readiness probe is unchanged)
+- `drush mcp-sentinel:sql-query`
+
+JSON:API and the GraphQL HTTP seam require that principal only when
+the request already carries a validated bearer. A role-fallback
+session on those two paths is unchanged.
+
+The principal is `iss`, a `sub` that is not the Drupal user id, `azp`
+or top-level `act.sub`, and `tenant`. A sealed token minted with a
+tenant already qualifies. A Simple OAuth access token is stamped onto
+`mcp_sentinel.token_claims` only when simple_oauth's resource server
+accepts that bearer and the verified payload already contains those
+claims. This module does not add an issuer, JWKS, or audience setting,
+and it does not copy the Drupal user id into `sub`.
+
+The other `mcp-sentinel:*` commands are unchanged. `drush sql:query`,
+`sql:cli`, `sql:dump`, and `php:eval` still run below module discovery
+and are still not governed.
+
+Rebuild caches after deploy. The JSON:API and GraphQL subscribers and
+the context controller fail closed if a cached container still has the
+previous argument list. `mcp-sentinel:sql-query` gained a required
+principal-dispatcher argument and will not construct until that rebuild.
+
 ## Translation inventory reads each language from its latest-affected revision
 
 `GET .../mcp-translations` still returns `meta.working.vid` as the tip

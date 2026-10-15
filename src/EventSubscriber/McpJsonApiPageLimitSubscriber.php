@@ -9,9 +9,14 @@ use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\jsonapi\ResourceType\ResourceType;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpReadBudgetResolver;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -74,6 +79,9 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *   Classification egress ceilings (d.o #3616540 part 2). Nullable for the
    *   deploy window in which the cached container still passes six arguments;
    *   without it no ceiling is evaluated here, exactly the previous behavior.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
+   *   Principal and tenant gate. Nullable only while a cached container
+   *   still has the previous argument list; a missing dispatcher fails closed.
    */
   public function __construct(
     private readonly McpAccessChecker $accessChecker,
@@ -83,6 +91,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     private readonly McpReadBudgetResolver $budgets,
     private readonly McpAuditLogger $auditLogger,
     private readonly ?McpClassificationResolver $classification = NULL,
+    private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
   ) {}
 
   /**
@@ -149,6 +158,12 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         NULL,
         'MCP source governance is not ready: active_profile_missing.',
       );
+    }
+
+    // A validated bearer must carry a principal. Role fallback is the
+    // local-dev path and has no token, so it stays governed by its profile.
+    if ($this->requestCarriesValidatedToken($request)) {
+      $this->requirePrincipal($surface->value);
     }
 
     // IP allowlist: deny the whole JSON:API request (collection, individual or
@@ -294,6 +309,41 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
           $cap,
         ),
       );
+    }
+  }
+
+  /**
+   * Whether this request authenticated with a validated bearer.
+   *
+   * Paladin claims, a sealed token, or a simple_oauth token user. A
+   * role-fallback session has none of these.
+   */
+  private function requestCarriesValidatedToken(Request $request): bool {
+    if ($request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)) {
+      return TRUE;
+    }
+    return $this->currentUser->getAccount() instanceof TokenAuthUserInterface;
+  }
+
+  /**
+   * Refuses a governed call that has no verified principal or tenant.
+   *
+   * @param string $surfaceId
+   *   Surface name recorded on the denial row.
+   *
+   * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+   *   When the principal gate refuses the call.
+   */
+  private function requirePrincipal(string $surfaceId): void {
+    if ($this->principalDispatcher === NULL) {
+      throw new AccessDeniedHttpException('A verified principal is required.');
+    }
+    try {
+      $this->principalDispatcher->assertDispatchAllowed([], $surfaceId);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      throw new AccessDeniedHttpException($e->getMessage(), $e);
     }
   }
 

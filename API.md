@@ -129,10 +129,15 @@ a `fields` map (empty on tools that do not write entities).
 principal + tenant context sealed at the request boundary
 (DEV-844 / DEV-839). It throws when the dispatcher is missing or no
 principal is sealed; it never returns an empty context and never
-reads the request attribute. This guard applies **only** to
-`McpGovernedToolBase` subclasses. Drush commands, GraphQL,
-JSON:API, and the Context controller are not admitted through
-`admit()`/`dispatch()` (follow-up work). `principalKey()` is
+reads the request attribute. The tool guard applies **only** to
+`McpGovernedToolBase` subclasses. GraphQL operations,
+`/drupal-mcp/context`, and `drush mcp-sentinel:sql-query` call
+`McpPrincipalContextDispatcher::assertDispatchAllowed()` with an
+empty argument list before their own gates. JSON:API and the GraphQL
+HTTP seam do that only when the request carries a validated bearer;
+a role-fallback session is unchanged. They are not admitted
+through `admit()`/`dispatch()`. Other `mcp-sentinel:*` commands are
+not gated. `principalKey()` is
 `iss|sub|actor` (actor = top-level `act.sub` per RFC 8693, else
 `azp`; never `client_id` or `act.subject`); `humanKey()` is
 `iss|sub`. Missing iss/sub/azp/`act.sub`, a `|`, Unicode
@@ -648,6 +653,19 @@ issuer, audience, subject, binding and scope checks succeed. Supply verified
 `iss`, `sub`, `azp`, `client_id`, `tenant`, optional nested `act`, and the issuer's
 space-separated `scope` or string-list `scopes`. Never decode an unverified JWT
 or accept caller arguments as that source. No tenant default is permitted.
+
+On a Simple OAuth request, `McpOauthClaimsSubscriber` re-checks the bearer
+with simple_oauth's resource server and, only after that check succeeds,
+copies a whitelist from that same JWT. The attribute is set only when the
+payload already contains `iss`, a `sub` that is not the authenticated Drupal
+user id, `azp` or top-level `act.sub`, and a non-empty `tenant`. The Drupal
+user id is never copied into `sub`. A rejected bearer is not parsed. A
+payload that fails those checks is left unstamped, because the presence of
+`mcp_sentinel.token_claims` suppresses the Simple OAuth client and scope
+fallback even when the value is malformed. This module does not configure
+an issuer, JWKS, or audience of its own. Sealed tokens stay on
+`mcp_sentinel.sealed_token`. An attribute another provider already set is
+left unchanged.
 
 The OAuth context snapshots the main request's grant on first use. Client
 identity resolves from `client_id`, then `client`, then `azp`; it must still be

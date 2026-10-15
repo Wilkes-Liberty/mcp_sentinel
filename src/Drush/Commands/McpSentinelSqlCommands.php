@@ -7,10 +7,12 @@ namespace Drupal\mcp_sentinel\Drush\Commands;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
-use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpSqlRefusal;
+use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpGovernedSql;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -66,6 +68,8 @@ final class McpSentinelSqlCommands extends DrushCommands {
     private readonly McpPolicyResolver $policyResolver,
     #[Autowire(service: 'mcp_sentinel.governed_sql')]
     private readonly McpGovernedSql $governedSql,
+    #[Autowire(service: 'mcp_sentinel.principal_context_dispatcher')]
+    private readonly McpPrincipalContextDispatcher $principalDispatcher,
   ) {
     parent::__construct();
   }
@@ -79,6 +83,13 @@ final class McpSentinelSqlCommands extends DrushCommands {
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query 'SELECT nid, title FROM node_field_data'", description: 'Run a governed query under the default profile.')]
   #[CLI\Usage(name: "drush mcp-sentinel:sql-query --profile=readonly 'SELECT COUNT(*) FROM node_field_data'", description: 'Run a governed query under a named profile.')]
   public function sqlQuery(string $query = '', array $options = ['profile' => NULL]): int {
+    try {
+      $this->principalDispatcher->assertDispatchAllowed([], 'mcp-sentinel:sql-query');
+    }
+    catch (McpPrincipalContextDeniedException $exception) {
+      $this->logger()->error($exception->getMessage());
+      return self::EXIT_FAILURE;
+    }
     $profile = $this->resolveProfile((string) ($options['profile'] ?? ''));
     try {
       $result = $this->governedSql->run($query, $profile, McpGovernedSurface::Drush);

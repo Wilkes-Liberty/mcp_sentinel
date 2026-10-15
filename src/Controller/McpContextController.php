@@ -8,11 +8,13 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\mcp_sentinel\Service\McpWhoamiRecorder;
@@ -49,6 +51,9 @@ class McpContextController extends ControllerBase {
    *   Last whoami recorder. NULL only in the deploy window.
    * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
    *   Deny-path explainer. NULL only in the deploy window.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
+   *   Principal and tenant gate. NULL only in the deploy window; a missing
+   *   dispatcher fails closed.
    */
   public function __construct(
     private readonly McpSiteSchemaBuilder $schemaBuilder,
@@ -59,6 +64,7 @@ class McpContextController extends ControllerBase {
     private readonly ?McpClassificationResolver $classification = NULL,
     private readonly ?McpWhoamiRecorder $whoamiRecorder = NULL,
     private readonly ?McpDenyExplainer $denyExplainer = NULL,
+    private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
   ) {}
 
   /**
@@ -74,6 +80,9 @@ class McpContextController extends ControllerBase {
       $container->has('mcp_sentinel.classification') ? $container->get('mcp_sentinel.classification') : NULL,
       $container->has('mcp_sentinel.whoami_recorder') ? $container->get('mcp_sentinel.whoami_recorder') : NULL,
       $container->has('mcp_sentinel.deny_explainer') ? $container->get('mcp_sentinel.deny_explainer') : NULL,
+      $container->has('mcp_sentinel.principal_context_dispatcher')
+        ? $container->get('mcp_sentinel.principal_context_dispatcher')
+        : NULL,
     );
   }
 
@@ -99,6 +108,10 @@ class McpContextController extends ControllerBase {
     $this->whoamiRecorder?->record($readiness, 'context');
     if (!$readiness->isReady()) {
       return $this->notReadyResponse($readiness->reason());
+    }
+    $denied = $this->principalDenial();
+    if ($denied !== NULL) {
+      return $denied;
     }
 
     // IP allowlist gate — governed requests only.
@@ -219,6 +232,30 @@ class McpContextController extends ControllerBase {
       'Cache-Control' => 'private, no-store',
       'X-Content-Type-Options' => 'nosniff',
     ]);
+  }
+
+  /**
+   * Returns 403 when the caller has no verified principal or tenant.
+   */
+  private function principalDenial(): ?JsonResponse {
+    if ($this->principalDispatcher === NULL) {
+      return new JsonResponse(
+        ['error' => 'A verified principal is required.', 'reason' => 'missing_principal'],
+        403,
+        ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'],
+      );
+    }
+    try {
+      $this->principalDispatcher->assertDispatchAllowed([], 'context');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      return new JsonResponse(
+        ['error' => $e->getMessage(), 'reason' => $e->reasonCode],
+        403,
+        ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'],
+      );
+    }
+    return NULL;
   }
 
   /**

@@ -30,10 +30,19 @@ omitting it, and a non-agent user cannot be governed by adding it. The
 `anonymous` and `authenticated` roles can never be governed.
 
 Governed tool dispatch (`McpGovernedToolBase` only) builds an immutable
-principal + tenant context from the validated Paladin token and passes
-it to handlers as a separate parameter. Tools must not read identity or
-tenant from arguments. Drush, GraphQL, JSON:API, and Context are not
-covered by this guard. Reserved identity and tenant keys (the full
+principal + tenant context from the validated token and passes it to
+handlers as a separate parameter. Tools must not read identity or
+tenant from arguments. GraphQL operations, `/drupal-mcp/context`,
+and `drush mcp-sentinel:sql-query` run the same check. JSON:API and
+GraphQL HTTP run it when the request carries a validated bearer. Other
+`mcp-sentinel:*` commands stay operator commands. `drush sql:query`
+still cannot be governed, because its bootstrap never loads the
+module. A Simple OAuth bearer is copied onto
+`mcp_sentinel.token_claims` only after the resource server accepts it
+and the verified payload already has `iss`, a subject that is not the
+Drupal user id, `azp` or `act.sub`, and `tenant`. A rejected bearer is
+not read, and those claims are not invented from the Drupal account.
+Reserved identity and tenant keys (the full
 list is `McpPrincipalContext::RESERVED_IDENTITY_KEYS`, documented in
 [`API.md`](API.md#tool-plugin-contract)) are rejected before dispatch,
 including nested maps, case variants, format characters, and
@@ -55,9 +64,15 @@ identity source.
 ### Breaking: Paladin tokens required for governed tools
 
 Cookie sessions, role-fallback, claimless stdio calls, and sealed
-tokens minted without a tenant are refused. There is no bypass. Callers
-must use Paladin-issued tokens that carry `iss`, `sub`, `azp` (or
+tokens minted without a tenant are refused on governed tools.
+JSON:API and GraphQL HTTP apply that refusal only when the request
+already carries a validated bearer; a role-fallback session on those
+paths is unchanged. GraphQL operations, `/drupal-mcp/context`, and
+`drush mcp-sentinel:sql-query` refuse a call with no verified
+principal. There is no bypass on those paths. Callers
+must use tokens that carry `iss`, `sub`, `azp` (or
 `act.sub`), and `tenant`, or a sealed token re-minted with a tenant.
+`sub` must not be the Drupal user id.
 For stdio development, mint that token and send it on the connector
 channel. A custom CLI worker that supplies claims calls
 `mcp_sentinel.principal_context_holder::resetForJob()` per message.
@@ -1334,7 +1349,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
-| `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. Refused unless the profile sets `allow_raw_sql`; every attempt is audited. |
+| `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. Refused without a verified principal and tenant, and unless the profile sets `allow_raw_sql`; every attempt is audited. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
 | `drush mcp-sentinel:audit-purge` | Delete audit entries past the retention window (also runs on cron). |
 | `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |

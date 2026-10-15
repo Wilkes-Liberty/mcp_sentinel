@@ -174,6 +174,58 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   }
 
   /**
+   * A role-fallback agent is not a principal.
+   *
+   * The operation must be refused and audited before the read gate runs.
+   *
+   * @covers ::onOperation
+   */
+  public function testOperationDeniedWithoutPrincipal(): void {
+    $this->setUpGovernedAgent(['allow_read' => TRUE]);
+    $this->dropStampedPrincipal();
+    $before = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+
+    try {
+      $this->subscriber()->onOperation($this->makeEvent('query'));
+      $this->fail('A GraphQL operation was admitted without a principal.');
+    }
+    catch (Error $exception) {
+      $this->assertStringContainsString('verified principal', $exception->getMessage());
+    }
+
+    $after = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame($before + 1, $after);
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $metadata = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame('graphql', $metadata['tool']);
+    $this->assertSame('missing_principal', $metadata['reason']);
+    $this->assertNotContains('graphql_query', $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['operation'])
+      ->execute()
+      ->fetchCol());
+  }
+
+  /**
    * A governed agent can run a GraphQL query when the read gate is on.
    *
    * The profile has allow_read = TRUE. onOperation() must not throw for a
@@ -304,6 +356,9 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $request->setSession($master->getSession());
     }
     $stack->push($request);
+    // The audit fixture sealed a principal on an earlier request. Seal
+    // it onto this request so the operation gate admits the call.
+    $this->stampDefaultPrincipalContext();
 
     $this->subscriber()->onOperation($this->makeEvent('mutation'));
     $this->assertSame(
@@ -386,6 +441,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.access_checker'),
       $graphqlResultsCache,
       $this->container->get('request_stack'),
+      $this->container->get('mcp_sentinel.principal_context_dispatcher'),
     );
   }
 
