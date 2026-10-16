@@ -469,7 +469,7 @@ final class McpDenyExplainer {
       ? McpGovernedSurface::fromPath($request->getPathInfo())
       : NULL;
     $meta = [
-      'tool' => $surface?->value ?? 'entity_access',
+      'tool' => $surface instanceof McpGovernedSurface ? $surface->value : 'entity_access',
       'reason' => $reason,
       'explain' => $explain,
       'rule' => $explanation->ruleId,

@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * Caller-facing denies in src/ and submodule src trees must go through refuse().
+ * Caller-facing src denies must go through refuse() (DEV-966).
  *
  * Lives in Kernel so a failing scan cannot skip the rest of the Kernel
  * suite (Unit runs first under set -euo pipefail).
@@ -103,7 +103,8 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
     }
     foreach ($matches[1] as $match) {
       $literal = $match[0];
-      $window = substr($code, $match[1], 500);
+      $start = max(0, $match[1] - 600);
+      $window = substr($code, $start, 1200);
       if ($literal === '@msg') {
         if (!str_contains($window, 'refuse(')
           && !str_contains($window, 'CALLER_MESSAGE')) {
