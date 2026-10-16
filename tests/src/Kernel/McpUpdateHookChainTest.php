@@ -987,7 +987,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
-   * Update 10032 adds unbind columns and is idempotent.
+   * Update 10032 adds unbind columns and deletes dead Paladin keys.
    */
   public function testUpdate10032AddsUnbindColumns(): void {
     $schema = $this->container->get('database')->schema();
@@ -1007,20 +1007,44 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     }
     $this->assertFalse($schema->fieldExists('mcp_sentinel_operator_binding', 'unbind_batch_id'));
     $this->config('mcp_sentinel.settings')
-      ->clear('paladin_introspection_url')
-      ->clear('paladin_introspection_client_id')
-      ->clear('paladin_introspection_client_secret_key')
+      ->set('paladin_introspection_url', 'https://stale.example/introspect')
+      ->set('paladin_introspection_client_id', 'stale-client')
+      ->set('paladin_introspection_client_secret_key', 'stale-secret-key')
       ->save();
 
     $message = mcp_sentinel_update_10032();
     $this->assertStringContainsString('unbind_batch_id', $message);
+    $this->assertStringContainsString('paladin_introspection_url', $message);
     $this->assertTrue($schema->fieldExists('mcp_sentinel_operator_binding', 'unbind_batch_id'));
     $this->assertTrue($schema->fieldExists('mcp_sentinel_operator_binding', 'unbind_requested_by'));
     $this->container->get('config.factory')->reset('mcp_sentinel.settings');
-    $this->assertSame('', $this->config('mcp_sentinel.settings')->get('paladin_introspection_url'));
+    $this->assertNull($this->config('mcp_sentinel.settings')->get('paladin_introspection_url'));
+    $this->assertNull($this->config('mcp_sentinel.settings')->get('paladin_introspection_client_id'));
+    $this->assertNull($this->config('mcp_sentinel.settings')->get('paladin_introspection_client_secret_key'));
 
     $again = mcp_sentinel_update_10032();
     $this->assertStringContainsString('already present', $again);
+  }
+
+  /**
+   * Update 10033 deletes paladin_introspection_* keys an earlier 10032 wrote.
+   */
+  public function testUpdate10033DeletesDeadPaladinIntrospectionConfig(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('paladin_introspection_url', 'https://stale.example/introspect')
+      ->set('paladin_introspection_client_id', 'stale-client')
+      ->set('paladin_introspection_client_secret_key', 'stale-secret-key')
+      ->save();
+
+    $message = mcp_sentinel_update_10033();
+    $this->assertStringContainsString('paladin_introspection_url', $message);
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertNull($this->config('mcp_sentinel.settings')->get('paladin_introspection_url'));
+    $this->assertNull($this->config('mcp_sentinel.settings')->get('paladin_introspection_client_id'));
+    $this->assertNull($this->config('mcp_sentinel.settings')->get('paladin_introspection_client_secret_key'));
+
+    $again = mcp_sentinel_update_10033();
+    $this->assertStringContainsString('already absent', $again);
   }
 
   /**

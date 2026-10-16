@@ -90,15 +90,6 @@ mcp_sentinel.settings:
       constraints:
         Range:
           min: 1
-    paladin_introspection_url:
-      type: string
-      label: 'Paladin RFC 7662 token introspection URL'
-    paladin_introspection_client_id:
-      type: string
-      label: 'Paladin introspection client id'
-    paladin_introspection_client_secret_key:
-      type: string
-      label: 'Key entity id for the Paladin introspection client secret'
     agent_oauth_clients:
       type: sequence
       label: 'Agent OAuth client IDs (consumer client_id values)'

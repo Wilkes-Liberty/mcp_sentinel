@@ -242,14 +242,14 @@ Paladin kill route arrives, Paladin `iss|sub` and the Drush assertion
 must resolve to one bound operator record
 (`mcp_sentinel.operator_binding` / `mcp-sentinel:operator-bind`).
 Bind introspects a Paladin access token (RFC 7662) over HTTPS with
-client authentication, requires `active`, and derives `iss|sub` from
-the introspection, never from `--human-key` or `--token` (token from
-`PALADIN_TOKEN` or stdin). The introspection URL, issuer, audience,
-and client credentials are pinned in `settings.php`, not importable
-config, so a config import cannot redirect introspection. The
-response `iss` and `aud` / `azp` / `client_id` must match those
-pins. Paladin unreachable, HTTP, missing client auth, or a claim
-mismatch fails closed. Rebind of an identity already bound to a
+client authentication, requires `active` and a numeric future `exp`,
+and derives `iss|sub` from the introspection, never from
+`--human-key` or `--token` (token from `PALADIN_TOKEN` or stdin).
+The introspection URL, issuer, audience, and client credentials are
+pinned in `settings.php`, not importable config, so a config import
+cannot redirect introspection. The response `iss` and `aud` / `azp`
+/ `client_id` must match those pins. Paladin unreachable, HTTP, a
+3xx, missing client auth, or a claim mismatch fails closed. Rebind of an identity already bound to a
 different operator is refused, including a unique-constraint race.
 Joining a new Paladin identity onto an existing Drush record writes
 `added_to_existing` on the `operator_bind` row. Every bind and every

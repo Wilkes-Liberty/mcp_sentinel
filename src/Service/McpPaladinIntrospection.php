@@ -19,8 +19,10 @@ use GuzzleHttp\Exception\GuzzleException;
  * token string and any --human-key input are never used as identity.
  * The introspection URL, issuer, audience, and client credentials
  * come from settings.php, not from importable config. HTTPS and
- * client authentication are required. Paladin unreachable,
- * misconfigured, or a claim mismatch: fail closed.
+ * client authentication are required. A numeric future exp is
+ * required. Redirects are not followed. Paladin unreachable,
+ * misconfigured, a missing or elapsed exp, a 3xx, or a claim
+ * mismatch: fail closed.
  */
 final class McpPaladinIntrospection {
 
@@ -28,6 +30,16 @@ final class McpPaladinIntrospection {
    * PHPUnit-only: skip pinned issuer and audience matching.
    */
   public const WEAKEN_SKIP_ISSUER_AUDIENCE = 'skip_issuer_audience';
+
+  /**
+   * PHPUnit-only: skip the required numeric future exp claim.
+   */
+  public const WEAKEN_SKIP_EXP = 'skip_exp';
+
+  /**
+   * PHPUnit-only: follow HTTP redirects instead of refusing 3xx.
+   */
+  public const WEAKEN_SKIP_REDIRECT = 'skip_redirect';
 
   /**
    * Test-only weaken flags. Empty in production.
@@ -44,7 +56,7 @@ final class McpPaladinIntrospection {
    * @param \Drupal\Core\Site\Settings $settings
    *   Pinned Paladin URL, issuer, audience, and client credentials.
    * @param \Drupal\Component\Datetime\TimeInterface $time
-   *   Clock used for the optional exp check.
+   *   Clock used for the required exp check.
    */
   public function __construct(
     private readonly ClientInterface $httpClient,
@@ -59,8 +71,9 @@ final class McpPaladinIntrospection {
    *   Access token to introspect. Never logged.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When Paladin is down, the token is inactive, or claims do not
-   *   match the pinned issuer and audience.
+   *   When Paladin is down, the token is inactive, exp is missing
+   *   or elapsed, or claims do not match the pinned issuer and
+   *   audience.
    */
   public function activeIdentity(string $token): McpOperatorIdentity {
     $token = trim($token);
@@ -122,11 +135,13 @@ final class McpPaladinIntrospection {
       );
     }
     $exp = $payload['exp'] ?? NULL;
-    if (is_numeric($exp) && (int) $exp <= $this->time->getRequestTime()) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
+    if (!$this->weakened(self::WEAKEN_SKIP_EXP)) {
+      if (!is_numeric($exp) || (int) $exp <= $this->time->getRequestTime()) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'A verified operator identity is required.',
+        );
+      }
     }
     $iss = $payload['iss'] ?? NULL;
     $sub = $payload['sub'] ?? NULL;
@@ -193,6 +208,9 @@ final class McpPaladinIntrospection {
       'http_errors' => FALSE,
       'timeout' => 5,
       'connect_timeout' => 5,
+      // Never follow a 3xx. Paladin must answer at the pinned URL;
+      // a hop would send the token to a host settings.php did not pin.
+      'allow_redirects' => $this->weakened(self::WEAKEN_SKIP_REDIRECT),
       'form_params' => ['token' => $token],
       'auth' => [$clientId, $clientSecret],
       'headers' => [
