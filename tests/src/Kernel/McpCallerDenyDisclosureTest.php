@@ -5,11 +5,10 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
-use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
-use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\DownstreamContractTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\UntrustedReadFixtureTool;
@@ -91,18 +90,6 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['system', 'user', 'mcp_sentinel']);
     $this->switchToGovernedUser();
-    // The page-limit subscriber seals whatever request is on the stack.
-    // These tests push a bearer-less request so the IP check can see
-    // REMOTE_ADDR. Without a PHPUnit role-fallback principal, that seal
-    // denies before the budget and IP rules run.
-    new Settings(Settings::getAll() + [
-      McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
-        'iss' => self::ENTRY_POINT_ISS,
-        'sub' => 'role-fallback-disclosure',
-        'azp' => 'role-fallback-disclosure-client',
-        'tenant' => 'tenant-a',
-      ],
-    ]);
   }
 
   /**
@@ -582,11 +569,22 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
     array $server = [],
     array $pageParams = [],
   ): void {
+    $this->dropStampedPrincipal();
     $request = Request::create($path, $method, [], [], [], $server);
     if ($pageParams !== []) {
       $request->query->set('page', $pageParams);
     }
-    $this->container->get('request_stack')->push($request);
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $claims = $this->verifiedEntryPointClaims(
+      in_array($method, ['GET', 'HEAD'], TRUE) ? ['mcp_read'] : ['mcp_write'],
+    );
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $stack->push($request);
     $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber')
       ->onRequest(new RequestEvent(
         $this->container->get('http_kernel'),
