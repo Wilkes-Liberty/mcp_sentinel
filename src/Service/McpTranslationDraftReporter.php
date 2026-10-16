@@ -69,15 +69,19 @@ final class McpTranslationDraftReporter {
    *   Machine code and operator-facing detail.
    */
   public function multiPendingPublishNotice(): array {
+    // Built outside the array. Coder 8 (drupal.org) and Coder 9 (GitHub)
+    // disagree on how far a leading "." indents inside an array, and a red
+    // job on either side fails the pipeline.
+    $detail = 'This entity has pending drafts in more than one language. '
+      . 'Publishing one language in the Drupal UI drops the other pending '
+      . 'drafts: core builds the new default revision from the published '
+      . 'language and takes every other language from the previous default. '
+      . 'The dropped draft remains in revision history. Re-draft it from that '
+      . 'language\'s last draft revision (working_vid on GET '
+      . '.../mcp-translations). Sentinel does not hide this core behavior.';
     return [
       'code' => self::NOTICE_CODE,
-      'detail' => 'This entity has pending drafts in more than one language. '
-        . 'Publishing one language in the Drupal UI drops the other pending '
-        . 'drafts: core builds the new default revision from the published '
-        . 'language and takes every other language from the previous default. '
-        . 'The dropped draft remains in revision history. Re-draft it from that '
-        . 'language\'s last draft revision (working_vid on GET '
-        . '.../mcp-translations). Sentinel does not hide this core behavior.',
+      'detail' => $detail,
     ];
   }
 
