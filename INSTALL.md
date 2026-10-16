@@ -232,10 +232,13 @@ $settings['mcp_sentinel.paladin.client_secret'] = 'the-introspection-client-secr
 ```
 
 The token is passed as `PALADIN_TOKEN` or on stdin, never `--token`.
-The introspection response must be `active`, `iss` must match the
-pinned issuer, and `aud` / `azp` / `client_id` must match the pinned
-audience. A delegated agent token minted for a different client is
-refused.
+The introspection response must be `active` with a numeric future
+`exp`, `iss` must match the pinned issuer, and `aud` / `azp` /
+`client_id` must match the pinned audience. A 3xx from Paladin is
+refused; the token is never sent to a hop. A delegated agent token
+minted for a different client is refused. Run database updates:
+10032 and 10033 delete dead `paladin_introspection_*` keys if an
+earlier update wrote them into importable config.
 
 ## Updating
 

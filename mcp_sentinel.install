@@ -1694,7 +1694,7 @@ function mcp_sentinel_update_10031(): string {
 }
 
 /**
- * Add unbind columns and Paladin introspection settings (DEV-846).
+ * Add unbind columns and drop dead Paladin introspection config (DEV-846).
  */
 function mcp_sentinel_update_10032(): string {
   $schema = \Drupal::database()->schema();
@@ -1726,26 +1726,51 @@ function mcp_sentinel_update_10032(): string {
     $messages[] = 'mcp_sentinel_operator_binding is missing; run update 10031.';
   }
 
-  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
-  $added = [];
-  if ($config->get('paladin_introspection_url') === NULL) {
-    $config->set('paladin_introspection_url', '');
-    $added[] = 'paladin_introspection_url';
-  }
-  if ($config->get('paladin_introspection_client_id') === NULL) {
-    $config->set('paladin_introspection_client_id', '');
-    $added[] = 'paladin_introspection_client_id';
-  }
-  if ($config->get('paladin_introspection_client_secret_key') === NULL) {
-    $config->set('paladin_introspection_client_secret_key', '');
-    $added[] = 'paladin_introspection_client_secret_key';
-  }
-  if ($added !== []) {
-    $config->save();
-    $messages[] = 'Seeded ' . implode(', ', $added) . '.';
+  $removed = mcp_sentinel_clear_dead_paladin_introspection_config();
+  if ($removed !== []) {
+    $messages[] = 'Removed ' . implode(', ', $removed) . '.';
   }
   if ($messages === []) {
-    return 'Operator-binding unbind columns and Paladin introspection settings already present.';
+    return 'Operator-binding unbind columns already present.';
   }
   return implode(' ', $messages);
+}
+
+/**
+ * Drop paladin_introspection_* keys seeded by an earlier 10032 (DEV-846).
+ */
+function mcp_sentinel_update_10033(): string {
+  $removed = mcp_sentinel_clear_dead_paladin_introspection_config();
+  if ($removed === []) {
+    return 'Dead paladin_introspection_* config keys already absent.';
+  }
+  return 'Removed ' . implode(', ', $removed) . '.';
+}
+
+/**
+ * Remove dead paladin_introspection_* keys from importable config.
+ *
+ * Pins live in settings.php. An earlier 10032 seeded these keys;
+ * sites that already ran that seed still have them until this runs.
+ *
+ * @return string[]
+ *   Keys that were removed.
+ */
+function mcp_sentinel_clear_dead_paladin_introspection_config(): array {
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $removed = [];
+  foreach ([
+    'paladin_introspection_url',
+    'paladin_introspection_client_id',
+    'paladin_introspection_client_secret_key',
+  ] as $key) {
+    if ($config->get($key) !== NULL) {
+      $config->clear($key);
+      $removed[] = $key;
+    }
+  }
+  if ($removed !== []) {
+    $config->save();
+  }
+  return $removed;
 }

@@ -923,6 +923,90 @@ final class McpKillSwitchTest extends KernelTestBase {
     }
     $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
     $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $audit['reason_code']);
+    $this->assertArrayNotHasKey('token', $audit);
+  }
+
+  /**
+   * An active response with no exp is refused.
+   */
+  public function testBindRefusesActiveResponseWithoutExp(): void {
+    $payload = json_decode($this->activeIntrospectionJson(), TRUE);
+    $this->assertIsArray($payload);
+    unset($payload['exp']);
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_THROW_ON_ERROR)),
+    ]);
+    try {
+      $this->bindings()->bindFromToken('any-token');
+      $this->fail('An introspection response with no exp must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $audit['reason_code']);
+    $this->assertArrayNotHasKey('token', $audit);
+  }
+
+  /**
+   * A 3xx introspection response is refused and is not followed.
+   */
+  public function testBindRefusesRedirectingIntrospection(): void {
+    $this->stubPaladinIntrospection([
+      new Response(302, ['Location' => 'https://evil.example/introspect']),
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson()),
+    ]);
+    try {
+      $this->bindings()->bindFromToken('any-token');
+      $this->fail('A redirecting Paladin introspection URL must fail closed.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::PALADIN_UNAVAILABLE, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::PALADIN_UNAVAILABLE, $audit['reason_code']);
+    $this->assertArrayNotHasKey('token', $audit);
+  }
+
+  /**
+   * Guard bypass: missing or elapsed exp binds when the exp check is off.
+   *
+   * This is the red mutation for testBindRefusesExpiredToken and
+   * testBindRefusesActiveResponseWithoutExp.
+   */
+  public function testMissingExpBindsWhenExpCheckIsWeakened(): void {
+    $this->introspectionWeaken = [McpPaladinIntrospection::WEAKEN_SKIP_EXP];
+    $payload = json_decode($this->activeIntrospectionJson(), TRUE);
+    $this->assertIsArray($payload);
+    unset($payload['exp']);
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_THROW_ON_ERROR)),
+    ]);
+    $operatorId = $this->bindings()->bindFromToken('any-token');
+    $this->assertNotSame('', $operatorId);
+    $this->assertSame(
+      $operatorId,
+      $this->bindings()->recordId('paladin', self::ISS . '|operator-a'),
+    );
+  }
+
+  /**
+   * Guard bypass: a 302 followed by 200 binds when redirects are allowed.
+   *
+   * This is the red mutation for testBindRefusesRedirectingIntrospection.
+   */
+  public function testRedirectingIntrospectionBindsWhenRedirectCheckIsWeakened(): void {
+    $this->introspectionWeaken = [McpPaladinIntrospection::WEAKEN_SKIP_REDIRECT];
+    $this->stubPaladinIntrospection([
+      new Response(302, ['Location' => 'https://evil.example/introspect']),
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson()),
+    ]);
+    $operatorId = $this->bindings()->bindFromToken('any-token');
+    $this->assertNotSame('', $operatorId);
+    $this->assertSame(
+      $operatorId,
+      $this->bindings()->recordId('paladin', self::ISS . '|operator-a'),
+    );
   }
 
   /**
@@ -1227,6 +1311,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       'iss' => self::ISS,
       'sub' => 'operator-a',
       'aud' => self::AUDIENCE,
+      'exp' => $this->container->get('datetime.time')->getRequestTime() + 3600,
     ];
     return json_encode($payload, JSON_THROW_ON_ERROR);
   }
