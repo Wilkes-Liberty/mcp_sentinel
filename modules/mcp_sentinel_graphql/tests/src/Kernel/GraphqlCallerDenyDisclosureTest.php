@@ -247,10 +247,17 @@ final class GraphqlCallerDenyDisclosureTest extends KernelTestBase {
 
   /**
    * Main-request event for a governed GraphQL POST.
+   *
+   * The audit installer seals a fixture on the parent request. A bare
+   * push hides that seal and the principal gate denies before the
+   * budget. Verified claims let this request seal on its own.
    */
   private function graphqlRequestEvent(HttpKernelInterface $kernel): RequestEvent {
-    $request = Request::create('/graphql', 'POST');
-    $this->container->get('request_stack')->push($request);
+    $request = $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_read', 'mcp_write']),
+      '/graphql',
+      'POST',
+    );
     return new RequestEvent($kernel, $request, HttpKernelInterface::MAIN_REQUEST);
   }
 
