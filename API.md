@@ -142,7 +142,11 @@ required name, including a token that lists no scopes, is refused
 (`required_scope_missing`). Role-fallback and kernel fixture
 sources skip that scope check. JSON:API, GraphQL, and
 `/drupal-mcp/context` require a verified principal on the ready
-  path. Role fallback also requires
+  path. A claimless PHP built-in server request waits for that
+  fallback stamp. `mcp_sentinel_role_fallback_test_principal` in
+  settings.php fills iss, sub, and azp only for that stamp, only
+  under PHPUnit or cli-server, and only when the request is not
+  proxied. Role fallback also requires
 `$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
 settings.php (or PHPUnit) and is refused when `reverse_proxy` is
 on or any Forwarded / X-Forwarded-* header is present. They are

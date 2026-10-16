@@ -88,6 +88,34 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
   }
 
   /**
+   * The built-in server must not freeze a claimless request.
+   *
+   * A bearer, sealed token, network mark, or fixture still seals.
+   * fpm-fcgi does not defer.
+   *
+   * @covers ::deferClaimlessBuiltinServer
+   */
+  public function testBuiltinServerDefersOnlyClaimlessRequests(): void {
+    $claimless = Request::create('/jsonapi/node/page');
+    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      'cli-server',
+    ));
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      'fpm-fcgi',
+    ));
+    $bearer = Request::create('/jsonapi/node/page');
+    $bearer->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+    ]);
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $bearer,
+      'cli-server',
+    ));
+  }
+
+  /**
    * A real factory (the class is final) over a mocked OAuth seam.
    */
   private function factory(RequestStack $stack): McpPrincipalContextFactory {

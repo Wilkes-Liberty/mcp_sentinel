@@ -52,12 +52,22 @@ trait McpGovernedRequestTrait {
       ->save();
     // Functional tests hit a PHP built-in server that is not a PHPUnit
     // process. settings.php is the production permit and is visible
-    // to that child process.
+    // to that child process. The test principal is ignored on every
+    // other SAPI and on proxied requests. It exists so the ready-path
+    // principal check can run after readiness stamps role fallback.
     if (method_exists($this, 'writeSettings')) {
       $this->writeSettings([
         'settings' => [
           McpRoleFallbackGate::SETTINGS_KEY => (object) [
             'value' => TRUE,
+            'required' => TRUE,
+          ],
+          McpRoleFallbackGate::TEST_PRINCIPAL_KEY => (object) [
+            'value' => [
+              'iss' => 'https://idp.example/realms/agents',
+              'sub' => 'functional-role-fallback',
+              'azp' => 'functional-role-fallback-client',
+            ],
             'required' => TRUE,
           ],
         ],

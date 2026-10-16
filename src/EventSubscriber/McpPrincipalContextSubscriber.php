@@ -58,7 +58,8 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       return;
     }
     $request = $event->getRequest();
-    if ($this->isLeftoverCliRequest($request)) {
+    if ($this->isLeftoverCliRequest($request)
+      || self::deferClaimlessBuiltinServer($request, PHP_SAPI)) {
       return;
     }
     $ctx = $this->factory->fromRequest($request);
@@ -75,6 +76,34 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       }
     }
     $request->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
+  }
+
+  /**
+   * Claimless built-in-server requests wait for the fallback stamp.
+   *
+   * Drupal functional tests serve HTTP from cli-server, which is not
+   * the PHPUnit process. Sealing there before readiness runs freezes
+   * an empty principal, and the later ready-path check cannot replace
+   * it. Production SAPIs still seal immediately.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The main request.
+   * @param string $sapi
+   *   PHP_SAPI of this process.
+   *
+   * @return bool
+   *   TRUE when this process must not seal a claimless request yet.
+   */
+  public static function deferClaimlessBuiltinServer(Request $request, string $sapi): bool {
+    if ($sapi !== 'cli-server') {
+      return FALSE;
+    }
+    $network = $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE);
+    $fixture = $request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE);
+    return !$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      && !$request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)
+      && $network !== TRUE
+      && $fixture !== TRUE;
   }
 
   /**

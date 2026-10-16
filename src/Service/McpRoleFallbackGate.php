@@ -25,6 +25,15 @@ final class McpRoleFallbackGate {
   public const SETTINGS_KEY = 'mcp_sentinel_allow_role_fallback';
 
   /**
+   * Settings.php principal used by PHPUnit's built-in server only.
+   *
+   * Functional tests cannot mint a Paladin bearer. The factory reads
+   * this map only after readiness has taken the role-fallback path,
+   * and only in PHPUnit or cli-server. Other SAPIs ignore it.
+   */
+  public const TEST_PRINCIPAL_KEY = 'mcp_sentinel_role_fallback_test_principal';
+
+  /**
    * Whether role fallback may run for this request (or CLI with no request).
    *
    * @param \Symfony\Component\HttpFoundation\Request|null $request

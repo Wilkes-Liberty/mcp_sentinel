@@ -48,6 +48,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   updates: until update 10031 creates the table, mixed-channel
   confirm fails closed.
 
+### Fixed
+- A claimless request on the PHP built-in server is no longer sealed
+  before readiness stamps role fallback. That early seal left
+  JSON:API, GraphQL, and context with `missing_iss` for functional
+  tests. `settings['mcp_sentinel_role_fallback_test_principal']` is
+  applied only on that fallback path, only under PHPUnit or
+  cli-server, and never when the request looks proxied.
+
 ### Changed
 - Kill-switch docs state that the Drush/shell path sits outside
   governance. The two-person rule on that path requires individual
