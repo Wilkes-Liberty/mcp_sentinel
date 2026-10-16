@@ -73,6 +73,7 @@ trait McpAuditSchemaTestTrait {
       $request = $request->duplicate();
       $stack->push($request);
     }
+    $request->attributes->set(McpPrincipalContext::FIXTURE_ATTRIBUTE, TRUE);
     $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'kernel-test',
@@ -116,6 +117,7 @@ trait McpAuditSchemaTestTrait {
     $request->attributes->remove(McpPrincipalContext::CLAIMS_ATTRIBUTE);
     $request->attributes->remove(McpOauthContext::SEALED_ATTRIBUTE);
     $request->attributes->remove(McpPrincipalContext::NETWORK_ATTRIBUTE);
+    $request->attributes->remove(McpPrincipalContext::FIXTURE_ATTRIBUTE);
   }
 
 }

@@ -13,13 +13,13 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
 
 /**
- * Context refuses a role-fallback call that has no principal.
+ * Ready-path JSON:API, GraphQL HTTP, and context require a principal.
  *
- * JSON:API and GraphQL HTTP keep role fallback as the local-dev path.
- * The principal gate on those seams runs only for a validated bearer.
+ * Role fallback still makes those surfaces applicable on loopback.
  * The kernel audit fixture seals one; these tests drop it first.
  *
  * @group mcp_sentinel
@@ -71,16 +71,25 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
   }
 
   /**
-   * Role-fallback JSON:API and GraphQL HTTP do not require a token principal.
+   * Ready-path JSON:API and GraphQL HTTP require a principal.
+   *
+   * Matches GraphQL operations and /drupal-mcp/context. Role fallback
+   * still makes the surface applicable on loopback only.
    */
-  public function testHttpRoleFallbackDoesNotRequirePrincipal(): void {
+  public function testHttpRoleFallbackRequiresPrincipal(): void {
     $this->switchToGovernedUser();
     $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
     foreach (['/jsonapi/node/article', '/graphql'] as $path) {
       $this->dropStampedPrincipal();
       $before = $this->deniedAccessCount();
-      $subscriber->onRequest($this->requestEvent($path));
-      $this->assertSame($before, $this->deniedAccessCount(), $path);
+      try {
+        $subscriber->onRequest($this->requestEvent($path));
+        $this->fail($path . ' must refuse a ready call without a principal.');
+      }
+      catch (AccessDeniedHttpException $e) {
+        $this->assertNotSame('', $e->getMessage());
+      }
+      $this->assertSame($before + 1, $this->deniedAccessCount(), $path);
     }
   }
 

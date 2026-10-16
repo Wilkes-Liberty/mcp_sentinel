@@ -135,10 +135,15 @@ reads the request attribute. The tool guard applies **only** to
 `McpPrincipalContextDispatcher::assertDispatchAllowed()` with an
 empty argument list and the surface's required OAuth scope
 (`mcp_read` / `mcp_write`, any-of on the GraphQL HTTP seam) before
-their own gates. A token that lists scopes and omits every required
-name is refused (`required_scope_missing`). JSON:API and the GraphQL
-HTTP seam do that only when the request carries a validated bearer;
-a role-fallback session is unchanged. They are not admitted
+their own gates. GraphQL queries and subscriptions require
+`mcp_read`; mutations require `mcp_write`; any other operation type
+is refused. A Paladin or sealed-token context that omits every
+required name, including a token that lists no scopes, is refused
+(`required_scope_missing`). Role-fallback and kernel fixture
+sources skip that scope check. JSON:API, GraphQL, and
+`/drupal-mcp/context` require a verified principal on the ready
+path. Role fallback applies only to loopback callers
+(127.0.0.1 / ::1). They are not admitted
 through `admit()`/`dispatch()`. `drush mcp-sentinel:sql-query` calls
 that check only when `hasSealedContext()` is already true; a local
 invocation has no bearer and stays on the profile SQL guard. Other

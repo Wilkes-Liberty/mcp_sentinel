@@ -174,6 +174,119 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
   }
 
   /**
+   * A Paladin token that lists no scopes is refused.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesPaladinEmptyScopes(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims([]),
+      '/graphql',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertGraphqlDenied('query');
+    $this->assertSurfaceDenialRow(
+      $before,
+      'graphql',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * A mutation is admitted when the token grants mcp_write.
+   *
+   * @covers ::onOperation
+   */
+  public function testAllowsMutationWithMcpWrite(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    $this->subscriber()->onOperation($this->makeEvent('mutation'));
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * A subscription requires mcp_read.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesSubscriptionWithoutMcpRead(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_write']),
+      '/graphql',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertGraphqlDenied('subscription');
+    $this->assertSurfaceDenialRow(
+      $before,
+      'graphql',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * A subscription is admitted when the token grants mcp_read.
+   *
+   * @covers ::onOperation
+   */
+  public function testAllowsSubscriptionWithMcpRead(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    $this->subscriber()->onOperation($this->makeEvent('subscription'));
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * Unknown GraphQL operation types are refused.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesUnknownOperationType(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    try {
+      $this->subscriber()->onOperation($this->makeEvent('unknown'));
+      $this->fail('An unknown GraphQL operation type must be refused.');
+    }
+    catch (Error $e) {
+      $this->assertStringContainsString('not permitted', $e->getMessage());
+    }
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * Each batched operation fires its own OperationEvent and gate.
+   *
+   * @covers ::onOperation
+   */
+  public function testBatchedQueriesGateOncePerOperation(): void {
+    $this->dropStampedPrincipal();
+    $before = $this->deniedAccessCount();
+    $this->assertGraphqlDenied('query');
+    $this->assertGraphqlDenied('query');
+    $this->assertSame($before + 2, $this->deniedAccessCount());
+  }
+
+  /**
+   * A persisted query still gates once per OperationEvent.
+   *
+   * @covers ::onOperation
+   */
+  public function testPersistedQueryGatesOnce(): void {
+    $this->dropStampedPrincipal();
+    $before = $this->deniedAccessCount();
+    try {
+      $this->subscriber()->onOperation($this->makePersistedEvent('query'));
+      $this->fail('GraphQL must refuse this governed operation.');
+    }
+    catch (Error $e) {
+      $this->assertNotSame('', $e->getMessage());
+    }
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+  }
+
+  /**
    * A verified Paladin bearer that grants mcp_read may run a query.
    *
    * @covers ::onOperation
@@ -219,6 +332,26 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
    */
   private function makeEvent(string $type): OperationEvent {
     $params = OperationParams::create(['query' => '{ __typename }']);
+    return $this->eventFromParams($type, $params);
+  }
+
+  /**
+   * Builds an OperationEvent shaped like a persisted query.
+   */
+  private function makePersistedEvent(string $type): OperationEvent {
+    $params = OperationParams::create([
+      'queryId' => 'persisted-typename',
+    ]);
+    return $this->eventFromParams($type, $params);
+  }
+
+  /**
+   * Wraps operation params in an OperationEvent.
+   */
+  private function eventFromParams(
+    string $type,
+    OperationParams $params,
+  ): OperationEvent {
     $context = $this->createMock(ResolveContext::class);
     $context->method('getType')->willReturn($type);
     $context->method('getOperation')->willReturn($params);

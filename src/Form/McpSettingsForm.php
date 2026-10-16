@@ -245,7 +245,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['oauth']['governed_role_fallback'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Govern by role without an OAuth token (local dev only)'),
-      '#description' => $this->t('When enabled, a request from a user holding a governed role is governed even without an OAuth agent token. Leave OFF in production so the admin UI stays ungoverned.'),
+      '#description' => $this->t('When enabled, a loopback (127.0.0.1 or ::1) request from a user holding a governed role is governed even without an OAuth agent token. Remote callers never use this path. Leave OFF in production so the admin UI stays ungoverned.'),
       '#default_value' => $config->get('governed_role_fallback') ?? FALSE,
     ];
 

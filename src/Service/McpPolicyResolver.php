@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Resolves whether a request is governed and which policy profile applies.
@@ -38,12 +39,15 @@ final class McpPolicyResolver {
    *   The current user proxy.
    * @param \Drupal\mcp_sentinel\Service\McpOauthContext $oauthContext
    *   The OAuth context service used to detect the agent channel.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   Request stack used to restrict role fallback to loopback callers.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly AccountProxyInterface $currentUser,
     private readonly McpOauthContext $oauthContext,
+    private readonly ?RequestStack $requestStack = NULL,
   ) {}
 
   /**
@@ -93,8 +97,22 @@ final class McpPolicyResolver {
     if (!$config->get('governed_role_fallback')) {
       return FALSE;
     }
+    if (!$this->isLocalDevCaller()) {
+      return FALSE;
+    }
     $account ??= $this->currentUser;
     return (bool) array_intersect($account->getRoles(), $this->getGovernedRoles());
+  }
+
+  /**
+   * Whether the current caller is loopback (local-dev fallback only).
+   */
+  private function isLocalDevCaller(): bool {
+    $request = $this->requestStack?->getCurrentRequest();
+    if ($request === NULL) {
+      return FALSE;
+    }
+    return in_array($request->getClientIp(), ['127.0.0.1', '::1'], TRUE);
   }
 
   /**

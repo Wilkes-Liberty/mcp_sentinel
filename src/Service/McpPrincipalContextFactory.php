@@ -83,7 +83,28 @@ final class McpPrincipalContextFactory {
       $network,
       $keyClaims,
       $this->fromSealedTokenProvider($request),
+      $this->sourceFromRequest($request),
     );
+  }
+
+  /**
+   * Provenance of the context for this request.
+   */
+  private function sourceFromRequest(?Request $request): string {
+    if ($request === NULL) {
+      return McpPrincipalContext::SOURCE_EMPTY;
+    }
+    if ($request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) === TRUE) {
+      return McpPrincipalContext::SOURCE_FIXTURE;
+    }
+    if ($this->fromSealedTokenProvider($request)) {
+      return McpPrincipalContext::SOURCE_SEALED_TOKEN;
+    }
+    $paladin = $request->attributes->get(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    if (is_array($paladin)) {
+      return McpPrincipalContext::SOURCE_PALADIN;
+    }
+    return McpPrincipalContext::SOURCE_ROLE_FALLBACK;
   }
 
   /**

@@ -651,6 +651,7 @@ final class McpGovernanceReadinessTest extends UnitTestCase {
       $oauth,
       $this->createMock(AuditChainLoggerInterface::class),
       NULL,
+      NULL,
       $this->requiredToolScopes(),
       static function (string $toolId) use (&$fixture): bool {
         return (bool) ($fixture['plugins'][$toolId] ?? TRUE);

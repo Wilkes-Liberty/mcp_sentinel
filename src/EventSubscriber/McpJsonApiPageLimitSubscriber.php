@@ -16,7 +16,6 @@ use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
-use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpReadBudgetResolver;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -142,9 +141,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     // is not applicable (undesignated client / contract not ready).
     // Role fallback with no bearer stays on the profile path.
     if ($this->requestHasGovernedToken($request)
-      || ($readiness->isApplicable()
-        && $readiness->isReady()
-        && $this->requestCarriesValidatedToken($request))) {
+      || ($readiness->isApplicable() && $readiness->isReady())) {
       $this->requirePrincipal($surface->value, $scopes);
     }
     if (!$readiness->isApplicable()) {
@@ -325,20 +322,6 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   private function requestHasGovernedToken(Request $request): bool {
     return $request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
       || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE);
-  }
-
-  /**
-   * Whether this request authenticated with a validated bearer.
-   *
-   * Paladin claims, a sealed token, or a simple_oauth token user. A
-   * role-fallback session has none of these.
-   */
-  private function requestCarriesValidatedToken(Request $request): bool {
-    if ($request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
-      || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)) {
-      return TRUE;
-    }
-    return $this->currentUser->getAccount() instanceof TokenAuthUserInterface;
   }
 
   /**

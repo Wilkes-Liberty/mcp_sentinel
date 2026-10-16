@@ -18,6 +18,7 @@ use Drupal\mcp_sentinel\Value\McpGovernanceReadinessResult;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\tool\Tool\ToolManager;
 use Drupal\user\UserInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Evaluates the connector-facing source-governance readiness contract.
@@ -57,6 +58,8 @@ final class McpGovernanceReadiness {
    *   Audit-chain logger when the module is available.
    * @param \Drupal\tool\Tool\ToolManager|null $toolManager
    *   Tool plugin manager used to derive the production scope map.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   Request stack used to restrict role fallback to loopback callers.
    * @param array<string, string>|null $requiredToolScopes
    *   Optional required-tool map for isolated contract tests.
    * @param (\Closure(string): bool)|null $toolExists
@@ -70,6 +73,7 @@ final class McpGovernanceReadiness {
     private readonly McpOauthContext $oauthContext,
     private readonly ?AuditChainLoggerInterface $auditChain,
     private readonly ?ToolManager $toolManager = NULL,
+    private readonly ?RequestStack $requestStack = NULL,
     private readonly ?array $requiredToolScopes = NULL,
     ?\Closure $toolExists = NULL,
   ) {
@@ -156,6 +160,7 @@ final class McpGovernanceReadiness {
     $designated = $this->oauthContext->isDesignatedAgentClient();
     $fallback = !$oauthRequest
       && (bool) $settings->get('governed_role_fallback')
+      && $this->isLocalDevCaller()
       && (bool) array_intersect(
         $account->getRoles(),
         $this->policyResolver->getGovernedRoles(),
@@ -202,6 +207,17 @@ final class McpGovernanceReadiness {
     return $profile instanceof McpPolicyProfileInterface && $profile->status()
       ? McpGovernanceReadinessResult::ready($profile)
       : $this->denied(McpGovernanceReadinessReason::ActiveProfileMissing);
+  }
+
+  /**
+   * Whether the current caller is loopback (local-dev fallback only).
+   */
+  private function isLocalDevCaller(): bool {
+    $request = $this->requestStack?->getCurrentRequest();
+    if ($request === NULL) {
+      return FALSE;
+    }
+    return in_array($request->getClientIp(), ['127.0.0.1', '::1'], TRUE);
   }
 
   /**

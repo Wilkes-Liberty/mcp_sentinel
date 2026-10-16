@@ -11,6 +11,7 @@ use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests OAuth-agent-channel governance via McpPolicyResolver.
@@ -96,6 +97,35 @@ final class McpPolicyResolverOauthTest extends KernelTestBase {
     Role::create(['id' => 'mcp_api', 'label' => 'mcp_api'])->save();
     $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
     $this->assertTrue(
+      $this->container->get('mcp_sentinel.policy_resolver')->isGoverned($account)
+    );
+  }
+
+  /**
+   * Role fallback does not govern a non-loopback caller.
+   */
+  public function testRoleFallbackDoesNotGovernRemoteCaller(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('governed_roles', ['mcp_api'])
+      ->set('governed_role_fallback', TRUE)
+      ->save();
+    Role::create(['id' => 'mcp_api', 'label' => 'mcp_api'])->save();
+    $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
+    $request = Request::create(
+      '/',
+      'GET',
+      [],
+      [],
+      [],
+      ['REMOTE_ADDR' => '203.0.113.10'],
+    );
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $this->assertFalse(
       $this->container->get('mcp_sentinel.policy_resolver')->isGoverned($account)
     );
   }
