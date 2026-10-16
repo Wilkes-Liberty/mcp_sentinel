@@ -70,12 +70,12 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
   use McpEntityToolTrait;
 
   /**
-   * The config factory.
+   * Config names this tool writes.
    */
   protected ConfigFactoryInterface $configFactory;
 
   /**
-   * The event dispatcher.
+   * Fires after a governed config write.
    */
   protected EventDispatcherInterface $eventDispatcher;
 

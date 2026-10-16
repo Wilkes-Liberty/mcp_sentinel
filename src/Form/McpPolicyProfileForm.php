@@ -34,7 +34,6 @@ final class McpPolicyProfileForm extends EntityForm {
   public static function create(ContainerInterface $container): static {
     $instance = parent::create($container);
     $instance->roleAssertions = $container->get('mcp_sentinel.role_assertions');
-    // NULL only in the deploy window before the container rebuilds.
     $instance->classification = $container->has('mcp_sentinel.classification')
       ? $container->get('mcp_sentinel.classification')
       : NULL;

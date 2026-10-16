@@ -17,9 +17,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * queue or Drush job opens a deny-only overlay that hides the
  * request seal and never stores a caller-built context. Governed
  * tools refuse under that overlay until a hop token (DEV-844)
- * supplies a Paladin principal. sealForJob() and resetForJob()
- * are removed; seal() is a no-op while an overlay is open so it
- * is not a forgery path.
+ * supplies a Paladin principal. seal() is a no-op while an
+ * overlay is open so it is not a forgery path.
  */
 final class McpPrincipalContextHolder {
 

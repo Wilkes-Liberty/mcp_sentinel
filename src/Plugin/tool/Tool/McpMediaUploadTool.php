@@ -58,7 +58,7 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
   use McpEntityToolTrait;
 
   /**
-   * The entity type manager.
+   * Storage for the media entity this tool creates.
    */
   protected EntityTypeManagerInterface $entityTypeManager;
 

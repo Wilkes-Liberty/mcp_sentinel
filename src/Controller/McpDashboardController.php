@@ -71,9 +71,9 @@ class McpDashboardController extends ControllerBase {
    * @param \Psr\Log\LoggerInterface $logger
    *   The mcp_sentinel logger channel.
    * @param \Drupal\mcp_sentinel\Service\McpAdminStatus|null $adminStatus
-   *   Admin status strip assembler. NULL only in the deploy window.
+   *   Admin status strip assembler.
    * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
-   *   Deny-path explainer. NULL only in the deploy window.
+   *   Deny-path explainer.
    */
   public function __construct(
     private readonly McpMetrics $metrics,

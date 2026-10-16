@@ -56,12 +56,12 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
   use McpEntityToolTrait;
 
   /**
-   * The entity type manager.
+   * Storage for the entity being transitioned.
    */
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel content lock service.
+   * Blocks a transition while another principal holds the lock.
    */
   protected McpContentLock $contentLock;
 

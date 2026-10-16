@@ -46,14 +46,12 @@ class McpContextController extends ControllerBase {
    * @param \Drupal\mcp_sentinel\Service\McpClassificationResolver|null $classification
    *   Classification egress ceilings (d.o #3616540 part 2): the schema
    *   document has a label, and over-ceiling bundles are not described.
-   *   NULL only in the deploy window before the container rebuilds.
    * @param \Drupal\mcp_sentinel\Service\McpWhoamiRecorder|null $whoamiRecorder
-   *   Last whoami recorder. NULL only in the deploy window.
+   *   Last whoami recorder.
    * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
-   *   Deny-path explainer. NULL only in the deploy window.
+   *   Deny-path explainer.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
-   *   Principal and tenant gate. NULL only in the deploy window; a missing
-   *   dispatcher fails closed.
+   *   Principal and tenant gate. A missing dispatcher fails closed.
    */
   public function __construct(
     private readonly McpSiteSchemaBuilder $schemaBuilder,
@@ -159,8 +157,7 @@ class McpContextController extends ControllerBase {
     // document is metadata with a label of its own; a profile whose context
     // ceiling sits below it may not receive it at all, and one at or above
     // it is not told about bundles classified higher than its ceiling.
-    // The resolver is NULL only in the deploy window before the container
-    // rebuilds; no ceiling is evaluated then, exactly the previous behaviour.
+    // No ceiling is evaluated when the resolver is absent.
     $ceiling = ($profile === NULL || $this->classification === NULL)
       ? NULL
       : $this->classification->effectiveCeiling($profile, McpGovernedSurface::Context);

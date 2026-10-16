@@ -28,12 +28,12 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpSecurityPolicyTool extends McpGovernedToolBase {
 
   /**
-   * The policy resolver service.
+   * Active policy profile for the caller.
    */
   protected McpPolicyResolver $resolver;
 
   /**
-   * The config factory.
+   * Settings used to describe the active policy.
    */
   protected ConfigFactoryInterface $configFactory;
 

@@ -100,23 +100,32 @@ drush mcp-sentinel:setup --allow-unauthenticated-development
 
 `drush mcp-sentinel:teardown` reverses this (unregisters all Sentinel tools).
 
-## 4. Set up the OAuth agent channel
+## 4. Set up the Paladin trust model
 
-Governance is decided server-side from the OAuth agent channel, never from a
-client-supplied header. Configure `simple_oauth`:
+From 3.0, governed tools fail closed unless the request carries a verified
+Paladin identity (`iss`, `sub`, `azp` or `act.sub`) plus a `tenant`. OAuth is
+transport only: a bearer delivers that Paladin principal; it is not itself a
+governed identity. Governance is decided server-side from the sealed principal,
+never from a client-supplied header.
+
+Configure `simple_oauth` as the transport:
 
 1. Create the required OAuth scope entities and an enabled role-bound policy
    profile.
 2. Run `drush mcp-sentinel:agent-provision <tier> --env=<env>` to create or bind
    the role, service account, and exact designated Consumer. The command never
    creates or rotates a secret; set that out of band.
-3. Mint a `simple_oauth` bearer token carrying the exact required scope.
-4. The agent sends `Authorization: Bearer …` on every request; Sentinel resolves
-   the governed policy profile from that token.
+3. Mint a Paladin token (carried as a `simple_oauth` bearer) with `iss`, `sub`,
+   `azp` (or `act.sub`), `tenant`, and the exact required scope.
+4. The agent sends `Authorization: Bearer …` on every request. Sentinel seals
+   the Paladin principal from that token and then resolves the policy profile.
 
-An optional **authenticated-role fallback** can govern requests by role when no
-token is present — set `governed_role_fallback` in the settings form. The
-companion Node.js connector is documented separately in `docs/CONNECTOR.md`.
+Cookie-session administrators and role-fallback sessions are not a
+governed-tool identity. Role-fallback (`governed_role_fallback`) remains only
+as the JSON:API/GraphQL session caveat: those HTTP surfaces apply the
+principal refusal when the request already carries a validated bearer; a
+role-fallback session on those paths is unchanged. The companion Node.js
+connector is documented separately in `docs/CONNECTOR.md`.
 
 > **Scope-name convention.** The `agent_scopes` you configure here must match the
 > scope **machine-ids** of your `oauth2_scope` entities exactly. simple_oauth
