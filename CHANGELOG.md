@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- GraphQL `requirePrincipal()`, JSON:API (validated bearer), and
+  `/drupal-mcp/context` pass the surface's required OAuth scope into
+  `assertDispatchAllowed()`. A token that omits that scope is refused
+  with `required_scope_missing` and a `denied_access` row that carries
+  the verified principal. Missing, unverified, killed, and
+  `urn:mcp-sentinel:sealed-token` callers stay refused. A Paladin or
+  sealed-token request is gated even when readiness is not applicable
+  (undesignated client / contract not ready), so a sealed issuer
+  cannot ride ordinary JSON:API or GraphQL traffic. JSON:API and the
+  GraphQL HTTP seam still skip the principal gate for a role-fallback
+  session with no bearer (local-dev). Deny tests fail when
+  `McpPrincipalContextGuard::disableForTest()` is injected.
+
 ### Added
 - Operator binding for the kill-switch two-person rule. Paladin
   `iss|sub` and a Drush OS effective uid assertion bind to one

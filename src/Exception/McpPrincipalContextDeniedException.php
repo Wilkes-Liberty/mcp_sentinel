@@ -45,6 +45,11 @@ final class McpPrincipalContextDeniedException extends \RuntimeException {
   public const NON_IDP_ISSUER = 'non_idp_issuer';
 
   /**
+   * Sealed token omits the exact OAuth scope the surface requires.
+   */
+  public const REQUIRED_SCOPE_MISSING = 'required_scope_missing';
+
+  /**
    * Constructs a fail-closed refusal.
    *
    * @param string $reasonCode

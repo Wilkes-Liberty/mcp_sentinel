@@ -16,7 +16,9 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use GraphQL\Error\Error;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -96,18 +98,38 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
   }
 
   /**
-   * Refuses an operation that has no verified principal or tenant.
+   * Whether Paladin or sealed-token claims are on the current request.
+   */
+  private function requestHasGovernedToken(): bool {
+    $request = $this->requestStack?->getCurrentRequest();
+    return $request !== NULL
+      && ($request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+        || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE));
+  }
+
+  /**
+   * Refuses an operation that has no verified principal, tenant, or scope.
+   *
+   * @param list<string> $requiredScopes
+   *   Any-of OAuth scopes the sealed token must carry. Empty for
+   *   subscriptions and other ungated operation types.
    *
    * @throws \GraphQL\Error\Error
    *   When the principal gate refuses the operation.
    */
-  private function requirePrincipal(): void {
+  private function requirePrincipal(array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
       throw new Error('A verified principal is required.');
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
-      $this->principalDispatcher->assertDispatchAllowed([], 'graphql');
+      $this->principalDispatcher->assertDispatchAllowed(
+        [],
+        'graphql',
+        [],
+        [],
+        $requiredScopes,
+      );
     }
     catch (McpPrincipalContextDeniedException $e) {
       throw new Error($e->getMessage(), previous: $e);
@@ -164,6 +186,19 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       $this->currentUser,
       $is_mutation ? 'mcp_write' : 'mcp_read',
     );
+    $requiredScopes = [];
+    if ($is_mutation) {
+      $requiredScopes = ['mcp_write'];
+    }
+    elseif ($type === 'query') {
+      $requiredScopes = ['mcp_read'];
+    }
+    // Paladin or sealed-token claims fail closed even when this
+    // operation is not applicable (undesignated client).
+    if ($this->requestHasGovernedToken()
+      || ($readiness->isApplicable() && $readiness->isReady())) {
+      $this->requirePrincipal($requiredScopes);
+    }
     if (!$readiness->isApplicable()) {
       return;
     }
@@ -180,7 +215,6 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     if ($profile === NULL) {
       throw new Error('MCP source governance is not ready: active_profile_missing.');
     }
-    $this->requirePrincipal();
 
     $config = $this->configFactory->get('mcp_sentinel.settings');
 
