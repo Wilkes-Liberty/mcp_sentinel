@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -45,6 +46,9 @@ final class McpPrincipalContextFactory {
    */
   public function fromRequest(?Request $request): McpPrincipalContext {
     $claims = $this->validatedClaims($request);
+    if ($claims === []) {
+      $claims = $this->roleFallbackTestClaims($request);
+    }
     $network = $this->isNetworkCall($request);
     $subject = $this->stringClaim($claims, ['sub']);
     $clientId = $this->oauthContext->clientId()
@@ -83,7 +87,36 @@ final class McpPrincipalContextFactory {
       $network,
       $keyClaims,
       $this->fromSealedTokenProvider($request),
+      $this->sourceFromRequest($request),
     );
+  }
+
+  /**
+   * Provenance of the context for this request.
+   *
+   * Unmarked requests are empty, not role fallback. Fixture is
+   * PHPUnit-only. Role fallback requires the attribute stamped when
+   * readiness or the resolver actually took that path.
+   */
+  private function sourceFromRequest(?Request $request): string {
+    if ($request === NULL) {
+      return McpPrincipalContext::SOURCE_EMPTY;
+    }
+    if (McpRoleFallbackGate::inPhpUnit()
+      && $request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) === TRUE) {
+      return McpPrincipalContext::SOURCE_FIXTURE;
+    }
+    if ($this->fromSealedTokenProvider($request)) {
+      return McpPrincipalContext::SOURCE_SEALED_TOKEN;
+    }
+    $paladin = $request->attributes->get(McpPrincipalContext::CLAIMS_ATTRIBUTE);
+    if (is_array($paladin)) {
+      return McpPrincipalContext::SOURCE_PALADIN;
+    }
+    if ($request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE) === TRUE) {
+      return McpPrincipalContext::SOURCE_ROLE_FALLBACK;
+    }
+    return McpPrincipalContext::SOURCE_EMPTY;
   }
 
   /**
@@ -103,6 +136,55 @@ final class McpPrincipalContextFactory {
     }
     $sealed = $request->attributes->get(McpOauthContext::SEALED_ATTRIBUTE);
     return is_array($sealed);
+  }
+
+  /**
+   * Test principal for a readiness-stamped role-fallback request.
+   *
+   * Empty unless the request already took the fallback path, the
+   * process is PHPUnit or a Drupal test child on cli-server, and the
+   * request does not look proxied. A real bearer is never replaced.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request|null $request
+   *   The request readiness has already stamped.
+   *
+   * @return array<string, string>
+   *   iss, sub, and azp, plus tenant when present.
+   */
+  private function roleFallbackTestClaims(?Request $request): array {
+    if ($request === NULL) {
+      return [];
+    }
+    $fallback = $request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE);
+    $testSapi = McpRoleFallbackGate::inPhpUnit()
+      || McpRoleFallbackGate::inTestChildServer();
+    if ($fallback !== TRUE
+      || McpRoleFallbackGate::looksProxied($request)
+      || !$testSapi) {
+      return [];
+    }
+    try {
+      $raw = Settings::get(McpRoleFallbackGate::TEST_PRINCIPAL_KEY);
+    }
+    catch (\Throwable) {
+      return [];
+    }
+    if (!is_array($raw)) {
+      return [];
+    }
+    $claims = [];
+    foreach (['iss', 'sub', 'azp'] as $name) {
+      $value = $raw[$name] ?? NULL;
+      if (!is_string($value) || $value === '') {
+        return [];
+      }
+      $claims[$name] = $value;
+    }
+    $tenant = $raw['tenant'] ?? NULL;
+    if (is_string($tenant) && $tenant !== '') {
+      $claims['tenant'] = $tenant;
+    }
+    return $claims;
   }
 
   /**

@@ -6,19 +6,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Breaking
+- Undesignated Paladin clients now need a verified principal on
+  JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
+  scopes need `mcp_read`, or `mcp_write` for writes and mutations,
+  or those surfaces return 403. A Paladin token that lists no
+  scopes is also `required_scope_missing`. GraphQL subscriptions
+  require `mcp_read`; unknown operation types are refused.
+  `governed_role_fallback` also requires
+  `$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
+  settings.php (or PHPUnit). That flag is for local-only stacks:
+  header-based proxy detection misses a proxy that adds no
+  Forwarded / X-Forwarded-* headers. HTTP fallback is refused when
+  `reverse_proxy` is on or any of those headers is present. The PHP
+  built-in server is not a permit; functional tests write the
+  settings.php flag. The ready path on all three surfaces requires a
+  principal, matching GraphQL operations and context.
+
 ### Security
-- GraphQL `requirePrincipal()`, JSON:API (validated bearer), and
+- GraphQL `requirePrincipal()`, JSON:API, and
   `/drupal-mcp/context` pass the surface's required OAuth scope into
-  `assertDispatchAllowed()`. A token that omits that scope is refused
+  `assertDispatchAllowed()`. A Paladin or sealed-token context that
+  omits that scope, including an empty grant list, is refused
   with `required_scope_missing` and a `denied_access` row that carries
   the verified principal. Missing, unverified, killed, and
   `urn:mcp-sentinel:sealed-token` callers stay refused. A Paladin or
   sealed-token request is gated even when readiness is not applicable
   (undesignated client / contract not ready), so a sealed issuer
-  cannot ride ordinary JSON:API or GraphQL traffic. JSON:API and the
-  GraphQL HTTP seam still skip the principal gate for a role-fallback
-  session with no bearer (local-dev). Deny tests fail when
-  `McpPrincipalContextGuard::disableForTest()` is injected.
+  cannot ride ordinary JSON:API or GraphQL traffic. Role fallback
+  is settings.php-gated and refused on proxied HTTP. Deny tests
+  fail when
+  `McpPrincipalContextGuard::disableForTest()` is injected, and
+  kill-only / scope-only red runs use `weakenForTest()`.
 
 ### Added
 - Operator binding for the kill-switch two-person rule. Paladin
@@ -42,6 +61,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   operators and is audited. One person with two Paladin accounts
   cannot be detected. Run database updates: 10031 creates the table;
   10032 adds unbind columns.
+
+### Fixed
+- A claimless request on a Drupal test child served by the PHP
+  built-in server is no longer sealed before readiness stamps role
+  fallback. That early seal left JSON:API, GraphQL, and context with
+  `missing_iss` for functional tests. Production cli-server seals
+  immediately. `settings['mcp_sentinel_role_fallback_test_principal']`
+  is applied only on that fallback path, only under PHPUnit or a
+  Drupal test child on cli-server, and never when the request looks
+  proxied.
 
 ### Changed
 - Kill-switch docs state that the Drush/shell path sits outside

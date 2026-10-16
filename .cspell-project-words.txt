@@ -38,6 +38,7 @@ exfiltration
 fataled
 fataling
 fatals
+fcgi
 fieldable
 fieldsets
 filebeat
@@ -95,6 +96,7 @@ permissioned
 phpcs
 phpstan
 phpunit
+proxied
 pgsql
 PKCE
 savepoint
@@ -116,6 +118,7 @@ replayable
 Revisionable
 rollup
 runbook
+runserver
 serialised
 SIEM
 sixteenbytekey

@@ -8,6 +8,7 @@ use Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -85,6 +86,38 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     ));
     $this->assertNull($holder->get());
     $this->assertFalse($leftover->attributes->has(McpPrincipalContext::REQUEST_ATTRIBUTE));
+  }
+
+  /**
+   * The built-in server must not freeze a claimless test-child request.
+   *
+   * Production cli-server and fpm-fcgi do not defer. A bearer still
+   * seals on a test child.
+   *
+   * @covers ::deferClaimlessBuiltinServer
+   */
+  public function testBuiltinServerDefersOnlyClaimlessTestChild(): void {
+    $claimless = Request::create('/jsonapi/node/page');
+    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
+    ));
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE),
+    ));
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, TRUE),
+    ));
+    $bearer = Request::create('/jsonapi/node/page');
+    $bearer->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+    ]);
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $bearer,
+      new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
+    ));
   }
 
   /**

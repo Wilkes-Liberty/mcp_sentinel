@@ -111,8 +111,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    * Refuses an operation that has no verified principal, tenant, or scope.
    *
    * @param list<string> $requiredScopes
-   *   Any-of OAuth scopes the sealed token must carry. Empty for
-   *   subscriptions and other ungated operation types.
+   *   Any-of OAuth scopes the sealed token must carry. Queries and
+   *   subscriptions require mcp_read; mutations require mcp_write.
    *
    * @throws \GraphQL\Error\Error
    *   When the principal gate refuses the operation.
@@ -181,18 +181,25 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     );
     $operation_name = $context->getOperation()->operationName ?? NULL;
     $is_mutation = $type === 'mutation';
+    $is_read = $type === 'query' || $type === 'subscription';
+    switch ($type) {
+      case 'mutation':
+        $requiredScopes = ['mcp_write'];
+        break;
+
+      case 'query':
+      case 'subscription':
+        $requiredScopes = ['mcp_read'];
+        break;
+
+      default:
+        throw new Error('GraphQL operation type is not permitted by MCP Sentinel.');
+    }
     $readiness = $this->readiness->evaluate(
       McpGovernedSurface::Graphql,
       $this->currentUser,
       $is_mutation ? 'mcp_write' : 'mcp_read',
     );
-    $requiredScopes = [];
-    if ($is_mutation) {
-      $requiredScopes = ['mcp_write'];
-    }
-    elseif ($type === 'query') {
-      $requiredScopes = ['mcp_read'];
-    }
     // Paladin or sealed-token claims fail closed even when this
     // operation is not applicable (undesignated client).
     if ($this->requestHasGovernedToken()
@@ -249,11 +256,11 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       return;
     }
 
-    // Read gate (queries only; leave subscriptions/other types untouched).
-    if ($type === 'query' && !$profile->allowsRead()) {
+    // Read gate (queries and subscriptions). Unknown types already threw.
+    if ($is_read && !$profile->allowsRead()) {
       throw new Error('GraphQL read access is disabled by MCP Sentinel.');
     }
-    if ($type === 'query') {
+    if ($is_read) {
       $this->refuseIfBundleDenies('view');
     }
   }

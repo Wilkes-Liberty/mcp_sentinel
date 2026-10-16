@@ -280,6 +280,44 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
+   * A Paladin token that lists no scopes is refused.
+   *
+   * @covers ::assertDispatchAllowed
+   */
+  public function testPaladinEmptyScopesAreRefused(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/jsonapi/node/article');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'agent-client',
+      'tenant' => 'tenant-a',
+    ]);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      'denied_access',
+      $this->callback(static function (array $meta): bool {
+        return ($meta['reason'] ?? '') === 'required_scope_missing'
+          && ($meta['principal_key'] ?? '') === 'https://idp.example/realms/agents|human-1|agent-client';
+      }),
+    );
+    $dispatcher = $this->dispatcher($stack, $holder, $audit);
+    try {
+      $dispatcher->assertDispatchAllowed([], 'jsonapi', [], [], ['mcp_read']);
+      $this->fail('A Paladin token with no scopes must be refused.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+        $e->reasonCode,
+      );
+    }
+  }
+
+  /**
    * Builds a dispatcher over a real factory and the given holder.
    */
   private function dispatcher(

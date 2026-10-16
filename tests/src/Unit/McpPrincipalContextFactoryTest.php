@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -156,6 +158,112 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     ]);
     $ctx = $factory->fromRequest($request);
     $this->assertFalse($ctx->fromSealedToken());
+    $this->assertSame(McpPrincipalContext::SOURCE_PALADIN, $ctx->source());
+  }
+
+  /**
+   * An unmarked request is empty, not role fallback.
+   *
+   * @covers ::fromRequest
+   */
+  public function testUnmarkedRequestIsEmptyNotRoleFallback(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $ctx = $factory->fromRequest(Request::create('/mcp', 'POST'));
+    $this->assertSame(McpPrincipalContext::SOURCE_EMPTY, $ctx->source());
+    $this->assertFalse($ctx->fromRoleFallback());
+    $this->assertFalse($ctx->fromFixture());
+  }
+
+  /**
+   * Readiness-stamped fallback is the only unmarked-token role source.
+   *
+   * @covers ::fromRequest
+   */
+  public function testFallbackAttributeIsRoleFallback(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    new Settings([]);
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($request);
+    $this->assertTrue($ctx->fromRoleFallback());
+    $this->assertSame('', $ctx->issuer());
+  }
+
+  /**
+   * The settings.php test principal is applied only after fallback.
+   *
+   * A proxied request and an unmarked request stay empty. The
+   * fallback context is not a network call.
+   *
+   * @covers ::fromRequest
+   */
+  public function testRoleFallbackTestPrincipalIgnoresProxy(): void {
+    new Settings([
+      McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'functional-role-fallback',
+        'azp' => 'functional-role-fallback-client',
+        'tenant' => 'tenant-a',
+      ],
+    ]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(new RequestStack(), $oauth);
+
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $admitted = $factory->fromRequest($fallback);
+    $this->assertTrue($admitted->fromRoleFallback());
+    $this->assertFalse($admitted->isNetwork());
+    $this->assertSame('https://idp.example/realms/agents', $admitted->issuer());
+    $this->assertSame('functional-role-fallback', $admitted->subject());
+    $this->assertSame('functional-role-fallback-client', $admitted->azp());
+
+    $unmarked = $factory->fromRequest(Request::create('/jsonapi/node/page'));
+    $this->assertSame(McpPrincipalContext::SOURCE_EMPTY, $unmarked->source());
+    $this->assertSame('', $unmarked->issuer());
+
+    $proxied = Request::create('/', 'GET', [], [], [], [
+      'REMOTE_ADDR' => '127.0.0.1',
+      'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+    ]);
+    $proxied->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $refused = $factory->fromRequest($proxied);
+    $this->assertTrue($refused->fromRoleFallback());
+    $this->assertSame('', $refused->issuer());
+    new Settings([]);
+  }
+
+  /**
+   * The fixture marker is honoured under PHPUnit.
+   *
+   * @covers ::fromRequest
+   */
+  public function testFixtureAttributeIsFixtureUnderPhpUnit(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::FIXTURE_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($request);
+    $this->assertTrue($ctx->fromFixture());
   }
 
 }

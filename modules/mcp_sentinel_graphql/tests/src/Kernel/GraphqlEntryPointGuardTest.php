@@ -174,6 +174,88 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
   }
 
   /**
+   * A Paladin token that lists no scopes is refused.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesPaladinEmptyScopes(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims([]),
+      '/graphql',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertGraphqlDenied('query');
+    $this->assertSurfaceDenialRow(
+      $before,
+      'graphql',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * A mutation is admitted when the token grants mcp_write.
+   *
+   * @covers ::onOperation
+   */
+  public function testAllowsMutationWithMcpWrite(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    $this->subscriber()->onOperation($this->makeEvent('mutation'));
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * A subscription requires mcp_read.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesSubscriptionWithoutMcpRead(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_write']),
+      '/graphql',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertGraphqlDenied('subscription');
+    $this->assertSurfaceDenialRow(
+      $before,
+      'graphql',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * A subscription is admitted when the token grants mcp_read.
+   *
+   * @covers ::onOperation
+   */
+  public function testAllowsSubscriptionWithMcpRead(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    $this->subscriber()->onOperation($this->makeEvent('subscription'));
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * Unknown GraphQL operation types are refused.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesUnknownOperationType(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    try {
+      $this->subscriber()->onOperation($this->makeEvent('unknown'));
+      $this->fail('An unknown GraphQL operation type must be refused.');
+    }
+    catch (Error $e) {
+      $this->assertStringContainsString('not permitted', $e->getMessage());
+    }
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
    * A verified Paladin bearer that grants mcp_read may run a query.
    *
    * @covers ::onOperation
@@ -218,10 +300,11 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
    * Builds a minimal OperationEvent wrapping a mocked ResolveContext.
    */
   private function makeEvent(string $type): OperationEvent {
-    $params = OperationParams::create(['query' => '{ __typename }']);
     $context = $this->createMock(ResolveContext::class);
     $context->method('getType')->willReturn($type);
-    $context->method('getOperation')->willReturn($params);
+    $context->method('getOperation')->willReturn(
+      OperationParams::create(['query' => '{ __typename }']),
+    );
     $context->method('mergeCacheMaxAge')->willReturnSelf();
     return new OperationEvent($context);
   }

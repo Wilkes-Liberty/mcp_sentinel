@@ -42,6 +42,48 @@ final readonly class McpPrincipalContext {
   public const NETWORK_ATTRIBUTE = 'mcp_sentinel.network_call';
 
   /**
+   * Request attribute that marks a kernel/PHPUnit fixture principal.
+   *
+   * Scope checks skip fixture and role-fallback sources, not an empty
+   * Paladin scope list. The factory honours this marker only under
+   * PHPUnit.
+   */
+  public const FIXTURE_ATTRIBUTE = 'mcp_sentinel.principal_fixture';
+
+  /**
+   * Request attribute set when readiness or the resolver took fallback.
+   *
+   * Positive provenance. An unmarked context is empty, not role
+   * fallback.
+   */
+  public const FALLBACK_ATTRIBUTE = 'mcp_sentinel.role_fallback';
+
+  /**
+   * Context built from Paladin CLAIMS_ATTRIBUTE.
+   */
+  public const SOURCE_PALADIN = 'paladin';
+
+  /**
+   * Context built from the sealed-token auth provider.
+   */
+  public const SOURCE_SEALED_TOKEN = 'sealed_token';
+
+  /**
+   * Context built for a local-dev role-fallback session (no bearer).
+   */
+  public const SOURCE_ROLE_FALLBACK = 'role_fallback';
+
+  /**
+   * Context built for a kernel or PHPUnit fixture principal.
+   */
+  public const SOURCE_FIXTURE = 'fixture';
+
+  /**
+   * Empty deny-only or CLI context with no request claims.
+   */
+  public const SOURCE_EMPTY = 'empty';
+
+  /**
    * Identity and tenant keys that must never appear in tool arguments.
    *
    * Compared after normalizeKey() (NFKC, strip \\p{Cf} and variation
@@ -129,6 +171,9 @@ final readonly class McpPrincipalContext {
    *   act). Empty when the context was built without a token.
    * @param bool $sealedToken
    *   TRUE when the sealed-token auth provider produced the claims.
+   * @param string $source
+   *   Provenance of this context (Paladin, sealed token, role
+   *   fallback, fixture, or empty).
    */
   public function __construct(
     private string $issuer,
@@ -141,6 +186,7 @@ final readonly class McpPrincipalContext {
     private bool $network,
     private array $keyClaims = [],
     private bool $sealedToken = FALSE,
+    private string $source = self::SOURCE_EMPTY,
   ) {}
 
   /**
@@ -213,6 +259,27 @@ final readonly class McpPrincipalContext {
    */
   public function fromSealedToken(): bool {
     return $this->sealedToken;
+  }
+
+  /**
+   * Provenance of this context.
+   */
+  public function source(): string {
+    return $this->source;
+  }
+
+  /**
+   * TRUE when this context is the local-dev role-fallback path.
+   */
+  public function fromRoleFallback(): bool {
+    return $this->source === self::SOURCE_ROLE_FALLBACK;
+  }
+
+  /**
+   * TRUE when this context is a kernel or PHPUnit fixture.
+   */
+  public function fromFixture(): bool {
+    return $this->source === self::SOURCE_FIXTURE;
   }
 
   /**

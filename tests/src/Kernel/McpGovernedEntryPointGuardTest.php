@@ -257,6 +257,199 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
   }
 
   /**
+   * JSON:API refuses a Paladin token that lists no scopes.
+   */
+  public function testJsonApiDeniesPaladinEmptyScopes(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims([]),
+      '/jsonapi/node/article',
+      'GET',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertJsonApiDenied();
+    $this->assertSurfaceDenialRow(
+      $before,
+      'jsonapi',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * Context refuses a Paladin token that lists no scopes.
+   */
+  public function testContextDeniesPaladinEmptyScopes(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims([]));
+    $before = $this->deniedAccessCount();
+    $this->assertContextDenied(McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING);
+    $this->assertSurfaceDenialRow(
+      $before,
+      'context',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * JSON:API include= shares the path-prefix principal gate.
+   */
+  public function testJsonApiIncludeRequiresPrincipal(): void {
+    $this->pushEntryPointRequest(
+      ['tenant' => 'tenant-a'],
+      '/jsonapi/node/article',
+      'GET',
+    );
+    $current = $this->container->get('request_stack')->getCurrentRequest();
+    $this->assertInstanceOf(Request::class, $current);
+    $current->query->set('include', 'uid');
+    $before = $this->deniedAccessCount();
+    $this->assertJsonApiDenied();
+    $this->assertSurfaceDenialRow(
+      $before,
+      'jsonapi',
+      McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+      FALSE,
+    );
+  }
+
+  /**
+   * JSON:API related routes share the path-prefix principal gate.
+   */
+  public function testJsonApiRelatedRequiresPrincipal(): void {
+    $this->pushEntryPointRequest(
+      ['tenant' => 'tenant-a'],
+      '/jsonapi/node/article/00000000-0000-4000-8000-000000000001/uid',
+      'GET',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertJsonApiDenied();
+    $this->assertSurfaceDenialRow(
+      $before,
+      'jsonapi',
+      McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+      FALSE,
+    );
+  }
+
+  /**
+   * JSON:API relationship routes share the path-prefix principal gate.
+   */
+  public function testJsonApiRelationshipRequiresPrincipal(): void {
+    $this->pushEntryPointRequest(
+      ['tenant' => 'tenant-a'],
+      '/jsonapi/node/article/00000000-0000-4000-8000-000000000001/relationships/uid',
+      'GET',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertJsonApiDenied();
+    $this->assertSurfaceDenialRow(
+      $before,
+      'jsonapi',
+      McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+      FALSE,
+    );
+  }
+
+  /**
+   * JSON:API HEAD is a read and is admitted with mcp_read.
+   */
+  public function testJsonApiHeadAllowsMcpRead(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_read']),
+      '/jsonapi/node/article',
+      'HEAD',
+    );
+    $before = $this->deniedAccessCount();
+    $this->jsonApiSubscriber()->onRequest($this->jsonApiEventFromCurrent());
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * JSON:API OPTIONS requires mcp_write.
+   */
+  public function testJsonApiOptionsDeniesWithoutMcpWrite(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_read']),
+      '/jsonapi/node/article',
+      'OPTIONS',
+    );
+    $before = $this->deniedAccessCount();
+    $this->assertJsonApiDenied();
+    $this->assertSurfaceDenialRow(
+      $before,
+      'jsonapi',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * JSON:API OPTIONS is admitted when the token grants mcp_write.
+   */
+  public function testJsonApiOptionsAllowsMcpWrite(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_write']),
+      '/jsonapi/node/article',
+      'OPTIONS',
+    );
+    $before = $this->deniedAccessCount();
+    $this->jsonApiSubscriber()->onRequest($this->jsonApiEventFromCurrent());
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
+   * JSON:API writes require mcp_write (already covered; include= write).
+   */
+  public function testJsonApiWriteIncludeRequiresMcpWrite(): void {
+    $this->pushEntryPointRequest(
+      $this->verifiedEntryPointClaims(['mcp_read']),
+      '/jsonapi/node/article',
+      'POST',
+    );
+    $current = $this->container->get('request_stack')->getCurrentRequest();
+    $this->assertInstanceOf(Request::class, $current);
+    $current->query->set('include', 'uid');
+    $before = $this->deniedAccessCount();
+    $this->assertJsonApiDenied();
+    $this->assertSurfaceDenialRow(
+      $before,
+      'jsonapi',
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      TRUE,
+    );
+  }
+
+  /**
+   * A proxied cookie session does not use role fallback.
+   *
+   * On the old getClientIp() loopback check this would govern because
+   * REMOTE_ADDR is 127.0.0.1.
+   */
+  public function testJsonApiProxiedFallbackIsNotGoverned(): void {
+    $this->dropStampedPrincipal();
+    $request = Request::create(
+      '/jsonapi/node/article',
+      'GET',
+      [],
+      [],
+      [],
+      [
+        'REMOTE_ADDR' => '127.0.0.1',
+        'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+      ],
+    );
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $before = $this->deniedAccessCount();
+    $this->jsonApiSubscriber()->onRequest($this->jsonApiEventFromCurrent());
+    $this->assertSame($before, $this->deniedAccessCount());
+  }
+
+  /**
    * JSON:API admits a verified Paladin bearer that grants mcp_read.
    */
   public function testJsonApiAllowsVerifiedPrincipal(): void {
