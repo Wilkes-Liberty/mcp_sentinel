@@ -38,6 +38,10 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
   public function testPhpUnitWithoutProxyIsPermitted(): void {
     $this->assertTrue(McpRoleFallbackGate::permitted(Request::create('/')));
     $this->assertTrue(McpRoleFallbackGate::permitted(NULL));
+    $this->assertFalse(
+      McpRoleFallbackGate::inLocalDevSapi(),
+      'PHPUnit runs as cli, not cli-server.',
+    );
   }
 
   /**

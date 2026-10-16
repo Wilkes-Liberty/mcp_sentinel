@@ -15,7 +15,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   require `mcp_read`; unknown operation types are refused.
   `governed_role_fallback` also requires
   `$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
-  settings.php (or PHPUnit). HTTP fallback is refused when
+  settings.php (or PHPUnit / the PHP built-in server). HTTP
+  fallback is refused when
   `reverse_proxy` is on or any Forwarded / X-Forwarded-* header is
   present. The ready path on all three surfaces requires a
   principal, matching GraphQL operations and context.

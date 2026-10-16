@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\consumers\Entity\Consumer;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
 use GuzzleHttp\RequestOptions;
@@ -49,6 +50,19 @@ trait McpGovernedRequestTrait {
       ->getEditable('mcp_sentinel.settings')
       ->set('governed_role_fallback', TRUE)
       ->save();
+    // Functional tests hit a PHP built-in server that is not a PHPUnit
+    // process. settings.php is the production permit and is visible
+    // to that child process.
+    if (method_exists($this, 'writeSettings')) {
+      $this->writeSettings([
+        'settings' => [
+          McpRoleFallbackGate::SETTINGS_KEY => (object) [
+            'value' => TRUE,
+            'required' => TRUE,
+          ],
+        ],
+      ]);
+    }
   }
 
   /**

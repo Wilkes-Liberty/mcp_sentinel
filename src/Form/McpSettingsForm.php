@@ -245,7 +245,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['oauth']['governed_role_fallback'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Govern by role without an OAuth token (local dev only)'),
-      '#description' => $this->t('When enabled, a governed-role session without an OAuth token is governed only if settings.php also sets mcp_sentinel_allow_role_fallback to TRUE (config import cannot set that flag). The path is refused when reverse_proxy is on or when any Forwarded or X-Forwarded-* header is present. PHPUnit kernel tests may use the path without the settings.php flag. Leave OFF in production so the admin UI stays ungoverned.'),
+      '#description' => $this->t('When enabled, a governed-role session without an OAuth token is governed only if settings.php also sets mcp_sentinel_allow_role_fallback to TRUE (config import cannot set that flag). The path is refused when reverse_proxy is on or when any Forwarded or X-Forwarded-* header is present. PHPUnit and the PHP built-in server (cli-server) may use the path without the settings.php flag. Leave OFF in production so the admin UI stays ungoverned.'),
       '#default_value' => $config->get('governed_role_fallback') ?? FALSE,
     ];
 

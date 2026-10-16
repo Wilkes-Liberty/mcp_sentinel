@@ -12,9 +12,10 @@ use Symfony\Component\HttpFoundation\Request;
  *
  * The config checkbox governed_role_fallback is not enough. Production
  * enablement is $settings['mcp_sentinel_allow_role_fallback'] = TRUE in
- * settings.php; config import cannot set that key. PHPUnit is the
- * kernel-test permit. HTTP fallback is refused when reverse_proxy is on
- * or when any Forwarded or X-Forwarded-* header is present.
+ * settings.php; config import cannot set that key. PHPUnit and the
+ * PHP built-in server (cli-server) are the kernel / functional test
+ * permits. HTTP fallback is refused when reverse_proxy is on or when
+ * any Forwarded or X-Forwarded-* header is present.
  */
 final class McpRoleFallbackGate {
 
@@ -36,7 +37,7 @@ final class McpRoleFallbackGate {
     if (Settings::get(self::SETTINGS_KEY) === TRUE) {
       return TRUE;
     }
-    return self::inPhpUnit();
+    return self::inPhpUnit() || self::inLocalDevSapi();
   }
 
   /**
@@ -72,6 +73,16 @@ final class McpRoleFallbackGate {
    */
   public static function inPhpUnit(): bool {
     return defined('PHPUNIT_COMPOSER_INSTALL') || defined('__PHPUNIT_PHAR__');
+  }
+
+  /**
+   * TRUE on the PHP built-in server used by Drupal functional tests.
+   *
+   * Production SAPIs (fpm-fcgi, apache2handler) are not permitted
+   * here. Generic CLI / Drush still needs the settings.php flag.
+   */
+  public static function inLocalDevSapi(): bool {
+    return PHP_SAPI === 'cli-server';
   }
 
 }
