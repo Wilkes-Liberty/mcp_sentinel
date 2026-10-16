@@ -8,7 +8,9 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\DownstreamContractTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
+use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\UntrustedReadFixtureTool;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedEntryPointTestTrait;
@@ -490,6 +492,62 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
       ->execute()
       ->fetchField();
     $this->assertSame(1, $count);
+  }
+
+  /**
+   * A marked read over the size cap hides the cap rule.
+   */
+  public function testMarkedReadSizeCapHidesRule(): void {
+    $role = Role::load('mcp_api');
+    $this->assertNotNull($role);
+    $role->grantPermission(DownstreamContractTool::PERMISSION)->save();
+    $body = str_repeat('x', 64);
+    $unmarked = strlen((string) json_encode(['body' => $body]));
+    $this->config('mcp_sentinel.mcp_policy_profile.default')
+      ->set('response_size_cap', $unmarked)
+      ->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+
+    $tool = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_untrusted_read_fixture');
+    $this->assertInstanceOf(UntrustedReadFixtureTool::class, $tool);
+    $tool->setInputValue('body', $body);
+    $tool->execute();
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame(self::CALLER_DENY, $message);
+    $this->assertCallerBodyHidesRule($message, 'response_size_cap');
+    $this->assertStringNotContainsString('response size cap', $message);
+  }
+
+  /**
+   * Config-set secret-bearing and schema-validation denies hide the rule.
+   */
+  public function testConfigSetHidesSecretAndValidationRules(): void {
+    $this->config('mcp_sentinel.mcp_policy_profile.default')
+      ->set('allow_config_write', TRUE)
+      ->save();
+    $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+
+    $secret = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_config_set');
+    $secret->setInputValue('name', 'key.key.new_key');
+    $secret->setInputValue('data', ['key_provider_settings' => ['key_value' => 'S3CR3T']]);
+    $secret->execute();
+    $this->assertFalse($secret->getResultStatus());
+    $secretMessage = (string) $secret->getResultMessage();
+    $this->assertSame(self::CALLER_DENY, $secretMessage);
+    $this->assertCallerBodyHidesRule($secretMessage, 'secret-bearing');
+    $this->assertStringNotContainsString('holds secrets', $secretMessage);
+
+    $invalid = $this->container->get('plugin.manager.tool')->createInstance('mcp_sentinel_config_set');
+    $invalid->setInputValue('name', 'mcp_sentinel_no_schema.object');
+    $invalid->setInputValue('data', ['x' => 1]);
+    $invalid->execute();
+    $this->assertFalse($invalid->getResultStatus());
+    $invalidMessage = (string) $invalid->getResultMessage();
+    $this->assertSame(self::CALLER_DENY, $invalidMessage);
+    $this->assertCallerBodyHidesRule($invalidMessage, 'SCHEMA_MISSING');
+    $this->assertStringNotContainsString('has no schema', $invalidMessage);
+    $this->assertStringNotContainsString('schema validation failed', $invalidMessage);
   }
 
   /**
