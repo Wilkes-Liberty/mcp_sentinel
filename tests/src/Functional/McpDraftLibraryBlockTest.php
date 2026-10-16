@@ -70,13 +70,16 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
     $this->config('mcp_sentinel.mcp_policy_profile.default')->set('deny_publish', TRUE)->save();
     $this->config('jsonapi.settings')->set('read_only', FALSE)->save();
 
+    // "view unpublished block content" arrived in Drupal 11.4. The previous
+    // minor lane is 11.3, and drupalCreateUser() rejects an unknown
+    // permission, which failed that required job. "administer block content"
+    // already allows unpublished blocks on both releases.
     $agent = $this->createGovernedAgentAccount([
       'administer paragraphs library',
       'create paragraph library item',
       'edit paragraph library item',
       'view unpublished paragraphs',
       'administer block content',
-      'view unpublished block content',
       'access block library',
       'use editorial transition create_new_draft',
       'use editorial transition publish',
@@ -84,10 +87,12 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
 
     $library = LibraryItem::create([
       'label' => 'Live library',
-      'paragraphs' => [[
-        'target_id' => $paragraph->id(),
-        'target_revision_id' => $paragraph->getRevisionId(),
-      ]],
+      'paragraphs' => [
+        [
+          'target_id' => $paragraph->id(),
+          'target_revision_id' => $paragraph->getRevisionId(),
+        ],
+      ],
       'moderation_state' => 'published',
     ]);
     $library->save();

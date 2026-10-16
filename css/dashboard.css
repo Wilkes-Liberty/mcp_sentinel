@@ -29,10 +29,7 @@
    inset. The offset tracks the expanded and collapsed sidebar. */
 .mcp-banner-stack--sitewide {
   box-sizing: border-box;
-  margin-inline-start: var(
-    --gin-toolbar-x-offset,
-    var(--drupal-displace-offset-left, 0px)
-  );
+  margin-inline-start: var(--gin-toolbar-x-offset, var(--drupal-displace-offset-left, 0));
   padding-inline: var(--gin-spacing-m, 1rem);
 }
 
@@ -68,8 +65,8 @@
   color: inherit;
   font: inherit;
   font-size: 0.875em;
-  line-height: 1.2;
   white-space: nowrap;
+  line-height: 1.2;
   border: 1px solid currentColor;
   border-radius: 4px;
   background: transparent;
@@ -77,7 +74,7 @@
 
 .mcp-banner__dismiss:hover,
 .mcp-banner__dismiss:focus-visible {
-  background: rgb(0 0 0 / 8%);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 .mcp-banner--critical {
