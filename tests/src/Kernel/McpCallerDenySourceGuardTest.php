@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * Caller-facing denies in src/ and modules/*/src must go through refuse().
+ * Caller-facing denies in src/ and submodule src trees must go through refuse().
  *
  * Lives in Kernel so a failing scan cannot skip the rest of the Kernel
  * suite (Unit runs first under set -euo pipefail).
