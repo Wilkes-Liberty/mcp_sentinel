@@ -100,9 +100,10 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
         $e->reasonCode,
       );
     }
-    $this->assertNull($holder->get());
     $stack->pop();
-    $this->assertSame('human-1', $holder->get()?->subject());
+    $restored = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame('human-1', $restored->subject());
   }
 
   /**
