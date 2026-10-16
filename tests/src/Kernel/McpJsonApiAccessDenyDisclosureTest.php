@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use ColinODell\PsrTestLogger\TestLogger;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
@@ -24,6 +25,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * the 403 message. JsonApiDocumentTopLevelNormalizer then copies that
  * detail onto meta.omitted.links.*.meta.detail. A governed deny must
  * therefore put only the generic caller message on the AccessResult.
+ * The HMAC denied_access row and the operator log still name the rule.
  *
  * @group mcp_sentinel
  *
@@ -41,6 +43,16 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    * Generic caller-facing deny. Duplicated so this test compiles on 3.2.0.
    */
   private const CALLER_DENY = 'MCP access is denied.';
+
+  /**
+   * Sealed kernel-test principal stamped by the audit-schema trait.
+   */
+  private const FIXTURE_PRINCIPAL_KEY = 'https://idp.example/realms/agents|kernel-test|kernel-test-client';
+
+  /**
+   * Operator-log spy injected as logger.channel.mcp_sentinel.
+   */
+  private TestLogger $denyLog;
 
   /**
    * {@inheritdoc}
@@ -72,6 +84,12 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->assertFalse(
+      $this->container->initialized('mcp_sentinel.deny_explainer'),
+      'deny_explainer must still be lazy so the operator-log spy can be injected.',
+    );
+    $this->denyLog = new TestLogger();
+    $this->container->set('logger.channel.mcp_sentinel', $this->denyLog);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
     $this->installSchema('system', ['sequences']);
@@ -113,6 +131,7 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
   public function testIndividualGetHidesEntityTypeDenyReason(): void {
     $person = $this->createUser([]);
     $this->assertInstanceOf(User::class, $person);
+    $before = $this->deniedAccessCount();
     $access = $person->access('view', $this->container->get('current_user')->getAccount(), TRUE);
     $this->assertTrue($access->isForbidden(), 'A denied type must refuse the individual GET.');
 
@@ -120,7 +139,12 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
       $access,
       'The current user is not allowed to GET the selected resource.',
     );
-    $this->assertJsonApiHidesRule($document, "Entity type 'user' is denied");
+    $this->assertJsonApiDenyIsAuditedNotDisclosed(
+      $document,
+      $before,
+      "Entity type 'user' is denied",
+      'entity_type_denied',
+    );
   }
 
   /**
@@ -132,6 +156,7 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
     $node = $this->createArticle($author);
     $this->assertSame($author->id(), $node->getOwnerId());
 
+    $before = $this->deniedAccessCount();
     $access = $author->access('view', $this->container->get('current_user')->getAccount(), TRUE);
     $this->assertTrue($access->isForbidden(), 'The default user denylist must refuse the included author.');
 
@@ -164,7 +189,12 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
         ],
       ],
     ];
-    $this->assertJsonApiHidesRule($document, "Entity type 'user' is denied");
+    $this->assertJsonApiDenyIsAuditedNotDisclosed(
+      $document,
+      $before,
+      "Entity type 'user' is denied",
+      'entity_type_denied',
+    );
     $this->assertSame(
       $detail,
       $document['meta']['omitted']['links']['item--include']['meta']['detail'],
@@ -176,6 +206,7 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    */
   public function testPostHidesDeniedTypeReason(): void {
     $this->denyEntityTypes(['node']);
+    $before = $this->deniedAccessCount();
     $access = $this->container->get('entity_type.manager')
       ->getAccessControlHandler('node')
       ->createAccess('article', $this->container->get('current_user')->getAccount(), [], TRUE);
@@ -185,7 +216,12 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
       $access,
       'The current user is not allowed to POST the selected resource.',
     );
-    $this->assertJsonApiHidesRule($document, "Entity type 'node' is denied");
+    $this->assertJsonApiDenyIsAuditedNotDisclosed(
+      $document,
+      $before,
+      "Entity type 'node' is denied",
+      'entity_type_denied',
+    );
     $this->assertStringNotContainsString('Write operations are disabled', json_encode($document));
   }
 
@@ -274,6 +310,34 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
   }
 
   /**
+   * Asserts caller, HMAC row, and operator log split the rule correctly.
+   *
+   * @param array $document
+   *   Encoded JSON:API errors or meta.omitted document.
+   * @param int $before
+   *   denied_access count before the governed access check.
+   * @param string $leaked
+   *   Rule text that must not reach the caller.
+   * @param string $ruleId
+   *   Explainer rule id recorded on the HMAC row.
+   */
+  private function assertJsonApiDenyIsAuditedNotDisclosed(
+    array $document,
+    int $before,
+    string $leaked,
+    string $ruleId,
+  ): void {
+    $this->assertJsonApiHidesRule($document, $leaked);
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame($ruleId, $meta['rule'] ?? NULL);
+    $this->assertStringContainsString($leaked, (string) ($meta['explain'] ?? ''));
+    $this->assertStringContainsString('[rule:' . $ruleId, (string) ($meta['explain'] ?? ''));
+    $this->assertSame(self::FIXTURE_PRINCIPAL_KEY, $meta['principal_key'] ?? NULL);
+    $this->assertOperatorLogCarriesRule($leaked, $ruleId);
+  }
+
+  /**
    * Asserts a JSON:API document is a generic deny with no rule disclosure.
    *
    * @param array $document
@@ -289,6 +353,25 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
     $this->assertStringNotContainsString('classification_egress_denied', $body);
     $this->assertStringNotContainsString('policy_bundle_denied', $body);
     $this->assertStringNotContainsString('tenant_mismatch', $body);
+  }
+
+  /**
+   * Asserts the operator channel received the rule the caller must not see.
+   *
+   * @param string $leaked
+   *   Rule text written to the operator log.
+   * @param string $ruleId
+   *   Explainer rule id written to the operator log.
+   */
+  private function assertOperatorLogCarriesRule(string $leaked, string $ruleId): void {
+    $haystacks = [];
+    foreach ($this->denyLog->records as $record) {
+      $haystacks[] = (string) ($record['message'] ?? '')
+        . json_encode($record['context'] ?? []);
+    }
+    $joined = implode("\n", $haystacks);
+    $this->assertStringContainsString($leaked, $joined);
+    $this->assertStringContainsString($ruleId, $joined);
   }
 
 }
