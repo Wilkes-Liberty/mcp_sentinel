@@ -63,21 +63,20 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
   use McpEntityToolTrait;
 
   /**
-   * The entity type manager.
+   * Storage for the entity ids in the batch.
    */
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel content lock service.
+   * Blocks a bulk mutation while another principal holds the lock.
    */
   protected McpContentLock $contentLock;
 
   /**
-   * The Symfony event dispatcher.
+   * Dispatches McpDestructiveOpEvent before a destructive operation.
    *
-   * Used to dispatch the veto-capable McpDestructiveOpEvent before a
-   * destructive operation. When no subscriber is registered (e.g. the approval
-   * submodule is absent) the event is a no-op and the operation proceeds.
+   * When no subscriber is registered (e.g. the approval submodule is absent)
+   * the event is a no-op and the operation proceeds.
    */
   protected EventDispatcherInterface $eventDispatcher;
 
@@ -113,14 +112,10 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
     $storage = $this->entityTypeManager->getStorage($entity_type);
     $results = ['succeeded' => [], 'failed' => [], 'queued' => []];
 
-    // Resolve the governance profile once. An ungoverned account must be
-    // rejected before any entity work — this is the most destructive tool.
     $profileForRateLimit = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profileForRateLimit === NULL) {
       return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
     }
-    // Rate-limit check: a throttled agent is blocked before touching the entity
-    // loop.
     if ($rateLimited = $this->checkRateLimit($profileForRateLimit, 'mcp_sentinel_bulk_operations')) {
       return $rateLimited;
     }

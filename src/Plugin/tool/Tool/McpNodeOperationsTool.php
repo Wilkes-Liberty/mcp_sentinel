@@ -72,12 +72,12 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
   use McpEntityToolTrait;
 
   /**
-   * The entity type manager.
+   * Storage for the node this tool mutates.
    */
   protected EntityTypeManagerInterface $entityTypeManager;
 
   /**
-   * The MCP Sentinel content lock service.
+   * Blocks a write while another principal holds the lock.
    */
   protected McpContentLock $contentLock;
 

@@ -41,7 +41,7 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
   use McpEntityToolTrait;
 
   /**
-   * The config factory.
+   * Config names this tool lists.
    */
   protected ConfigFactoryInterface $configFactory;
 

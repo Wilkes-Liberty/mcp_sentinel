@@ -55,7 +55,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpContentLockTool extends McpGovernedToolBase {
 
   /**
-   * The MCP Sentinel content lock service.
+   * Lock and unlock implementation for this tool.
    */
   protected McpContentLock $contentLock;
 

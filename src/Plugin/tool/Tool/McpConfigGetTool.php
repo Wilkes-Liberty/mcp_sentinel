@@ -40,7 +40,7 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
   use McpEntityToolTrait;
 
   /**
-   * The config factory.
+   * Config names this tool reads.
    */
   protected ConfigFactoryInterface $configFactory;
 

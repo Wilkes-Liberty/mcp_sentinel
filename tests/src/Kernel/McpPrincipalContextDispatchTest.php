@@ -9,6 +9,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
+use Drupal\mcp_sentinel\Service\McpLookalikeChecker;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
@@ -769,7 +770,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    * A missing Spoofchecker fails closed and is audited.
    */
   public function testLookalikeCheckUnavailableFailsClosed(): void {
-    $checker = $this->container->get('mcp_sentinel.lookalike_checker');
+    $checker = new McpLookalikeChecker();
     $checker->disableForTest();
     $tool = $this->executeProbe(
       [
