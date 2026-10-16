@@ -80,6 +80,18 @@ final class GraphqlCallerDenyDisclosureTest extends KernelTestBase {
   }
 
   /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    $stack = $this->container->get('request_stack');
+    while ($stack->getCurrentRequest() !== NULL
+      && $stack->getCurrentRequest() !== $stack->getMainRequest()) {
+      $stack->pop();
+    }
+    parent::tearDown();
+  }
+
+  /**
    * A missing principal GraphQL Error is generic; the audit row names the rule.
    */
   public function testGraphqlHidesMissingPrincipalRule(): void {

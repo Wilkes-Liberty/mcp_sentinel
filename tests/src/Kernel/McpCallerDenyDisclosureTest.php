@@ -90,6 +90,18 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
   }
 
   /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    $stack = $this->container->get('request_stack');
+    while ($stack->getCurrentRequest() !== NULL
+      && $stack->getCurrentRequest() !== $stack->getMainRequest()) {
+      $stack->pop();
+    }
+    parent::tearDown();
+  }
+
+  /**
    * A tools/call deny hides the rule suffix; the audit row keeps it.
    */
   public function testToolCallHidesMissingTenantRule(): void {
