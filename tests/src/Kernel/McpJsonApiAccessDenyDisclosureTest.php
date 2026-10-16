@@ -10,6 +10,7 @@ use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedEntryPointTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -17,6 +18,7 @@ use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * JSON:API copies AccessResult reasons into errors[].detail and meta.omitted.
@@ -223,6 +225,79 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
       'entity_type_denied',
     );
     $this->assertStringNotContainsString('Write operations are disabled', json_encode($document));
+  }
+
+  /**
+   * A classification 403 writes denied_access even when audit is off.
+   */
+  public function testClassificationGetWritesDeniedAccessWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->set('classification_map', [
+        [
+          'entity_type' => 'node',
+          'bundle' => 'article',
+          'field' => '',
+          'label' => 'restricted',
+        ],
+      ])
+      ->save();
+    $this->config('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['jsonapi' => 'internal'])
+      ->save();
+    $this->container->get('entity_type.manager')
+      ->getStorage('mcp_policy_profile')
+      ->resetCache();
+
+    $node = $this->createArticle();
+    $request = Request::create('/jsonapi/node/article/' . $node->uuid());
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    if ($current !== NULL) {
+      foreach ([
+        McpPrincipalContext::CLAIMS_ATTRIBUTE,
+        McpPrincipalContext::NETWORK_ATTRIBUTE,
+        McpPrincipalContext::FIXTURE_ATTRIBUTE,
+      ] as $name) {
+        if ($current->attributes->has($name) && !$request->attributes->has($name)) {
+          $request->attributes->set($name, $current->attributes->get($name));
+        }
+      }
+    }
+    $stack->push($request);
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
+    $this->container->get('entity_type.manager')
+      ->getAccessControlHandler('node')
+      ->resetCache();
+
+    $before = $this->deniedAccessCount();
+    $access = $node->access(
+      'view',
+      $this->container->get('current_user')->getAccount(),
+      TRUE,
+    );
+    $this->assertTrue(
+      $access->isForbidden(),
+      'An over-ceiling article must refuse the individual GET.',
+    );
+
+    $document = $this->jsonApiErrorDocument(
+      $access,
+      'The current user is not allowed to GET the selected resource.',
+    );
+    $this->assertJsonApiDenyIsAuditedNotDisclosed(
+      $document,
+      $before,
+      'classification_egress_denied',
+      'classification_egress_denied',
+    );
   }
 
   /**

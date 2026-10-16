@@ -28,6 +28,33 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
   protected static $modules = ['system'];
 
   /**
+   * Nested parentheses inside forbidden() are part of the scanned argument.
+   */
+  public function testForbiddenMatchHandlesNestedParentheses(): void {
+    $leaky = <<<'PHP'
+<?php
+AccessResult::forbidden($this->t('Nope (@id)', ['@id' => $id]));
+PHP;
+    $leaks = $this->forbiddenLeaks('nested.php', $leaky);
+    $this->assertNotSame([], $leaks, 'A nested-paren leak must be reported.');
+    $this->assertStringContainsString(
+      "['@id' => \$id]",
+      $leaks[0],
+      'The matcher must not stop at the first closing parenthesis.',
+    );
+
+    $ok = <<<'PHP'
+<?php
+AccessResult::forbidden($this->denyExplainer?->refuse('tenant_mismatch'));
+PHP;
+    $this->assertSame(
+      [],
+      $this->forbiddenLeaks('ok.php', $ok),
+      'A nested refuse() argument is not a leak.',
+    );
+  }
+
+  /**
    * AccessResult::forbidden and policy-deny tool failures use refuse().
    */
   public function testSrcCallerFacingDeniesGoThroughRefuse(): void {
