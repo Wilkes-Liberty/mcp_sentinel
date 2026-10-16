@@ -12,6 +12,7 @@ use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
+use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -255,6 +256,21 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->assertSame('subject-exp', $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject());
     $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
     $this->assertSame('ttl', $this->lastAuditMetadata(McpKillSwitch::AUDIT_EXPIRE)['reason']);
+  }
+
+  /**
+   * Guard bypass: a mass kill applies immediately when mass-pending is off.
+   *
+   * This is the red mutation for testMassKillStaysPendingWithoutSecondOperator.
+   */
+  public function testMassKillAppliesWhenMassPendingIsWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_PENDING);
+    $one = $this->principalSelector('subject-m1w', 'agent-m1w');
+    $two = $this->principalSelector('subject-m2w', 'agent-m2w');
+    $result = $this->killSwitch()->kill([$one, $two], 'mass', $this->paladinA());
+    $this->assertFalse($result->needsConfirm);
+    $this->assertSame(McpKillBlockStatus::Killed, $result->status);
+    $this->assertTrue($this->killSwitch()->isKilled($one->key));
   }
 
   /**
@@ -584,6 +600,106 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * Mixed-channel confirm without a binding is refused.
+   */
+  public function testUnboundMixedChannelConfirmIsRefused(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-unbound');
+    $kill = $this->killSwitch()->kill([$human], 'unbound', $this->paladinA());
+    try {
+      $this->killSwitch()->confirm($kill->batchId, $this->drushFingerprint('shell-a'));
+      $this->fail('Mixed-channel confirm without a binding must be refused.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNBOUND_OPERATOR, $e->reasonCode);
+    }
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * The same bound person cannot confirm on the other channel.
+   */
+  public function testBoundSamePersonCannotConfirmAcrossChannels(): void {
+    $paladin = $this->paladinA();
+    $drush = $this->drushFingerprint('shell-a');
+    $this->bindings()->bind($paladin, $drush);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-same-bound');
+    $kill = $this->killSwitch()->kill([$human], 'cross', $paladin);
+    try {
+      $this->killSwitch()->confirm($kill->batchId, $drush);
+      $this->fail('The same bound operator must not confirm on the other channel.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
+    }
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Distinct bound people can confirm across Paladin and Drush.
+   */
+  public function testBoundDistinctPeopleCanConfirmAcrossChannels(): void {
+    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-cross-bound');
+    $kill = $this->killSwitch()->kill([$human], 'cross', $this->paladinA());
+    $done = $this->killSwitch()->confirm($kill->batchId, $this->drushFingerprint('shell-b'));
+    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Identities already bound to different records cannot be merged.
+   */
+  public function testBindingConflictWhenIdentitiesBelongToDifferentRecords(): void {
+    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
+    try {
+      $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-b'));
+      $this->fail('Identities bound to different records must conflict.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Two Drush OS accounts do not need a Paladin binding.
+   */
+  public function testSameKindDrushConfirmDoesNotRequireBinding(): void {
+    $first = $this->drushFingerprint('shell-a');
+    $second = $this->drushFingerprint('shell-b');
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-two-shells');
+    $kill = $this->killSwitch()->kill([$human], 'shells', $first);
+    $done = $this->killSwitch()->confirm($kill->batchId, $second);
+    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Mixed-channel un-kill confirm without a binding is refused.
+   */
+  public function testUnboundMixedChannelUnkillConfirmIsRefused(): void {
+    $selector = $this->principalSelector('subject-unbound-u', 'agent-unbound-u');
+    $this->killSwitch()->kill([$selector], 'kill', $this->paladinA());
+    $pending = $this->killSwitch()->requestUnkill(
+      [$selector],
+      'restore',
+      $this->paladinA(),
+    );
+    try {
+      $this->killSwitch()->confirmUnkill(
+        $pending->batchId,
+        $this->drushFingerprint('shell-b'),
+      );
+      $this->fail('Mixed-channel un-kill confirm without a binding must be refused.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNBOUND_OPERATOR, $e->reasonCode);
+    }
+    $this->assertTrue($this->killSwitch()->isKilled($selector->key));
+  }
+
+  /**
    * Operator selectors use principal-key vector error codes.
    */
   public function testSelectorUsesPrincipalKeyVectorCodes(): void {
@@ -660,6 +776,20 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   private function paladinA(): McpOperatorIdentity {
     return McpOperatorIdentity::paladin(self::ISS . '|operator-a');
+  }
+
+  /**
+   * Fabricated Drush assertion for a distinct OS account.
+   */
+  private function drushFingerprint(string $seed): McpOperatorIdentity {
+    return McpOperatorIdentity::drushAssertion(hash('sha256', $seed));
+  }
+
+  /**
+   * Operator-binding store.
+   */
+  private function bindings(): McpOperatorBinding {
+    return $this->container->get('mcp_sentinel.operator_binding');
   }
 
   /**

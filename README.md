@@ -74,6 +74,21 @@ verified Paladin `iss|sub` or a Drush assertion bound to the OS
 effective uid (not the login name or `USER`); `drush --uid` is
 permission-only and is not an operator identity.
 
+**The Drush/shell path sits outside governance.** Kill and confirm
+commands run as OS processes, not as governed MCP requests. The
+two-person rule on that path is two distinct OS accounts (the HMAC of
+each process's effective uid). It holds only when each operator has
+an individual OS account. A shared deploy user is one operator: the
+same shell cannot confirm its own request by switching Drupal account
+ids. Keep agent credentials off the shell, and do not share the
+account that runs `mcp-sentinel:kill`.
+
+When a web or Paladin kill route is added, Paladin `iss|sub` and the
+Drush assertion must resolve to one bound operator record
+(`drush mcp-sentinel:operator-bind --human-key=iss|sub`). Mixed-channel
+confirm with no binding is refused. A requester cannot confirm their
+own request on the other channel.
+
 **Known limitation (pending DEV-846 job cancellation):** a kill does
 not cancel webhook deliveries already in the
 `mcp_sentinel_webhook_delivery` queue. Those items still run. After a
@@ -1375,6 +1390,11 @@ default rather than merely guarded.
 
 | Command | Purpose |
 |---------|---------|
+| `drush mcp-sentinel:kill` | Kill one principal, every agent of this person, a tenant, or a mass set. Mass kills stay pending until a distinct operator confirms. The shell sits outside governance; use individual OS accounts, not a shared deploy user. |
+| `drush mcp-sentinel:kill-confirm` | Confirm a pending mass kill as a distinct operator. |
+| `drush mcp-sentinel:unkill` | Request or confirm an un-kill. Always needs two distinct operators. |
+| `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. |
+| `drush mcp-sentinel:operator-bind` | Bind this OS account's Drush assertion to a Paladin human key so mixed-channel confirm can tell two people apart. |
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |

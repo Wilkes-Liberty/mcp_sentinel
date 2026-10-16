@@ -33,7 +33,9 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * transactional. A killed row is never downgraded to kill_pending.
  * Re-killing stays killed and may extend block_until up to 7 d
  * from now. Two-person confirm binds Paladin iss|sub or a Drush
- * OS assertion, never a Drupal uid. Tokens never appear in audit
+ * OS assertion, never a Drupal uid. Mixed-channel confirm requires
+ * both identities to resolve to one bound operator record; unbound
+ * mixed-channel confirm is refused. Tokens never appear in audit
  * metadata. expireDue() runs from hook_cron, not admit() or save.
  */
 final class McpKillSwitch implements McpKillEnforcerInterface {
@@ -89,6 +91,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const WEAKEN_SKIP_DISTINCT_OPERATOR = 'skip_distinct_operator';
 
   /**
+   * PHPUnit-only: treat every kill as single-principal (apply immediately).
+   */
+  public const WEAKEN_SKIP_MASS_PENDING = 'skip_mass_pending';
+
+  /**
    * PHPUnit-only: treat killed rows as blocking after block_until.
    */
   public const WEAKEN_IGNORE_BLOCK_UNTIL = 'ignore_block_until';
@@ -137,6 +144,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   dispatcher: config-save subscribers also consult the registry).
    * @param \Drupal\Component\Uuid\UuidInterface $uuid
    *   Batch ids.
+   * @param \Drupal\mcp_sentinel\Service\McpOperatorBinding $bindings
+   *   Paladin/Drush operator-record bindings for mixed-channel confirm.
    */
   public function __construct(
     private readonly Connection $connection,
@@ -147,6 +156,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     private readonly McpPrincipalContextGuard $guard,
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly UuidInterface $uuid,
+    private readonly McpOperatorBinding $bindings,
   ) {}
 
   /**
@@ -742,9 +752,14 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Unique selectors.
    */
   private function isMass(array $selectors): bool {
-    // Broken on purpose for the merged-head red run: mass kills apply
-    // immediately, so the pending, Drush-identity, and re-kill tests fail.
-    return count($selectors) < 1;
+    if ($this->weakened(self::WEAKEN_SKIP_MASS_PENDING)) {
+      return FALSE;
+    }
+    if (count($selectors) > 1) {
+      return TRUE;
+    }
+    $first = $selectors[0];
+    return $first->type->isMassByItself();
   }
 
   /**
@@ -1301,13 +1316,62 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'The named second person (secondary account holder) must be a distinct operator account.',
       );
     }
+    $firstKind = $this->storageKind($first);
+    $secondKind = $this->storageKind($second);
+    $firstRecord = $this->bindings->recordId($firstKind, $this->storageIdentity($first));
+    $secondRecord = $this->bindings->recordId($secondKind, $this->storageIdentity($second));
+    if ($firstKind === '' || $secondKind === '' || $firstKind !== $secondKind) {
+      if ($firstRecord === NULL || $secondRecord === NULL) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNBOUND_OPERATOR,
+          'Paladin and Drush operator identities must resolve to one bound operator record.',
+        );
+      }
+      if ($this->bindings->sameRecord($firstRecord, $secondRecord)) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::SAME_OPERATOR,
+          'The named second person (secondary account holder) must be a distinct operator account.',
+        );
+      }
+      return;
+    }
+    if ($firstRecord !== NULL && $secondRecord !== NULL
+      && $this->bindings->sameRecord($firstRecord, $secondRecord)) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::SAME_OPERATOR,
+        'The named second person (secondary account holder) must be a distinct operator account.',
+      );
+    }
+  }
+
+  /**
+   * Kind prefix of a stored operator id (paladin, drush, uid).
+   */
+  private function storageKind(string $storageId): string {
+    $pos = strpos($storageId, ':');
+    if ($pos === FALSE || $pos === 0) {
+      return '';
+    }
+    return substr($storageId, 0, $pos);
+  }
+
+  /**
+   * Identity part of a stored operator id after the kind prefix.
+   */
+  private function storageIdentity(string $storageId): string {
+    $pos = strpos($storageId, ':');
+    if ($pos === FALSE) {
+      return '';
+    }
+    return substr($storageId, $pos + 1);
   }
 
   /**
    * PHPUnit-only injection that disables one kill-switch invariant.
    *
    * Impossible outside the PHPUnit process. Used so two-person, TTL,
-   * expiry, audit, P0 never-downgrade, and uid-identity tests can fail.
+   * expiry, audit, P0 never-downgrade, mass-pending, and uid-identity
+   * tests can fail.
    *
    * @param string $flag
    *   One of the WEAKEN_* constants.

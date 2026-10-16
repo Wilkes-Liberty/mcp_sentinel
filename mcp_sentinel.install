@@ -236,6 +236,39 @@ function mcp_sentinel_schema(): array {
     ],
   ];
 
+  // Paladin iss|sub and Drush OS-assertion rows that resolve to one
+  // operator record. identity_id can be 770 characters (a Paladin
+  // human key), so the unique index is a hash, matching kill_block.
+  $schema['mcp_sentinel_operator_binding'] = [
+    'description' => 'Bound Paladin and Drush identities for one operator (DEV-846).',
+    'fields' => [
+      'identity_hash' => [
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+      ],
+      'identity_kind' => [
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => TRUE,
+      ],
+      'identity_id' => [
+        'type' => 'varchar',
+        'length' => 770,
+        'not null' => TRUE,
+      ],
+      'operator_id' => [
+        'type' => 'varchar',
+        'length' => 36,
+        'not null' => TRUE,
+      ],
+    ],
+    'primary key' => ['identity_hash'],
+    'indexes' => [
+      'operator_id' => ['operator_id'],
+    ],
+  ];
+
   $schema['mcp_sentinel_sealed_token'] = [
     'description' => 'Metadata for short-lived sealed tokens. The secret is never stored.',
     'fields' => [
@@ -1620,4 +1653,17 @@ function mcp_sentinel_update_10030(): string {
     $messages[] = 'Kill-switch TTL settings already present.';
   }
   return implode(' ', $messages);
+}
+
+/**
+ * Create the operator-binding table for mixed-channel kill confirm (DEV-846).
+ */
+function mcp_sentinel_update_10031(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->tableExists('mcp_sentinel_operator_binding')) {
+    return 'mcp_sentinel_operator_binding already exists.';
+  }
+  $spec = mcp_sentinel_schema()['mcp_sentinel_operator_binding'];
+  $schema->createTable('mcp_sentinel_operator_binding', $spec);
+  return 'Created mcp_sentinel_operator_binding. Paladin and Drush identities bind to one operator record before mixed-channel confirm.';
 }

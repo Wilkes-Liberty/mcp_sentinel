@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Operator binding for the kill-switch two-person rule. Paladin
+  `iss|sub` and a Drush OS effective uid assertion bind to one
+  operator record (`mcp_sentinel_operator_binding`). Mixed-channel
+  confirm with no binding is refused. The same bound person cannot
+  confirm on the other channel. Distinct same-kind identities still
+  work without a binding. Command:
+  `mcp-sentinel:operator-bind --human-key=iss|sub`. Run database
+  updates: until update 10031 creates the table, mixed-channel
+  confirm fails closed.
+
+### Changed
+- Kill-switch docs state that the Drush/shell path sits outside
+  governance. The two-person rule on that path requires individual
+  OS accounts and no shared deploy user.
+
 ## [3.2.0] - 2026-10-15
 
 ### Added
