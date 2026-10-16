@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -69,7 +70,11 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
     }
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_config_get')) {
       return $rateLimited;

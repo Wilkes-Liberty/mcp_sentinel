@@ -122,7 +122,7 @@ class McpContextController extends ControllerBase {
     }
     if (!$readiness->isReady()) {
       $reason = $readiness->reason();
-      $this->denyExplainer?->operatorNotice($reason->value);
+      $this->denyExplainer?->refuse($reason->value);
       $status = $reason->isAuthorizationFailure() ? 403 : 503;
       return $this->genericDenyResponse($status);
     }
@@ -130,17 +130,14 @@ class McpContextController extends ControllerBase {
     // IP allowlist gate — governed requests only.
     $profile = $readiness->profile();
     if ($profile !== NULL && !$this->accessChecker->isClientIpAllowed($profile)) {
-      return new JsonResponse(
-        ['error' => 'Source IP not permitted by MCP Sentinel policy.'],
-        403,
-        ['Cache-Control' => 'no-store', 'X-Content-Type-Options' => 'nosniff'],
-      );
+      $this->denyExplainer?->refuse('Source IP not permitted by MCP Sentinel policy.');
+      return $this->genericDenyResponse(403);
     }
 
     // Attested bundle / emergency deny (d.o #3617702). The schema document
     // does not go through entity access, so the floor is applied here.
     if ($this->accessChecker->checkBundleFloor('view', AccessResult::neutral())->isForbidden()) {
-      $this->denyExplainer?->operatorNotice(McpAccessChecker::BUNDLE_DENIAL_CODE);
+      $this->denyExplainer?->refuse(McpAccessChecker::BUNDLE_DENIAL_CODE);
       return $this->genericDenyResponse(403);
     }
 
@@ -156,10 +153,17 @@ class McpContextController extends ControllerBase {
           'budget' => 'requests',
           'profile' => $profile->id(),
         ]);
+        $this->denyExplainer?->refuse(
+          'MCP Sentinel request budget exceeded (read_budget_exceeded). Retry after the current window.',
+        );
         return new JsonResponse(
-          ['error' => 'MCP Sentinel request budget exceeded (read_budget_exceeded). Retry after the current window.'],
+          ['error' => McpDenyExplainer::CALLER_MESSAGE],
           429,
-          ['Cache-Control' => 'no-store', 'Retry-After' => '60'],
+          [
+            'Cache-Control' => 'private, no-store',
+            'Retry-After' => '60',
+            'X-Content-Type-Options' => 'nosniff',
+          ],
         );
       }
       $this->rateLimiter->register($profile, $uid, NULL);
@@ -260,7 +264,7 @@ class McpContextController extends ControllerBase {
    */
   private function principalDenial(): ?JsonResponse {
     if ($this->principalDispatcher === NULL) {
-      $this->denyExplainer?->operatorNotice('missing_principal');
+      $this->denyExplainer?->refuse('missing_principal');
       return $this->genericDenyResponse(403);
     }
     try {

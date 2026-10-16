@@ -8,6 +8,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist;
 use Drupal\node\NodeInterface;
 use Drupal\tool\Attribute\Tool;
@@ -118,7 +119,11 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
     // so throttled agents are blocked regardless of input validity.
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_node_operations')) {
       return $rateLimited;
@@ -235,7 +240,11 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
       $node->save();
     }
     catch (\Exception $e) {
-      return ExecutableResult::failure($this->t('Failed to save node: @message', ['@message' => $e->getMessage()]));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'Failed to save node: ' . $e->getMessage(),
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     return ExecutableResult::success(

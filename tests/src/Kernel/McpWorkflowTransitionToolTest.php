@@ -235,7 +235,8 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'A deny_publish profile must block a transition to a published state.');
-    $this->assertStringContainsString('publishing is not permitted',
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('publishing is not permitted',
       (string) $tool->getResultMessage());
 
     // The node stays in draft.
@@ -288,10 +289,10 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'Transition must be denied for an ungoverned account.');
-    $this->assertStringContainsStringIgnoringCase(
-      'no governance profile',
+    $this->assertSame(
+      'MCP access is denied.',
       (string) $tool->getResultMessage(),
-      'Failure message must mention the missing governance profile.'
+      'Caller-facing no-profile denials must be generic (DEV-966).',
     );
   }
 

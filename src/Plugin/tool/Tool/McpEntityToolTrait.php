@@ -8,6 +8,7 @@ use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\tool\ExecutableResult;
 
 /**
@@ -151,15 +152,16 @@ trait McpEntityToolTrait {
         $logger = \Drupal::service('mcp_sentinel.audit_logger');
       }
       $limited = (string) $this->t('Rate limit exceeded. Retry after the current window expires.');
-      $explain = $this->governanceDenyExplainer?->operatorNotice($limited) ?? $limited;
+      $caller = $this->governanceDenyExplainer?->refuse($limited)
+        ?? McpDenyExplainer::CALLER_MESSAGE;
       if ($logger !== NULL) {
-        $logger->log('rate_limit_exceeded', [
+        $logger->logAlways('rate_limit_exceeded', [
           'tool' => $toolId,
-          'explain' => $explain,
+          'explain' => $this->governanceDenyExplainer?->annotate($limited) ?? $limited,
           'rule' => $this->governanceDenyExplainer?->explain($limited)->ruleId,
         ]);
       }
-      return ExecutableResult::failure($this->t('MCP access is denied.'));
+      return ExecutableResult::failure($this->t('@msg', ['@msg' => $caller]));
     }
     $limiter->register($profile, $uid, $toolId);
     return NULL;
@@ -230,14 +232,14 @@ trait McpEntityToolTrait {
     }
     $bytes = strlen($serialized);
     if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
-      $this->governanceDenyExplainer?->operatorNotice((string) $this->t(
+      $caller = $this->governanceDenyExplainer?->refuse((string) $this->t(
         'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
         [
           '@bytes' => $bytes,
           '@cap'   => $guard->effectiveResponseSizeCap($profile),
         ]
-      ));
-      return ExecutableResult::failure($this->t('MCP access is denied.'));
+      )) ?? McpDenyExplainer::CALLER_MESSAGE;
+      return ExecutableResult::failure($this->t('@msg', ['@msg' => $caller]));
     }
     return NULL;
   }

@@ -135,6 +135,7 @@ final class McpClassificationResolver {
     private readonly RequestStack $requestStack,
     private readonly Settings $settings,
     private readonly McpAuditLogger $auditLogger,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -554,17 +555,18 @@ final class McpClassificationResolver {
    * The structured refusal every HTTP seam returns for a classification denial.
    *
    * One shape for the request seam and the response seam: a JSON:API error
-   * document whose first error carries the stable code. Never cacheable — the
+   * document with HTTP 403 and the generic caller deny. The stable code is
+   * written to the audit row, not the caller body. Never cacheable — the
    * decision is per principal, per surface and per declaration.
    */
   public function refusalResponse(): JsonResponse {
+    $this->denyExplainer?->refuse(self::DENIAL_CODE);
     $refusal = new JsonResponse([
       'errors' => [
         [
           'status' => '403',
-          'code' => self::DENIAL_CODE,
-          'title' => 'Classification exceeds the MCP Sentinel egress ceiling',
-          'detail' => 'The requested data carries a classification label above the ceiling this principal may receive on this surface.',
+          'title' => McpDenyExplainer::CALLER_MESSAGE,
+          'detail' => McpDenyExplainer::CALLER_MESSAGE,
         ],
       ],
     ], 403);

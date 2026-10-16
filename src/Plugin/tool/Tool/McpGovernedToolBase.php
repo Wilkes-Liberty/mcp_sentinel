@@ -535,9 +535,8 @@ abstract class McpGovernedToolBase extends ToolBase {
     );
     if (!$readiness->isReady()) {
       $reason = $readiness->reason()->value;
-      $message = 'MCP Sentinel source governance is not ready: ' . $reason . '.';
-      $this->governanceDenyExplainer?->operatorNotice(
-        $message,
+      $this->governanceDenyExplainer?->refuse(
+        'MCP Sentinel source governance is not ready: ' . $reason . '.',
         $readiness->profile()?->id(),
       );
       $denied = AccessResult::forbidden(McpDenyExplainer::CALLER_MESSAGE)
@@ -547,9 +546,11 @@ abstract class McpGovernedToolBase extends ToolBase {
 
     $profile = $readiness->profile();
     if ($profile === NULL || !$this->governanceAccessChecker->isClientIpAllowed($profile)) {
-      $denied = AccessResult::forbidden(
+      $this->governanceDenyExplainer?->refuse(
         'Source IP not permitted by MCP Sentinel policy.',
-      )->setCacheMaxAge(0);
+      );
+      $denied = AccessResult::forbidden(McpDenyExplainer::CALLER_MESSAGE)
+        ->setCacheMaxAge(0);
       return $denied;
     }
 

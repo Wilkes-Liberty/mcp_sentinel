@@ -270,7 +270,8 @@ final class McpContextControllerTest extends KernelTestBase {
 
     $second = $controller->context();
     $this->assertSame(429, $second->getStatusCode());
-    $this->assertStringContainsString('read_budget_exceeded', (string) $second->getContent());
+    $this->assertStringContainsString('MCP access is denied.', (string) $second->getContent());
+    $this->assertStringNotContainsString('read_budget_exceeded', (string) $second->getContent());
   }
 
   /**
@@ -316,7 +317,8 @@ final class McpContextControllerTest extends KernelTestBase {
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(403, $response->getStatusCode());
     $payload = json_decode((string) $response->getContent(), TRUE);
-    $this->assertSame('classification_egress_denied', $payload['errors'][0]['code'] ?? NULL);
+    $this->assertSame('MCP access is denied.', $payload['errors'][0]['title'] ?? NULL);
+    $this->assertArrayNotHasKey('code', $payload['errors'][0]);
     $this->assertArrayNotHasKey('site', $payload);
 
     \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')

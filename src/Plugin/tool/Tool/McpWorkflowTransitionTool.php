@@ -10,6 +10,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\content_moderation\ModerationInformationInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpModerationGate;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Exception\RequirementsException;
@@ -118,7 +119,11 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
     // over-limit agent is throttled without paying the entity-load cost.
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_workflow_transition')) {
       return $rateLimited;
@@ -159,7 +164,11 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
       $entity->save();
     }
     catch (\Exception $e) {
-      return ExecutableResult::failure($this->t('Transition failed: @message', ['@message' => $e->getMessage()]));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'Transition failed: ' . $e->getMessage(),
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     return ExecutableResult::success(
@@ -213,7 +222,11 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
 
     if ($profile->deniesPublish() && $this->moderationGate->targetIsPublishedState($entity, $state)) {
       $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entityType, $id, 'publish', 'publish denied by policy');
-      return ExecutableResult::failure($this->t('MCP Sentinel denied the transition: publishing is not permitted for this agent. A human publisher must publish.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied the transition: publishing is not permitted for this agent. A human publisher must publish.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     $max = $profile->getMaxModerationState();
@@ -221,10 +234,12 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
       $ceiling = $typePlugin->getState($max);
       if ($target->weight() > $ceiling->weight()) {
         $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entityType, $id, 'update', 'moderation state exceeds policy ceiling');
-        return ExecutableResult::failure($this->t(
-          'MCP Sentinel denied the transition: state "@to" exceeds the maximum permitted state "@max".',
-          ['@to' => $state, '@max' => $max],
-        ));
+        return ExecutableResult::failure($this->t('@msg', [
+          '@msg' => $this->governanceDenyExplainer?->refuse(
+            'MCP Sentinel denied the transition: state "' . $state
+            . '" exceeds the maximum permitted state "' . $max . '".',
+          ) ?? McpDenyExplainer::CALLER_MESSAGE,
+        ]));
       }
     }
 

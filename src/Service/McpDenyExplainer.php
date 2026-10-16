@@ -260,7 +260,28 @@ final class McpDenyExplainer {
         'Stay denied.',
       );
     }
-    if (str_contains($reason, 'Rate limit exceeded') || str_contains($reason, 'request budget exceeded')) {
+    if (str_contains($reason, 'no governance profile')) {
+      return new McpDenyExplanation(
+        'no_governance_profile',
+        'governance profile',
+        FALSE,
+        'Assign a policy profile to this account. Do not widen an allowlist as a substitute.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'publishing is not permitted')
+      || str_contains($reason, 'deny_publish')) {
+      return new McpDenyExplanation(
+        'deny_publish',
+        'publish gate',
+        TRUE,
+        'A human publisher must publish. A human may turn off deny_publish on the profile if agents may go live.' . $profileHint,
+        'Human review only.',
+      );
+    }
+    if (str_contains($reason, 'Rate limit exceeded')
+      || str_contains($reason, 'request budget exceeded')
+      || str_contains($reason, 'page budget exceeded')) {
       return new McpDenyExplanation(
         'rate_limit',
         'rate or read budget',
@@ -321,6 +342,24 @@ final class McpDenyExplainer {
    * Generic deny the caller is allowed to see.
    */
   public function callerMessage(): string {
+    return self::CALLER_MESSAGE;
+  }
+
+  /**
+   * Logs the operator explainer and returns the generic caller deny.
+   *
+   * Every caller-facing deny must go through this method (DEV-966).
+   *
+   * @param string $reason
+   *   Original deny reason. Written to the operator log only.
+   * @param string|null $profileId
+   *   Active policy profile id when known.
+   *
+   * @return string
+   *   CALLER_MESSAGE. Never the annotated reason.
+   */
+  public function refuse(string $reason, ?string $profileId = NULL): string {
+    $this->operatorNotice($reason, $profileId);
     return self::CALLER_MESSAGE;
   }
 

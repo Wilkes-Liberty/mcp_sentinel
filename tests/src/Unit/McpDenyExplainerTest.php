@@ -152,4 +152,25 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertNotSame($explainer->callerMessage(), $annotated);
   }
 
+  /**
+   * refuse() logs the explainer and returns only the generic caller deny.
+   *
+   * @covers ::refuse
+   */
+  public function testRefuseReturnsCallerMessageOnly(): void {
+    $explainer = new McpDenyExplainer();
+    $this->assertSame(
+      McpDenyExplainer::CALLER_MESSAGE,
+      $explainer->refuse('Source IP not permitted by MCP Sentinel policy.'),
+    );
+    $this->assertSame(
+      'no_governance_profile',
+      $explainer->explain('MCP Sentinel denied: no governance profile applies to this account.')->ruleId,
+    );
+    $this->assertSame(
+      'deny_publish',
+      $explainer->explain('publishing is not permitted for this agent')->ruleId,
+    );
+  }
+
 }

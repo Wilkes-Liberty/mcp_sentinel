@@ -60,6 +60,7 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
     'text',
     'file',
     'node',
+    'taxonomy',
     'serialization',
     'jsonapi',
     'tool',
@@ -345,7 +346,6 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
   public function testToolsHideNoProfileRule(): void {
     $ungoverned = $this->createUser(['access mcp sentinel context', 'administer nodes']);
     $this->container->get('current_user')->setAccount($ungoverned);
-    $this->dropStampedPrincipal();
 
     $cases = [
       'mcp_sentinel_bulk_operations' => static function ($tool): void {

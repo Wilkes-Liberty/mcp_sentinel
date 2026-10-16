@@ -47,9 +47,28 @@ final class McpReadinessAccessDeniedSubscriberTest extends UnitTestCase {
     $payload = json_decode((string) $response->getContent(), TRUE);
     $this->assertIsArray($payload);
     $this->assertSame('MCP access is denied.', $payload['error']);
-    $this->assertSame('unauthenticated', $payload['reason']);
+    $this->assertArrayNotHasKey('reason', $payload);
     $this->assertArrayNotHasKey('contract_ready', $payload);
     $this->assertTrue($event->isPropagationStopped());
+  }
+
+  /**
+   * The JSON refusal has no reason field (DEV-966).
+   *
+   * @covers ::onException
+   */
+  public function testAnonymousReadinessJsonHidesReason(): void {
+    $event = $this->exceptionEvent(
+      new AccessDeniedHttpException(),
+      'mcp_sentinel.readiness',
+    );
+    $this->subscriber(FALSE)->onException($event);
+    $payload = json_decode((string) $event->getResponse()?->getContent(), TRUE);
+    $this->assertIsArray($payload);
+    $this->assertSame('MCP access is denied.', $payload['error']);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertArrayNotHasKey('rule', $payload);
+    $this->assertArrayNotHasKey('explain', $payload);
   }
 
   /**
@@ -72,7 +91,7 @@ final class McpReadinessAccessDeniedSubscriberTest extends UnitTestCase {
     $payload = json_decode((string) $response->getContent(), TRUE);
     $this->assertIsArray($payload);
     $this->assertSame('MCP access is denied.', $payload['error']);
-    $this->assertSame('unauthenticated', $payload['reason']);
+    $this->assertArrayNotHasKey('reason', $payload);
     $this->assertTrue($event->isPropagationStopped());
   }
 

@@ -118,7 +118,8 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
     $this->assertNotNull($response, 'A refusal response was set.');
     $this->assertSame(403, $response->getStatusCode());
     $document = json_decode((string) $response->getContent(), TRUE);
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $document['errors'][0]['code'] ?? NULL);
+    $this->assertSame('MCP access is denied.', $document['errors'][0]['title'] ?? NULL);
+    $this->assertArrayNotHasKey('code', $document['errors'][0]);
     $this->assertSame('403', $document['errors'][0]['status'] ?? NULL);
     $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
   }

@@ -150,8 +150,8 @@ final class McpDestructiveOpEventTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'Bulk operations must fail when no governance profile applies.');
-    $this->assertStringContainsString(
-      'no governance profile',
+    $this->assertSame(
+      'MCP access is denied.',
       (string) $tool->getResultMessage(),
     );
     $this->assertNotNull(

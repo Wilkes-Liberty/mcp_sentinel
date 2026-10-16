@@ -120,7 +120,8 @@ final class McpGovernedResponseSubscriberTest extends KernelTestBase {
     $subscriber->onResponse($event);
     $response = $event->getResponse();
     $this->assertSame(413, $response->getStatusCode());
-    $this->assertStringContainsString('response_size_cap_exceeded', (string) $response->getContent());
+    $this->assertStringContainsString('MCP access is denied.', (string) $response->getContent());
+    $this->assertStringNotContainsString('response_size_cap_exceeded', (string) $response->getContent());
     $this->assertStringNotContainsString('xxxxxxxxxxx', (string) $response->getContent(),
       'The over-budget payload must not leak through the refusal.');
   }

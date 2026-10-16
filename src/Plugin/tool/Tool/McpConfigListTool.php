@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -61,7 +62,11 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
     $prefix = trim((string) ($values['prefix'] ?? ''));
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_config_list')) {
       return $rateLimited;
@@ -70,7 +75,11 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
     // filtered below so denied config is never enumerated.
     if (!$profile->allowsConfigRead()) {
       $this->logDeniedAccess('mcp_sentinel_config_list', 'config', $prefix, 'read', 'Configuration read is disabled in MCP Sentinel.');
-      return ExecutableResult::failure($this->t('MCP Sentinel denied the config list: configuration read is disabled.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'Configuration read is disabled in MCP Sentinel.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     $names = $this->configFactory->listAll($prefix);

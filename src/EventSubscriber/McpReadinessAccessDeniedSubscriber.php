@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
 use Drupal\Core\Session\AccountProxyInterface;
-use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpKernel\Event\ExceptionEvent;
@@ -161,8 +161,7 @@ final class McpReadinessAccessDeniedSubscriber implements EventSubscriberInterfa
    */
   private function refuse(ExceptionEvent $event, int $status, array $headers): void {
     $event->setResponse(new JsonResponse([
-      'error' => 'MCP access is denied.',
-      'reason' => McpGovernanceReadinessReason::Unauthenticated->value,
+      'error' => McpDenyExplainer::CALLER_MESSAGE,
     ], $status, $headers));
     $event->stopPropagation();
   }

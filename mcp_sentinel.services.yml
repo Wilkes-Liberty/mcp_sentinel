@@ -390,6 +390,7 @@ services:
       # ($settings['mcp_sentinel.environment']), never from config.
       - '@settings'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.deny_explainer'
 
   mcp_sentinel.site_schema_builder:
     class: Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder
@@ -447,6 +448,7 @@ services:
       # Optional: kernel tests boot the module without jsonapi; the seam then
       # never re-types a body (there is no JSON:API to serve one).
       - '@?jsonapi.resource_type.repository'
+      - '@mcp_sentinel.deny_explainer'
     tags:
       - { name: event_subscriber }
 

@@ -123,8 +123,10 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
-      $this->denyExplainer?->operatorNotice('missing_principal');
-      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
+      throw new Error(
+        $this->denyExplainer?->refuse('missing_principal')
+          ?? McpDenyExplainer::CALLER_MESSAGE,
+      );
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
@@ -136,8 +138,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
         $requiredScopes,
       );
     }
-    catch (McpPrincipalContextDeniedException $e) {
-      throw new Error(McpDenyExplainer::CALLER_MESSAGE, previous: $e);
+    catch (McpPrincipalContextDeniedException) {
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
   }
 
@@ -208,14 +210,17 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       return;
     }
     if (!$readiness->isReady()) {
-      $reason = $readiness->reason();
-      $this->denyExplainer?->operatorNotice($reason->value);
-      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
+      throw new Error(
+        $this->denyExplainer?->refuse($readiness->reason()->value)
+          ?? McpDenyExplainer::CALLER_MESSAGE,
+      );
     }
     $profile = $readiness->profile();
     if ($profile === NULL) {
-      $this->denyExplainer?->operatorNotice('active_profile_missing');
-      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
+      throw new Error(
+        $this->denyExplainer?->refuse('active_profile_missing')
+          ?? McpDenyExplainer::CALLER_MESSAGE,
+      );
     }
 
     $config = $this->configFactory->get('mcp_sentinel.settings');
@@ -245,8 +250,10 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     // Mutation gate.
     if ($is_mutation) {
       if (!$profile->allowsWrite() || !$profile->allowsGraphqlMutations()) {
-        $this->denyExplainer?->operatorNotice('allow_write');
-        throw new Error(McpDenyExplainer::CALLER_MESSAGE);
+        throw new Error(
+          $this->denyExplainer?->refuse('allow_write')
+            ?? McpDenyExplainer::CALLER_MESSAGE,
+        );
       }
       $this->refuseIfBundleDenies('update');
       return;
@@ -254,8 +261,10 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
 
     // Read gate (queries only; leave subscriptions/other types untouched).
     if ($type === 'query' && !$profile->allowsRead()) {
-      $this->denyExplainer?->operatorNotice('allow_read');
-      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
+      throw new Error(
+        $this->denyExplainer?->refuse('allow_read')
+          ?? McpDenyExplainer::CALLER_MESSAGE,
+      );
     }
     if ($type === 'query') {
       $this->refuseIfBundleDenies('view');
@@ -273,8 +282,10 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       return;
     }
     if ($this->accessChecker->checkBundleFloor($operation, AccessResult::neutral())->isForbidden()) {
-      $this->denyExplainer?->operatorNotice(McpAccessChecker::BUNDLE_DENIAL_CODE);
-      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
+      throw new Error(
+        $this->denyExplainer?->refuse(McpAccessChecker::BUNDLE_DENIAL_CODE)
+          ?? McpDenyExplainer::CALLER_MESSAGE,
+      );
     }
   }
 

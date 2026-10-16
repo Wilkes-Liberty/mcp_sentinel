@@ -106,7 +106,7 @@ protected helpers the shipped tools share:
 
 | Helper | Purpose |
 |--------|---------|
-| `denyReason(AccessResultInterface $result)` | extract a human-readable deny reason for audit/logs. Do not return it to a caller; use `McpDenyExplainer::CALLER_MESSAGE` (`MCP access is denied.`) |
+| `denyReason(AccessResultInterface $result)` | extract a human-readable deny reason for audit/logs. Do not return it to a caller; call `McpDenyExplainer::refuse()` |
 | `logDeniedAccess(...)` | write a `denied_access` audit row |
 | `validationMessages(FieldableEntityInterface $entity)` | collect entity validation errors |
 | `checkRateLimit(...)` | enforce the profile's per-window request rate limit |
@@ -495,7 +495,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.admin_status` | `McpAdminStatus` | admin status strip: MCP on/off, designated clients, readiness, last whoami |
 | `mcp_sentinel.whoami_recorder` | `McpWhoamiRecorder` | last `/drupal-mcp/readiness`, context, or governance-status signal (no secrets) |
 | `mcp_sentinel.sealed_token_manager` | `McpSealedTokenManager` | mint / verify / revoke short-lived client-bound sealed tokens; secret is copy-once |
-| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens) |
+| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and returns `CALLER_MESSAGE` |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |
@@ -512,6 +512,24 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.role_assertions` | `McpRoleAssertions` | `violations()` → governed roles holding forbidden permissions, resolving *effective* permissions (role ∪ `authenticated`) and treating `is_admin` as its own violation; `isAdminRole()` backs the forms' refusal to govern one |
 | `mcp_sentinel.urgent_conditions` | `McpUrgentConditions` | `evaluate()` → critical/warning/info conditions + operator broadcast for the dashboard banner (pure read) |
 | `mcp_sentinel.chart_renderer` | `McpChartRenderer` | `render($type, $series, $options)` → a `drupal/charts` element when a Charts library plugin is available, else an inline-SVG fallback (empty-state on empty series) |
+
+### Caller-facing deny HTTP status (DEV-966)
+
+Caller bodies are always `MCP access is denied.` The HTTP status is a
+deliberate disclosure of the deny class, not the rule id:
+
+| Status | Deny class |
+|--------|------------|
+| `403` | Policy, principal, IP, classification, or auth deny |
+| `503` | Source-governance contract not ready |
+| `429` | Rate limit or read/page budget |
+| `413` | Response-size cap |
+| `400` | Requested `page[limit]` above the result cap |
+
+Save, media-create, and workflow-transition exceptions are logged for the
+operator and replaced with the same generic body. GraphQL `Error` objects
+do not attach `previous`. `/drupal-mcp/readiness` remains a diagnostic
+document and may name the contract reason.
 
 ### `McpReadBudgetResolver` — finite-by-default read budgets
 
@@ -550,7 +568,7 @@ $surface = $classification->currentSurface();                    // ?McpGoverned
 $ceiling = $classification->effectiveCeiling($profile, $surface); // ?string, NULL = none
 if ($classification->exceeds($classification->labelForEntity($entity), $ceiling)) {
   $classification->evidence($profile, $surface, $entity->getEntityTypeId(), $entity->bundle(), '', $label, $ceiling);
-  return $classification->refusalResponse();                     // 403, code classification_egress_denied
+  return $classification->refusalResponse();                     // 403, generic caller deny; rule on the audit row
 }
 ```
 
