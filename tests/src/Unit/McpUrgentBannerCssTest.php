@@ -30,7 +30,7 @@ final class McpUrgentBannerCssTest extends UnitTestCase {
     $pattern = '/\.mcp-banner-stack--sitewide \{[^}]*'
       . 'margin-inline-start:\s*'
       . 'var\(\s*--gin-toolbar-x-offset,\s*'
-      . 'var\(--drupal-displace-offset-left,\s*0px\)\s*\)/s';
+      . 'var\(--drupal-displace-offset-left,\s*0\)\s*\)/s';
     $this->assertMatchesRegularExpression($pattern, $css);
   }
 
