@@ -1726,23 +1726,9 @@ function mcp_sentinel_update_10032(): string {
     $messages[] = 'mcp_sentinel_operator_binding is missing; run update 10031.';
   }
 
-  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
-  $added = [];
-  if ($config->get('paladin_introspection_url') === NULL) {
-    $config->set('paladin_introspection_url', '');
-    $added[] = 'paladin_introspection_url';
-  }
-  if ($config->get('paladin_introspection_client_id') === NULL) {
-    $config->set('paladin_introspection_client_id', '');
-    $added[] = 'paladin_introspection_client_id';
-  }
-  if ($config->get('paladin_introspection_client_secret_key') === NULL) {
-    $config->set('paladin_introspection_client_secret_key', '');
-    $added[] = 'paladin_introspection_client_secret_key';
-  }
-  if ($added !== []) {
-    $config->save();
-    $messages[] = 'Seeded ' . implode(', ', $added) . '.';
+  $removed = mcp_sentinel_clear_dead_paladin_introspection_config();
+  if ($removed !== []) {
+    $messages[] = 'Removed ' . implode(', ', $removed) . '.';
   }
   if ($messages === []) {
     return 'Operator-binding unbind columns already present.';
