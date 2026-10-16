@@ -11,6 +11,7 @@ use Drupal\Core\Queue\Attribute\QueueWorker;
 use Drupal\Core\Queue\QueueWorkerBase;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\key\KeyRepositoryInterface;
+use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
@@ -234,13 +235,37 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    * {@inheritdoc}
    */
   public function processItem(mixed $data): void {
-    $handle = $this->principalJob->begin();
+    $handle = $this->beginJobScope($data);
     try {
       $this->processClaimedItem($data);
     }
     finally {
       $this->principalJob->release($handle);
     }
+  }
+
+  /**
+   * Opens the deny-only overlay, carrying kill-check keys when present.
+   *
+   * @param mixed $data
+   *   Queue item payload.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpJobScopeHandle
+   *   Overlay handle.
+   */
+  private function beginJobScope(mixed $data): McpJobScopeHandle {
+    $principalKey = '';
+    $humanKey = '';
+    $tenant = '';
+    if (is_array($data)) {
+      $principalKey = trim((string) ($data['principal_key'] ?? ''));
+      $humanKey = trim((string) ($data['human_key'] ?? ''));
+      $tenant = trim((string) ($data['tenant'] ?? ''));
+    }
+    if ($principalKey !== '' || $humanKey !== '' || $tenant !== '') {
+      return $this->principalJob->beginCarrying($principalKey, $humanKey, $tenant);
+    }
+    return $this->principalJob->begin();
   }
 
   /**

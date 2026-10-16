@@ -84,7 +84,10 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
     $this->installSchema('node', ['node_access']);
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_tenant_resource']);
+    $this->installSchema('mcp_sentinel', [
+      'mcp_sentinel_tenant_resource',
+      'mcp_sentinel_kill_block',
+    ]);
     $this->installConfig([
       'field',
       'filter',

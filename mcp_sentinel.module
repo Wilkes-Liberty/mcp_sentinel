@@ -9,6 +9,9 @@
  */
 
 use Drupal\mcp_sentinel\Controller\McpBannerController;
+use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
+use Drupal\mcp_sentinel\Event\McpKillUnavailableConfirmerEvent;
+use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\Core\Entity\EntityTypeInterface;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultInterface;
@@ -276,6 +279,12 @@ function mcp_sentinel_page_top(array &$page): void {
  * because the original (pre-change) field values are still available here.
  */
 function mcp_sentinel_entity_presave(EntityInterface $entity): void {
+  // Kill-switch re-check (DEV-846): a kill mid-request must abort
+  // the write before commit, alongside the tenant re-check.
+  if (\Drupal::hasService('mcp_sentinel.kill_switch')) {
+    \Drupal::service('mcp_sentinel.kill_switch')->assertNotKilledAtCommitOrAccess();
+  }
+
   // Save does not consult hook_entity_access(). Refuse a different
   // tenant before any write precondition or audit row.
   \Drupal::service('mcp_sentinel.tenant_resource_boundary')
@@ -487,6 +496,9 @@ function _mcp_sentinel_log_entity_save(EntityInterface $entity, string $operatio
  * fail gracefully.
  */
 function mcp_sentinel_entity_predelete(EntityInterface $entity): void {
+  if (\Drupal::hasService('mcp_sentinel.kill_switch')) {
+    \Drupal::service('mcp_sentinel.kill_switch')->assertNotKilledAtCommitOrAccess();
+  }
   \Drupal::service('mcp_sentinel.tenant_resource_boundary')
     ->assertSameTenant($entity);
   if (!$entity instanceof ContentEntityInterface) {
@@ -888,6 +900,16 @@ function mcp_sentinel_mail(string $key, array &$message, array $params): void {
  * Implements hook_cron().
  */
 function mcp_sentinel_cron(): void {
+  if (\Drupal::hasService('mcp_sentinel.kill_switch')) {
+    $expiredKills = \Drupal::service('mcp_sentinel.kill_switch')->expireDue();
+    if ($expiredKills > 0) {
+      \Drupal::logger('mcp_sentinel')->info(
+        'Expired @count agent kill-block row(s).',
+        ['@count' => $expiredKills]
+      );
+    }
+  }
+
   $pruned = \Drupal::service('mcp_sentinel.audit_logger')->pruneOldEntries();
   if ($pruned > 0) {
     \Drupal::logger('mcp_sentinel')->info(
@@ -1149,4 +1171,32 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
   }
   $gate->enforceOnSave($entity);
   return $gate->allowsPublishInSave($entity) ? NULL : FALSE;
+}
+
+/**
+ * Implements hook_mcp_sentinel_kill_unavailable_confirmer().
+ *
+ * Dispatches the OO event from the hook so McpKillSwitch does not
+ * depend on the event dispatcher (config-save subscribers also
+ * consult the kill registry).
+ *
+ * @todo DEV-846 operator decision: the unavailable-confirmer rule is
+ *   not decided. This hook must not apply a pending mass kill or
+ *   complete a pending un-kill.
+ */
+function mcp_sentinel_kill_unavailable_confirmer(array $context): void {
+  $type = McpKillSelectorType::tryFrom((string) ($context['selector_type'] ?? ''));
+  $key = (string) ($context['selector_key'] ?? '');
+  if ($type === NULL || $key === '') {
+    return;
+  }
+  \Drupal::service('event_dispatcher')->dispatch(
+    new McpKillUnavailableConfirmerEvent(
+      (string) ($context['batch_id'] ?? ''),
+      (string) ($context['transition'] ?? ''),
+      (string) ($context['first_operator_id'] ?? ''),
+      new McpKillSelector($type, $key),
+    ),
+    McpKillUnavailableConfirmerEvent::NAME,
+  );
 }

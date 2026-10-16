@@ -939,6 +939,33 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10030 creates the kill-block table and seeds TTL defaults.
+   */
+  public function testUpdate10030CreatesKillBlockTable(): void {
+    $schema = $this->container->get('database')->schema();
+    if ($schema->tableExists('mcp_sentinel_kill_block')) {
+      $schema->dropTable('mcp_sentinel_kill_block');
+    }
+    $this->config('mcp_sentinel.settings')
+      ->clear('kill_switch_default_ttl')
+      ->clear('kill_switch_max_ttl')
+      ->clear('kill_switch_confirm_window')
+      ->save();
+    $this->assertFalse($schema->tableExists('mcp_sentinel_kill_block'));
+
+    $message = mcp_sentinel_update_10030();
+    $this->assertStringContainsString('Created mcp_sentinel_kill_block', $message);
+    $this->assertTrue($schema->tableExists('mcp_sentinel_kill_block'));
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertSame(86400, $this->config('mcp_sentinel.settings')->get('kill_switch_default_ttl'));
+    $this->assertSame(604800, $this->config('mcp_sentinel.settings')->get('kill_switch_max_ttl'));
+    $this->assertSame(900, $this->config('mcp_sentinel.settings')->get('kill_switch_confirm_window'));
+
+    $again = mcp_sentinel_update_10030();
+    $this->assertStringContainsString('already exists', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

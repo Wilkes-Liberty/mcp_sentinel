@@ -133,6 +133,39 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   }
 
   /**
+   * Operator-supplied keys use the same codes as fromClaims().
+   *
+   * @covers ::parsePrincipalKey
+   * @covers ::parseHumanKey
+   */
+  public function testParseKeyUsesVectorErrorCodes(): void {
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-client',
+      McpPrincipalKey::parsePrincipalKey(
+        'https://idp.example/realms/agents|human-1|agent-client',
+      ),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1',
+      McpPrincipalKey::parseHumanKey('https://idp.example/realms/agents|human-1'),
+    );
+    try {
+      McpPrincipalKey::parsePrincipalKey('https://idp.example/realms/agents|human-1|a|b');
+      $this->fail('An extra pipe must be invalid_separator.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::INVALID_SEPARATOR, $e->reasonCode);
+    }
+    try {
+      McpPrincipalKey::parseHumanKey('https://idp.example/realms/agents');
+      $this->fail('A missing sub must be invalid_part.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::INVALID_PART, $e->reasonCode);
+    }
+  }
+
+  /**
    * Invalid UTF-8 is rejected (not representable in the JSON vectors).
    *
    * @covers ::fromClaims

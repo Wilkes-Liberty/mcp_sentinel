@@ -11,3 +11,8 @@ access mcp sentinel context:
   title: 'Access MCP Sentinel context endpoint'
   description: 'Access /drupal-mcp/context. Grant to the MCP API user only.'
   restrict access: true
+
+administer agent kill switch:
+  title: 'Administer agent kill switch'
+  description: 'Kill, confirm, un-kill, and inspect agent principals. Restricted to operators. No /mcp surface in this release.'
+  restrict access: true

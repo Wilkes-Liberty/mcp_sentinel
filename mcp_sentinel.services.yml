@@ -143,6 +143,7 @@ services:
       - '@mcp_sentinel.oauth_context'
       - '@request_stack'
       - '@database'
+      - '@mcp_sentinel.kill_switch'
 
   mcp_sentinel.unmoderated_redirect:
     class: Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision
@@ -210,6 +211,24 @@ services:
       - '@request_stack'
       - '@mcp_sentinel.oauth_context'
 
+  mcp_sentinel.kill_switch:
+    class: Drupal\mcp_sentinel\Service\McpKillSwitch
+    arguments:
+      - '@database'
+      - '@config.factory'
+      - '@datetime.time'
+      - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.principal_context_holder'
+      - '@mcp_sentinel.principal_context_guard'
+      - '@module_handler'
+      - '@uuid'
+
+  mcp_sentinel.operator_identity:
+    class: Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory
+    arguments:
+      - '@mcp_sentinel.principal_context_holder'
+      - '@private_key'
+
   mcp_sentinel.principal_context_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher
     arguments:
@@ -219,6 +238,7 @@ services:
       - '@mcp_sentinel.principal_context_holder'
       - '@mcp_sentinel.audit_logger'
       - '@logger.channel.mcp_sentinel'
+      - '@mcp_sentinel.kill_switch'
 
   mcp_sentinel.principal_key:
     class: Drupal\mcp_sentinel\Service\McpPrincipalKey
@@ -436,6 +456,7 @@ services:
       - '@config.storage'
       - '@mcp_sentinel.role_assertions'
       - '@logger.channel.mcp_sentinel'
+      - '@mcp_sentinel.kill_switch'
     tags:
       - { name: event_subscriber }
 

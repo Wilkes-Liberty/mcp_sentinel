@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Value\McpCarriedPrincipal;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -38,6 +39,13 @@ final class McpPrincipalContextHolder {
    * @var list<\Drupal\mcp_sentinel\Service\McpJobScopeHandle>
    */
   private array $scopeHandles = [];
+
+  /**
+   * Kill-check keys carried by open job handles, keyed by spl_object_id.
+   *
+   * @var array<int, \Drupal\mcp_sentinel\Value\McpCarriedPrincipal>
+   */
+  private array $carriedByHandle = [];
 
   /**
    * Constructs the holder.
@@ -145,6 +153,7 @@ final class McpPrincipalContextHolder {
       );
     }
     array_pop($this->scopeHandles);
+    unset($this->carriedByHandle[spl_object_id($handle)]);
   }
 
   /**
@@ -166,6 +175,7 @@ final class McpPrincipalContextHolder {
     while ($this->scopeHandles !== []) {
       $top = $this->scopeHandles[array_key_last($this->scopeHandles)];
       array_pop($this->scopeHandles);
+      unset($this->carriedByHandle[spl_object_id($top)]);
       $closed++;
       if ($top === $handle) {
         return $closed;
@@ -181,6 +191,51 @@ final class McpPrincipalContextHolder {
    */
   public function inJobScope(): bool {
     return $this->scopeHandles !== [];
+  }
+
+  /**
+   * Attaches kill-check keys to an open job overlay.
+   *
+   * Does not seal identity. Tools still refuse under the overlay
+   * until a hop token supplies a Paladin principal.
+   *
+   * @param \Drupal\mcp_sentinel\Service\McpJobScopeHandle $handle
+   *   Handle returned by enterJobScope().
+   * @param \Drupal\mcp_sentinel\Value\McpCarriedPrincipal $carried
+   *   Keys the queued work was admitted under.
+   *
+   * @throws \LogicException
+   *   When $handle is not an open overlay.
+   *
+   * @internal Called by mcp_sentinel.principal_context_job.
+   */
+  public function carryPrincipal(McpJobScopeHandle $handle, McpCarriedPrincipal $carried): void {
+    $open = FALSE;
+    foreach ($this->scopeHandles as $openHandle) {
+      if ($openHandle === $handle) {
+        $open = TRUE;
+        break;
+      }
+    }
+    if (!$open) {
+      throw new \LogicException(
+        'carryPrincipal() requires an open job-scope handle.',
+      );
+    }
+    $this->carriedByHandle[spl_object_id($handle)] = $carried;
+  }
+
+  /**
+   * Innermost carried keys, or NULL when the overlay carries none.
+   *
+   * @internal Used by the kill switch at admit() and pre-commit.
+   */
+  public function carriedPrincipal(): ?McpCarriedPrincipal {
+    if ($this->scopeHandles === []) {
+      return NULL;
+    }
+    $top = $this->scopeHandles[array_key_last($this->scopeHandles)];
+    return $this->carriedByHandle[spl_object_id($top)] ?? NULL;
   }
 
   /**
@@ -224,6 +279,7 @@ final class McpPrincipalContextHolder {
     $this->context = NULL;
     $this->sealedFor = NULL;
     $this->scopeHandles = [];
+    $this->carriedByHandle = [];
   }
 
   /**

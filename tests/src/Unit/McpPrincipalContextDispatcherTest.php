@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpKillEnforcerInterface;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
@@ -122,6 +123,124 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
+   * A killed principal is refused with a generic deny; the row names the kill.
+   *
+   * @covers ::admit
+   */
+  public function testKilledPrincipalIsGenericDenyWithKillReasonOnRow(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('subject-a', 'agent-a'));
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal(new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'subject-a',
+      'agent-a',
+      'agent-a',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      FALSE,
+      $this->claims('subject-a', 'agent-a'),
+    ), $request);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      'denied_access',
+      $this->callback(static function (array $meta): bool {
+        return ($meta['reason'] ?? '') === 'principal_killed';
+      }),
+    );
+    $kill = $this->createMock(McpKillEnforcerInterface::class);
+    $kill->method('isContextKilled')->willReturn(TRUE);
+    $dispatcher = $this->dispatcher($stack, $holder, $audit, NULL, $kill);
+    try {
+      $dispatcher->admit(['note' => 'ok'], 'tool-a');
+      $this->fail('A killed principal must be refused at admit().');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertSame(
+        McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+        $e->getMessage(),
+      );
+      $this->assertStringNotContainsString('killed', $e->getMessage());
+    }
+  }
+
+  /**
+   * Overlay and kill refusals are the same code, message, and exception class.
+   *
+   * @covers ::admit
+   */
+  public function testKilledAndOverlayRefusalsAreIndistinguishable(): void {
+    $stack = new RequestStack();
+    $holder = new McpPrincipalContextHolder($stack);
+    $job = new McpPrincipalContextJob($holder);
+    $handle = $job->beginCarrying(
+      'https://idp.example/realms/agents|subject-a|agent-a',
+      'https://idp.example/realms/agents|subject-a',
+      'tenant-a',
+    );
+
+    $overlayMeta = [];
+    $overlayAudit = $this->createMock(McpAuditLogger::class);
+    $overlayAudit->method('logAlways')->willReturnCallback(
+      static function (string $op, array $meta) use (&$overlayMeta): void {
+        if ($op === 'denied_access') {
+          $overlayMeta = $meta;
+        }
+      },
+    );
+    $overlayKill = $this->createMock(McpKillEnforcerInterface::class);
+    $overlayKill->method('isContextKilled')->willReturn(FALSE);
+    $overlayDispatcher = $this->dispatcher($stack, $holder, $overlayAudit, NULL, $overlayKill);
+    try {
+      $overlayDispatcher->admit(['note' => 'ok'], 'tool-a');
+      $this->fail('A job overlay must refuse.');
+    }
+    catch (McpPrincipalContextDeniedException $overlay) {
+      $killMeta = [];
+      $killAudit = $this->createMock(McpAuditLogger::class);
+      $killAudit->method('logAlways')->willReturnCallback(
+        static function (string $op, array $meta) use (&$killMeta): void {
+          if ($op === 'denied_access') {
+            $killMeta = $meta;
+          }
+        },
+      );
+      $killSwitch = $this->createMock(McpKillEnforcerInterface::class);
+      $killSwitch->method('isContextKilled')->willReturn(TRUE);
+      $killDispatcher = $this->dispatcher($stack, $holder, $killAudit, NULL, $killSwitch);
+      try {
+        $killDispatcher->admit(['note' => 'ok'], 'tool-a');
+        $this->fail('A killed carried principal must be refused.');
+      }
+      catch (McpPrincipalContextDeniedException $killed) {
+        $this->assertSame($overlay->reasonCode, $killed->reasonCode);
+        $this->assertSame($overlay->getMessage(), $killed->getMessage());
+        $this->assertSame(
+          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+          $overlay->reasonCode,
+        );
+        $this->assertSame(
+          McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+          $overlay->getMessage(),
+        );
+        $this->assertSame('job_overlay', $overlayMeta['reason'] ?? '');
+        $this->assertSame('principal_killed', $killMeta['reason'] ?? '');
+        $this->assertSame('unverified', $killMeta['principal_key'] ?? '');
+        $this->assertSame('unverified', $overlayMeta['principal_key'] ?? '');
+      }
+    }
+    $job->end($handle);
+  }
+
+  /**
    * Builds a dispatcher over a real factory and the given holder.
    */
   private function dispatcher(
@@ -129,12 +248,17 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     McpPrincipalContextHolder $holder,
     ?McpAuditLogger $audit = NULL,
     ?LoggerInterface $logger = NULL,
+    ?McpKillEnforcerInterface $kill = NULL,
   ): McpPrincipalContextDispatcher {
     $guard = new McpPrincipalContextGuard();
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
     $factory = new McpPrincipalContextFactory($stack, $oauth);
+    if ($kill === NULL) {
+      $kill = $this->createMock(McpKillEnforcerInterface::class);
+      $kill->method('isContextKilled')->willReturn(FALSE);
+    }
     return new McpPrincipalContextDispatcher(
       $factory,
       $stack,
@@ -142,6 +266,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       $holder,
       $audit ?? $this->createMock(McpAuditLogger::class),
       $logger ?? $this->createMock(LoggerInterface::class),
+      $kill,
     );
   }
 

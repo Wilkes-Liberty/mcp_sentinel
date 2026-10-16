@@ -10,8 +10,11 @@ use Drupal\Core\Config\ConfigEvents;
 use Drupal\Core\Config\ConfigException;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\StorageInterface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpKillEnforcerInterface;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -57,6 +60,8 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
    *   escape-hatch permission.
    * @param \Psr\Log\LoggerInterface $logger
    *   The mcp_sentinel logger channel.
+   * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
+   *   Kill registry re-checked on a governed config write (DEV-846).
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,
@@ -65,6 +70,7 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
     private readonly StorageInterface $configStorage,
     private readonly McpRoleAssertions $roleAssertions,
     private readonly LoggerInterface $logger,
+    private readonly McpKillEnforcerInterface $killSwitch,
   ) {}
 
   /**
@@ -149,7 +155,8 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
    *   The config CRUD event.
    *
    * @throws \Drupal\Core\Config\ConfigException
-   *   When a governed write targets a denied config name (after revert).
+   *   When a governed write targets a denied config name, or the
+   *   acting principal is killed (after revert).
    */
   public function onConfigSave(ConfigCrudEvent $event): void {
     // Only governed (policy-resolved agent) requests are subject to this gate.
@@ -157,11 +164,6 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
     if (!$this->policyResolver->isGoverned()) {
       return;
     }
-    $profile = $this->policyResolver->resolve();
-    if ($profile === NULL) {
-      return;
-    }
-
     $config = $event->getConfig();
     $name = $config->getName();
     $new = $config->getRawData();
@@ -170,6 +172,23 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
     $original = $config instanceof Config
       ? $config->getOriginal('', FALSE)
       : (array) $config->getOriginal('');
+    // SAVE fires after the write. Revert first, matching denied-name.
+    try {
+      $this->killSwitch->assertNotKilledAtCommit();
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->revert($name, $original);
+      throw new ConfigException(
+        McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+        0,
+        $e,
+      );
+    }
+    $profile = $this->policyResolver->resolve();
+    if ($profile === NULL) {
+      return;
+    }
+
     $redacted = $profile->getRedactedFields();
 
     // Hard-deny: a write to a denied config name is reverted and rejected. The
