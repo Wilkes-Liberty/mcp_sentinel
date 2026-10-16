@@ -45,9 +45,18 @@ final readonly class McpPrincipalContext {
    * Request attribute that marks a kernel/PHPUnit fixture principal.
    *
    * Scope checks skip fixture and role-fallback sources, not an empty
-   * Paladin scope list.
+   * Paladin scope list. The factory honours this marker only under
+   * PHPUnit.
    */
   public const FIXTURE_ATTRIBUTE = 'mcp_sentinel.principal_fixture';
+
+  /**
+   * Request attribute set when readiness or the resolver took fallback.
+   *
+   * Positive provenance. An unmarked context is empty, not role
+   * fallback.
+   */
+  public const FALLBACK_ATTRIBUTE = 'mcp_sentinel.role_fallback';
 
   /**
    * Context built from Paladin CLAIMS_ATTRIBUTE.

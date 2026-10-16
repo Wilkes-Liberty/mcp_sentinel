@@ -118,6 +118,7 @@ trait McpAuditSchemaTestTrait {
     $request->attributes->remove(McpOauthContext::SEALED_ATTRIBUTE);
     $request->attributes->remove(McpPrincipalContext::NETWORK_ATTRIBUTE);
     $request->attributes->remove(McpPrincipalContext::FIXTURE_ATTRIBUTE);
+    $request->attributes->remove(McpPrincipalContext::FALLBACK_ATTRIBUTE);
   }
 
 }

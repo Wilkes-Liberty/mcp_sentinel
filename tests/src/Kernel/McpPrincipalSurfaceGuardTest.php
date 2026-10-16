@@ -19,8 +19,9 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 /**
  * Ready-path JSON:API, GraphQL HTTP, and context require a principal.
  *
- * Role fallback still makes those surfaces applicable on loopback.
- * The kernel audit fixture seals one; these tests drop it first.
+ * Role fallback still makes those surfaces applicable under
+ * PHPUnit when the request is not proxied. The kernel audit
+ * fixture seals one; these tests drop it first.
  *
  * @group mcp_sentinel
  *
@@ -74,7 +75,8 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
    * Ready-path JSON:API and GraphQL HTTP require a principal.
    *
    * Matches GraphQL operations and /drupal-mcp/context. Role fallback
-   * still makes the surface applicable on loopback only.
+   * still makes the surface applicable under PHPUnit when the
+   * request is not proxied.
    */
   public function testHttpRoleFallbackRequiresPrincipal(): void {
     $this->switchToGovernedUser();

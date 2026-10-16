@@ -86,6 +86,17 @@ final class McpPrincipalContextHolder {
     }
     $current = $this->requestStack->getCurrentRequest();
     $main = $this->requestStack->getMainRequest();
+    // A leftover seal for a request that is neither current nor main
+    // is not a visible parent. Replace it. A seal on the main request
+    // while current is a subrequest still refuses a different identity
+    // (#298).
+    if ($current !== NULL
+      && $this->sealedFor !== $current
+      && $this->sealedFor !== $main) {
+      $this->context = $ctx;
+      $this->sealedFor = $token;
+      return;
+    }
     $isSubrequest = $current !== NULL && $main !== NULL && $current !== $main;
     if ($isSubrequest) {
       if ($this->identityOf($this->context) !== $this->identityOf($ctx)) {
@@ -94,13 +105,6 @@ final class McpPrincipalContextHolder {
           'A subrequest cannot reseal a different principal.',
         );
       }
-      return;
-    }
-    if ($current !== NULL
-      && $this->sealedFor !== $current
-      && $this->sealedFor !== $main) {
-      $this->context = $ctx;
-      $this->sealedFor = $token;
       return;
     }
     if ($current !== NULL

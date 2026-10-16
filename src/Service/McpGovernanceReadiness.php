@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Tool\McpToolScopeResolver;
 use Drupal\mcp_sentinel\Value\McpGovernanceReadinessResult;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\tool\Tool\ToolManager;
 use Drupal\user\UserInterface;
@@ -59,7 +60,8 @@ final class McpGovernanceReadiness {
    * @param \Drupal\tool\Tool\ToolManager|null $toolManager
    *   Tool plugin manager used to derive the production scope map.
    * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
-   *   Request stack used to restrict role fallback to loopback callers.
+   *   Request stack used to refuse proxied role-fallback callers and
+   *   to stamp fallback provenance.
    * @param array<string, string>|null $requiredToolScopes
    *   Optional required-tool map for isolated contract tests.
    * @param (\Closure(string): bool)|null $toolExists
@@ -158,9 +160,10 @@ final class McpGovernanceReadiness {
     $settings = $this->configFactory->get('mcp_sentinel.settings');
     $oauthRequest = $this->oauthContext->isOauthRequest();
     $designated = $this->oauthContext->isDesignatedAgentClient();
+    $request = $this->requestStack?->getCurrentRequest();
     $fallback = !$oauthRequest
       && (bool) $settings->get('governed_role_fallback')
-      && $this->isLocalDevCaller()
+      && McpRoleFallbackGate::permitted($request)
       && (bool) array_intersect(
         $account->getRoles(),
         $this->policyResolver->getGovernedRoles(),
@@ -171,6 +174,10 @@ final class McpGovernanceReadiness {
     }
 
     if ($fallback) {
+      $request?->attributes->set(
+        McpPrincipalContext::FALLBACK_ATTRIBUTE,
+        TRUE,
+      );
       if (!(bool) $settings->get('enabled')) {
         return $this->denied(McpGovernanceReadinessReason::ModuleDisabled);
       }
@@ -207,17 +214,6 @@ final class McpGovernanceReadiness {
     return $profile instanceof McpPolicyProfileInterface && $profile->status()
       ? McpGovernanceReadinessResult::ready($profile)
       : $this->denied(McpGovernanceReadinessReason::ActiveProfileMissing);
-  }
-
-  /**
-   * Whether the current caller is loopback (local-dev fallback only).
-   */
-  private function isLocalDevCaller(): bool {
-    $request = $this->requestStack?->getCurrentRequest();
-    if ($request === NULL) {
-      return FALSE;
-    }
-    return in_array($request->getClientIp(), ['127.0.0.1', '::1'], TRUE);
   }
 
   /**

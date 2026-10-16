@@ -89,12 +89,17 @@ final class McpPrincipalContextFactory {
 
   /**
    * Provenance of the context for this request.
+   *
+   * Unmarked requests are empty, not role fallback. Fixture is
+   * PHPUnit-only. Role fallback requires the attribute stamped when
+   * readiness or the resolver actually took that path.
    */
   private function sourceFromRequest(?Request $request): string {
     if ($request === NULL) {
       return McpPrincipalContext::SOURCE_EMPTY;
     }
-    if ($request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) === TRUE) {
+    if (McpRoleFallbackGate::inPhpUnit()
+      && $request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) === TRUE) {
       return McpPrincipalContext::SOURCE_FIXTURE;
     }
     if ($this->fromSealedTokenProvider($request)) {
@@ -104,7 +109,10 @@ final class McpPrincipalContextFactory {
     if (is_array($paladin)) {
       return McpPrincipalContext::SOURCE_PALADIN;
     }
-    return McpPrincipalContext::SOURCE_ROLE_FALLBACK;
+    if ($request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE) === TRUE) {
+      return McpPrincipalContext::SOURCE_ROLE_FALLBACK;
+    }
+    return McpPrincipalContext::SOURCE_EMPTY;
   }
 
   /**

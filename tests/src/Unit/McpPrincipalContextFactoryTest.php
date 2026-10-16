@@ -156,6 +156,64 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     ]);
     $ctx = $factory->fromRequest($request);
     $this->assertFalse($ctx->fromSealedToken());
+    $this->assertSame(McpPrincipalContext::SOURCE_PALADIN, $ctx->source());
+  }
+
+  /**
+   * An unmarked request is empty, not role fallback.
+   *
+   * @covers ::fromRequest
+   */
+  public function testUnmarkedRequestIsEmptyNotRoleFallback(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $ctx = $factory->fromRequest(Request::create('/mcp', 'POST'));
+    $this->assertSame(McpPrincipalContext::SOURCE_EMPTY, $ctx->source());
+    $this->assertFalse($ctx->fromRoleFallback());
+    $this->assertFalse($ctx->fromFixture());
+  }
+
+  /**
+   * Readiness-stamped fallback is the only unmarked-token role source.
+   *
+   * @covers ::fromRequest
+   */
+  public function testFallbackAttributeIsRoleFallback(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($request);
+    $this->assertTrue($ctx->fromRoleFallback());
+  }
+
+  /**
+   * The fixture marker is honoured under PHPUnit.
+   *
+   * @covers ::fromRequest
+   */
+  public function testFixtureAttributeIsFixtureUnderPhpUnit(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::FIXTURE_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($request);
+    $this->assertTrue($ctx->fromFixture());
   }
 
 }

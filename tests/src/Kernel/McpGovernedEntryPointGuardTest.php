@@ -420,9 +420,12 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
   }
 
   /**
-   * A remote cookie session does not use role fallback.
+   * A proxied cookie session does not use role fallback.
+   *
+   * On the old getClientIp() loopback check this would govern because
+   * REMOTE_ADDR is 127.0.0.1.
    */
-  public function testJsonApiRemoteFallbackIsNotGoverned(): void {
+  public function testJsonApiProxiedFallbackIsNotGoverned(): void {
     $this->dropStampedPrincipal();
     $request = Request::create(
       '/jsonapi/node/article',
@@ -430,7 +433,10 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
       [],
       [],
       [],
-      ['REMOTE_ADDR' => '203.0.113.10'],
+      [
+        'REMOTE_ADDR' => '127.0.0.1',
+        'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+      ],
     );
     $stack = $this->container->get('request_stack');
     $current = $stack->getCurrentRequest();

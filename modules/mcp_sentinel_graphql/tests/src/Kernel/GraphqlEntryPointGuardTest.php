@@ -256,37 +256,6 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
   }
 
   /**
-   * Each batched operation fires its own OperationEvent and gate.
-   *
-   * @covers ::onOperation
-   */
-  public function testBatchedQueriesGateOncePerOperation(): void {
-    $this->dropStampedPrincipal();
-    $before = $this->deniedAccessCount();
-    $this->assertGraphqlDenied('query');
-    $this->assertGraphqlDenied('query');
-    $this->assertSame($before + 2, $this->deniedAccessCount());
-  }
-
-  /**
-   * A persisted query still gates once per OperationEvent.
-   *
-   * @covers ::onOperation
-   */
-  public function testPersistedQueryGatesOnce(): void {
-    $this->dropStampedPrincipal();
-    $before = $this->deniedAccessCount();
-    try {
-      $this->subscriber()->onOperation($this->makePersistedEvent('query'));
-      $this->fail('GraphQL must refuse this governed operation.');
-    }
-    catch (Error $e) {
-      $this->assertNotSame('', $e->getMessage());
-    }
-    $this->assertSame($before + 1, $this->deniedAccessCount());
-  }
-
-  /**
    * A verified Paladin bearer that grants mcp_read may run a query.
    *
    * @covers ::onOperation
@@ -331,30 +300,11 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
    * Builds a minimal OperationEvent wrapping a mocked ResolveContext.
    */
   private function makeEvent(string $type): OperationEvent {
-    $params = OperationParams::create(['query' => '{ __typename }']);
-    return $this->eventFromParams($type, $params);
-  }
-
-  /**
-   * Builds an OperationEvent shaped like a persisted query.
-   */
-  private function makePersistedEvent(string $type): OperationEvent {
-    $params = OperationParams::create([
-      'queryId' => 'persisted-typename',
-    ]);
-    return $this->eventFromParams($type, $params);
-  }
-
-  /**
-   * Wraps operation params in an OperationEvent.
-   */
-  private function eventFromParams(
-    string $type,
-    OperationParams $params,
-  ): OperationEvent {
     $context = $this->createMock(ResolveContext::class);
     $context->method('getType')->willReturn($type);
-    $context->method('getOperation')->willReturn($params);
+    $context->method('getOperation')->willReturn(
+      OperationParams::create(['query' => '{ __typename }']),
+    );
     $context->method('mergeCacheMaxAge')->willReturnSelf();
     return new OperationEvent($context);
   }

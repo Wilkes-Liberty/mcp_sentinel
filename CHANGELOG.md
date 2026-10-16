@@ -13,9 +13,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or those surfaces return 403. A Paladin token that lists no
   scopes is also `required_scope_missing`. GraphQL subscriptions
   require `mcp_read`; unknown operation types are refused.
-  `governed_role_fallback` applies only to loopback callers
-  (127.0.0.1 / ::1). The ready path on all three surfaces requires
-  a principal, matching GraphQL operations and context.
+  `governed_role_fallback` also requires
+  `$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
+  settings.php (or PHPUnit). HTTP fallback is refused when
+  `reverse_proxy` is on or any Forwarded / X-Forwarded-* header is
+  present. The ready path on all three surfaces requires a
+  principal, matching GraphQL operations and context.
 
 ### Security
 - GraphQL `requirePrincipal()`, JSON:API, and
@@ -28,7 +31,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sealed-token request is gated even when readiness is not applicable
   (undesignated client / contract not ready), so a sealed issuer
   cannot ride ordinary JSON:API or GraphQL traffic. Role fallback
-  is loopback-only. Deny tests fail when
+  is settings.php-gated and refused on proxied HTTP. Deny tests
+  fail when
   `McpPrincipalContextGuard::disableForTest()` is injected, and
   kill-only / scope-only red runs use `weakenForTest()`.
 

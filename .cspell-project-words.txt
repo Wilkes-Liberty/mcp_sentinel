@@ -95,6 +95,7 @@ permissioned
 phpcs
 phpstan
 phpunit
+proxied
 pgsql
 PKCE
 savepoint

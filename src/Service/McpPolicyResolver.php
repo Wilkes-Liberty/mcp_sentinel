@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -16,10 +17,14 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * Governance keys on the validated OAuth agent channel (consumer client_id or
  * agent scope on the request's access token). The Phase-1 role-based check is
- * retained only as a local-dev fallback, enabled by the governed_role_fallback
- * setting. Profile selection still uses the account's roles so per-admin
- * policy stays intact even on OAuth-authenticated requests (TokenAuthUser
- * returns the subject's roles via getRoles()).
+ * retained only as a local-dev fallback, enabled by the
+ * governed_role_fallback setting plus
+ * $settings['mcp_sentinel_allow_role_fallback'] or PHPUnit. HTTP
+ * fallback is refused when reverse_proxy is on or a Forwarded /
+ * X-Forwarded-* header is present. Profile selection still uses the
+ * account's roles so per-admin policy stays intact even on
+ * OAuth-authenticated requests (TokenAuthUser returns the subject's
+ * roles via getRoles()).
  */
 final class McpPolicyResolver {
 
@@ -40,7 +45,8 @@ final class McpPolicyResolver {
    * @param \Drupal\mcp_sentinel\Service\McpOauthContext $oauthContext
    *   The OAuth context service used to detect the agent channel.
    * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
-   *   Request stack used to restrict role fallback to loopback callers.
+   *   Request stack used to refuse proxied role-fallback callers and
+   *   to stamp fallback provenance.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -78,9 +84,10 @@ final class McpPolicyResolver {
    * Governed when the request is authenticated on the OAuth agent channel
    * (designated consumer client_id or an agent scope on the access token).
    * The role-based check is only honoured as a local-dev fallback when
-   * governed_role_fallback is explicitly enabled in settings. This ensures
-   * that an admin's cookie-session UI stays ungoverned while their
-   * token-bearing agent traffic is fully governed and audited.
+   * governed_role_fallback is enabled and McpRoleFallbackGate permits
+   * the caller. This ensures that an admin's cookie-session UI stays
+   * ungoverned while their token-bearing agent traffic is fully
+   * governed and audited.
    *
    * @param \Drupal\Core\Session\AccountInterface|null $account
    *   The account to check for role fallback, or NULL to use the current user.
@@ -97,22 +104,19 @@ final class McpPolicyResolver {
     if (!$config->get('governed_role_fallback')) {
       return FALSE;
     }
-    if (!$this->isLocalDevCaller()) {
+    $request = $this->requestStack?->getCurrentRequest();
+    if (!McpRoleFallbackGate::permitted($request)) {
       return FALSE;
     }
     $account ??= $this->currentUser;
-    return (bool) array_intersect($account->getRoles(), $this->getGovernedRoles());
-  }
-
-  /**
-   * Whether the current caller is loopback (local-dev fallback only).
-   */
-  private function isLocalDevCaller(): bool {
-    $request = $this->requestStack?->getCurrentRequest();
-    if ($request === NULL) {
+    if (!(bool) array_intersect($account->getRoles(), $this->getGovernedRoles())) {
       return FALSE;
     }
-    return in_array($request->getClientIp(), ['127.0.0.1', '::1'], TRUE);
+    $request?->attributes->set(
+      McpPrincipalContext::FALLBACK_ATTRIBUTE,
+      TRUE,
+    );
+    return TRUE;
   }
 
   /**

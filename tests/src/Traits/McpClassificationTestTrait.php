@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -38,6 +40,23 @@ trait McpClassificationTestTrait {
     $master = $stack->getCurrentRequest();
     if ($master !== NULL && $master->hasSession()) {
       $request->setSession($master->getSession());
+    }
+    // Keep the kernel fixture principal on the request this helper
+    // makes current. The holder hides a seal that is neither current
+    // nor main; without these attributes requirePrincipal would seal
+    // an empty context and refuse missing_iss.
+    if ($master !== NULL) {
+      foreach ([
+        McpPrincipalContext::CLAIMS_ATTRIBUTE,
+        McpPrincipalContext::NETWORK_ATTRIBUTE,
+        McpPrincipalContext::FIXTURE_ATTRIBUTE,
+        McpOauthContext::SEALED_ATTRIBUTE,
+      ] as $name) {
+        if (!$request->attributes->has($name)
+          && $master->attributes->has($name)) {
+          $request->attributes->set($name, $master->attributes->get($name));
+        }
+      }
     }
     $stack->push($request);
     $this->pushedRequest = TRUE;

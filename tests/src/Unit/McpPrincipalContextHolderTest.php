@@ -72,6 +72,30 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
+   * An invisible leftover seal is replaced, not treated as a parent.
+   *
+   * Kernel tests keep the master request under a pushed fixture, then
+   * push another current request. That leftover is not a visible
+   * parent. A seal on main while current is a subrequest still
+   * refuses a different identity (testSubrequestDifferentPrincipalIsRefused).
+   *
+   * @covers ::seal
+   */
+  public function testInvisibleSealIsReplacedOnStackedRequest(): void {
+    $stack = new RequestStack();
+    $main = Request::create('/kernel');
+    $fixture = Request::create('/fixture');
+    $current = Request::create('/jsonapi/node/memo');
+    $stack->push($main);
+    $stack->push($fixture);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($this->ctx('human-1', 'agent-a'), $fixture);
+    $stack->push($current);
+    $holder->seal($this->ctx('human-2', 'agent-b'), $current);
+    $this->assertSame('human-2', $holder->get()?->subject());
+  }
+
+  /**
    * A new main request replaces the previous request's seal.
    *
    * @covers ::seal
