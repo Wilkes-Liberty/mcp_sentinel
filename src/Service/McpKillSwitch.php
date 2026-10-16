@@ -742,11 +742,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Unique selectors.
    */
   private function isMass(array $selectors): bool {
-    if (count($selectors) > 1) {
-      return TRUE;
-    }
-    $first = $selectors[0];
-    return $first->type->isMassByItself();
+    // Broken on purpose for the merged-head red run: mass kills apply
+    // immediately, so the pending, Drush-identity, and re-kill tests fail.
+    return count($selectors) < 1;
   }
 
   /**
