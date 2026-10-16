@@ -50,6 +50,16 @@ final class McpKillSwitchException extends \RuntimeException {
   public const UNVERIFIED_OPERATOR = 'unverified_operator';
 
   /**
+   * Mixed-channel confirm with no bound operator record.
+   */
+  public const UNBOUND_OPERATOR = 'unbound_operator';
+
+  /**
+   * Identities already belong to different operator records.
+   */
+  public const OPERATOR_BINDING_CONFLICT = 'operator_binding_conflict';
+
+  /**
    * Reason is required and must not look like a token.
    */
   public const INVALID_REASON = 'invalid_reason';

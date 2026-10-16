@@ -8,6 +8,7 @@ use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
+use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
@@ -32,6 +33,10 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * effective uid with the site private key. --uid, the login name,
  * and the USER environment variable cannot change that assertion.
  * Without a verified identity, confirm is refused (fail closed).
+ * Mixed-channel confirm (Paladin then Drush, or the reverse) needs
+ * mcp-sentinel:operator-bind so both identities resolve to one
+ * operator record. The shell sits outside governance; bind from an
+ * individual OS account, not a shared deploy user.
  */
 final class McpKillSwitchCommands extends DrushCommands {
 
@@ -46,6 +51,8 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Drupal account for permission only. Not the two-person identity.
    * @param \Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory $operatorIdentities
    *   Paladin or Drush-assertion identity resolver.
+   * @param \Drupal\mcp_sentinel\Service\McpOperatorBinding $operatorBindings
+   *   Paladin/Drush operator-record bindings.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
@@ -54,6 +61,8 @@ final class McpKillSwitchCommands extends DrushCommands {
     private readonly AccountProxyInterface $currentUser,
     #[Autowire(service: 'mcp_sentinel.operator_identity')]
     private readonly McpOperatorIdentityFactory $operatorIdentities,
+    #[Autowire(service: 'mcp_sentinel.operator_binding')]
+    private readonly McpOperatorBinding $operatorBindings,
   ) {
     parent::__construct();
   }
@@ -157,6 +166,44 @@ final class McpKillSwitchCommands extends DrushCommands {
         $this->operatorIdentity(),
       );
       $this->printResult($result);
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Bind this OS account's Drush assertion to a Paladin iss|sub.
+   *
+   * Required before a Paladin kill route and a Drush confirm can be
+   * the same person or two distinct people. Mixed-channel confirm
+   * without a binding is refused. The shell is outside governance:
+   * run this from an individual OS account, not a shared deploy user.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:operator-bind', aliases: ['mcps:operator-bind'])]
+  #[CLI\Option(name: 'human-key', description: 'Paladin iss|sub bound to this OS effective uid.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:operator-bind --human-key=iss|sub', description: 'Bind this shell to a Paladin operator record.')]
+  public function bindOperator(
+    array $options = [
+      'human-key' => '',
+    ],
+  ): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $humanKey = trim((string) ($options['human-key'] ?? ''));
+      if ($humanKey === '') {
+        $this->logger()->error('operator-bind requires --human-key=iss|sub.');
+        return self::EXIT_FAILURE;
+      }
+      $operatorId = $this->operatorBindings->bind(
+        McpOperatorIdentity::paladin($humanKey),
+        $this->operatorIdentities->fromDrushAssertion(),
+      );
+      $this->io()->writeln('operator_id: ' . $operatorId);
       return self::EXIT_SUCCESS;
     }
     catch (McpKillSwitchException | McpPrincipalKeyException $e) {

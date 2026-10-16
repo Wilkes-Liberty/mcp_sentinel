@@ -232,7 +232,16 @@ effective uid. The login name and `USER` are not part of that
 assertion. `drush --user` / `--uid` sets `currentUser` for the
 `administer agent kill switch` permission only; that uid is not
 trusted for the two-person rule. Confirm without a verified identity
-fails closed. Confirm windows default to 15 minutes. Kill-block TTL
+fails closed. The Drush/shell path sits outside governance: the
+two-person rule there is two distinct OS accounts, and it holds only
+with individual OS accounts and no shared deploy user. When a web or
+Paladin kill route arrives, Paladin `iss|sub` and the Drush assertion
+must resolve to one bound operator record
+(`mcp_sentinel.operator_binding` / `mcp-sentinel:operator-bind`).
+Mixed-channel confirm with no binding is refused. A requester cannot
+confirm their own request on the other channel. Distinct same-kind
+identities (two OS accounts, two Paladin keys) still work without a
+binding. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
 `kill_pending`. Audit operations `agent_kill`, `agent_kill_confirm`,

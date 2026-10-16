@@ -35,6 +35,9 @@ trait McpAuditSchemaTestTrait {
     if (!$database->schema()->tableExists('mcp_sentinel_kill_block')) {
       $this->installSchema('mcp_sentinel', ['mcp_sentinel_kill_block']);
     }
+    if (!$database->schema()->tableExists('mcp_sentinel_operator_binding')) {
+      $this->installSchema('mcp_sentinel', ['mcp_sentinel_operator_binding']);
+    }
     $this->stampDefaultPrincipalContext();
   }
 
@@ -49,6 +52,9 @@ trait McpAuditSchemaTestTrait {
     $database = $this->container->get('database');
     if (!$database->schema()->tableExists('mcp_sentinel_kill_block')) {
       $this->installSchema('mcp_sentinel', ['mcp_sentinel_kill_block']);
+    }
+    if (!$database->schema()->tableExists('mcp_sentinel_operator_binding')) {
+      $this->installSchema('mcp_sentinel', ['mcp_sentinel_operator_binding']);
     }
     $stack = $this->container->get('request_stack');
     $request = $stack->getCurrentRequest();

@@ -966,6 +966,27 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10031 creates the operator-binding table and is idempotent.
+   */
+  public function testUpdate10031CreatesOperatorBindingTable(): void {
+    $schema = $this->container->get('database')->schema();
+    if ($schema->tableExists('mcp_sentinel_operator_binding')) {
+      $schema->dropTable('mcp_sentinel_operator_binding');
+    }
+    $this->assertFalse($schema->tableExists('mcp_sentinel_operator_binding'));
+
+    $message = mcp_sentinel_update_10031();
+    $this->assertStringContainsString(
+      'Created mcp_sentinel_operator_binding',
+      $message,
+    );
+    $this->assertTrue($schema->tableExists('mcp_sentinel_operator_binding'));
+
+    $again = mcp_sentinel_update_10031();
+    $this->assertStringContainsString('already exists', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it
