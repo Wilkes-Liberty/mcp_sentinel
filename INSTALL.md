@@ -215,6 +215,28 @@ Without correct trusted-proxy configuration, the `X-Forwarded-For` header is
 match the proxy address. See `README.md` → *IP allowlisting per profile* for the
 full explanation and spoofing-protection details.
 
+## Paladin operator-bind introspection
+
+Operator bind and unbind introspect a Paladin access token. The URL,
+issuer, audience, and client credentials are pinned in `settings.php`,
+not in exported config, so a config import cannot redirect
+introspection. HTTPS and HTTP Basic client authentication are
+required. Missing any of these fails closed.
+
+```php
+$settings['mcp_sentinel.paladin.introspection_url'] = 'https://idp.example/realms/agents/protocol/openid-connect/token/introspect';
+$settings['mcp_sentinel.paladin.issuer'] = 'https://idp.example/realms/agents';
+$settings['mcp_sentinel.paladin.audience'] = 'mcp-sentinel-operator-bind';
+$settings['mcp_sentinel.paladin.client_id'] = 'mcp-sentinel-introspect';
+$settings['mcp_sentinel.paladin.client_secret'] = 'the-introspection-client-secret';
+```
+
+The token is passed as `PALADIN_TOKEN` or on stdin, never `--token`.
+The introspection response must be `active`, `iss` must match the
+pinned issuer, and `aud` / `azp` / `client_id` must match the pinned
+audience. A delegated agent token minted for a different client is
+refused.
+
 ## Updating
 
 From 3.0, incomplete source-contract wiring and a missing Paladin principal fail closed.

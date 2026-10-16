@@ -241,10 +241,27 @@ with individual OS accounts and no shared deploy user. When a web or
 Paladin kill route arrives, Paladin `iss|sub` and the Drush assertion
 must resolve to one bound operator record
 (`mcp_sentinel.operator_binding` / `mcp-sentinel:operator-bind`).
-Mixed-channel confirm with no binding is refused. A requester cannot
-confirm their own request on the other channel. Distinct same-kind
-identities (two OS accounts, two Paladin keys) still work without a
-binding. Confirm windows default to 15 minutes. Kill-block TTL
+Bind introspects a Paladin access token (RFC 7662) over HTTPS with
+client authentication, requires `active`, and derives `iss|sub` from
+the introspection, never from `--human-key` or `--token` (token from
+`PALADIN_TOKEN` or stdin). The introspection URL, issuer, audience,
+and client credentials are pinned in `settings.php`, not importable
+config, so a config import cannot redirect introspection. The
+response `iss` and `aud` / `azp` / `client_id` must match those
+pins. Paladin unreachable, HTTP, missing client auth, or a claim
+mismatch fails closed. Rebind of an identity already bound to a
+different operator is refused, including a unique-constraint race.
+Joining a new Paladin identity onto an existing Drush record writes
+`added_to_existing` on the `operator_bind` row. Every bind and every
+refusal writes an audit row (`operator_bind` /
+`operator_bind_refused`). Unbind (`mcp-sentinel:operator-unbind`)
+needs two distinct verified operators and writes
+`operator_unbind_request` / `operator_unbind` /
+`operator_unbind_refused`. Mixed-channel confirm with no binding is
+refused. A requester cannot confirm their own request on the other
+channel. Distinct same-kind identities (two OS accounts, two Paladin
+keys) still work without a binding. One person holding two Paladin
+accounts cannot be detected. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
 `kill_pending`. Audit operations `agent_kill`, `agent_kill_confirm`,

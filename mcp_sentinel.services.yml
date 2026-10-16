@@ -222,6 +222,18 @@ services:
     arguments:
       - '@database'
       - '@uuid'
+      - '@mcp_sentinel.audit_logger'
+      - '@datetime.time'
+      - '@config.factory'
+      - '@mcp_sentinel.paladin_introspection'
+      - '@mcp_sentinel.operator_identity'
+
+  mcp_sentinel.paladin_introspection:
+    class: Drupal\mcp_sentinel\Service\McpPaladinIntrospection
+    arguments:
+      - '@http_client'
+      - '@settings'
+      - '@datetime.time'
 
   mcp_sentinel.operator_identity:
     class: Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory

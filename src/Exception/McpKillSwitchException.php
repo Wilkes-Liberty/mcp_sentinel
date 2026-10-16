@@ -60,6 +60,11 @@ final class McpKillSwitchException extends \RuntimeException {
   public const OPERATOR_BINDING_CONFLICT = 'operator_binding_conflict';
 
   /**
+   * Paladin introspection is unreachable or not configured.
+   */
+  public const PALADIN_UNAVAILABLE = 'paladin_unavailable';
+
+  /**
    * Reason is required and must not look like a token.
    */
   public const INVALID_REASON = 'invalid_reason';

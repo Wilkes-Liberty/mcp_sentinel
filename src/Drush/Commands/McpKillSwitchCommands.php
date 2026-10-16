@@ -35,7 +35,11 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * Without a verified identity, confirm is refused (fail closed).
  * Mixed-channel confirm (Paladin then Drush, or the reverse) needs
  * mcp-sentinel:operator-bind so both identities resolve to one
- * operator record. The shell sits outside governance; bind from an
+ * operator record. Bind introspects a Paladin token (active required)
+ * and derives iss|sub from that response, never from --human-key.
+ * The token is read from stdin or PALADIN_TOKEN, never --token.
+ * Paladin down fails closed. Unbind needs two distinct verified
+ * operators. The shell sits outside governance; bind from an
  * individual OS account, not a shared deploy user.
  */
 final class McpKillSwitchCommands extends DrushCommands {
@@ -175,35 +179,70 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Bind this OS account's Drush assertion to a Paladin iss|sub.
+   * Bind this OS account to a Paladin identity from token introspection.
    *
-   * Required before a Paladin kill route and a Drush confirm can be
-   * the same person or two distinct people. Mixed-channel confirm
-   * without a binding is refused. The shell is outside governance:
-   * run this from an individual OS account, not a shared deploy user.
+   * The iss|sub is taken from an active Paladin introspection response,
+   * never from --human-key. Paladin unreachable fails closed. A
+   * squatted identity already bound to a different operator is
+   * refused. Pipe the token on stdin or set PALADIN_TOKEN; --token
+   * is refused. The shell is outside governance: run this from an
+   * individual OS account, not a shared deploy user.
    */
   #[CLI\Command(name: 'mcp-sentinel:operator-bind', aliases: ['mcps:operator-bind'])]
-  #[CLI\Option(name: 'human-key', description: 'Paladin iss|sub bound to this OS effective uid.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:operator-bind --human-key=iss|sub', description: 'Bind this shell to a Paladin operator record.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-bind', description: 'Bind this shell to the Paladin iss|sub from an active introspection.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:operator-bind < token.txt', description: 'Bind using a token piped on stdin.')]
   public function bindOperator(
     array $options = [
-      'human-key' => '',
+      'token' => '',
     ],
   ): int {
     if (($denied = $this->requirePermission()) !== NULL) {
       return $denied;
     }
     try {
-      $humanKey = trim((string) ($options['human-key'] ?? ''));
-      if ($humanKey === '') {
-        $this->logger()->error('operator-bind requires --human-key=iss|sub.');
-        return self::EXIT_FAILURE;
-      }
-      $operatorId = $this->operatorBindings->bind(
-        McpOperatorIdentity::paladin($humanKey),
-        $this->operatorIdentities->fromDrushAssertion(),
-      );
+      $token = $this->paladinToken($options);
+      $operatorId = $this->operatorBindings->bindFromToken($token);
       $this->io()->writeln('operator_id: ' . $operatorId);
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Unbind an operator record. Two distinct Paladin operators required.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:operator-unbind', aliases: ['mcps:operator-unbind'])]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an unbind request, to confirm as the named second person (secondary account holder).')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-unbind', description: 'Request unbind of this Paladin operator record (pending confirm).')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-unbind --confirm-batch=BATCH', description: 'Confirm an unbind as a distinct operator.')]
+  public function unbindOperator(
+    array $options = [
+      'token' => '',
+      'confirm-batch' => NULL,
+    ],
+  ): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $token = $this->paladinToken($options);
+      $confirmBatch = trim((string) ($options['confirm-batch'] ?? ''));
+      if ($confirmBatch !== '') {
+        $this->operatorBindings->confirmUnbindFromToken($token, $confirmBatch);
+        $this->io()->writeln('status: unbound');
+        return self::EXIT_SUCCESS;
+      }
+      $batchId = $this->operatorBindings->requestUnbindFromToken($token);
+      $this->io()->writeln('status: unbind_pending');
+      $this->io()->writeln('batch: ' . $batchId);
+      $this->io()->writeln(
+        'needs_confirm: yes (named second person / secondary account holder)',
+      );
       return self::EXIT_SUCCESS;
     }
     catch (McpKillSwitchException | McpPrincipalKeyException $e) {
@@ -330,6 +369,39 @@ final class McpKillSwitchCommands extends DrushCommands {
       $this->io()->writeln('block_until: ' . (string) $result->blockUntil);
     }
     $this->io()->writeln('ttl: ' . (string) $result->ttl);
+  }
+
+  /**
+   * Paladin access token from PALADIN_TOKEN or stdin. Never logged.
+   *
+   * --token is refused: it lands in shell history and in ps. An empty
+   * value is passed through so bind and unbind can audit the refusal.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   *
+   * @return string
+   *   Access token, or empty when neither source provided one.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   *   When --token is passed.
+   */
+  private function paladinToken(array $options): string {
+    if (trim((string) ($options['token'] ?? '')) !== '') {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        'Do not pass --token. Pipe the token on stdin or set PALADIN_TOKEN.',
+      );
+    }
+    $fromEnv = getenv('PALADIN_TOKEN');
+    if (is_string($fromEnv) && trim($fromEnv) !== '') {
+      return trim($fromEnv);
+    }
+    if (!defined('STDIN') || (function_exists('posix_isatty') && posix_isatty(STDIN))) {
+      return '';
+    }
+    $fromStdin = stream_get_contents(STDIN);
+    return is_string($fromStdin) ? trim($fromStdin) : '';
   }
 
   /**
