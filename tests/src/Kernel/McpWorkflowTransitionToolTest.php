@@ -358,11 +358,12 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'Second transition call within the window must fail due to rate limiting.');
-    $this->assertStringContainsStringIgnoringCase(
-      'rate limit',
+    $this->assertSame(
+      'MCP access is denied.',
       (string) $tool->getResultMessage(),
-      'Failure message must mention the rate limit.'
+      'Caller-facing rate-limit denials must be generic (DEV-966).',
     );
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
   }
 
   /**

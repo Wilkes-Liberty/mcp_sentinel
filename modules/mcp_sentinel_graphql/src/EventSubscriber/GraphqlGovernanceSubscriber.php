@@ -209,7 +209,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     }
     if (!$readiness->isReady()) {
       $reason = $readiness->reason();
-      $this->denyExplainer?->operatorNotice($reason?->value ?? 'unspecified');
+      $this->denyExplainer?->operatorNotice($reason->value);
       throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
     $profile = $readiness->profile();

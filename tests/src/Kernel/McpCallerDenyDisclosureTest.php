@@ -7,14 +7,12 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
-use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedEntryPointTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\HttpKernelInterface;
@@ -86,23 +84,16 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
    * A tools/call deny hides the rule suffix; the audit row keeps it.
    */
   public function testToolCallHidesMissingTenantRule(): void {
-    $before = $this->deniedAccessCount();
-    $request = Request::create('/mcp', 'POST');
-    $request->attributes->set(
-      McpPrincipalContext::CLAIMS_ATTRIBUTE,
+    $this->pushEntryPointRequest(
       [
         'iss' => self::ENTRY_POINT_ISS,
         'sub' => 'human-1',
         'azp' => 'agent-client',
         'scope' => 'mcp_read',
       ],
+      '/mcp',
     );
-    $request->attributes->set(
-      McpPrincipalContext::NETWORK_ATTRIBUTE,
-      TRUE,
-    );
-    $this->principalContextHolder()->resetForTest();
-    $this->container->get('request_stack')->push($request);
+    $before = $this->deniedAccessCount();
 
     $tool = $this->container->get('plugin.manager.tool')
       ->createInstance('mcp_sentinel_principal_context_probe');

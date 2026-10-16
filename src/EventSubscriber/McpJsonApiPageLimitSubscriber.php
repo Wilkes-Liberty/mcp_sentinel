@@ -156,8 +156,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     }
     if (!$readiness->isReady()) {
       $reason = $readiness->reason();
-      $this->denyExplainer?->operatorNotice($reason?->value ?? 'unspecified');
-      if ($reason?->isAuthorizationFailure()) {
+      $this->denyExplainer?->operatorNotice($reason->value);
+      if ($reason->isAuthorizationFailure()) {
         throw new AccessDeniedHttpException(McpDenyExplainer::CALLER_MESSAGE);
       }
       throw new ServiceUnavailableHttpException(
