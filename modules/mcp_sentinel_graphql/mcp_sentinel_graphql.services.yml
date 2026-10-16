@@ -10,5 +10,6 @@ services:
       - '@?cache.graphql.results'
       - '@request_stack'
       - '@mcp_sentinel.principal_context_dispatcher'
+      - '@?mcp_sentinel.deny_explainer'
     tags:
       - { name: event_subscriber }

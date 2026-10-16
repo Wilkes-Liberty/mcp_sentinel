@@ -85,7 +85,7 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
   }
 
   /**
-   * The context endpoint returns 403 missing_principal and audits it.
+   * The context endpoint returns a generic 403 and audits the rule.
    */
   public function testContextDeniesWithoutPrincipal(): void {
     $this->switchToGovernedUser();
@@ -95,13 +95,18 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
     $this->assertSame(403, $response->getStatusCode());
     $payload = json_decode((string) $response->getContent(), TRUE);
     $this->assertIsArray($payload);
-    $this->assertSame('missing_principal', $payload['reason']);
-    $this->assertStringContainsString('verified principal', (string) $payload['error']);
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertArrayNotHasKey('rule', $payload);
+    $this->assertStringNotContainsString('missing_principal', (string) $response->getContent());
+    $this->assertStringNotContainsString('[rule:', (string) $response->getContent());
     $this->assertStringContainsString('private', (string) $response->headers->get('Cache-Control'));
     $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
     $this->assertSame('nosniff', $response->headers->get('X-Content-Type-Options'));
     $this->assertSame($before + 1, $this->deniedAccessCount());
     $this->assertSame('context', $this->lastDenialMetadata()['tool']);
+    $this->assertSame('missing_principal', $this->lastDenialMetadata()['reason']);
+    $this->assertStringContainsString('[rule:', (string) ($this->lastDenialMetadata()['explain'] ?? ''));
   }
 
   /**
@@ -115,7 +120,9 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
     $this->assertSame(403, $response->getStatusCode());
     $payload = json_decode((string) $response->getContent(), TRUE);
     $this->assertIsArray($payload);
-    $this->assertSame('missing_principal', $payload['reason']);
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertStringNotContainsString('missing_principal', (string) $response->getContent());
     $this->assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
   }
 

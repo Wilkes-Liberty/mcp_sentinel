@@ -94,9 +94,8 @@ final class McpRateLimitToolTest extends KernelTestBase {
     $tool->setInputValue('bundle', '');
     $tool->setInputValue('title', 'T');
     $tool->execute();
-    $this->assertStringContainsStringIgnoringCase(
-      'rate limit', (string) $tool->getResultMessage()
-    );
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
   }
 
 }

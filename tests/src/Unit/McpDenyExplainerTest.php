@@ -134,4 +134,22 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertFalse($explained->widenAppropriate);
   }
 
+  /**
+   * Callers receive a generic deny; annotate stays operator-only (DEV-966).
+   *
+   * @covers ::callerMessage
+   * @covers ::annotate
+   */
+  public function testCallerMessageHidesTheRuleSuffix(): void {
+    $explainer = new McpDenyExplainer();
+    $this->assertSame('MCP access is denied.', $explainer->callerMessage());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $explainer->callerMessage());
+    $this->assertStringNotContainsString('[rule:', $explainer->callerMessage());
+    $annotated = $explainer->annotate(
+      'Network calls require a tenant claim on the validated token (DEV-839).',
+    );
+    $this->assertStringContainsString('[rule:missing_tenant_claim', $annotated);
+    $this->assertNotSame($explainer->callerMessage(), $annotated);
+  }
+
 }

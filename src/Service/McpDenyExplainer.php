@@ -6,13 +6,31 @@ namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 use Drupal\mcp_sentinel\Value\McpDenyExplanation;
+use Psr\Log\LoggerInterface;
 
 /**
  * Names the policy rule behind a deny and whether widening is appropriate.
  *
  * Fail-closed and secret-free. Never auto-widens an allowlist or denylist.
+ * The formatted suffix is operator-facing (audit row and logs). Callers
+ * receive callerMessage() only (DEV-966).
  */
 final class McpDenyExplainer {
+
+  /**
+   * Generic caller-facing deny. No rule id, reason, or explainer suffix.
+   */
+  public const CALLER_MESSAGE = 'MCP access is denied.';
+
+  /**
+   * Constructs the explainer.
+   *
+   * @param \Psr\Log\LoggerInterface|null $logger
+   *   Operator log channel. NULL in unit tests.
+   */
+  public function __construct(
+    private readonly ?LoggerInterface $logger = NULL,
+  ) {}
 
   /**
    * Entity types that must stay denied even when an allowlist is edited.
@@ -109,6 +127,15 @@ final class McpDenyExplainer {
         'required OAuth scope missing',
         FALSE,
         'Mint a token that includes the exact required scope. Do not drop the scope check.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'principal_killed')) {
+      return new McpDenyExplanation(
+        'principal_killed',
+        'agent kill switch',
+        FALSE,
+        'An operator must un-kill this principal before it may run again.',
         'Stay denied.',
       );
     }
@@ -273,6 +300,8 @@ final class McpDenyExplainer {
   /**
    * Appends the explanation to a deny reason without duplicating it.
    *
+   * Operator-facing only. Never send this string to a caller.
+   *
    * @param string $reason
    *   Original deny reason.
    * @param string|null $profileId
@@ -286,6 +315,32 @@ final class McpDenyExplainer {
       return $reason;
     }
     return $reason . ' ' . $this->explain($reason, $profileId)->format();
+  }
+
+  /**
+   * Generic deny the caller is allowed to see.
+   */
+  public function callerMessage(): string {
+    return self::CALLER_MESSAGE;
+  }
+
+  /**
+   * Annotates the reason, writes it to the operator log, and returns it.
+   *
+   * @param string $reason
+   *   Original deny reason.
+   * @param string|null $profileId
+   *   Active policy profile id when known.
+   *
+   * @return string
+   *   Reason plus a non-secret rule suffix.
+   */
+  public function operatorNotice(string $reason, ?string $profileId = NULL): string {
+    $annotated = $this->annotate($reason, $profileId);
+    $this->logger?->notice('MCP Sentinel deny: @explain', [
+      '@explain' => $annotated,
+    ]);
+    return $annotated;
   }
 
 }

@@ -367,22 +367,19 @@ abstract class McpGovernedToolBase extends ToolBase {
     }
     elseif ($audit && $this->governanceAuditLogger !== NULL) {
       $ctx = new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
-      $this->governanceAuditLogger->logAlways(
-        'denied_access',
-        McpPrincipalContextDispatcher::denialAuditMetadata(
-          $this->getPluginId(),
-          $e->reasonCode,
-          $ctx,
-        ),
+      $meta = McpPrincipalContextDispatcher::denialAuditMetadata(
+        $this->getPluginId(),
+        $e->reasonCode,
+        $ctx,
       );
+      if ($this->governanceDenyExplainer !== NULL) {
+        $meta['explain'] = $this->governanceDenyExplainer->operatorNotice(
+          $e->getMessage(),
+        );
+      }
+      $this->governanceAuditLogger->logAlways('denied_access', $meta);
     }
-    $message = $e->getMessage();
-    if ($this->governanceDenyExplainer !== NULL) {
-      $message = $this->governanceDenyExplainer->annotate($message);
-    }
-    return ExecutableResult::failure($this->t('@message', [
-      '@message' => $message,
-    ]));
+    return ExecutableResult::failure($this->t('MCP access is denied.'));
   }
 
   /**
@@ -539,13 +536,12 @@ abstract class McpGovernedToolBase extends ToolBase {
     if (!$readiness->isReady()) {
       $reason = $readiness->reason()->value;
       $message = 'MCP Sentinel source governance is not ready: ' . $reason . '.';
-      if ($this->governanceDenyExplainer !== NULL) {
-        $message = $this->governanceDenyExplainer->annotate(
-          $message,
-          $readiness->profile()?->id(),
-        );
-      }
-      $denied = AccessResult::forbidden($message)->addCacheableDependency($readiness);
+      $this->governanceDenyExplainer?->operatorNotice(
+        $message,
+        $readiness->profile()?->id(),
+      );
+      $denied = AccessResult::forbidden(McpDenyExplainer::CALLER_MESSAGE)
+        ->addCacheableDependency($readiness);
       return $denied;
     }
 

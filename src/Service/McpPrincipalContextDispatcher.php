@@ -52,6 +52,9 @@ final class McpPrincipalContextDispatcher {
    *   Fallback when a denial audit write fails.
    * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
    *   Kill registry checked on every admit() before doExecute.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer recorded on the HMAC row. Nullable for a
+   *   cached container that predates this argument.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
@@ -61,6 +64,7 @@ final class McpPrincipalContextDispatcher {
     private readonly McpAuditLogger $auditLogger,
     private readonly LoggerInterface $logger,
     private readonly McpKillEnforcerInterface $killSwitch,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -438,11 +442,15 @@ final class McpPrincipalContextDispatcher {
    *   Denial reason.
    * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
    *   Principal recorded on the row.
+   * @param string $detail
+   *   Optional deny message folded into metadata.explain. Must not
+   *   contain secrets.
    */
   private function logDenial(
     string $toolId,
     string $reasonCode,
     McpPrincipalContext $ctx,
+    string $detail = '',
   ): void {
     $metadata = self::denialAuditMetadata($toolId, $reasonCode, $ctx);
     $carried = $this->holder->carriedPrincipal();
@@ -451,6 +459,10 @@ final class McpPrincipalContextDispatcher {
       $metadata['human_key'] = 'unverified';
       $metadata['principal_unverified'] = 'carried_queue_key';
     }
+    $explainer = $this->denyExplainer ?? new McpDenyExplainer();
+    $seed = $detail !== '' ? $reasonCode . ' ' . $detail : $reasonCode;
+    $metadata['explain'] = $explainer->operatorNotice($seed);
+    $metadata['rule'] = $explainer->explain($seed)->ruleId;
     $this->auditLogger->logAlways('denied_access', $metadata);
   }
 
@@ -559,7 +571,7 @@ final class McpPrincipalContextDispatcher {
   ): never {
     $rowReason = $auditReason ?? $reasonCode;
     try {
-      $this->logDenial($toolId, $rowReason, $this->auditContext());
+      $this->logDenial($toolId, $rowReason, $this->auditContext(), $message);
     }
     catch (\Throwable $e) {
       $this->logger->error(

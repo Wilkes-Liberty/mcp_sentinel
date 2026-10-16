@@ -123,7 +123,7 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'write', $profile);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', $reason);
-      return ExecutableResult::failure($this->t('MCP Sentinel denied the config write: @reason', ['@reason' => $reason]));
+      return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
 
     // A config name that holds secrets by nature is not written through this

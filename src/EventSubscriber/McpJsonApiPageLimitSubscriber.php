@@ -12,6 +12,7 @@ use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
@@ -82,6 +83,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
    *   Principal and tenant gate. Nullable only while a cached container
    *   still has the previous argument list; a missing dispatcher fails closed.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer. Nullable for a cached container that predates it.
    */
   public function __construct(
     private readonly McpAccessChecker $accessChecker,
@@ -92,6 +95,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     private readonly McpAuditLogger $auditLogger,
     private readonly ?McpClassificationResolver $classification = NULL,
     private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -152,21 +156,22 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     }
     if (!$readiness->isReady()) {
       $reason = $readiness->reason();
+      $this->denyExplainer?->operatorNotice($reason?->value ?? 'unspecified');
       if ($reason?->isAuthorizationFailure()) {
-        throw new AccessDeniedHttpException('MCP access is denied.');
+        throw new AccessDeniedHttpException(McpDenyExplainer::CALLER_MESSAGE);
       }
       throw new ServiceUnavailableHttpException(
         NULL,
-        'MCP source governance is not ready: '
-        . $reason->value . '.',
+        McpDenyExplainer::CALLER_MESSAGE,
       );
     }
 
     $profile = $readiness->profile();
     if ($profile === NULL) {
+      $this->denyExplainer?->operatorNotice('active_profile_missing');
       throw new ServiceUnavailableHttpException(
         NULL,
-        'MCP source governance is not ready: active_profile_missing.',
+        McpDenyExplainer::CALLER_MESSAGE,
       );
     }
 
@@ -354,7 +359,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(string $surfaceId, array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
-      throw new AccessDeniedHttpException('A verified principal is required.');
+      $this->denyExplainer?->operatorNotice('missing_principal');
+      throw new AccessDeniedHttpException(McpDenyExplainer::CALLER_MESSAGE);
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
@@ -367,7 +373,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       );
     }
     catch (McpPrincipalContextDeniedException $e) {
-      throw new AccessDeniedHttpException($e->getMessage(), $e);
+      throw new AccessDeniedHttpException(McpDenyExplainer::CALLER_MESSAGE, $e);
     }
   }
 

@@ -106,7 +106,7 @@ protected helpers the shipped tools share:
 
 | Helper | Purpose |
 |--------|---------|
-| `denyReason(AccessResultInterface $result)` | extract a human-readable deny reason |
+| `denyReason(AccessResultInterface $result)` | extract a human-readable deny reason for audit/logs. Do not return it to a caller; use `McpDenyExplainer::CALLER_MESSAGE` (`MCP access is denied.`) |
 | `logDeniedAccess(...)` | write a `denied_access` audit row |
 | `validationMessages(FieldableEntityInterface $entity)` | collect entity validation errors |
 | `checkRateLimit(...)` | enforce the profile's per-window request rate limit |

@@ -96,7 +96,12 @@ final class McpContextControllerTest extends KernelTestBase {
     $payload = json_decode((string) $response->getContent(), TRUE);
 
     $this->assertSame(503, $response->getStatusCode());
-    $this->assertSame('module_disabled', $payload['reason']);
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertArrayNotHasKey('rule', $payload);
+    $this->assertArrayNotHasKey('explain', $payload);
+    $this->assertArrayNotHasKey('next_step', $payload);
+    $this->assertStringNotContainsString('module_disabled', (string) $response->getContent());
     $this->assertArrayNotHasKey('site', $payload);
   }
 

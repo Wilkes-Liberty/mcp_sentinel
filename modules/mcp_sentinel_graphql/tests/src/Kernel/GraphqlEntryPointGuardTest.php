@@ -121,7 +121,7 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
     $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
     $this->killVerifiedEntryPointPrincipal();
     $before = $this->deniedAccessCount();
-    $this->assertGraphqlDenied('query');
+    $this->assertGraphqlDenied('query', McpKillSwitch::DENY_REASON);
     $this->assertSurfaceDenialRow(
       $before,
       'graphql',
@@ -141,7 +141,7 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
       '/graphql',
     );
     $before = $this->deniedAccessCount();
-    $this->assertGraphqlDenied('mutation');
+    $this->assertGraphqlDenied('mutation', McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING);
     $this->assertSurfaceDenialRow(
       $before,
       'graphql',
@@ -163,7 +163,7 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
       TRUE,
     );
     $before = $this->deniedAccessCount();
-    $this->assertGraphqlDenied('query');
+    $this->assertGraphqlDenied('query', McpPrincipalContextDeniedException::NON_IDP_ISSUER);
     $this->assertSurfaceDenialRow(
       $before,
       'graphql',
@@ -188,13 +188,13 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
   /**
    * Asserts onOperation throws a GraphQL Error.
    */
-  private function assertGraphqlDenied(string $type): void {
+  private function assertGraphqlDenied(string $type, string $ruleId = McpPrincipalContextDeniedException::MISSING_PRINCIPAL): void {
     try {
       $this->subscriber()->onOperation($this->makeEvent($type));
       $this->fail('GraphQL must refuse this governed operation.');
     }
     catch (Error $e) {
-      $this->assertNotSame('', $e->getMessage());
+      $this->assertCallerHidesRule($e->getMessage(), $ruleId);
     }
   }
 
@@ -211,6 +211,7 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
       NULL,
       $this->container->get('request_stack'),
       $this->container->get('mcp_sentinel.principal_context_dispatcher'),
+      $this->container->get('mcp_sentinel.deny_explainer'),
     );
   }
 

@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Value;
 
 /**
- * Operator- and agent-facing explanation of a policy denial.
+ * Operator-facing explanation of a policy denial.
  *
- * Never carries secrets. Widening is advisory only: callers must not
- * auto-apply it.
+ * Never carries secrets. Never sent to a caller (DEV-966). Widening is
+ * advisory only: operators must not auto-apply it.
  */
 final class McpDenyExplanation {
 

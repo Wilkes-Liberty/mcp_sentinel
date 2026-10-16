@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -223,6 +224,23 @@ trait McpGovernedEntryPointTestTrait {
       $this->assertSame('unverified', $meta['principal_key']);
       $this->assertSame('unverified', $meta['human_key']);
     }
+    $this->assertArrayHasKey('explain', $meta);
+    $this->assertStringContainsString('[rule:', (string) $meta['explain']);
+    $this->assertStringContainsString($reason, (string) $meta['explain']);
+  }
+
+  /**
+   * Asserts a caller-facing body is a generic deny with no rule disclosure.
+   *
+   * @param string $body
+   *   Exception message or JSON response body.
+   * @param string $ruleId
+   *   Rule id that must stay off the caller body and on the audit row.
+   */
+  protected function assertCallerHidesRule(string $body, string $ruleId): void {
+    $this->assertStringContainsString(McpDenyExplainer::CALLER_MESSAGE, $body);
+    $this->assertStringNotContainsString('[rule:', $body);
+    $this->assertStringNotContainsString($ruleId, $body);
   }
 
 }

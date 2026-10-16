@@ -22,7 +22,7 @@ use Symfony\Component\HttpKernel\HttpKernelInterface;
 /**
  * Caller-facing denies hide the [rule:] explainer (DEV-966).
  *
- * tools/call, JSON:API, and /drupal-mcp/context must return a generic
+ * Tools/call, JSON:API, and /drupal-mcp/context must return a generic
  * deny. The HMAC audit row still records the rule. GraphQL lives in
  * GraphqlCallerDenyDisclosureTest.
  *
@@ -157,7 +157,7 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
   }
 
   /**
-   * /drupal-mcp/context hides the rule id; the audit row keeps it.
+   * Context hides the rule id; the audit row keeps it.
    */
   public function testContextHidesMissingPrincipalRule(): void {
     $this->dropStampedPrincipal();

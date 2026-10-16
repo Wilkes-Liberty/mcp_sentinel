@@ -43,14 +43,6 @@ trait McpEntityToolTrait {
     $reason = $result instanceof AccessResultReasonInterface && $result->getReason()
       ? (string) $result->getReason()
       : 'denied by policy';
-    if ($this->governanceDenyExplainer !== NULL) {
-      $profileId = NULL;
-      if (isset($this->governancePolicyResolver)) {
-        $profile = $this->governancePolicyResolver->resolve();
-        $profileId = $profile?->id();
-      }
-      $reason = $this->governanceDenyExplainer->annotate($reason, $profileId);
-    }
     return $reason;
   }
 
@@ -90,12 +82,20 @@ trait McpEntityToolTrait {
       $logger = \Drupal::service('mcp_sentinel.audit_logger');
     }
     if ($logger !== NULL) {
+      $profileId = NULL;
+      if (isset($this->governancePolicyResolver)) {
+        $profileId = $this->governancePolicyResolver->resolve()?->id();
+      }
+      $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
+        ?? $reason;
       $logger->log('denied_access', [
         'tool'        => $toolId,
         'entity_type' => $entityType,
         'id'          => $entityId,
         'operation'   => $operation,
         'reason'      => $reason,
+        'explain'     => $explain,
+        'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
       ]);
     }
   }
@@ -150,15 +150,16 @@ trait McpEntityToolTrait {
       if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
         $logger = \Drupal::service('mcp_sentinel.audit_logger');
       }
+      $limited = (string) $this->t('Rate limit exceeded. Retry after the current window expires.');
+      $explain = $this->governanceDenyExplainer?->operatorNotice($limited) ?? $limited;
       if ($logger !== NULL) {
-        $logger->log('rate_limit_exceeded', ['tool' => $toolId]);
+        $logger->log('rate_limit_exceeded', [
+          'tool' => $toolId,
+          'explain' => $explain,
+          'rule' => $this->governanceDenyExplainer?->explain($limited)->ruleId,
+        ]);
       }
-      $message = $this->t('Rate limit exceeded. Retry after the current window expires.');
-      if ($this->governanceDenyExplainer !== NULL) {
-        $annotated = $this->governanceDenyExplainer->annotate((string) $message);
-        $message = $this->t('@message', ['@message' => $annotated]);
-      }
-      return ExecutableResult::failure($message);
+      return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
     $limiter->register($profile, $uid, $toolId);
     return NULL;
@@ -229,18 +230,14 @@ trait McpEntityToolTrait {
     }
     $bytes = strlen($serialized);
     if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
-      $message = $this->t(
+      $this->governanceDenyExplainer?->operatorNotice((string) $this->t(
         'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
         [
           '@bytes' => $bytes,
           '@cap'   => $guard->effectiveResponseSizeCap($profile),
         ]
-      );
-      if ($this->governanceDenyExplainer !== NULL) {
-        $annotated = $this->governanceDenyExplainer->annotate((string) $message);
-        $message = $this->t('@message', ['@message' => $annotated]);
-      }
-      return ExecutableResult::failure($message);
+      ));
+      return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
     return NULL;
   }

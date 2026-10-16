@@ -224,7 +224,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $event = $this->makeRequestEvent('/jsonapi/node/article');
 
     $this->expectException(ServiceUnavailableHttpException::class);
-    $this->expectExceptionMessage('module_disabled');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($event);
   }
 
@@ -239,7 +239,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $event = $this->makeRequestEvent('/jsonapi/node/article/example', [], 'PATCH');
 
     $this->expectException(ServiceUnavailableHttpException::class);
-    $this->expectExceptionMessage('module_disabled');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($event);
   }
 

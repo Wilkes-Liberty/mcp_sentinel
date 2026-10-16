@@ -7,6 +7,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Security
+- Deny responses no longer append a `[rule:<id> ...]` explainer suffix
+  or name the rule to the caller (DEV-966). `tools/call` (tool plugin
+  result and MCP body), GraphQL errors, JSON:API exceptions, and
+  `/drupal-mcp/context` return `MCP access is denied.` The HMAC
+  `denied_access` row and the operator log still carry the annotated
+  suffix (`metadata.explain`). `/drupal-mcp/readiness` stays a
+  diagnostic document and still names the contract reason.
 - GraphQL `requirePrincipal()`, JSON:API (validated bearer), and
   `/drupal-mcp/context` pass the surface's required OAuth scope into
   `assertDispatchAllowed()`. A token that omits that scope is refused
@@ -32,6 +39,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   confirm fails closed.
 
 ### Changed
+- **Behaviour change.** Anything that parsed `[rule:` or a rule id
+  from a tool failure, GraphQL error, JSON:API exception, or context
+  JSON must stop. The suffix is operator-only. Downstream tools that
+  forwarded `denyReason()` or `McpDenyExplainer::annotate()` to the
+  caller should return `McpDenyExplainer::CALLER_MESSAGE` instead.
 - Kill-switch docs state that the Drush/shell path sits outside
   governance. The two-person rule on that path requires individual
   OS accounts and no shared deploy user.

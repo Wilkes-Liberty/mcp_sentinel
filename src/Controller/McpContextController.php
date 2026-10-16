@@ -121,7 +121,10 @@ class McpContextController extends ControllerBase {
       }
     }
     if (!$readiness->isReady()) {
-      return $this->notReadyResponse($readiness->reason());
+      $reason = $readiness->reason();
+      $this->denyExplainer?->operatorNotice($reason->value);
+      $status = $reason->isAuthorizationFailure() ? 403 : 503;
+      return $this->genericDenyResponse($status);
     }
 
     // IP allowlist gate — governed requests only.
@@ -137,11 +140,8 @@ class McpContextController extends ControllerBase {
     // Attested bundle / emergency deny (d.o #3617702). The schema document
     // does not go through entity access, so the floor is applied here.
     if ($this->accessChecker->checkBundleFloor('view', AccessResult::neutral())->isForbidden()) {
-      return new JsonResponse(
-        ['error' => 'MCP access is denied (' . McpAccessChecker::BUNDLE_DENIAL_CODE . ').'],
-        403,
-        ['Cache-Control' => 'no-store', 'X-Content-Type-Options' => 'nosniff'],
-      );
+      $this->denyExplainer?->operatorNotice(McpAccessChecker::BUNDLE_DENIAL_CODE);
+      return $this->genericDenyResponse(403);
     }
 
     // Request budget (#3616540): the schema document is a governed read and
@@ -260,11 +260,8 @@ class McpContextController extends ControllerBase {
    */
   private function principalDenial(): ?JsonResponse {
     if ($this->principalDispatcher === NULL) {
-      return new JsonResponse(
-        ['error' => 'A verified principal is required.', 'reason' => 'missing_principal'],
-        403,
-        ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'],
-      );
+      $this->denyExplainer?->operatorNotice('missing_principal');
+      return $this->genericDenyResponse(403);
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
@@ -277,13 +274,20 @@ class McpContextController extends ControllerBase {
       );
     }
     catch (McpPrincipalContextDeniedException $e) {
-      return new JsonResponse(
-        ['error' => $e->getMessage(), 'reason' => $e->reasonCode],
-        403,
-        ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'],
-      );
+      return $this->genericDenyResponse(403);
     }
     return NULL;
+  }
+
+  /**
+   * Caller-facing deny with no rule id or explainer suffix.
+   */
+  private function genericDenyResponse(int $status): JsonResponse {
+    return new JsonResponse(
+      ['error' => McpDenyExplainer::CALLER_MESSAGE],
+      $status,
+      ['Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'],
+    );
   }
 
   /**

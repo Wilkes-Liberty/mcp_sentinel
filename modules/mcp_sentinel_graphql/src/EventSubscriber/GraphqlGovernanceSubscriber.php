@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
@@ -70,6 +71,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
    *   Principal and tenant gate. Nullable only for a cached container that
    *   predates it; a missing dispatcher fails closed on a governed operation.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer. Nullable for a cached container that predates it.
    */
   public function __construct(
     private readonly McpAuditLogger $auditLogger,
@@ -80,6 +83,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     private readonly ?CacheBackendInterface $graphqlResultsCache = NULL,
     private readonly ?RequestStack $requestStack = NULL,
     private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -119,7 +123,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
-      throw new Error('A verified principal is required.');
+      $this->denyExplainer?->operatorNotice('missing_principal');
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
@@ -132,7 +137,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       );
     }
     catch (McpPrincipalContextDeniedException $e) {
-      throw new Error($e->getMessage(), previous: $e);
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE, previous: $e);
     }
   }
 
@@ -204,16 +209,13 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     }
     if (!$readiness->isReady()) {
       $reason = $readiness->reason();
-      throw new Error(
-        $reason?->isAuthorizationFailure()
-          ? 'MCP access is denied.'
-          : 'MCP source governance is not ready: '
-            . $reason->value . '.',
-      );
+      $this->denyExplainer?->operatorNotice($reason?->value ?? 'unspecified');
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
     $profile = $readiness->profile();
     if ($profile === NULL) {
-      throw new Error('MCP source governance is not ready: active_profile_missing.');
+      $this->denyExplainer?->operatorNotice('active_profile_missing');
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
 
     $config = $this->configFactory->get('mcp_sentinel.settings');
@@ -243,7 +245,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     // Mutation gate.
     if ($is_mutation) {
       if (!$profile->allowsWrite() || !$profile->allowsGraphqlMutations()) {
-        throw new Error('GraphQL mutations are disabled by MCP Sentinel.');
+        $this->denyExplainer?->operatorNotice('allow_write');
+        throw new Error(McpDenyExplainer::CALLER_MESSAGE);
       }
       $this->refuseIfBundleDenies('update');
       return;
@@ -251,7 +254,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
 
     // Read gate (queries only; leave subscriptions/other types untouched).
     if ($type === 'query' && !$profile->allowsRead()) {
-      throw new Error('GraphQL read access is disabled by MCP Sentinel.');
+      $this->denyExplainer?->operatorNotice('allow_read');
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
     if ($type === 'query') {
       $this->refuseIfBundleDenies('view');
@@ -269,7 +273,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
       return;
     }
     if ($this->accessChecker->checkBundleFloor($operation, AccessResult::neutral())->isForbidden()) {
-      throw new Error('MCP access is denied (' . McpAccessChecker::BUNDLE_DENIAL_CODE . ').');
+      $this->denyExplainer?->operatorNotice(McpAccessChecker::BUNDLE_DENIAL_CODE);
+      throw new Error(McpDenyExplainer::CALLER_MESSAGE);
     }
   }
 

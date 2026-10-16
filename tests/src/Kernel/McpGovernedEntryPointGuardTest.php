@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
@@ -160,7 +161,7 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
     );
     $this->killVerifiedEntryPointPrincipal();
     $before = $this->deniedAccessCount();
-    $this->assertJsonApiDenied();
+    $this->assertJsonApiDenied(McpKillSwitch::DENY_REASON);
     $this->assertSurfaceDenialRow(
       $before,
       'jsonapi',
@@ -195,7 +196,7 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
       'POST',
     );
     $before = $this->deniedAccessCount();
-    $this->assertJsonApiDenied();
+    $this->assertJsonApiDenied(McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING);
     $this->assertSurfaceDenialRow(
       $before,
       'jsonapi',
@@ -230,7 +231,7 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
       TRUE,
     );
     $before = $this->deniedAccessCount();
-    $this->assertJsonApiDenied();
+    $this->assertJsonApiDenied(McpPrincipalContextDeniedException::NON_IDP_ISSUER);
     $this->assertSurfaceDenialRow(
       $before,
       'jsonapi',
@@ -307,25 +308,31 @@ final class McpGovernedEntryPointGuardTest extends KernelTestBase {
   /**
    * Asserts the JSON:API subscriber refuses the current request.
    */
-  private function assertJsonApiDenied(): void {
+  private function assertJsonApiDenied(string $ruleId = McpPrincipalContextDeniedException::MISSING_PRINCIPAL): void {
     try {
       $this->jsonApiSubscriber()->onRequest($this->jsonApiEventFromCurrent());
       $this->fail('JSON:API must refuse this governed call.');
     }
     catch (AccessDeniedHttpException $e) {
-      $this->assertNotSame('', $e->getMessage());
+      $this->assertCallerHidesRule($e->getMessage(), $ruleId);
     }
   }
 
   /**
-   * Asserts /drupal-mcp/context returns 403 with the given reason.
+   * Asserts /drupal-mcp/context returns a generic 403 with no rule id.
    */
   private function assertContextDenied(string $reason): void {
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(403, $response->getStatusCode());
-    $payload = json_decode((string) $response->getContent(), TRUE);
+    $body = (string) $response->getContent();
+    $this->assertCallerHidesRule($body, $reason);
+    $payload = json_decode($body, TRUE);
     $this->assertIsArray($payload);
-    $this->assertSame($reason, $payload['reason']);
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertArrayNotHasKey('rule', $payload);
+    $this->assertArrayNotHasKey('explain', $payload);
+    $this->assertArrayNotHasKey('next_step', $payload);
   }
 
 }

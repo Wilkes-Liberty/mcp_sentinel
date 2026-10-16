@@ -1409,12 +1409,16 @@ default rather than merely guarded.
 | `drush mcp-sentinel:agent-provision <tier> --env=<env>` | (submodule) Provision an agent tier — `content`, `content-auditor`, `auditor`, `developer`, or `admin` — as a role + service account + OAuth consumer (`<tier>-<env>`). Never creates or rotates secrets. |
 | `drush mcp-sentinel:break-glass <uid>` | (approval submodule) Request the time-boxed `mcp_admin` break-glass role for a user; always approval-gated, auto-revoked at the configured TTL. |
 
-### Deny-path explain (DEV-764)
+### Deny-path explain (DEV-764, DEV-966)
 
-When a tool is denied, the failure names the **rule** and whether a human
-may consider widening. Sentinel never auto-widens an allowlist.
+When a tool is denied, the **HMAC audit row** and the operator log name the
+rule and whether a human may consider widening. Sentinel never auto-widens
+an allowlist. The caller (tools/call, GraphQL, JSON:API, `/drupal-mcp/context`)
+receives only `MCP access is denied.` — no `[rule:]` suffix, rule id, or
+reason. `/drupal-mcp/readiness` stays a diagnostic document for operators
+and still names the contract reason.
 
-Good deny (agent-visible):
+Good deny (operator / audit):
 
 ```
 Entity type 'taxonomy_term' is not in the MCP Sentinel allowlist.
@@ -1423,7 +1427,7 @@ Widening may be appropriate after a human review; it is never automatic.
 Next: A human may add "taxonomy_term" to allowed_entity_types if that type is editorial.
 ```
 
-Good deny that must stay denied:
+Good deny that must stay denied (operator / audit):
 
 ```
 Entity type 'user' is denied by MCP Sentinel.
@@ -1432,15 +1436,23 @@ Widening is not appropriate; this deny must stay.
 Next: Keep "user" on the denylist. Credential-bearing types must stay denied.
 ```
 
-Bad deny (do not ship this shape):
+Good deny (caller-visible):
+
+```
+MCP access is denied.
+```
+
+Bad deny (do not ship this shape to a caller):
 
 ```
 denied
+Entity type 'taxonomy_term' is not in the MCP Sentinel allowlist. [rule:entity_type_allowlist ...]
 ```
 
 or any message that echoes a bearer token, consumer secret, signing key,
-or hashed material. Rule ids and next-step prose are the contract; secrets
-are not.
+or hashed material. Rule ids and next-step prose belong on the audit row
+and in operator logs; secrets are not. Anything that parsed `[rule:` from
+a tool result or MCP error body must read the HMAC row instead.
 
 ### Sealed-token mint (DEV-762)
 
