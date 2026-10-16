@@ -10,6 +10,7 @@ use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\tool\Tool\ToolInterface;
 use Drupal\user\Entity\Role;
@@ -178,7 +179,7 @@ final class McpApprovalConfigSecretTest extends KernelTestBase {
       $tool = $this->agentConfigSet($name, ['key_provider_settings' => ['key_value' => self::SECRET]]);
       self::assertFalse($tool->getResultStatus(), $name);
       self::assertSame(
-        'MCP Sentinel refused the config write: this configuration holds secrets and cannot be written through a governed tool.',
+        McpDenyExplainer::CALLER_MESSAGE,
         (string) $tool->getResultMessage(),
         $name,
       );

@@ -11,16 +11,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   or name the rule to the caller (DEV-966). Every caller-facing deny
   goes through `McpDenyExplainer::refuse()`. `tools/call` (tool plugin
   result and MCP body), GraphQL errors, JSON:API exceptions, and
-  `/drupal-mcp/context` return `MCP access is denied.` IP, read/page
-  budget, result cap, response-size cap, classification refusal,
-  no-profile, publish-gate, and save/transition exception text stay
-  off the caller body. HTTP 403/503/429/413/400 remain as a deliberate
-  disclosure of the deny class. GraphQL Errors do not attach
-  `previous`. Rate-limit rows use `logAlways()`. The HMAC
-  `denied_access` / budget row and the operator log still carry the
-  annotated suffix (`metadata.explain`, `metadata.rule`).
-  `/drupal-mcp/readiness` stays a diagnostic document and still names
-  the contract reason.
+  `/drupal-mcp/context` return `MCP access is denied.` Governed
+  `AccessResult::forbidden()` reasons are the same generic string, so
+  JSON:API `errors[].detail` and `meta.omitted` no longer repeat IP,
+  entity-type, tenant, classification, bundle-floor, or write-gate
+  text. Size-cap and config-set secret/validation tool failures stay
+  generic too. IP, read/page budget, result cap, response-size cap,
+  classification refusal, no-profile, publish-gate, and
+  save/transition exception text stay off the caller body. HTTP
+  403/503/429/413/400 remain as a deliberate disclosure of the deny
+  class. GraphQL Errors do not attach `previous`. Rate-limit rows use
+  `logAlways()`. The HMAC `denied_access` / budget row and the
+  operator log still carry the annotated suffix (`metadata.explain`,
+  `metadata.rule`). `/drupal-mcp/readiness` stays a diagnostic
+  document and still names the contract reason.
 - GraphQL `requirePrincipal()`, JSON:API (validated bearer), and
   `/drupal-mcp/context` pass the surface's required OAuth scope into
   `assertDispatchAllowed()`. A token that omits that scope is refused

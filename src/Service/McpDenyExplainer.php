@@ -290,12 +290,51 @@ final class McpDenyExplainer {
         'Human review only.',
       );
     }
-    if (str_contains($reason, 'exceeds the MCP Sentinel cap')) {
+    if (str_contains($reason, 'exceeds the MCP Sentinel cap')
+      || str_contains($reason, 'response size cap')) {
       return new McpDenyExplanation(
         'response_size_cap',
         'response size cap',
         TRUE,
         'Narrow the query, or a human may raise the profile response_size_cap. Widening is never automatic.' . $profileHint,
+        'Human review only.',
+      );
+    }
+    if (str_contains($reason, 'tenant_mismatch')) {
+      return new McpDenyExplanation(
+        'tenant_mismatch',
+        'tenant resource boundary',
+        FALSE,
+        'The sealed network tenant does not own this resource. Never pass tenant as a tool argument.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'Scheduled transition is not permitted')) {
+      return new McpDenyExplanation(
+        'scheduled_transition',
+        'scheduled publish transition',
+        TRUE,
+        'A human may raise max_moderation_state or allow the scheduled transition on the profile.' . $profileHint,
+        'Human review only.',
+      );
+    }
+    if (str_contains($reason, 'secret-bearing') || str_contains($reason, 'holds secrets')) {
+      return new McpDenyExplanation(
+        'secret_bearing_config',
+        'secret-bearing configuration',
+        FALSE,
+        'Do not write key material or secret-bearing config names through a governed tool.',
+        'Stay denied.',
+      );
+    }
+    if (str_contains($reason, 'config validation')
+      || str_contains($reason, 'has no schema')
+      || str_contains($reason, 'schema validation failed')) {
+      return new McpDenyExplanation(
+        'config_validation',
+        'config write validation',
+        TRUE,
+        'Fix the named property paths or schema. Widening is never automatic.' . $profileHint,
         'Human review only.',
       );
     }

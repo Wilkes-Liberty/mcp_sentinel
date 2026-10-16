@@ -9,6 +9,7 @@ use Drupal\key\Entity\Key;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -376,7 +377,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $p = $this->profile(['allow_write' => TRUE, 'allow_delete' => TRUE]);
     $denied = $this->checker()->checkEntityAccess($this->node, 'delete', $p);
     $this->assertInstanceOf(AccessResultForbidden::class, $denied);
-    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $denied->getReason());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $denied->getReason());
     $this->assertContains(McpPolicyBundleRegistry::CACHE_TAG, $denied->getCacheTags());
     $view = $this->checker()->checkEntityAccess($this->node, 'view', $p);
     $this->assertFalse($view->isForbidden(), 'A bundle that names only delete must not refuse view.');
@@ -413,7 +414,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     foreach (['view', 'update', 'delete'] as $operation) {
       $result = $this->checker()->checkEntityAccess($this->node, $operation, $p);
       $this->assertInstanceOf(AccessResultForbidden::class, $result, $operation . ' must be refused under emergency deny.');
-      $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+      $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $result->getReason());
     }
   }
 
@@ -430,7 +431,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $p = $this->profile(['allow_write' => TRUE]);
     $result = $this->checker()->checkEntityAccess($this->node, 'view', $p);
     $this->assertInstanceOf(AccessResultForbidden::class, $result);
-    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $result->getReason());
   }
 
   /**
@@ -445,7 +446,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $p = $this->profile(['allow_write' => TRUE]);
     $result = $this->checker()->checkCreateAccess('node', $p);
     $this->assertInstanceOf(AccessResultForbidden::class, $result);
-    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $result->getReason());
   }
 
   /**
@@ -460,7 +461,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $p = $this->profile(['allow_config_write' => TRUE, 'allow_config_read' => TRUE]);
     $write = $this->checker()->checkConfigAccess('system.site', 'write', $p);
     $this->assertInstanceOf(AccessResultForbidden::class, $write);
-    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $write->getReason());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $write->getReason());
     $read = $this->checker()->checkConfigAccess('system.site', 'read', $p);
     $this->assertFalse($read->isForbidden(), 'A bundle that names only update must not refuse config read.');
   }
@@ -478,7 +479,7 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $access = $this->checker()->getJsonApiFilterAccess('node', $p);
     $result = $access[JSONAPI_FILTER_AMONG_ALL] ?? NULL;
     $this->assertInstanceOf(AccessResultForbidden::class, $result);
-    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $result->getReason());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $result->getReason());
   }
 
   /**

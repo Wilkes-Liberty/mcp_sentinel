@@ -5,11 +5,8 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
-use FilesystemIterator;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
 
 /**
  * Caller-facing denies in src/ must go through the generic helper (DEV-966).
@@ -37,8 +34,8 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
     $root = dirname(__DIR__, 3) . '/src';
     $this->assertDirectoryExists($root);
     $leaks = [];
-    $files = new RecursiveIteratorIterator(
-      new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS),
+    $files = new \RecursiveIteratorIterator(
+      new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
     );
     foreach ($files as $file) {
       if (!$file->isFile() || $file->getExtension() !== 'php') {
@@ -49,13 +46,22 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
       $leaks = array_merge($leaks, $this->forbiddenLeaks($rel, $code));
       $leaks = array_merge($leaks, $this->failureLeaks($rel, $code));
     }
-    $this->assertSame([], $leaks, "Caller-facing deny literals must go through refuse() or CALLER_MESSAGE:\n" . implode("\n", $leaks));
+    $this->assertSame(
+      [],
+      $leaks,
+      "Caller-facing deny literals must go through refuse() or CALLER_MESSAGE:\n" . implode("\n", $leaks),
+    );
   }
 
   /**
    * AccessResult::forbidden() arguments that are not the generic helper.
    *
-   * @return string[]
+   * @param string $rel
+   *   Path relative to src/.
+   * @param string $code
+   *   File contents.
+   *
+   * @return array
    *   Leak descriptions.
    */
   private function forbiddenLeaks(string $rel, string $code): array {
@@ -76,7 +82,12 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
   /**
    * Tool failure literals that still name a Sentinel rule.
    *
-   * @return string[]
+   * @param string $rel
+   *   Path relative to src/.
+   * @param string $code
+   *   File contents.
+   *
+   * @return array
    *   Leak descriptions.
    */
   private function failureLeaks(string $rel, string $code): array {
@@ -98,7 +109,15 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
   }
 
   /**
-   * 1-based line number for a byte offset.
+   * Returns the 1-based line number for a byte offset.
+   *
+   * @param string $code
+   *   File contents.
+   * @param int $offset
+   *   Byte offset of the match.
+   *
+   * @return int
+   *   Line number starting at 1.
    */
   private function lineAt(string $code, int $offset): int {
     return substr_count(substr($code, 0, $offset), "\n") + 1;
@@ -106,6 +125,12 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
 
   /**
    * Collapses an argument snippet to one line.
+   *
+   * @param string $arg
+   *   Raw argument text from the source.
+   *
+   * @return string
+   *   Whitespace-collapsed argument.
    */
   private function oneLine(string $arg): string {
     return trim(preg_replace('/\s+/', ' ', $arg) ?? $arg);

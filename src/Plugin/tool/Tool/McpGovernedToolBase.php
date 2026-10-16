@@ -404,7 +404,11 @@ abstract class McpGovernedToolBase extends ToolBase {
     $context = $this->result->getContextValues();
     $context[self::UNTRUSTED_READ_MARKER] = self::UNTRUSTED_READ_VALUE;
     if ($this->markedPayloadExceedsSizeCap($context)) {
-      $this->result = ExecutableResult::failure($this->t('MCP Sentinel refused a read that exceeds the response size cap.'));
+      $this->result = ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'Response size exceeds the MCP Sentinel cap.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
       return;
     }
     $this->result = ExecutableResult::success($this->result->getMessage(), $context);

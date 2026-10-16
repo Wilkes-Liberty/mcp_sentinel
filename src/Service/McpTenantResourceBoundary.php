@@ -38,10 +38,13 @@ final class McpTenantResourceBoundary {
    *   The database connection.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
    *   The sealed principal for this request.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer. Nullable for the deploy window.
    */
   public function __construct(
     private readonly Connection $connection,
     private readonly McpPrincipalContextHolder $holder,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -255,7 +258,9 @@ final class McpTenantResourceBoundary {
    * Uncacheable tenant denial.
    */
   private function forbidden(): AccessResult {
-    return AccessResult::forbidden('tenant_mismatch')->setCacheMaxAge(0);
+    return AccessResult::forbidden(
+      $this->denyExplainer?->refuse('tenant_mismatch') ?? McpDenyExplainer::CALLER_MESSAGE,
+    )->setCacheMaxAge(0);
   }
 
 }

@@ -138,7 +138,11 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     // one fixed message, so nothing about the submitted data is stored.
     if ($this->configSecrets->isSecretBearing($name)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', 'secret-bearing configuration name');
-      return ExecutableResult::failure($this->t('MCP Sentinel refused the config write: this configuration holds secrets and cannot be written through a governed tool.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'secret-bearing configuration name',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     // Validate the object this write would produce before anything is queued
@@ -146,7 +150,11 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     $verdict = $this->configWriteValidator->validate($name, $data, $profile->allowsSchemalessConfigWrite());
     if (!$verdict->valid) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', 'config validation: ' . $verdict->summary());
-      return ExecutableResult::failure($this->t('MCP Sentinel refused the config write: @summary.', ['@summary' => $verdict->summary()]));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'config validation: ' . $verdict->summary(),
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     // Give the approval submodule a chance to gate this write. A veto means the

@@ -7,7 +7,6 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
-use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
@@ -81,6 +80,8 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['system', 'user', 'filter', 'node', 'mcp_sentinel']);
     NodeType::create(['type' => 'article', 'name' => 'Article'])->save();
+    // Uid 1 bypasses entity access; burn it so the governed agent is ordinary.
+    $this->createUser();
     $this->switchToGovernedUser();
     $role = Role::load('mcp_api');
     $this->assertNotNull($role);
@@ -110,16 +111,16 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    * An individual GET 403 hides the entity-type denylist reason.
    */
   public function testIndividualGetHidesEntityTypeDenyReason(): void {
-    $this->denyEntityTypes(['node']);
-    $node = $this->createArticle();
-    $access = $node->access('view', $this->container->get('current_user')->getAccount(), TRUE);
+    $person = $this->createUser([]);
+    $this->assertInstanceOf(User::class, $person);
+    $access = $person->access('view', $this->container->get('current_user')->getAccount(), TRUE);
     $this->assertTrue($access->isForbidden(), 'A denied type must refuse the individual GET.');
 
     $document = $this->jsonApiErrorDocument(
       $access,
       'The current user is not allowed to GET the selected resource.',
     );
-    $this->assertJsonApiHidesRule($document, "Entity type 'node' is denied");
+    $this->assertJsonApiHidesRule($document, "Entity type 'user' is denied");
   }
 
   /**
@@ -195,15 +196,23 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    *   Extra denied entity types.
    */
   private function denyEntityTypes(array $types): void {
-    $profile = McpPolicyProfile::load('default');
-    $this->assertInstanceOf(McpPolicyProfile::class, $profile);
-    $denied = array_values(array_unique(array_merge($profile->getDeniedEntityTypes(), $types)));
-    $profile->set('denied_entity_types', $denied)->save();
+    $config = $this->config('mcp_sentinel.mcp_policy_profile.default');
+    $current = $config->get('denied_entity_types') ?? [];
+    $config
+      ->set('denied_entity_types', array_values(array_unique(array_merge($current, $types))))
+      ->save();
     $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();
+    $this->container->get('entity_type.manager')->getAccessControlHandler('node')->resetCache();
   }
 
   /**
    * Creates a published article.
+   *
+   * @param \Drupal\user\Entity\User|null $author
+   *   Optional node owner.
+   *
+   * @return \Drupal\node\Entity\Node
+   *   The saved node.
    */
   private function createArticle(?User $author = NULL): Node {
     $values = [
@@ -227,7 +236,7 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    * @param string $message
    *   The exception message core puts in errors[].detail before the reason.
    *
-   * @return array<string, mixed>
+   * @return array
    *   A JSON:API error document.
    */
   private function jsonApiErrorDocument(AccessResultInterface $access, string $message): array {
@@ -244,6 +253,14 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
 
   /**
    * Appends getReason() onto the 403 message, as core JSON:API does.
+   *
+   * @param \Drupal\Core\Access\AccessResultInterface $access
+   *   The governed access result.
+   * @param string $message
+   *   The exception message core puts in errors[].detail before the reason.
+   *
+   * @return string
+   *   Caller-facing detail text.
    */
   private function jsonApiAccessDetail(AccessResultInterface $access, string $message): string {
     $detail = $message;
@@ -259,7 +276,7 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
   /**
    * Asserts a JSON:API document is a generic deny with no rule disclosure.
    *
-   * @param array<string, mixed> $document
+   * @param array $document
    *   Encoded JSON:API errors or meta.omitted document.
    * @param string $leaked
    *   Rule text that must not reach the caller.
