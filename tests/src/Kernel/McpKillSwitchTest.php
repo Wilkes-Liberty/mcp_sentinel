@@ -72,7 +72,10 @@ final class McpKillSwitchTest extends KernelTestBase {
    *
    * @var list<string>
    */
-  private array $introspectionWeaken = [];
+  private array $introspectionWeaken = [
+    McpPaladinIntrospection::WEAKEN_SKIP_EXP,
+    McpPaladinIntrospection::WEAKEN_SKIP_REDIRECT,
+  ];
 
   /**
    * PHPUnit weaken flags reapplied after binding service rebuilds.
