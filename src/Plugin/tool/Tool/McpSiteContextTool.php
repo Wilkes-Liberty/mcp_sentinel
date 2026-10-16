@@ -60,6 +60,8 @@ final class McpSiteContextTool extends McpGovernedToolBase {
         '@msg' => $this->governanceDenyExplainer?->refuse(
           "The site schema is classified above this principal's egress ceiling ("
           . McpClassificationResolver::DENIAL_CODE . ').',
+          NULL,
+          FALSE,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }

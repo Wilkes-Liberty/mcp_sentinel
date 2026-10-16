@@ -125,7 +125,7 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_config_set')) {
       return $rateLimited;
     }
-    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'write', $profile);
+    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'write', $profile, FALSE);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', $reason);
       return ExecutableResult::failure($this->t('MCP access is denied.'));
@@ -141,6 +141,8 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
       return ExecutableResult::failure($this->t('@msg', [
         '@msg' => $this->governanceDenyExplainer?->refuse(
           'secret-bearing configuration name',
+          NULL,
+          FALSE,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }
@@ -153,6 +155,8 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
       return ExecutableResult::failure($this->t('@msg', [
         '@msg' => $this->governanceDenyExplainer?->refuse(
           'config validation: ' . $verdict->summary(),
+          NULL,
+          FALSE,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }

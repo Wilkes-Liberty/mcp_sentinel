@@ -56,7 +56,7 @@ trait McpEntityToolTrait {
    * security event that is always written. audit_enabled gates allow rows
    * only.
    *
-   * JSON:API / GraphQL denial logging is a future enhancement (F10 v2).
+   * JSON:API access-hook denies write denied_access through refuse().
    *
    * @param string $toolId
    *   The plugin ID of the tool handling the denial.
@@ -152,7 +152,7 @@ trait McpEntityToolTrait {
         $logger = \Drupal::service('mcp_sentinel.audit_logger');
       }
       $limited = (string) $this->t('Rate limit exceeded. Retry after the current window expires.');
-      $caller = $this->governanceDenyExplainer?->refuse($limited)
+      $caller = $this->governanceDenyExplainer?->refuse($limited, NULL, FALSE)
         ?? McpDenyExplainer::CALLER_MESSAGE;
       if ($logger !== NULL) {
         $logger->logAlways('rate_limit_exceeded', [

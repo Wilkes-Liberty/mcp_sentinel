@@ -78,6 +78,8 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
       return ExecutableResult::failure($this->t('@msg', [
         '@msg' => $this->governanceDenyExplainer?->refuse(
           'Configuration read is disabled in MCP Sentinel.',
+          NULL,
+          FALSE,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }
@@ -86,7 +88,7 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
     $tags = [];
     $names = array_values(array_filter(
       $names,
-      fn (string $name): bool => $this->governanceAccessChecker->checkConfigTypePolicy($name, $profile, $tags) === NULL,
+      fn (string $name): bool => $this->governanceAccessChecker->checkConfigTypePolicy($name, $profile, $tags, FALSE) === NULL,
     ));
 
     $names = $this->applyResultCap([

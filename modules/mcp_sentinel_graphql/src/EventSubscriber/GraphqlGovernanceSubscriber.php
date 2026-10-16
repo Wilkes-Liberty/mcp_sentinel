@@ -293,7 +293,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
     }
     if ($this->accessChecker->checkBundleFloor($operation, AccessResult::neutral())->isForbidden()) {
       throw new Error(
-        $this->denyExplainer?->refuse(McpAccessChecker::BUNDLE_DENIAL_CODE)
+        $this->denyExplainer?->refuse(McpAccessChecker::BUNDLE_DENIAL_CODE, NULL, FALSE)
           ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }

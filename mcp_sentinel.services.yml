@@ -302,6 +302,9 @@ services:
     class: Drupal\mcp_sentinel\Service\McpDenyExplainer
     arguments:
       - '@logger.channel.mcp_sentinel'
+      - '@?mcp_sentinel.audit_logger'
+      - '@?mcp_sentinel.principal_context_holder'
+      - '@?request_stack'
 
   mcp_sentinel.whoami_recorder:
     class: Drupal\mcp_sentinel\Service\McpWhoamiRecorder

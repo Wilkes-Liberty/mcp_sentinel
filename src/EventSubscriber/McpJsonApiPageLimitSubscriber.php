@@ -198,6 +198,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       throw new TooManyRequestsHttpException(NULL,
         $this->denyExplainer?->refuse(
           'MCP Sentinel request budget exceeded for the active profile (read_budget_exceeded). Retry after the current window.',
+          NULL,
+          FALSE,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
@@ -243,6 +245,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         throw new TooManyRequestsHttpException(NULL,
           $this->denyExplainer?->refuse(
             'MCP Sentinel collection page budget exceeded for the active profile (page_budget_exceeded). Retry after the current window.',
+            NULL,
+            FALSE,
           ) ?? McpDenyExplainer::CALLER_MESSAGE,
         );
       }

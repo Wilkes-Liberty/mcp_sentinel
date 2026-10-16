@@ -158,7 +158,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
       'uid' => $this->currentUser->id(),
     ]);
 
-    $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'create', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'create', $profile, FALSE);
     if ($policy = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', '(new)', 'create', $policy);
       return ExecutableResult::failure($this->t('MCP access is denied.'));
@@ -191,7 +191,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
     if ($this->contentLock->conflictsForActor('node', (string) $node->id(), $node)) {
       return ExecutableResult::failure($this->t('Node @id is locked against MCP writes by another actor (a human may be editing it).', ['@id' => $node->id()]));
     }
-    $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'update', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'update', $profile, FALSE);
     if ($policy = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', (string) $node->id(), 'update', $policy);
       return ExecutableResult::failure($this->t('MCP access is denied.'));

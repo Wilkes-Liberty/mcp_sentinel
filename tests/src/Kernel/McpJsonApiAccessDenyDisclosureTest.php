@@ -315,7 +315,7 @@ final class McpJsonApiAccessDenyDisclosureTest extends KernelTestBase {
    * @param array $document
    *   Encoded JSON:API errors or meta.omitted document.
    * @param int $before
-   *   denied_access count before the governed access check.
+   *   Denied_access count before the governed access check.
    * @param string $leaked
    *   Rule text that must not reach the caller.
    * @param string $ruleId

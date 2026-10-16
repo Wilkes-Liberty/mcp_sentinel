@@ -133,7 +133,7 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_media_create')) {
       return $rateLimited;
     }
-    $policyResult = $this->governanceAccessChecker->checkEntityAccess($media, 'create', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($media, 'create', $profile, FALSE);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_media_create', 'media', '(new)', 'create', $reason);
       return ExecutableResult::failure($this->t('MCP access is denied.'));

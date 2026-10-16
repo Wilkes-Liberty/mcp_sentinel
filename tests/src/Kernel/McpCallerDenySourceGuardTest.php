@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * Caller-facing denies in src/ must go through the generic helper (DEV-966).
+ * Caller-facing denies in src/ and modules/*/src must go through refuse().
  *
  * Lives in Kernel so a failing scan cannot skip the rest of the Kernel
  * suite (Unit runs first under set -euo pipefail).
@@ -31,20 +31,26 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
    * AccessResult::forbidden and policy-deny tool failures use refuse().
    */
   public function testSrcCallerFacingDeniesGoThroughRefuse(): void {
-    $root = dirname(__DIR__, 3) . '/src';
-    $this->assertDirectoryExists($root);
+    $moduleRoot = dirname(__DIR__, 3);
+    $roots = [$moduleRoot . '/src'];
+    foreach (glob($moduleRoot . '/modules/*/src') ?: [] as $dir) {
+      $roots[] = $dir;
+    }
     $leaks = [];
-    $files = new \RecursiveIteratorIterator(
-      new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-    );
-    foreach ($files as $file) {
-      if (!$file->isFile() || $file->getExtension() !== 'php') {
-        continue;
+    foreach ($roots as $root) {
+      $this->assertDirectoryExists($root);
+      $files = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+      );
+      foreach ($files as $file) {
+        if (!$file->isFile() || $file->getExtension() !== 'php') {
+          continue;
+        }
+        $code = (string) file_get_contents($file->getPathname());
+        $rel = substr($file->getPathname(), strlen($moduleRoot) + 1);
+        $leaks = array_merge($leaks, $this->forbiddenLeaks($rel, $code));
+        $leaks = array_merge($leaks, $this->failureLeaks($rel, $code));
       }
-      $code = (string) file_get_contents($file->getPathname());
-      $rel = substr($file->getPathname(), strlen($root) + 1);
-      $leaks = array_merge($leaks, $this->forbiddenLeaks($rel, $code));
-      $leaks = array_merge($leaks, $this->failureLeaks($rel, $code));
     }
     $this->assertSame(
       [],
@@ -97,7 +103,16 @@ final class McpCallerDenySourceGuardTest extends KernelTestBase {
     }
     foreach ($matches[1] as $match) {
       $literal = $match[0];
-      if ($literal === 'MCP access is denied.' || $literal === '@msg') {
+      $window = substr($code, $match[1], 500);
+      if ($literal === '@msg') {
+        if (!str_contains($window, 'refuse(')
+          && !str_contains($window, 'CALLER_MESSAGE')) {
+          $leaks[] = $rel . ':' . $this->lineAt($code, $match[1])
+            . ' failure t(\'@msg\') is not bound to refuse() or CALLER_MESSAGE';
+        }
+        continue;
+      }
+      if ($literal === 'MCP access is denied.') {
         continue;
       }
       if (!preg_match('/MCP Sentinel refused|holds secrets|response size cap/', $literal)) {

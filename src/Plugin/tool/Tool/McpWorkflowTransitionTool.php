@@ -138,7 +138,7 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
     if ($this->contentLock->conflictsForActor($entity_type, $id, $entity)) {
       return ExecutableResult::failure($this->t('Entity @id is locked against MCP writes by another actor.', ['@id' => $id]));
     }
-    $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, 'update', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, 'update', $profile, FALSE);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_workflow_transition', $entity_type, $id, 'update', $reason);
       return ExecutableResult::failure($this->t('MCP access is denied.'));
@@ -225,6 +225,8 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
       return ExecutableResult::failure($this->t('@msg', [
         '@msg' => $this->governanceDenyExplainer?->refuse(
           'MCP Sentinel denied the transition: publishing is not permitted for this agent. A human publisher must publish.',
+          NULL,
+          FALSE,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }
@@ -238,6 +240,8 @@ final class McpWorkflowTransitionTool extends McpGovernedToolBase {
           '@msg' => $this->governanceDenyExplainer?->refuse(
             'MCP Sentinel denied the transition: state "' . $state
             . '" exceeds the maximum permitted state "' . $max . '".',
+            NULL,
+            FALSE,
           ) ?? McpDenyExplainer::CALLER_MESSAGE,
         ]));
       }

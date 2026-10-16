@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpDenyExplanation;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Names the policy rule behind a deny and whether widening is appropriate.
@@ -23,16 +26,6 @@ final class McpDenyExplainer {
   public const CALLER_MESSAGE = 'MCP access is denied.';
 
   /**
-   * Constructs the explainer.
-   *
-   * @param \Psr\Log\LoggerInterface|null $logger
-   *   Operator log channel. NULL in unit tests.
-   */
-  public function __construct(
-    private readonly ?LoggerInterface $logger = NULL,
-  ) {}
-
-  /**
    * Entity types that must stay denied even when an allowlist is edited.
    */
   private const CREDENTIAL_TYPES = [
@@ -42,6 +35,37 @@ final class McpDenyExplainer {
     'consumer',
     'encryption_profile',
   ];
+
+  /**
+   * Denied_access fingerprints already written for the current request.
+   *
+   * @var array<string, true>
+   */
+  private array $written = [];
+
+  /**
+   * Request object-id the fingerprints belong to.
+   */
+  private mixed $writtenFor = NULL;
+
+  /**
+   * Constructs the explainer.
+   *
+   * @param \Psr\Log\LoggerInterface|null $logger
+   *   Operator log channel. NULL in unit tests.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
+   *   HMAC audit chain. NULL in unit tests or the deploy window.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder|null $holder
+   *   Sealed principal for this request. NULL when unknown.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   Current request, used to name the surface and dedupe one deny.
+   */
+  public function __construct(
+    private readonly ?LoggerInterface $logger = NULL,
+    private readonly ?McpAuditLogger $auditLogger = NULL,
+    private readonly ?McpPrincipalContextHolder $holder = NULL,
+    private readonly ?RequestStack $requestStack = NULL,
+  ) {}
 
   /**
    * Builds a structured explanation from a deny reason string.
@@ -385,21 +409,97 @@ final class McpDenyExplainer {
   }
 
   /**
-   * Logs the operator explainer and returns the generic caller deny.
+   * Logs the operator explainer, audits, and returns the generic caller deny.
    *
    * Every caller-facing deny must go through this method (DEV-966).
    *
    * @param string $reason
-   *   Original deny reason. Written to the operator log only.
+   *   Original deny reason. Written to the operator log and HMAC row.
    * @param string|null $profileId
    *   Active policy profile id when known.
+   * @param bool $audit
+   *   FALSE when the caller already wrote an HMAC row for this deny.
    *
    * @return string
    *   CALLER_MESSAGE. Never the annotated reason.
    */
-  public function refuse(string $reason, ?string $profileId = NULL): string {
-    $this->operatorNotice($reason, $profileId);
+  public function refuse(
+    string $reason,
+    ?string $profileId = NULL,
+    bool $audit = TRUE,
+  ): string {
+    $annotated = $this->operatorNotice($reason, $profileId);
+    if ($audit) {
+      $this->writeDeniedAccess($reason, $annotated, $profileId);
+    }
     return self::CALLER_MESSAGE;
+  }
+
+  /**
+   * Writes one denied_access row with the rule, explain, and principal.
+   *
+   * AccessResult construction must still return forbidden when the chain
+   * is not installed (kernel tests without the audit schema).
+   *
+   * @param string $reason
+   *   Original deny reason. Must not contain secrets.
+   * @param string $explain
+   *   Annotated operator suffix already logged.
+   * @param string|null $profileId
+   *   Active policy profile id when known.
+   */
+  private function writeDeniedAccess(string $reason, string $explain, ?string $profileId): void {
+    if ($this->auditLogger === NULL) {
+      return;
+    }
+    $request = $this->requestStack?->getCurrentRequest();
+    $requestId = $request === NULL ? 0 : spl_object_id($request);
+    if ($requestId !== $this->writtenFor) {
+      $this->written = [];
+      $this->writtenFor = $requestId;
+    }
+    $explanation = $this->explain($reason, $profileId);
+    $fingerprint = $explanation->ruleId . "\0" . $reason;
+    if (isset($this->written[$fingerprint])) {
+      return;
+    }
+    $this->written[$fingerprint] = TRUE;
+
+    $surface = $request !== NULL
+      ? McpGovernedSurface::fromPath($request->getPathInfo())
+      : NULL;
+    $meta = [
+      'tool' => $surface?->value ?? 'entity_access',
+      'reason' => $reason,
+      'explain' => $explain,
+      'rule' => $explanation->ruleId,
+    ];
+    if ($profileId !== NULL && $profileId !== '') {
+      $meta['profile'] = $profileId;
+    }
+    $ctx = $this->holder?->get();
+    if ($ctx !== NULL) {
+      try {
+        $meta['principal_key'] = $ctx->principalKey();
+        $meta['human_key'] = $ctx->humanKey();
+        $meta['iss'] = $ctx->issuer();
+        $meta['sub'] = $ctx->subject();
+        $meta['tenant'] = $ctx->tenant();
+      }
+      catch (McpPrincipalKeyException $e) {
+        $meta['principal_key'] = 'unverified';
+        $meta['human_key'] = 'unverified';
+        $meta['principal_unverified'] = $e->reasonCode;
+      }
+    }
+    try {
+      $this->auditLogger->logAlways('denied_access', $meta);
+    }
+    catch (\Throwable $e) {
+      $this->logger?->error('MCP Sentinel denied_access write failed: @m', [
+        '@m' => $e->getMessage(),
+      ]);
+    }
   }
 
   /**

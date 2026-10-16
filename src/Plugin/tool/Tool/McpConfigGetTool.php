@@ -79,7 +79,7 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_config_get')) {
       return $rateLimited;
     }
-    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'read', $profile);
+    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'read', $profile, FALSE);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_config_get', 'config', $name, 'read', $reason);
       return ExecutableResult::failure($this->t('MCP access is denied.'));

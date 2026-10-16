@@ -41,7 +41,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   class. GraphQL Errors do not attach `previous`. Rate-limit rows use
   `logAlways()`. The HMAC `denied_access` / budget row and the
   operator log still carry the annotated suffix (`metadata.explain`,
-  `metadata.rule`). `/drupal-mcp/readiness` stays a diagnostic
+  `metadata.rule`), including governed JSON:API access-hook 403s
+  from entity, tenant, and scheduled-publish gates, with the
+  principal when it is known. Paths that already audit pass
+  `refuse(..., audit: false)` so a deny is written once.
+  `/drupal-mcp/readiness` stays a diagnostic
   document and still names the contract reason.
 - GraphQL `requirePrincipal()`, JSON:API, and
   `/drupal-mcp/context` pass the surface's required OAuth scope into

@@ -137,7 +137,7 @@ class McpContextController extends ControllerBase {
     // Attested bundle / emergency deny (d.o #3617702). The schema document
     // does not go through entity access, so the floor is applied here.
     if ($this->accessChecker->checkBundleFloor('view', AccessResult::neutral())->isForbidden()) {
-      $this->denyExplainer?->refuse(McpAccessChecker::BUNDLE_DENIAL_CODE);
+      $this->denyExplainer?->refuse(McpAccessChecker::BUNDLE_DENIAL_CODE, NULL, FALSE);
       return $this->genericDenyResponse(403);
     }
 
@@ -155,6 +155,8 @@ class McpContextController extends ControllerBase {
         ]);
         $this->denyExplainer?->refuse(
           'MCP Sentinel request budget exceeded (read_budget_exceeded). Retry after the current window.',
+          NULL,
+          FALSE,
         );
         return new JsonResponse(
           ['error' => McpDenyExplainer::CALLER_MESSAGE],

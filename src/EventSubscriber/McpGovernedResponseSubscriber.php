@@ -135,7 +135,7 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
       'The rendered response (%d bytes) exceeds the effective cap of %d bytes for the active profile (response_size_cap_exceeded).',
       $bytes,
       $cap,
-    ));
+    ), NULL, FALSE);
     $refusal = new JsonResponse([
       'errors' => [
         [
