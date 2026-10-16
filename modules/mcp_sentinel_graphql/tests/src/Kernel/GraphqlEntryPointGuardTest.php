@@ -252,7 +252,11 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
     catch (Error $e) {
       $this->assertSame('MCP access is denied.', $e->getMessage());
     }
-    $this->assertSame($before, $this->deniedAccessCount());
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('graphql', $meta['tool']);
+    $this->assertSame('graphql_operation_type', $meta['reason']);
+    $this->assertStringContainsString('[rule:', (string) ($meta['explain'] ?? ''));
   }
 
   /**
