@@ -37,6 +37,7 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * mcp-sentinel:operator-bind so both identities resolve to one
  * operator record. Bind introspects a Paladin token (active required)
  * and derives iss|sub from that response, never from --human-key.
+ * The token is read from stdin or PALADIN_TOKEN, never --token.
  * Paladin down fails closed. Unbind needs two distinct verified
  * operators. The shell sits outside governance; bind from an
  * individual OS account, not a shared deploy user.
@@ -183,12 +184,14 @@ final class McpKillSwitchCommands extends DrushCommands {
    * The iss|sub is taken from an active Paladin introspection response,
    * never from --human-key. Paladin unreachable fails closed. A
    * squatted identity already bound to a different operator is
-   * refused. The shell is outside governance: run this from an
+   * refused. Pipe the token on stdin or set PALADIN_TOKEN; --token
+   * is refused. The shell is outside governance: run this from an
    * individual OS account, not a shared deploy user.
    */
   #[CLI\Command(name: 'mcp-sentinel:operator-bind', aliases: ['mcps:operator-bind'])]
-  #[CLI\Option(name: 'token', description: 'Paladin access token to introspect. Not logged. PALADIN_TOKEN is accepted when this option is empty.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:operator-bind --token=ACCESS_TOKEN', description: 'Bind this shell to the Paladin iss|sub from an active introspection.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-bind', description: 'Bind this shell to the Paladin iss|sub from an active introspection.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:operator-bind < token.txt', description: 'Bind using a token piped on stdin.')]
   public function bindOperator(
     array $options = [
       'token' => '',
@@ -213,10 +216,10 @@ final class McpKillSwitchCommands extends DrushCommands {
    * Unbind an operator record. Two distinct Paladin operators required.
    */
   #[CLI\Command(name: 'mcp-sentinel:operator-unbind', aliases: ['mcps:operator-unbind'])]
-  #[CLI\Option(name: 'token', description: 'Paladin access token to introspect. Not logged. PALADIN_TOKEN is accepted when this option is empty.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
   #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an unbind request, to confirm as the named second person (secondary account holder).')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:operator-unbind --token=ACCESS_TOKEN', description: 'Request unbind of this Paladin operator record (pending confirm).')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:operator-unbind --confirm-batch=BATCH --token=ACCESS_TOKEN', description: 'Confirm an unbind as a distinct operator.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-unbind', description: 'Request unbind of this Paladin operator record (pending confirm).')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-unbind --confirm-batch=BATCH', description: 'Confirm an unbind as a distinct operator.')]
   public function unbindOperator(
     array $options = [
       'token' => '',
@@ -369,24 +372,36 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Paladin access token from --token or PALADIN_TOKEN. Never logged.
+   * Paladin access token from PALADIN_TOKEN or stdin. Never logged.
    *
-   * An empty value is passed through so bind and unbind can audit the
-   * refusal. The token is never written to logs.
+   * --token is refused: it lands in shell history and in ps. An empty
+   * value is passed through so bind and unbind can audit the refusal.
    *
    * @param array<string, mixed> $options
    *   Command options.
    *
    * @return string
    *   Access token, or empty when neither source provided one.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   *   When --token is passed.
    */
   private function paladinToken(array $options): string {
-    $token = trim((string) ($options['token'] ?? ''));
-    if ($token === '') {
-      $fromEnv = getenv('PALADIN_TOKEN');
-      $token = is_string($fromEnv) ? trim($fromEnv) : '';
+    if (trim((string) ($options['token'] ?? '')) !== '') {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        'Do not pass --token. Pipe the token on stdin or set PALADIN_TOKEN.',
+      );
     }
-    return $token;
+    $fromEnv = getenv('PALADIN_TOKEN');
+    if (is_string($fromEnv) && trim($fromEnv) !== '') {
+      return trim($fromEnv);
+    }
+    if (!defined('STDIN') || (function_exists('posix_isatty') && posix_isatty(STDIN))) {
+      return '';
+    }
+    $fromStdin = stream_get_contents(STDIN);
+    return is_string($fromStdin) ? trim($fromStdin) : '';
   }
 
   /**

@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
-use Drupal\Core\Config\ConfigFactoryInterface;
-use Drupal\key\KeyRepositoryInterface;
+use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
@@ -17,24 +17,39 @@ use GuzzleHttp\Exception\GuzzleException;
  *
  * The iss|sub is taken only from an active introspection response. The
  * token string and any --human-key input are never used as identity.
- * Paladin unreachable, misconfigured, or non-200: fail closed.
+ * The introspection URL, issuer, audience, and client credentials
+ * come from settings.php, not from importable config. HTTPS and
+ * client authentication are required. Paladin unreachable,
+ * misconfigured, or a claim mismatch: fail closed.
  */
 final class McpPaladinIntrospection {
+
+  /**
+   * PHPUnit-only: skip pinned issuer and audience matching.
+   */
+  public const WEAKEN_SKIP_ISSUER_AUDIENCE = 'skip_issuer_audience';
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * @var array<string, true>
+   */
+  private array $weakenForTest = [];
 
   /**
    * Constructs Paladin token introspection.
    *
    * @param \GuzzleHttp\ClientInterface $httpClient
    *   HTTP client.
-   * @param \Drupal\Core\Config\ConfigFactoryInterface $configFactory
-   *   Paladin introspection URL and client credentials.
-   * @param \Drupal\key\KeyRepositoryInterface|null $keyRepository
-   *   Client secret for introspection, when configured.
+   * @param \Drupal\Core\Site\Settings $settings
+   *   Pinned Paladin URL, issuer, audience, and client credentials.
+   * @param \Drupal\Component\Datetime\TimeInterface $time
+   *   Clock used for the optional exp check.
    */
   public function __construct(
     private readonly ClientInterface $httpClient,
-    private readonly ConfigFactoryInterface $configFactory,
-    private readonly ?KeyRepositoryInterface $keyRepository = NULL,
+    private readonly Settings $settings,
+    private readonly TimeInterface $time,
   ) {}
 
   /**
@@ -44,7 +59,8 @@ final class McpPaladinIntrospection {
    *   Access token to introspect. Never logged.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When Paladin is down, the token is inactive, or iss|sub is missing.
+   *   When Paladin is down, the token is inactive, or claims do not
+   *   match the pinned issuer and audience.
    */
   public function activeIdentity(string $token): McpOperatorIdentity {
     $token = trim($token);
@@ -54,9 +70,19 @@ final class McpPaladinIntrospection {
         'A Paladin access token is required.',
       );
     }
-    $url = trim((string) $this->configFactory->get('mcp_sentinel.settings')
-      ->get('paladin_introspection_url'));
-    if ($url === '') {
+    $url = $this->setting('introspection_url');
+    $issuer = $this->setting('issuer');
+    $audience = $this->setting('audience');
+    $clientId = $this->setting('client_id');
+    $clientSecret = $this->setting('client_secret');
+    if ($url === '' || $issuer === '' || $audience === '' || $clientId === '' || $clientSecret === '') {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::PALADIN_UNAVAILABLE,
+        'Paladin is unavailable.',
+      );
+    }
+    $parts = parse_url($url);
+    if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https' || ($parts['host'] ?? '') === '') {
       throw new McpKillSwitchException(
         McpKillSwitchException::PALADIN_UNAVAILABLE,
         'Paladin is unavailable.',
@@ -64,7 +90,7 @@ final class McpPaladinIntrospection {
     }
 
     try {
-      $response = $this->httpClient->request('POST', $url, $this->requestOptions($token));
+      $response = $this->httpClient->request('POST', $url, $this->requestOptions($token, $clientId, $clientSecret));
     }
     catch (GuzzleException) {
       throw new McpKillSwitchException(
@@ -95,6 +121,13 @@ final class McpPaladinIntrospection {
         'A verified operator identity is required.',
       );
     }
+    $exp = $payload['exp'] ?? NULL;
+    if (is_numeric($exp) && (int) $exp <= $this->time->getRequestTime()) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        'A verified operator identity is required.',
+      );
+    }
     $iss = $payload['iss'] ?? NULL;
     $sub = $payload['sub'] ?? NULL;
     if (!is_string($iss) || $iss === '' || !is_string($sub) || $sub === '') {
@@ -102,6 +135,23 @@ final class McpPaladinIntrospection {
         McpKillSwitchException::UNVERIFIED_OPERATOR,
         'A verified operator identity is required.',
       );
+    }
+    if (!$this->weakened(self::WEAKEN_SKIP_ISSUER_AUDIENCE)) {
+      if (!$this->claimMatches($issuer, $iss)) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'A verified operator identity is required.',
+        );
+      }
+      $audienceOk = $this->claimMatches($audience, $payload['aud'] ?? NULL)
+        || $this->claimMatches($audience, $payload['azp'] ?? NULL)
+        || $this->claimMatches($audience, $payload['client_id'] ?? NULL);
+      if (!$audienceOk) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'A verified operator identity is required.',
+        );
+      }
     }
     try {
       return McpOperatorIdentity::paladin($iss . '|' . $sub);
@@ -115,41 +165,86 @@ final class McpPaladinIntrospection {
   }
 
   /**
+   * PHPUnit-only injection that disables pinned issuer and audience checks.
+   *
+   * @param string $flag
+   *   One of the WEAKEN_* constants.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Paladin introspection weaken flags can be set only under PHPUnit.',
+      );
+    }
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
    * Guzzle options. The token is the form body, never a log field.
    *
    * @return array<string, mixed>
    *   Request options.
    */
-  private function requestOptions(string $token): array {
-    $options = [
+  private function requestOptions(string $token, string $clientId, string $clientSecret): array {
+    return [
       'http_errors' => FALSE,
       'timeout' => 5,
       'connect_timeout' => 5,
       'form_params' => ['token' => $token],
+      'auth' => [$clientId, $clientSecret],
       'headers' => [
         'Accept' => 'application/json',
       ],
     ];
-    $clientId = trim((string) $this->configFactory->get('mcp_sentinel.settings')
-      ->get('paladin_introspection_client_id'));
-    $secret = $this->clientSecret();
-    if ($clientId !== '' && $secret !== '') {
-      $options['auth'] = [$clientId, $secret];
-    }
-    return $options;
   }
 
   /**
-   * Configured introspection client secret, or empty.
+   * Pinned settings.php value, or empty.
    */
-  private function clientSecret(): string {
-    $keyId = trim((string) $this->configFactory->get('mcp_sentinel.settings')
-      ->get('paladin_introspection_client_secret_key'));
-    if ($keyId === '' || $this->keyRepository === NULL) {
-      return '';
+  private function setting(string $key): string {
+    $value = $this->settings->get('mcp_sentinel.paladin.' . $key, '');
+    return is_string($value) ? trim($value) : '';
+  }
+
+  /**
+   * Constant-time match of a pinned value against a claim.
+   *
+   * @param string $expected
+   *   Pinned issuer or audience.
+   * @param mixed $claim
+   *   String claim, list of strings, or anything else.
+   */
+  private function claimMatches(string $expected, mixed $claim): bool {
+    if ($expected === '') {
+      return FALSE;
     }
-    $key = $this->keyRepository->getKey($keyId);
-    return $key ? (string) $key->getKeyValue() : '';
+    $candidates = [];
+    if (is_string($claim) && $claim !== '') {
+      $candidates[] = $claim;
+    }
+    elseif (is_array($claim)) {
+      foreach ($claim as $item) {
+        if (is_string($item) && $item !== '') {
+          $candidates[] = $item;
+        }
+      }
+    }
+    foreach ($candidates as $candidate) {
+      if (strlen($candidate) === strlen($expected) && hash_equals($expected, $candidate)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
   }
 
 }

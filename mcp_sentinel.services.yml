@@ -232,8 +232,8 @@ services:
     class: Drupal\mcp_sentinel\Service\McpPaladinIntrospection
     arguments:
       - '@http_client'
-      - '@config.factory'
-      - '@?key.repository'
+      - '@settings'
+      - '@datetime.time'
 
   mcp_sentinel.operator_identity:
     class: Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory

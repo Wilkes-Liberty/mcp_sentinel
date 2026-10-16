@@ -8,6 +8,7 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Uuid\UuidInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Database\IntegrityConstraintViolationException;
 use Drupal\Core\Database\Transaction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
@@ -62,11 +63,21 @@ final class McpOperatorBinding {
   public const WEAKEN_SKIP_MIXED_CHANNEL = 'skip_mixed_channel';
 
   /**
+   * PHPUnit-only: skip same-identity unbind/confirm refusal.
+   */
+  public const WEAKEN_SKIP_SAME_OPERATOR = 'skip_same_operator';
+
+  /**
    * Test-only weaken flags. Empty in production.
    *
    * @var array<string, true>
    */
   private array $weakenForTest = [];
+
+  /**
+   * PHPUnit-only callback invoked immediately before an insert.
+   */
+  private mixed $beforeUpsertForTest = NULL;
 
   /**
    * Constructs the binding store.
@@ -163,15 +174,20 @@ final class McpOperatorBinding {
           return $firstRecord;
         }
         $operatorId = $firstRecord ?? $secondRecord ?? $this->uuid->generate();
+        $joinedExisting = ($firstRecord === NULL) !== ($secondRecord === NULL);
         $this->upsert($first, $operatorId);
         $this->upsert($second, $operatorId);
-        $this->audit(self::AUDIT_BIND, $first, $second, $operatorId);
+        $this->audit(self::AUDIT_BIND, $first, $second, $operatorId, $joinedExisting);
         unset($txn);
         return $operatorId;
       }
       catch (\Throwable $e) {
-        if ($txn instanceof Transaction) {
-          $txn->rollBack();
+        $txn->rollBack();
+        if ($e instanceof IntegrityConstraintViolationException) {
+          throw new McpKillSwitchException(
+            McpKillSwitchException::OPERATOR_BINDING_CONFLICT,
+            'Those identities are already bound to different operator records.',
+          );
         }
         throw $e;
       }
@@ -370,7 +386,7 @@ final class McpOperatorBinding {
       );
     }
     $same = strlen($first) === strlen($second) && hash_equals($first, $second);
-    if ($same) {
+    if ($same && !$this->weakened(self::WEAKEN_SKIP_SAME_OPERATOR)) {
       throw new McpKillSwitchException(
         McpKillSwitchException::SAME_OPERATOR,
         'The named second person (secondary account holder) must be a distinct operator account.',
@@ -399,7 +415,8 @@ final class McpOperatorBinding {
       return;
     }
     if ($firstRecord !== NULL && $secondRecord !== NULL
-      && $this->sameRecord($firstRecord, $secondRecord)) {
+      && $this->sameRecord($firstRecord, $secondRecord)
+      && !$this->weakened(self::WEAKEN_SKIP_SAME_OPERATOR)) {
       throw new McpKillSwitchException(
         McpKillSwitchException::SAME_OPERATOR,
         'The named second person (secondary account holder) must be a distinct operator account.',
@@ -454,10 +471,10 @@ final class McpOperatorBinding {
   }
 
   /**
-   * PHPUnit-only injection that disables mixed-channel bind invariants.
+   * PHPUnit-only injection that disables bind or unbind invariants.
    *
    * Impossible outside the PHPUnit process. Used so unbound, same-
-   * person, and squat-refusal tests can fail.
+   * person, squat-refusal, and same-operator unbind tests can fail.
    *
    * @param string $flag
    *   One of the WEAKEN_* constants.
@@ -472,6 +489,27 @@ final class McpOperatorBinding {
       );
     }
     $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
+   * PHPUnit-only hook that runs after the uniqueness read, before insert.
+   *
+   * Used so a concurrent insert can be shown to become an audited
+   * binding-conflict refusal.
+   *
+   * @param callable $callback
+   *   Receives the identity about to be inserted.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function beforeUpsertForTest(callable $callback): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Operator-binding upsert hooks can be set only under PHPUnit.',
+      );
+    }
+    $this->beforeUpsertForTest = $callback;
   }
 
   /**
@@ -492,6 +530,9 @@ final class McpOperatorBinding {
         );
       }
       return;
+    }
+    if (is_callable($this->beforeUpsertForTest)) {
+      ($this->beforeUpsertForTest)($identity, $operatorId);
     }
     $this->connection->insert(self::TABLE)
       ->fields([
@@ -595,11 +636,13 @@ final class McpOperatorBinding {
     McpOperatorIdentity $first,
     McpOperatorIdentity $second,
     string $operatorId,
+    bool $addedToExisting = FALSE,
   ): void {
     $this->auditLogger->logAlways($operation, [
       'actor' => $first->storageId(),
       'second_confirmer' => $second->storageId(),
       'operator_id' => $operatorId,
+      'added_to_existing' => $addedToExisting,
     ]);
   }
 

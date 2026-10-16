@@ -81,14 +81,21 @@ each process's effective uid). It holds only when each operator has
 an individual OS account. A shared deploy user is one operator: the
 same shell cannot confirm its own request by switching Drupal account
 ids. Keep agent credentials off the shell, and do not share the
-account that runs `mcp-sentinel:kill`.
+account that runs `mcp-sentinel:kill`. One person holding two
+separate Paladin accounts is two operators: this module cannot
+detect that they are the same person.
 
 When a web or Paladin kill route is added, Paladin `iss|sub` and the
 Drush assertion must resolve to one bound operator record
-(`drush mcp-sentinel:operator-bind --token=…`). Bind introspects the
-token at Paladin, requires `active`, and derives `iss|sub` from that
-response, never from a `--human-key` string. Paladin unreachable
-fails closed. An identity already bound to a different operator is
+(`PALADIN_TOKEN=… drush mcp-sentinel:operator-bind`, or pipe the
+token on stdin). Bind introspects the token at Paladin over HTTPS
+with client authentication, requires `active`, and derives `iss|sub`
+from that response, never from a `--human-key` string or `--token`.
+The introspection URL, issuer, audience, and client credentials are
+pinned in `settings.php` so a config import cannot redirect them.
+The response `iss` and `aud` / `azp` / `client_id` must match those
+pins. Paladin unreachable, HTTP, or missing client auth fails
+closed. An identity already bound to a different operator is
 refused. Unbind needs two distinct verified Paladin operators.
 Mixed-channel confirm with no binding is refused. A requester cannot
 confirm their own request on the other channel.
@@ -1398,7 +1405,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:kill-confirm` | Confirm a pending mass kill as a distinct operator. |
 | `drush mcp-sentinel:unkill` | Request or confirm an un-kill. Always needs two distinct operators. |
 | `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. |
-| `drush mcp-sentinel:operator-bind` | Bind this OS account's Drush assertion to the Paladin `iss|sub` from an active token introspection. Paladin down fails closed. |
+| `drush mcp-sentinel:operator-bind` | Bind this OS account's Drush assertion to the Paladin `iss|sub` from an active token introspection. Token from `PALADIN_TOKEN` or stdin, never `--token`. Paladin down fails closed. |
 | `drush mcp-sentinel:operator-unbind` | Request or confirm removal of an operator binding. Always needs two distinct Paladin operators. |
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
