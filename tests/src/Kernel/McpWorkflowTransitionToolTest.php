@@ -348,6 +348,11 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
    * Transition exceptions are not forwarded to the caller (DEV-966).
    */
   public function testTransitionExceptionHidesExceptionText(): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('deny_publish', FALSE)
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
     $this->createGovernedAccount();
     $node = $this->createDraftArticle();
     \Drupal::state()->set(

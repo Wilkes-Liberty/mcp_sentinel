@@ -426,6 +426,7 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
     $role->grantPermission('administer nodes')->save();
     $this->config('mcp_sentinel.mcp_policy_profile.default')
       ->set('allow_write', TRUE)
+      ->set('deny_publish', FALSE)
       ->set('denied_entity_types', [])
       ->save();
     $this->container->get('entity_type.manager')->getStorage('mcp_policy_profile')->resetCache();

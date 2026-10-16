@@ -153,7 +153,7 @@ final class McpDenyExplainerTest extends UnitTestCase {
   }
 
   /**
-   * refuse() logs the explainer and returns only the generic caller deny.
+   * Refuse() logs the explainer and returns only the generic caller deny.
    *
    * @covers ::refuse
    */
