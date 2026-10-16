@@ -13,8 +13,10 @@ use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
  * Resolves a verified operator identity (DEV-846).
  *
  * Paladin: iss|sub from the sealed principal context. Drush: HMAC of
- * the OS effective uid and login name with the site private key.
- * currentUser / --uid is never used. Fail closed when neither exists.
+ * the OS effective uid with the site private key. The login name and
+ * the USER environment variable are not inputs: a shell can change
+ * both without changing the process uid. currentUser / --uid is never
+ * used. Fail closed when neither identity exists.
  */
 final class McpOperatorIdentityFactory {
 
@@ -66,52 +68,24 @@ final class McpOperatorIdentityFactory {
   }
 
   /**
-   * HMAC of the OS process identity. Independent of --uid / currentUser.
+   * HMAC of the OS effective uid. Independent of --uid / currentUser.
    *
    * Two Drupal accounts on the same shell produce the same assertion.
+   * A changed USER variable or login-name lookup does not.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When the process identity or site key is missing.
+   *   When the process uid or site key is missing.
    */
   public function fromDrushAssertion(): McpOperatorIdentity {
     $secret = $this->privateKey->get();
-    if ($secret === '') {
+    if ($secret === '' || !function_exists('posix_geteuid')) {
       throw new McpKillSwitchException(
         McpKillSwitchException::UNVERIFIED_OPERATOR,
         'A verified operator identity is required.',
       );
     }
-    $processUid = function_exists('posix_geteuid') ? (string) posix_geteuid() : '';
-    $name = $this->processLoginName($processUid);
-    if ($processUid === '' && $name === '') {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    $fingerprint = hash_hmac('sha256', $processUid . "\0" . $name, $secret);
+    $fingerprint = hash_hmac('sha256', 'uid:' . (string) posix_geteuid(), $secret);
     return McpOperatorIdentity::drushAssertion($fingerprint);
-  }
-
-  /**
-   * Login name for the process user id, or the PHP process user.
-   */
-  private function processLoginName(string $processUid): string {
-    if ($processUid !== '' && function_exists('posix_getpwuid')) {
-      $pw = posix_getpwuid((int) $processUid);
-      if (is_array($pw) && $pw['name'] !== '') {
-        return $pw['name'];
-      }
-    }
-    $user = get_current_user();
-    if ($user !== '') {
-      return $user;
-    }
-    $value = getenv('USER');
-    if (is_string($value) && $value !== '') {
-      return $value;
-    }
-    return '';
   }
 
 }

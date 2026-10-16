@@ -416,7 +416,10 @@ final class McpKillSwitchTest extends KernelTestBase {
     $pending = $this->killSwitch()->kill([$human], 'mass', $this->paladinA());
     $this->killSwitch()->confirm($pending->batchId, $this->paladinB());
     $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
-    $this->killSwitch()->kill([$human], 'mass-again', $this->paladinA());
+    $again = $this->killSwitch()->kill([$human], 'mass-again', $this->paladinA());
+    $this->assertSame(McpKillBlockStatus::Killed, $again->status);
+    $this->assertFalse($again->needsConfirm);
+    $this->assertSame('', $again->batchId);
     $row = $this->killSwitch()->status($human);
     $this->assertIsArray($row);
     $this->assertSame(McpKillBlockStatus::Killed->value, $row['status']);
@@ -442,6 +445,41 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->assertIsArray($row);
     $this->assertSame(McpKillBlockStatus::Killed->value, $row['status']);
     $this->assertTrue($this->killSwitch()->isKilled($killed->key));
+    $this->expectGenericDeny();
+  }
+
+  /**
+   * A mass re-kill cancels an in-flight un-kill and stays blocking.
+   *
+   * The new request is not blocking by itself. It must not leave the
+   * un-kill confirmable, and it must not open a phantom confirm batch.
+   */
+  public function testNewKillCancelsInFlightUnkill(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-cancel-unkill');
+    $this->sealSubject('subject-cancel-unkill', 'agent-cancel-unkill');
+    $killed = $this->killSwitch()->kill([$human], 'already', $this->paladinA());
+    $this->killSwitch()->confirm($killed->batchId, $this->paladinB());
+    $pending = $this->killSwitch()->requestUnkill(
+      [$human],
+      'restore',
+      $this->paladinA(),
+    );
+    $again = $this->killSwitch()->kill([$human], 'stay-dead', $this->paladinB());
+    $this->assertSame(McpKillBlockStatus::Killed, $again->status);
+    $this->assertFalse($again->needsConfirm);
+    $this->assertSame('', $again->batchId);
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame(McpKillBlockStatus::Killed->value, $row['status']);
+    $this->assertSame('', $row['unkill_batch_id']);
+    try {
+      $this->killSwitch()->confirmUnkill($pending->batchId, $this->paladinB());
+      $this->fail('A cancelled un-kill must not complete.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNKNOWN_BATCH, $e->reasonCode);
+    }
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
     $this->expectGenericDeny();
   }
 
@@ -521,9 +559,18 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->assertInstanceOf(User::class, $firstAccount);
     $this->assertInstanceOf(User::class, $secondAccount);
     $this->container->get('current_user')->setAccount($firstAccount);
+    $previousUser = getenv('USER');
+    putenv('USER=operator-one');
     $asA = $factory->fromDrushAssertion();
     $this->container->get('current_user')->setAccount($secondAccount);
+    putenv('USER=operator-two');
     $asB = $factory->fromDrushAssertion();
+    if ($previousUser === FALSE) {
+      putenv('USER');
+    }
+    else {
+      putenv('USER=' . $previousUser);
+    }
     $this->assertTrue($asA->equals($asB));
     $human = McpKillSelector::humanKey(self::ISS . '|subject-shell');
     $kill = $this->killSwitch()->kill([$human], 'shell', $asA);

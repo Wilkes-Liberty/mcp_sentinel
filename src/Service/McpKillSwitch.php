@@ -292,9 +292,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $operatorId = $operator->storageId();
 
     $txn = $this->connection->startTransaction();
+    $anyPending = FALSE;
     try {
       foreach ($this->sortedSelectors($selectors) as $selector) {
-        $this->writeKillRow(
+        $stored = $this->writeKillRow(
           $selector,
           $status,
           $batchId,
@@ -305,6 +306,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           $now,
           $confirmUntil,
         );
+        if ($stored === McpKillBlockStatus::KillPending) {
+          $anyPending = TRUE;
+        }
       }
       unset($txn);
     }
@@ -315,6 +319,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       throw $e;
     }
 
+    // A mass request whose every target was already blocking did not
+    // open a confirm batch. Reporting kill_pending here would invite
+    // a confirm of a batch that has no rows.
+    $resultStatus = $anyPending ? McpKillBlockStatus::KillPending : McpKillBlockStatus::Killed;
+    $resultBatch = ($mass && !$anyPending) ? '' : $batchId;
     $this->auditTransition(self::AUDIT_KILL, [
       'actor' => $operatorId,
       'target_selector' => $this->selectorList($selectors),
@@ -322,16 +331,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       'ttl' => (string) $ttl,
       'block_until' => (string) $blockUntil,
       'batch_id' => $batchId,
-      'status' => $status->value,
+      'status' => $resultStatus->value,
       'second_confirmer' => '',
-      'needs_confirm' => $mass ? '1' : '0',
+      'needs_confirm' => $anyPending ? '1' : '0',
     ]);
 
     return new McpKillSwitchResult(
-      $status,
-      $batchId,
-      $mass,
-      $mass ? 0 : $blockUntil,
+      $resultStatus,
+      $resultBatch,
+      $anyPending,
+      $anyPending ? 0 : $blockUntil,
       $ttl,
       $selectors,
     );
@@ -742,6 +751,13 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
 
   /**
    * Inserts or extends one kill row.
+   *
+   * A blocking row is never replaced by a non-blocking status. A new
+   * kill on an in-flight un-kill cancels that un-kill and leaves the
+   * row killed.
+   *
+   * @return \Drupal\mcp_sentinel\Enum\McpKillBlockStatus
+   *   Status stored on the row.
    */
   private function writeKillRow(
     McpKillSelector $selector,
@@ -753,7 +769,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     string $operatorId,
     int $now,
     int $confirmUntil,
-  ): void {
+  ): McpKillBlockStatus {
     $existing = $this->lockSelector($selector);
     if ($existing !== NULL) {
       $existingStatus = McpKillBlockStatus::tryFrom((string) $existing['status']);
@@ -769,14 +785,21 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         && !$this->weakened(self::WEAKEN_DOWNGRADE_KILLED)) {
         $this->connection->update(self::TABLE)
           ->fields([
+            'status' => McpKillBlockStatus::Killed->value,
             'block_until' => $newUntil,
             'ttl' => max((int) $existing['ttl'], $ttl),
             'reason' => $reason,
             'changed' => $now,
+            'unkill_batch_id' => '',
+            'unkill_requested_by' => '',
+            'unkill_requested_at' => 0,
+            'unkill_confirm_until' => 0,
+            'unkill_confirmed_by' => '',
+            'unkill_confirmed_at' => 0,
           ])
           ->condition('selector_hash', $selector->hash())
           ->execute();
-        return;
+        return McpKillBlockStatus::Killed;
       }
       $fields = [
         'status' => $status->value,
@@ -788,6 +811,12 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'requested_at' => $now,
         'confirm_until' => $confirmUntil,
         'changed' => $now,
+        'unkill_batch_id' => '',
+        'unkill_requested_by' => '',
+        'unkill_requested_at' => 0,
+        'unkill_confirm_until' => 0,
+        'unkill_confirmed_by' => '',
+        'unkill_confirmed_at' => 0,
       ];
       if ($existingStatus === McpKillBlockStatus::Killed
         && $status === McpKillBlockStatus::Killed) {
@@ -802,7 +831,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         ->fields($fields)
         ->condition('selector_hash', $selector->hash())
         ->execute();
-      return;
+      return $status;
     }
     $this->connection->insert(self::TABLE)
       ->fields([
@@ -828,6 +857,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'changed' => $now,
       ])
       ->execute();
+    return $status;
   }
 
   /**

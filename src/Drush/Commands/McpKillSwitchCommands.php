@@ -29,9 +29,9 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * and appear as two accounts. The two-person rule binds each
  * approval to a Paladin human key (iss|sub) from the sealed
  * principal context, or to a Drush assertion HMAC of the OS
- * process identity (effective uid and login name) with the site
- * private key. --uid cannot change that assertion. Without a
- * verified identity, confirm is refused (fail closed).
+ * effective uid with the site private key. --uid, the login name,
+ * and the USER environment variable cannot change that assertion.
+ * Without a verified identity, confirm is refused (fail closed).
  */
 final class McpKillSwitchCommands extends DrushCommands {
 

@@ -71,8 +71,8 @@ A durable kill-block registry (`mcp_sentinel.kill_switch`) keyed by
 `admit()` and again before a governed write commits. Callers see the
 same generic deny as a missing principal. Two-person confirm uses a
 verified Paladin `iss|sub` or a Drush assertion bound to the OS
-process; `drush --uid` is permission-only and is not an operator
-identity.
+effective uid (not the login name or `USER`); `drush --uid` is
+permission-only and is not an operator identity.
 
 **Known limitation (pending DEV-846 job cancellation):** a kill does
 not cancel webhook deliveries already in the

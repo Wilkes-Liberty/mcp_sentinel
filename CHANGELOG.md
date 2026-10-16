@@ -20,9 +20,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   principal, or any `human_key` / tenant selector) and every un-kill
   stay pending until a distinct *verified* operator identity confirms
   within a configurable window (default 15 min): Paladin `iss|sub` from
-  the sealed principal, or a Drush assertion bound to the OS process
-  (not `--uid` / `currentUser`). Same identity confirming twice is
-  refused. Confirm without a verified identity fails closed. In-flight
+  the sealed principal, or a Drush assertion HMAC of the OS effective
+  uid (not `--uid` / `currentUser`, and not the login name or `USER`).
+  Same identity confirming twice is refused. Confirm without a verified
+  identity fails closed. A new kill on a key with an in-flight un-kill
+  cancels that un-kill and leaves the key killed. A mass kill whose
+  every target is already blocking does not open a confirm batch.
+  In-flight
   governed writes re-check the registry before commit and roll back
   (config SAVE reverts first). Queue and Drush job scopes refuse a
   carried killed principal. Expiry writes run from `hook_cron`; admit

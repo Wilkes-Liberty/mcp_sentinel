@@ -227,8 +227,9 @@ rules and error codes as `tests/fixtures/principal-key-vectors.json`).
 A single principal kill is immediate. A mass kill and every un-kill
 wait for the named second person (secondary account holder), each
 bound to a verified operator identity: Paladin `iss|sub` from the
-sealed principal context, or a Drush assertion HMAC of the OS process
-identity. `drush --user` / `--uid` sets `currentUser` for the
+sealed principal context, or a Drush assertion HMAC of the OS
+effective uid. The login name and `USER` are not part of that
+assertion. `drush --user` / `--uid` sets `currentUser` for the
 `administer agent kill switch` permission only; that uid is not
 trusted for the two-person rule. Confirm without a verified identity
 fails closed. Confirm windows default to 15 minutes. Kill-block TTL
