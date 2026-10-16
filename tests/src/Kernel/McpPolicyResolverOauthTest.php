@@ -11,6 +11,7 @@ use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests OAuth-agent-channel governance via McpPolicyResolver.
@@ -98,6 +99,71 @@ final class McpPolicyResolverOauthTest extends KernelTestBase {
     $this->assertTrue(
       $this->container->get('mcp_sentinel.policy_resolver')->isGoverned($account)
     );
+  }
+
+  /**
+   * Role fallback does not govern a proxied caller (X-Forwarded-For).
+   *
+   * On the old getClientIp() loopback check this would admit because
+   * REMOTE_ADDR is 127.0.0.1.
+   */
+  public function testRoleFallbackDoesNotGovernForwardedForHeader(): void {
+    $this->assertFalse($this->fallbackGovernsPushedRequest([
+      'REMOTE_ADDR' => '127.0.0.1',
+      'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+    ]));
+  }
+
+  /**
+   * Role fallback does not govern when reverse_proxy is on.
+   *
+   * On the old getClientIp() loopback check this would admit because
+   * REMOTE_ADDR is 127.0.0.1.
+   */
+  public function testRoleFallbackDoesNotGovernReverseProxy(): void {
+    $this->setSetting('reverse_proxy', TRUE);
+    $this->assertFalse($this->fallbackGovernsPushedRequest([
+      'REMOTE_ADDR' => '127.0.0.1',
+    ]));
+  }
+
+  /**
+   * Role fallback does not govern when the Forwarded header is present.
+   *
+   * On the old getClientIp() loopback check this would admit because
+   * REMOTE_ADDR is 127.0.0.1.
+   */
+  public function testRoleFallbackDoesNotGovernForwardedHeader(): void {
+    $this->assertFalse($this->fallbackGovernsPushedRequest([
+      'REMOTE_ADDR' => '127.0.0.1',
+      'HTTP_FORWARDED' => 'for=203.0.113.10',
+    ]));
+  }
+
+  /**
+   * Pushes a request and reports whether role fallback governs it.
+   *
+   * @param array<string, string> $server
+   *   Request server bag.
+   */
+  private function fallbackGovernsPushedRequest(array $server): bool {
+    $this->config('mcp_sentinel.settings')
+      ->set('governed_roles', ['mcp_api'])
+      ->set('governed_role_fallback', TRUE)
+      ->save();
+    if (!Role::load('mcp_api')) {
+      Role::create(['id' => 'mcp_api', 'label' => 'mcp_api'])->save();
+    }
+    $account = $this->createUser([], NULL, FALSE, ['roles' => ['mcp_api']]);
+    $request = Request::create('/', 'GET', [], [], [], $server);
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    return $this->container->get('mcp_sentinel.policy_resolver')
+      ->isGoverned($account);
   }
 
   /**

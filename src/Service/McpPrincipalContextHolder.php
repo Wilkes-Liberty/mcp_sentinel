@@ -96,9 +96,11 @@ final class McpPrincipalContextHolder {
       }
       return;
     }
-    if ($current !== NULL
-      && $this->sealedFor !== $current
-      && $this->sealedFor !== $main) {
+    // Replace only when the sealed request is gone from the stack.
+    // A leftover that is still a parent (or any intermediate) is not
+    // replaced here; the subrequest branch above already refused a
+    // different identity.
+    if ($current !== NULL && !$this->sealedRequestStillOnStack()) {
       $this->context = $ctx;
       $this->sealedFor = $token;
       return;
@@ -279,6 +281,26 @@ final class McpPrincipalContextHolder {
     $this->sealedFor = NULL;
     $this->scopeHandles = [];
     $this->carriedByHandle = [];
+  }
+
+  /**
+   * TRUE when the sealed request is still current, parent, or main.
+   *
+   * RequestStack exposes only those three windows. Combined with the
+   * subrequest identity check, a nested request cannot replace an
+   * intermediate parent's seal.
+   */
+  private function sealedRequestStillOnStack(): bool {
+    if ($this->sealedFor === NULL) {
+      return FALSE;
+    }
+    $current = $this->requestStack->getCurrentRequest();
+    $main = $this->requestStack->getMainRequest();
+    if ($this->sealedFor === $current || $this->sealedFor === $main) {
+      return TRUE;
+    }
+    $parent = $this->requestStack->getParentRequest();
+    return $parent !== NULL && $this->sealedFor === $parent;
   }
 
   /**

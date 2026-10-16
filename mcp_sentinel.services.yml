@@ -54,6 +54,7 @@ services:
       - '@entity_type.manager'
       - '@current_user'
       - '@mcp_sentinel.oauth_context'
+      - '@request_stack'
 
   mcp_sentinel.access_checker:
     class: Drupal\mcp_sentinel\Service\McpAccessChecker
@@ -225,6 +226,18 @@ services:
     arguments:
       - '@database'
       - '@uuid'
+      - '@mcp_sentinel.audit_logger'
+      - '@datetime.time'
+      - '@config.factory'
+      - '@mcp_sentinel.paladin_introspection'
+      - '@mcp_sentinel.operator_identity'
+
+  mcp_sentinel.paladin_introspection:
+    class: Drupal\mcp_sentinel\Service\McpPaladinIntrospection
+    arguments:
+      - '@http_client'
+      - '@settings'
+      - '@datetime.time'
 
   mcp_sentinel.operator_identity:
     class: Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory
@@ -376,6 +389,7 @@ services:
       # run requirements/update tooling. Readiness returns
       # tool_registration_missing rather than letting the container fail.
       - '@?plugin.manager.tool'
+      - '@request_stack'
 
   mcp_sentinel.dlp:
     class: Drupal\mcp_sentinel\Service\McpDlp

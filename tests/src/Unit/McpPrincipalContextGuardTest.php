@@ -41,4 +41,26 @@ final class McpPrincipalContextGuardTest extends UnitTestCase {
     putenv('PHPUNIT');
   }
 
+  /**
+   * Weaken flags are independent of disableForTest().
+   *
+   * @covers ::weakenForTest
+   * @covers ::weakened
+   */
+  public function testWeakenFlagsAreIndependentOfDisable(): void {
+    $guard = new McpPrincipalContextGuard();
+    $this->assertTrue($guard->required());
+    $this->assertFalse(
+      $guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_KILL),
+    );
+    $guard->weakenForTest(McpPrincipalContextGuard::WEAKEN_SKIP_KILL);
+    $this->assertTrue($guard->required());
+    $this->assertTrue(
+      $guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_KILL),
+    );
+    $this->assertFalse(
+      $guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE),
+    );
+  }
+
 }

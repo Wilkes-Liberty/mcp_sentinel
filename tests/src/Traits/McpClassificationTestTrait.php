@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -24,6 +27,11 @@ trait McpClassificationTestTrait {
   private bool $pushedRequest = FALSE;
 
   /**
+   * The sealed principal holder. Hosts also use McpAuditSchemaTestTrait.
+   */
+  abstract protected function principalContextHolder(): McpPrincipalContextHolder;
+
+  /**
    * Makes a request current, keeping the kernel's master request underneath.
    *
    * Only the request this helper pushed last time is replaced; the master
@@ -39,11 +47,52 @@ trait McpClassificationTestTrait {
     if ($master !== NULL && $master->hasSession()) {
       $request->setSession($master->getSession());
     }
+    // Keep the kernel fixture principal on the request this helper
+    // makes current. The holder hides a seal that is neither current
+    // nor main; without these attributes requirePrincipal would seal
+    // an empty context and refuse missing_iss.
+    if ($master !== NULL) {
+      foreach ([
+        McpPrincipalContext::CLAIMS_ATTRIBUTE,
+        McpPrincipalContext::NETWORK_ATTRIBUTE,
+        McpPrincipalContext::FIXTURE_ATTRIBUTE,
+        McpOauthContext::SEALED_ATTRIBUTE,
+      ] as $name) {
+        if (!$request->attributes->has($name)
+          && $master->attributes->has($name)) {
+          $request->attributes->set($name, $master->attributes->get($name));
+        }
+      }
+    }
     $stack->push($request);
     $this->pushedRequest = TRUE;
+    // A leftover fixture seal on an intermediate request is still an
+    // active parent. Reset it here instead of asking the holder to
+    // replace a visible seal (#298).
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    if ($request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) === TRUE
+      || $request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)) {
+      $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+        ->fromRequest($request);
+      $holder->seal($ctx, $request);
+    }
     if (\Drupal::entityTypeManager()->hasDefinition('node')) {
       \Drupal::entityTypeManager()->getAccessControlHandler('node')->resetCache();
     }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    if ($this->pushedRequest) {
+      $this->container->get('request_stack')->pop();
+      $this->pushedRequest = FALSE;
+    }
+    $this->principalContextHolder()->resetForTest();
+    parent::tearDown();
   }
 
   /**

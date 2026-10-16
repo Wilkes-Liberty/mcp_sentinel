@@ -245,7 +245,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['oauth']['governed_role_fallback'] = [
       '#type' => 'checkbox',
       '#title' => $this->t('Govern by role without an OAuth token (local dev only)'),
-      '#description' => $this->t('When enabled, a request from a user holding a governed role is governed even without an OAuth agent token. Leave OFF in production so the admin UI stays ungoverned.'),
+      '#description' => $this->t('When enabled, a governed-role session without an OAuth token is governed only if settings.php also sets mcp_sentinel_allow_role_fallback to TRUE (config import cannot set that flag). Use that flag only on local-only stacks. Header-based proxy detection misses a proxy that adds no Forwarded or X-Forwarded-* headers (nginx proxy_pass adds none by default). The path is refused when reverse_proxy is on or when any of those headers is present. PHPUnit may use the path without the settings.php flag. Functional tests must set the flag in settings.php. Leave OFF in production so the admin UI stays ungoverned.'),
       '#default_value' => $config->get('governed_role_fallback') ?? FALSE,
     ];
 

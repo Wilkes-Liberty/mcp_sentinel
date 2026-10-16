@@ -135,10 +135,25 @@ reads the request attribute. The tool guard applies **only** to
 `McpPrincipalContextDispatcher::assertDispatchAllowed()` with an
 empty argument list and the surface's required OAuth scope
 (`mcp_read` / `mcp_write`, any-of on the GraphQL HTTP seam) before
-their own gates. A token that lists scopes and omits every required
-name is refused (`required_scope_missing`). JSON:API and the GraphQL
-HTTP seam do that only when the request carries a validated bearer;
-a role-fallback session is unchanged. They are not admitted
+their own gates. GraphQL queries and subscriptions require
+`mcp_read`; mutations require `mcp_write`; any other operation type
+is refused. A Paladin or sealed-token context that omits every
+required name, including a token that lists no scopes, is refused
+(`required_scope_missing`). Role-fallback and kernel fixture
+sources skip that scope check. JSON:API, GraphQL, and
+`/drupal-mcp/context` require a verified principal on the ready
+  path. A claimless Drupal test child on the PHP built-in server
+  waits for that fallback stamp. Production cli-server seals
+  immediately. `mcp_sentinel_role_fallback_test_principal` in
+  settings.php fills iss, sub, and azp only for that stamp, only
+  under PHPUnit or a Drupal test child on cli-server, and only when
+  the request is not proxied. Role fallback also requires
+`$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
+settings.php (or PHPUnit). That flag is for local-only stacks:
+header-based proxy detection misses a proxy that adds no Forwarded
+/ X-Forwarded-* headers. HTTP fallback is refused when
+`reverse_proxy` is on or any of those headers is present. They are
+not admitted
 through `admit()`/`dispatch()`. `drush mcp-sentinel:sql-query` calls
 that check only when `hasSealedContext()` is already true; a local
 invocation has no bearer and stays on the profile SQL guard. Other
@@ -241,10 +256,27 @@ with individual OS accounts and no shared deploy user. When a web or
 Paladin kill route arrives, Paladin `iss|sub` and the Drush assertion
 must resolve to one bound operator record
 (`mcp_sentinel.operator_binding` / `mcp-sentinel:operator-bind`).
-Mixed-channel confirm with no binding is refused. A requester cannot
-confirm their own request on the other channel. Distinct same-kind
-identities (two OS accounts, two Paladin keys) still work without a
-binding. Confirm windows default to 15 minutes. Kill-block TTL
+Bind introspects a Paladin access token (RFC 7662) over HTTPS with
+client authentication, requires `active`, and derives `iss|sub` from
+the introspection, never from `--human-key` or `--token` (token from
+`PALADIN_TOKEN` or stdin). The introspection URL, issuer, audience,
+and client credentials are pinned in `settings.php`, not importable
+config, so a config import cannot redirect introspection. The
+response `iss` and `aud` / `azp` / `client_id` must match those
+pins. Paladin unreachable, HTTP, missing client auth, or a claim
+mismatch fails closed. Rebind of an identity already bound to a
+different operator is refused, including a unique-constraint race.
+Joining a new Paladin identity onto an existing Drush record writes
+`added_to_existing` on the `operator_bind` row. Every bind and every
+refusal writes an audit row (`operator_bind` /
+`operator_bind_refused`). Unbind (`mcp-sentinel:operator-unbind`)
+needs two distinct verified operators and writes
+`operator_unbind_request` / `operator_unbind` /
+`operator_unbind_refused`. Mixed-channel confirm with no binding is
+refused. A requester cannot confirm their own request on the other
+channel. Distinct same-kind identities (two OS accounts, two Paladin
+keys) still work without a binding. One person holding two Paladin
+accounts cannot be detected. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
 `kill_pending`. Audit operations `agent_kill`, `agent_kill_confirm`,

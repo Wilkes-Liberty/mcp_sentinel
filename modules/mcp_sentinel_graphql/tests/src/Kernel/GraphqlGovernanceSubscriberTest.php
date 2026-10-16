@@ -31,7 +31,7 @@ use Symfony\Component\HttpFoundation\Request;
  *  - Query allowed when allow_read = TRUE.
  *  - Query blocked when allow_read = FALSE.
  *  - A blocked mutation still produces an audit row (audit-before-throw).
- *  - Subscriptions and unknown operation types are left untouched.
+ *  - Subscriptions require the read gate; unknown types are refused.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber
  * @group mcp_sentinel
@@ -298,19 +298,16 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
   }
 
   /**
-   * A subscription operation is left untouched by the governance subscriber.
-   *
-   * The subscriber only gates 'query' and 'mutation' types; 'subscription'
-   * must not throw or produce an unexpected side effect for a governed user.
+   * A subscription is gated as a read when the profile forbids reads.
    *
    * @covers ::onOperation
    */
-  public function testSubscriptionUntouched(): void {
+  public function testSubscriptionRequiresReadGate(): void {
     $this->setUpGovernedAgent(['allow_read' => FALSE, 'allow_write' => FALSE]);
 
-    // No exception expected — the subscriber must return without gating.
+    $this->expectException(Error::class);
+    $this->expectExceptionMessage('MCP access is denied.');
     $this->subscriber()->onOperation($this->makeEvent('subscription'));
-    $this->addToAssertionCount(1);
   }
 
   /**

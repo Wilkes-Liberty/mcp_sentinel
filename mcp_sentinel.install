@@ -262,10 +262,35 @@ function mcp_sentinel_schema(): array {
         'length' => 36,
         'not null' => TRUE,
       ],
+      'unbind_batch_id' => [
+        'type' => 'varchar',
+        'length' => 36,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'unbind_requested_by' => [
+        'type' => 'varchar',
+        'length' => 770,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'unbind_requested_at' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'unbind_confirm_until' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
     ],
     'primary key' => ['identity_hash'],
     'indexes' => [
       'operator_id' => ['operator_id'],
+      'unbind_batch_id' => ['unbind_batch_id'],
     ],
   ];
 
@@ -1666,4 +1691,61 @@ function mcp_sentinel_update_10031(): string {
   $spec = mcp_sentinel_schema()['mcp_sentinel_operator_binding'];
   $schema->createTable('mcp_sentinel_operator_binding', $spec);
   return 'Created mcp_sentinel_operator_binding. Paladin and Drush identities bind to one operator record before mixed-channel confirm.';
+}
+
+/**
+ * Add unbind columns and Paladin introspection settings (DEV-846).
+ */
+function mcp_sentinel_update_10032(): string {
+  $schema = \Drupal::database()->schema();
+  $messages = [];
+  if ($schema->tableExists('mcp_sentinel_operator_binding')) {
+    $spec = mcp_sentinel_schema()['mcp_sentinel_operator_binding']['fields'];
+    foreach ([
+      'unbind_batch_id',
+      'unbind_requested_by',
+      'unbind_requested_at',
+      'unbind_confirm_until',
+    ] as $field) {
+      if (!$schema->fieldExists('mcp_sentinel_operator_binding', $field)) {
+        $schema->addField('mcp_sentinel_operator_binding', $field, $spec[$field]);
+        $messages[] = 'Added ' . $field . '.';
+      }
+    }
+    if (!$schema->indexExists('mcp_sentinel_operator_binding', 'unbind_batch_id')) {
+      $schema->addIndex(
+        'mcp_sentinel_operator_binding',
+        'unbind_batch_id',
+        ['unbind_batch_id'],
+        mcp_sentinel_schema()['mcp_sentinel_operator_binding'],
+      );
+      $messages[] = 'Added unbind_batch_id index.';
+    }
+  }
+  else {
+    $messages[] = 'mcp_sentinel_operator_binding is missing; run update 10031.';
+  }
+
+  $config = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
+  $added = [];
+  if ($config->get('paladin_introspection_url') === NULL) {
+    $config->set('paladin_introspection_url', '');
+    $added[] = 'paladin_introspection_url';
+  }
+  if ($config->get('paladin_introspection_client_id') === NULL) {
+    $config->set('paladin_introspection_client_id', '');
+    $added[] = 'paladin_introspection_client_id';
+  }
+  if ($config->get('paladin_introspection_client_secret_key') === NULL) {
+    $config->set('paladin_introspection_client_secret_key', '');
+    $added[] = 'paladin_introspection_client_secret_key';
+  }
+  if ($added !== []) {
+    $config->save();
+    $messages[] = 'Seeded ' . implode(', ', $added) . '.';
+  }
+  if ($messages === []) {
+    return 'Operator-binding unbind columns and Paladin introspection settings already present.';
+  }
+  return implode(' ', $messages);
 }

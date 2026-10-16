@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\consumers\Entity\Consumer;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\user\Entity\Role;
 use Drupal\user\UserInterface;
 use GuzzleHttp\RequestOptions;
@@ -49,6 +50,30 @@ trait McpGovernedRequestTrait {
       ->getEditable('mcp_sentinel.settings')
       ->set('governed_role_fallback', TRUE)
       ->save();
+    // Functional tests hit a PHP built-in server that is not a PHPUnit
+    // process. settings.php is the only permit on that SAPI and is
+    // visible to the child process. The test principal is ignored
+    // except under PHPUnit or a Drupal test child, and on proxied
+    // requests. It exists so the ready-path principal check can run
+    // after readiness stamps role fallback.
+    if (method_exists($this, 'writeSettings')) {
+      $this->writeSettings([
+        'settings' => [
+          McpRoleFallbackGate::SETTINGS_KEY => (object) [
+            'value' => TRUE,
+            'required' => TRUE,
+          ],
+          McpRoleFallbackGate::TEST_PRINCIPAL_KEY => (object) [
+            'value' => [
+              'iss' => 'https://idp.example/realms/agents',
+              'sub' => 'functional-role-fallback',
+              'azp' => 'functional-role-fallback-client',
+            ],
+            'required' => TRUE,
+          ],
+        ],
+      ]);
+    }
   }
 
   /**

@@ -36,9 +36,9 @@
             const stack = banner.parentNode;
             stack.removeChild(banner);
             if (
-              stack.classList
-              && stack.classList.contains('mcp-banner-stack')
-              && !stack.querySelector('[data-mcp-banner-key]')
+              stack.classList &&
+              stack.classList.contains('mcp-banner-stack') &&
+              !stack.querySelector('[data-mcp-banner-key]')
             ) {
               stack.remove();
             }

@@ -175,9 +175,9 @@ final class McpPrincipalContextDispatcher {
    *   Field-definition rules for named nested maps (e.g. fields).
    * @param list<string> $requiredScopes
    *   Any-of OAuth scopes the sealed token must carry. Empty skips
-   *   the check. A context with no granted scopes (role-fallback /
-   *   fixture) is also skipped so local-dev sessions stay on the
-   *   readiness fallback path.
+   *   the check. Role-fallback and kernel fixture sources skip the
+   *   check. A Paladin or sealed-token context with no granted
+   *   scopes is refused.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    *   When the guard is on and the call is not allowed.
@@ -342,8 +342,9 @@ final class McpPrincipalContextDispatcher {
   /**
    * Refuses a token whose granted scopes miss every required name.
    *
-   * Empty $requiredScopes, or a context that granted none, skips so
-   * role-fallback and kernel fixture principals stay on readiness.
+   * Empty $requiredScopes skips. Role-fallback and kernel fixture
+   * sources skip. A Paladin or sealed-token context is refused when
+   * it grants none of the required names, including an empty list.
    *
    * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
    *   The sealed context.
@@ -360,7 +361,11 @@ final class McpPrincipalContextDispatcher {
     string $toolId,
     array $requiredScopes,
   ): void {
-    if (!$this->guard->required() || $requiredScopes === [] || $ctx->scopes() === []) {
+    if (!$this->guard->required()
+      || $this->guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE)
+      || $requiredScopes === []
+      || $ctx->fromRoleFallback()
+      || $ctx->fromFixture()) {
       return;
     }
     foreach ($requiredScopes as $scope) {
@@ -599,7 +604,8 @@ final class McpPrincipalContextDispatcher {
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
   private function assertNotKilled(string $toolId, ?McpPrincipalContext $ctx = NULL): void {
-    if (!$this->guard->required()) {
+    if (!$this->guard->required()
+      || $this->guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_KILL)) {
       return;
     }
     $carried = $this->holder->carriedPrincipal();

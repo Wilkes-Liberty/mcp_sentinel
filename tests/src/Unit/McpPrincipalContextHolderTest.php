@@ -72,6 +72,41 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
+   * A nested subrequest cannot replace an active parent's seal.
+   *
+   * Main → A (sealed P) → B (Q) must throw RESEAL_REFUSED. The
+   * leftover fixture in kernel tests is reset in the test helper,
+   * not by weakening this guard.
+   *
+   * @covers ::seal
+   */
+  public function testNestedSubrequestCannotReplaceParentSeal(): void {
+    $stack = new RequestStack();
+    $main = Request::create('/kernel');
+    $parent = Request::create('/parent');
+    $nested = Request::create('/nested');
+    $stack->push($main);
+    $stack->push($parent);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($this->ctx('human-1', 'agent-a'), $parent);
+    $stack->push($nested);
+    try {
+      $holder->seal($this->ctx('human-2', 'agent-b'), $nested);
+      $this->fail('A nested subrequest must not replace a parent seal.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        $e->reasonCode,
+      );
+    }
+    $stack->pop();
+    $restored = $holder->get();
+    $this->assertInstanceOf(McpPrincipalContext::class, $restored);
+    $this->assertSame('human-1', $restored->subject());
+  }
+
+  /**
    * A new main request replaces the previous request's seal.
    *
    * @covers ::seal
