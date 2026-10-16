@@ -114,6 +114,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->operatorA = (string) $first->id();
     $this->operatorB = (string) $second->id();
     $this->assertNotSame($this->operatorA, $this->operatorB);
+    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_MIXED_CHANNEL);
   }
 
   /**
