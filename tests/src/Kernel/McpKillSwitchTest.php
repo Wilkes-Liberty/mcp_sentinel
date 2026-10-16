@@ -13,6 +13,7 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
+use Drupal\mcp_sentinel\Service\McpPaladinIntrospection;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -26,6 +27,12 @@ use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Psr7\Request as GuzzleRequest;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
@@ -700,6 +707,159 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * Guard bypass: mixed-channel and squat checks are skipped when weakened.
+   *
+   * This is the red mutation for unbound, same-person, and squat tests.
+   */
+  public function testMixedChannelChecksFailWhenWeakened(): void {
+    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_MIXED_CHANNEL);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-weak-mix');
+    $kill = $this->killSwitch()->kill([$human], 'unbound', $this->paladinA());
+    $done = $this->killSwitch()->confirm($kill->batchId, $this->drushFingerprint('shell-a'));
+    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
+
+    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
+    $merged = $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-b'));
+    $this->assertNotSame('', $merged);
+  }
+
+  /**
+   * Bind derives iss|sub from an active Paladin introspection, not input.
+   */
+  public function testBindFromTokenUsesIntrospectedIssSub(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], json_encode([
+        'active' => TRUE,
+        'iss' => self::ISS,
+        'sub' => 'operator-a',
+      ], JSON_THROW_ON_ERROR)),
+    ]);
+    $operatorId = $this->bindings()->bindFromToken('not-a-human-key');
+    $this->assertNotSame('', $operatorId);
+    $this->assertSame(
+      $operatorId,
+      $this->bindings()->recordId('paladin', self::ISS . '|operator-a'),
+    );
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND);
+    $this->assertSame($this->paladinA()->storageId(), $audit['actor']);
+    $this->assertArrayNotHasKey('token', $audit);
+    $this->assertArrayNotHasKey('access_token', $audit);
+  }
+
+  /**
+   * An inactive Paladin token cannot bind.
+   */
+  public function testBindFromInactiveTokenIsRefused(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], json_encode([
+        'active' => FALSE,
+        'iss' => self::ISS,
+        'sub' => 'operator-a',
+      ], JSON_THROW_ON_ERROR)),
+    ]);
+    try {
+      $this->bindings()->bindFromToken('inactive-token');
+      $this->fail('An inactive Paladin token must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $audit['reason_code']);
+    $this->assertArrayNotHasKey('token', $audit);
+  }
+
+  /**
+   * Paladin unreachable fails closed.
+   */
+  public function testBindWhenPaladinIsDownFailsClosed(): void {
+    $this->stubPaladinIntrospection([
+      new ConnectException('down', new GuzzleRequest('POST', 'https://idp.example/introspect')),
+    ]);
+    try {
+      $this->bindings()->bindFromToken('any-token');
+      $this->fail('Paladin down must fail closed.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::PALADIN_UNAVAILABLE, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::PALADIN_UNAVAILABLE, $audit['reason_code']);
+  }
+
+  /**
+   * Paladin unconfigured fails closed.
+   */
+  public function testBindWhenPaladinIsUnconfiguredFailsClosed(): void {
+    try {
+      $this->bindings()->bindFromToken('any-token');
+      $this->fail('Unconfigured Paladin must fail closed.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::PALADIN_UNAVAILABLE, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::PALADIN_UNAVAILABLE, $audit['reason_code']);
+  }
+
+  /**
+   * A squatted identity cannot be rebound to a different operator.
+   */
+  public function testBindRefusalIsAudited(): void {
+    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
+    try {
+      $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-b'));
+      $this->fail('Identities bound to different records must conflict.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $audit['reason_code']);
+  }
+
+  /**
+   * Unbind stays pending without a second operator.
+   */
+  public function testUnbindNeedsTwoOperators(): void {
+    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $batch = $this->bindings()->requestUnbind($this->paladinA());
+    $this->assertNotSame('', $batch);
+    try {
+      $this->bindings()->confirmUnbind($batch, $this->paladinA());
+      $this->fail('Unbind must not complete with one operator.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
+    }
+    $this->assertNotNull($this->bindings()->recordId('paladin', self::ISS . '|operator-a'));
+    $refused = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_UNBIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $refused['reason_code']);
+    $this->assertArrayNotHasKey('token', $refused);
+    $this->bindings()->confirmUnbind($batch, $this->paladinB());
+    $this->assertNull($this->bindings()->recordId('paladin', self::ISS . '|operator-a'));
+    $this->assertNull($this->bindings()->recordId('drush', $this->drushFingerprint('shell-a')->id));
+  }
+
+  /**
+   * Unbind request and confirm write audit rows without tokens.
+   */
+  public function testUnbindWritesAuditRows(): void {
+    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $batch = $this->bindings()->requestUnbind($this->paladinA());
+    $request = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_UNBIND_REQUEST);
+    $this->assertSame($this->paladinA()->storageId(), $request['actor']);
+    $this->assertSame($batch, $request['batch_id']);
+    $this->assertArrayNotHasKey('token', $request);
+    $this->bindings()->confirmUnbind($batch, $this->paladinB());
+    $done = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_UNBIND);
+    $this->assertSame($this->paladinB()->storageId(), $done['second_confirmer']);
+    $this->assertArrayNotHasKey('token', $done);
+  }
+
+  /**
    * Operator selectors use principal-key vector error codes.
    */
   public function testSelectorUsesPrincipalKeyVectorCodes(): void {
@@ -790,6 +950,36 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   private function bindings(): McpOperatorBinding {
     return $this->container->get('mcp_sentinel.operator_binding');
+  }
+
+  /**
+   * Configure Paladin introspection against a mock HTTP client.
+   *
+   * @param array<int, \Psr\Http\Message\ResponseInterface|\Throwable> $responses
+   *   Mocked introspection responses or transport errors.
+   */
+  private function stubPaladinIntrospection(array $responses): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('paladin_introspection_url', 'https://idp.example/introspect')
+      ->save();
+    $stack = HandlerStack::create(new MockHandler($responses));
+    $client = new Client(['handler' => $stack]);
+    $this->container->set('http_client', $client);
+    $introspection = new McpPaladinIntrospection(
+      $client,
+      $this->container->get('config.factory'),
+    );
+    $binding = new McpOperatorBinding(
+      $this->container->get('database'),
+      $this->container->get('uuid'),
+      $this->container->get('mcp_sentinel.audit_logger'),
+      $this->container->get('datetime.time'),
+      $this->container->get('config.factory'),
+      $introspection,
+      $this->container->get('mcp_sentinel.operator_identity'),
+    );
+    $this->container->set('mcp_sentinel.paladin_introspection', $introspection);
+    $this->container->set('mcp_sentinel.operator_binding', $binding);
   }
 
   /**

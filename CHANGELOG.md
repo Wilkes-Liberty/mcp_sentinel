@@ -12,10 +12,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   operator record (`mcp_sentinel_operator_binding`). Mixed-channel
   confirm with no binding is refused. The same bound person cannot
   confirm on the other channel. Distinct same-kind identities still
-  work without a binding. Command:
-  `mcp-sentinel:operator-bind --human-key=iss|sub`. Run database
-  updates: until update 10031 creates the table, mixed-channel
-  confirm fails closed.
+  work without a binding. `mcp-sentinel:operator-bind` introspects a
+  Paladin token, requires `active`, and derives `iss|sub` from that
+  response, never from `--human-key`. Paladin unreachable fails
+  closed. Rebind of an identity already bound to a different operator
+  is refused. Every bind and every refusal is audited. Unbind
+  (`mcp-sentinel:operator-unbind`) needs two distinct verified
+  operators and is audited. Run database updates: 10031 creates the
+  table; 10032 adds unbind columns and Paladin introspection
+  settings.
 
 ### Changed
 - Kill-switch docs state that the Drush/shell path sits outside

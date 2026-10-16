@@ -1303,75 +1303,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($this->weakened(self::WEAKEN_SKIP_DISTINCT_OPERATOR)) {
       return;
     }
-    if ($first === '' || $second === '') {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    $same = strlen($first) === strlen($second) && hash_equals($first, $second);
-    if ($same) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::SAME_OPERATOR,
-        'The named second person (secondary account holder) must be a distinct operator account.',
-      );
-    }
-    $firstKind = $this->storageKind($first);
-    $secondKind = $this->storageKind($second);
-    $firstRecord = $this->bindings->recordId($firstKind, $this->storageIdentity($first));
-    $secondRecord = $this->bindings->recordId($secondKind, $this->storageIdentity($second));
-    if ($firstKind === '' || $secondKind === '' || $firstKind !== $secondKind) {
-      if ($firstRecord === NULL || $secondRecord === NULL) {
-        throw new McpKillSwitchException(
-          McpKillSwitchException::UNBOUND_OPERATOR,
-          'Paladin and Drush operator identities must resolve to one bound operator record.',
-        );
-      }
-      if ($this->bindings->sameRecord($firstRecord, $secondRecord)) {
-        throw new McpKillSwitchException(
-          McpKillSwitchException::SAME_OPERATOR,
-          'The named second person (secondary account holder) must be a distinct operator account.',
-        );
-      }
-      return;
-    }
-    if ($firstRecord !== NULL && $secondRecord !== NULL
-      && $this->bindings->sameRecord($firstRecord, $secondRecord)) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::SAME_OPERATOR,
-        'The named second person (secondary account holder) must be a distinct operator account.',
-      );
-    }
-  }
-
-  /**
-   * Kind prefix of a stored operator id (paladin, drush, uid).
-   */
-  private function storageKind(string $storageId): string {
-    $pos = strpos($storageId, ':');
-    if ($pos === FALSE || $pos === 0) {
-      return '';
-    }
-    return substr($storageId, 0, $pos);
-  }
-
-  /**
-   * Identity part of a stored operator id after the kind prefix.
-   */
-  private function storageIdentity(string $storageId): string {
-    $pos = strpos($storageId, ':');
-    if ($pos === FALSE) {
-      return '';
-    }
-    return substr($storageId, $pos + 1);
+    $this->bindings->assertDistinctOperators($first, $second);
   }
 
   /**
    * PHPUnit-only injection that disables one kill-switch invariant.
    *
    * Impossible outside the PHPUnit process. Used so two-person, TTL,
-   * expiry, audit, P0 never-downgrade, mass-pending, and uid-identity
-   * tests can fail.
+   * expiry, audit, P0 never-downgrade, mass-pending, mixed-channel,
+   * and uid-identity tests can fail.
    *
    * @param string $flag
    *   One of the WEAKEN_* constants.

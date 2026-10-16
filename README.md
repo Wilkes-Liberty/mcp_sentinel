@@ -85,9 +85,13 @@ account that runs `mcp-sentinel:kill`.
 
 When a web or Paladin kill route is added, Paladin `iss|sub` and the
 Drush assertion must resolve to one bound operator record
-(`drush mcp-sentinel:operator-bind --human-key=iss|sub`). Mixed-channel
-confirm with no binding is refused. A requester cannot confirm their
-own request on the other channel.
+(`drush mcp-sentinel:operator-bind --token=…`). Bind introspects the
+token at Paladin, requires `active`, and derives `iss|sub` from that
+response, never from a `--human-key` string. Paladin unreachable
+fails closed. An identity already bound to a different operator is
+refused. Unbind needs two distinct verified Paladin operators.
+Mixed-channel confirm with no binding is refused. A requester cannot
+confirm their own request on the other channel.
 
 **Known limitation (pending DEV-846 job cancellation):** a kill does
 not cancel webhook deliveries already in the
@@ -1394,7 +1398,8 @@ default rather than merely guarded.
 | `drush mcp-sentinel:kill-confirm` | Confirm a pending mass kill as a distinct operator. |
 | `drush mcp-sentinel:unkill` | Request or confirm an un-kill. Always needs two distinct operators. |
 | `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. |
-| `drush mcp-sentinel:operator-bind` | Bind this OS account's Drush assertion to a Paladin human key so mixed-channel confirm can tell two people apart. |
+| `drush mcp-sentinel:operator-bind` | Bind this OS account's Drush assertion to the Paladin `iss|sub` from an active token introspection. Paladin down fails closed. |
+| `drush mcp-sentinel:operator-unbind` | Request or confirm removal of an operator binding. Always needs two distinct Paladin operators. |
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |

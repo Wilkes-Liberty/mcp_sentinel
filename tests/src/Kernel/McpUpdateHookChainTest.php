@@ -987,6 +987,43 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10032 adds unbind columns and is idempotent.
+   */
+  public function testUpdate10032AddsUnbindColumns(): void {
+    $schema = $this->container->get('database')->schema();
+    $this->assertTrue($schema->tableExists('mcp_sentinel_operator_binding'));
+    if ($schema->indexExists('mcp_sentinel_operator_binding', 'unbind_batch_id')) {
+      $schema->dropIndex('mcp_sentinel_operator_binding', 'unbind_batch_id');
+    }
+    foreach ([
+      'unbind_batch_id',
+      'unbind_requested_by',
+      'unbind_requested_at',
+      'unbind_confirm_until',
+    ] as $field) {
+      if ($schema->fieldExists('mcp_sentinel_operator_binding', $field)) {
+        $schema->dropField('mcp_sentinel_operator_binding', $field);
+      }
+    }
+    $this->assertFalse($schema->fieldExists('mcp_sentinel_operator_binding', 'unbind_batch_id'));
+    $this->config('mcp_sentinel.settings')
+      ->clear('paladin_introspection_url')
+      ->clear('paladin_introspection_client_id')
+      ->clear('paladin_introspection_client_secret_key')
+      ->save();
+
+    $message = mcp_sentinel_update_10032();
+    $this->assertStringContainsString('unbind_batch_id', $message);
+    $this->assertTrue($schema->fieldExists('mcp_sentinel_operator_binding', 'unbind_batch_id'));
+    $this->assertTrue($schema->fieldExists('mcp_sentinel_operator_binding', 'unbind_requested_by'));
+    $this->container->get('config.factory')->reset('mcp_sentinel.settings');
+    $this->assertSame('', $this->config('mcp_sentinel.settings')->get('paladin_introspection_url'));
+
+    $again = mcp_sentinel_update_10032();
+    $this->assertStringContainsString('already present', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it
