@@ -102,6 +102,16 @@ final class McpDenyExplainer {
         'Stay denied.',
       );
     }
+    if (str_contains($reason, 'required_scope_missing')
+      || str_contains($reason, 'exact required OAuth scope')) {
+      return new McpDenyExplanation(
+        'required_scope_missing',
+        'required OAuth scope missing',
+        FALSE,
+        'Mint a token that includes the exact required scope. Do not drop the scope check.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'missing_principal')
       || str_contains($reason, 'verified principal')) {
       return new McpDenyExplanation(

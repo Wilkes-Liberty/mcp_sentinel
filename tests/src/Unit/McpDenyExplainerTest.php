@@ -109,6 +109,19 @@ final class McpDenyExplainerTest extends UnitTestCase {
   }
 
   /**
+   * A missing required OAuth scope stays denied.
+   *
+   * @covers ::explain
+   */
+  public function testRequiredScopeMissingStaysDenied(): void {
+    $explained = (new McpDenyExplainer())->explain(
+      'The token is missing the exact required OAuth scope.',
+    );
+    $this->assertSame('required_scope_missing', $explained->ruleId);
+    $this->assertFalse($explained->widenAppropriate);
+  }
+
+  /**
    * A missing Spoofchecker stays denied.
    *
    * @covers ::explain

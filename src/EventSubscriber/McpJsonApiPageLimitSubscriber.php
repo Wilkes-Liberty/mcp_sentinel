@@ -137,6 +137,16 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
       $this->currentUser,
       $requiredScope,
     );
+    $scopes = is_array($requiredScope) ? $requiredScope : [$requiredScope];
+    // Paladin or sealed-token claims fail closed even when readiness
+    // is not applicable (undesignated client / contract not ready).
+    // Role fallback with no bearer stays on the profile path.
+    if ($this->requestHasGovernedToken($request)
+      || ($readiness->isApplicable()
+        && $readiness->isReady()
+        && $this->requestCarriesValidatedToken($request))) {
+      $this->requirePrincipal($surface->value, $scopes);
+    }
     if (!$readiness->isApplicable()) {
       return;
     }
@@ -158,12 +168,6 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         NULL,
         'MCP source governance is not ready: active_profile_missing.',
       );
-    }
-
-    // A validated bearer must carry a principal. Role fallback is the
-    // local-dev path and has no token, so it stays governed by its profile.
-    if ($this->requestCarriesValidatedToken($request)) {
-      $this->requirePrincipal($surface->value);
     }
 
     // IP allowlist: deny the whole JSON:API request (collection, individual or
@@ -313,6 +317,17 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   }
 
   /**
+   * Whether Paladin or sealed-token claims are on this request.
+   *
+   * A Simple OAuth TokenAuthUser without those attributes is not
+   * included: ordinary JSON:API OAuth traffic stays ungoverned.
+   */
+  private function requestHasGovernedToken(Request $request): bool {
+    return $request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE);
+  }
+
+  /**
    * Whether this request authenticated with a validated bearer.
    *
    * Paladin claims, a sealed token, or a simple_oauth token user. A
@@ -327,21 +342,29 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   }
 
   /**
-   * Refuses a governed call that has no verified principal or tenant.
+   * Refuses a governed call that has no verified principal, tenant, or scope.
    *
    * @param string $surfaceId
    *   Surface name recorded on the denial row.
+   * @param list<string> $requiredScopes
+   *   Any-of OAuth scopes the sealed token must carry.
    *
    * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
    *   When the principal gate refuses the call.
    */
-  private function requirePrincipal(string $surfaceId): void {
+  private function requirePrincipal(string $surfaceId, array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
       throw new AccessDeniedHttpException('A verified principal is required.');
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
-      $this->principalDispatcher->assertDispatchAllowed([], $surfaceId);
+      $this->principalDispatcher->assertDispatchAllowed(
+        [],
+        $surfaceId,
+        [],
+        [],
+        $requiredScopes,
+      );
     }
     catch (McpPrincipalContextDeniedException $e) {
       throw new AccessDeniedHttpException($e->getMessage(), $e);

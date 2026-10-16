@@ -133,7 +133,10 @@ reads the request attribute. The tool guard applies **only** to
 `McpGovernedToolBase` subclasses. GraphQL operations and
 `/drupal-mcp/context` call
 `McpPrincipalContextDispatcher::assertDispatchAllowed()` with an
-empty argument list before their own gates. JSON:API and the GraphQL
+empty argument list and the surface's required OAuth scope
+(`mcp_read` / `mcp_write`, any-of on the GraphQL HTTP seam) before
+their own gates. A token that lists scopes and omits every required
+name is refused (`required_scope_missing`). JSON:API and the GraphQL
 HTTP seam do that only when the request carries a validated bearer;
 a role-fallback session is unchanged. They are not admitted
 through `admit()`/`dispatch()`. `drush mcp-sentinel:sql-query` calls

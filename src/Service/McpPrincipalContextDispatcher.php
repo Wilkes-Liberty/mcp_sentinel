@@ -169,6 +169,11 @@ final class McpPrincipalContextDispatcher {
    *   Declared schema input names that may be exempted.
    * @param array<string, array{allow?: list<string>, refuse?: list<string>}> $nestedMapRules
    *   Field-definition rules for named nested maps (e.g. fields).
+   * @param list<string> $requiredScopes
+   *   Any-of OAuth scopes the sealed token must carry. Empty skips
+   *   the check. A context with no granted scopes (role-fallback /
+   *   fixture) is also skipped so local-dev sessions stay on the
+   *   readiness fallback path.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    *   When the guard is on and the call is not allowed.
@@ -178,6 +183,7 @@ final class McpPrincipalContextDispatcher {
     string $toolId,
     array $reservedExceptions = [],
     array $nestedMapRules = [],
+    array $requiredScopes = [],
   ): void {
     if ($this->holder->inJobScope()) {
       $this->assertNotKilled($toolId);
@@ -197,6 +203,11 @@ final class McpPrincipalContextDispatcher {
     );
     $sealed = $this->holder->get();
     if (!$sealed instanceof McpPrincipalContext) {
+      // Behind the guard so disableForTest() admits a missing
+      // principal and the surface deny tests can go red.
+      if (!$this->guard->required()) {
+        return;
+      }
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
@@ -205,6 +216,7 @@ final class McpPrincipalContextDispatcher {
     }
     $this->assertContextAllowed($sealed, $toolId);
     $this->assertNotKilled($toolId, $sealed);
+    $this->assertScopesAllowed($sealed, $toolId, $requiredScopes);
   }
 
   /**
@@ -321,6 +333,42 @@ final class McpPrincipalContextDispatcher {
         . '.',
       );
     }
+  }
+
+  /**
+   * Refuses a token whose granted scopes miss every required name.
+   *
+   * Empty $requiredScopes, or a context that granted none, skips so
+   * role-fallback and kernel fixture principals stay on readiness.
+   *
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
+   *   The sealed context.
+   * @param string $toolId
+   *   Surface or tool id for the audit row.
+   * @param list<string> $requiredScopes
+   *   Any-of required scope names.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the guard is on and no required scope is granted.
+   */
+  private function assertScopesAllowed(
+    McpPrincipalContext $ctx,
+    string $toolId,
+    array $requiredScopes,
+  ): void {
+    if (!$this->guard->required() || $requiredScopes === [] || $ctx->scopes() === []) {
+      return;
+    }
+    foreach ($requiredScopes as $scope) {
+      if (in_array($scope, $ctx->scopes(), TRUE)) {
+        return;
+      }
+    }
+    $this->deny(
+      $toolId,
+      McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
+      'The token is missing the exact required OAuth scope.',
+    );
   }
 
   /**

@@ -14,12 +14,15 @@ use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpRateLimiter;
 use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\mcp_sentinel\Service\McpWhoamiRecorder;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Serves the /drupal-mcp/context endpoint with full site schema.
@@ -52,6 +55,8 @@ class McpContextController extends ControllerBase {
    *   Deny-path explainer.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
    *   Principal and tenant gate. A missing dispatcher fails closed.
+   * @param \Symfony\Component\HttpFoundation\RequestStack|null $requestStack
+   *   Request stack used to see Paladin or sealed-token claims.
    */
   public function __construct(
     private readonly McpSiteSchemaBuilder $schemaBuilder,
@@ -63,6 +68,7 @@ class McpContextController extends ControllerBase {
     private readonly ?McpWhoamiRecorder $whoamiRecorder = NULL,
     private readonly ?McpDenyExplainer $denyExplainer = NULL,
     private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
+    private readonly ?RequestStack $requestStack = NULL,
   ) {}
 
   /**
@@ -81,6 +87,7 @@ class McpContextController extends ControllerBase {
       $container->has('mcp_sentinel.principal_context_dispatcher')
         ? $container->get('mcp_sentinel.principal_context_dispatcher')
         : NULL,
+      $container->get('request_stack'),
     );
   }
 
@@ -104,12 +111,17 @@ class McpContextController extends ControllerBase {
       'mcp_read',
     );
     $this->whoamiRecorder?->record($readiness, 'context');
+    // A Paladin or sealed-token caller is refused here even when the
+    // source-governance contract is not ready, so the issuer and
+    // principal gates still write a denied_access row (DEV-927).
+    if ($readiness->isReady() || $this->requestHasGovernedToken()) {
+      $denied = $this->principalDenial();
+      if ($denied !== NULL) {
+        return $denied;
+      }
+    }
     if (!$readiness->isReady()) {
       return $this->notReadyResponse($readiness->reason());
-    }
-    $denied = $this->principalDenial();
-    if ($denied !== NULL) {
-      return $denied;
     }
 
     // IP allowlist gate — governed requests only.
@@ -232,6 +244,18 @@ class McpContextController extends ControllerBase {
   }
 
   /**
+   * Whether Paladin or sealed-token claims are on the current request.
+   */
+  private function requestHasGovernedToken(): bool {
+    $request = $this->requestStack?->getCurrentRequest();
+    if ($request === NULL) {
+      return FALSE;
+    }
+    return $request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE);
+  }
+
+  /**
    * Returns 403 when the caller has no verified principal or tenant.
    */
   private function principalDenial(): ?JsonResponse {
@@ -244,7 +268,13 @@ class McpContextController extends ControllerBase {
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
-      $this->principalDispatcher->assertDispatchAllowed([], 'context');
+      $this->principalDispatcher->assertDispatchAllowed(
+        [],
+        'context',
+        [],
+        [],
+        ['mcp_read'],
+      );
     }
     catch (McpPrincipalContextDeniedException $e) {
       return new JsonResponse(
