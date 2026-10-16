@@ -5,19 +5,23 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel_graphql\Functional;
 
 use Drupal\graphql\Entity\Server;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\Tests\BrowserTestBase;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
 use Drupal\user\Entity\Role;
 use GuzzleHttp\RequestOptions;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * POSTs batched and persisted GraphQL through the live server.
  *
- * Skips when graphql / graphql_compose are not installed. Proves the
- * GraphQL module fires one operation gate per batched query and for
- * a persisted queryId.
+ * Skips when graphql / graphql_compose are not installed. The HTTP
+ * seam refuses a governed /graphql request without a principal before
+ * the executor runs, so a batched POST and a persisted queryId each
+ * produce one denied_access row. Per-operation GraphQL errors are
+ * covered by GraphqlModuleEntryPointTest.
  *
  * @group mcp_sentinel
  * @group mcp_sentinel_graphql
@@ -64,71 +68,93 @@ final class GraphqlBatchFunctionalTest extends BrowserTestBase {
       Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
     }
     $this->enableRoleFallbackGovernance();
+    // Draft tests need the fixture principal. This class must not: the
+    // HTTP gate is the denial without iss/sub/azp, same as
+    // dropStampedPrincipal() in the kernel suite.
+    $this->writeSettings([
+      'settings' => [
+        McpRoleFallbackGate::TEST_PRINCIPAL_KEY => (object) [
+          'value' => [],
+          'required' => TRUE,
+        ],
+      ],
+    ]);
     $this->configureDefaultProfile(TRUE, TRUE, [], 0, TRUE);
     $role = Role::load('mcp_api');
     $this->assertInstanceOf(Role::class, $role);
     $role->grantPermission('execute graphql_compose_server arbitrary graphql requests');
+    $role->grantPermission('execute graphql_compose_server persisted graphql requests');
     $role->grantPermission('access content');
     $role->save();
     $server = Server::load('graphql_compose_server');
-    if ($server instanceof Server) {
-      $plugin = $this->container
-        ->get('plugin.manager.graphql.persisted_query')
-        ->createInstance('mcp_sentinel_graphql_test_typename');
-      $server->addPersistedQueryInstance($plugin);
-      $server->save();
-    }
+    $this->assertInstanceOf(Server::class, $server);
+    $plugin = $this->container
+      ->get('plugin.manager.graphql.persisted_query')
+      ->createInstance('mcp_sentinel_graphql_test_typename');
+    $server->addPersistedQueryInstance($plugin);
+    $server->save();
   }
 
   /**
-   * A batched POST to /graphql denies each operation without a principal.
+   * A batched POST to /graphql is refused once without a principal.
    */
   public function testBatchedGraphqlPostGatesOncePerOperation(): void {
     $account = $this->createGovernedAgentAccount();
     $this->drupalLogin($account);
     $before = $this->deniedAccessCount();
-    $response = $this->getHttpClient()->request(
-      'POST',
-      $this->buildUrl('/graphql', ['absolute' => TRUE]),
-      [
-        RequestOptions::HTTP_ERRORS => FALSE,
-        RequestOptions::HEADERS => ['Content-Type' => 'application/json'],
-        RequestOptions::JSON => [
-          ['query' => '{ __typename }'],
-          ['query' => '{ __typename }'],
-        ],
-      ],
-    );
-    $this->assertSame(200, $response->getStatusCode());
-    $payload = json_decode((string) $response->getBody(), TRUE);
-    $this->assertIsArray($payload);
-    $this->assertCount(2, $payload);
-    $this->assertArrayHasKey('errors', $payload[0]);
-    $this->assertArrayHasKey('errors', $payload[1]);
-    $this->assertSame($before + 2, $this->deniedAccessCount());
+    $response = $this->postGraphql([
+      ['query' => '{ __typename }'],
+      ['query' => '{ __typename }'],
+    ]);
+    $this->assertGraphqlPrincipalDenied($response);
+    $this->assertSame($before + 1, $this->deniedAccessCount());
   }
 
   /**
-   * A persisted queryId POST to /graphql still gates once.
+   * A persisted queryId POST to /graphql is refused once without a principal.
    */
   public function testPersistedQueryIdGatesOnce(): void {
     $account = $this->createGovernedAgentAccount();
     $this->drupalLogin($account);
     $before = $this->deniedAccessCount();
-    $response = $this->getHttpClient()->request(
+    $response = $this->postGraphql(['queryId' => 'persisted-typename']);
+    $this->assertGraphqlPrincipalDenied($response);
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+  }
+
+  /**
+   * Asserts the HTTP seam refused /graphql for a missing principal.
+   */
+  private function assertGraphqlPrincipalDenied(ResponseInterface $response): void {
+    $body = (string) $response->getBody();
+    $this->assertSame(403, $response->getStatusCode(), $body);
+    $this->assertStringContainsString('A verified principal is required', $body);
+  }
+
+  /**
+   * POSTs JSON to /graphql with the Mink session, not a bare Guzzle client.
+   *
+   * The Mink Guzzle client does not send the login cookie. GraphQL
+   * Compose's own browser tests attach getSessionCookies() for the same
+   * reason.
+   *
+   * @param array<mixed> $json
+   *   Batched operations or a single query / queryId document.
+   */
+  private function postGraphql(array $json): ResponseInterface {
+    return $this->getHttpClient()->request(
       'POST',
       $this->buildUrl('/graphql', ['absolute' => TRUE]),
       [
         RequestOptions::HTTP_ERRORS => FALSE,
-        RequestOptions::HEADERS => ['Content-Type' => 'application/json'],
-        RequestOptions::JSON => ['queryId' => 'persisted-typename'],
+        RequestOptions::COOKIES => $this->getSessionCookies(),
+        RequestOptions::HEADERS => [
+          'Content-Type' => 'application/json',
+          'Accept' => 'application/json',
+        ],
+        RequestOptions::JSON => $json,
       ],
     );
-    $this->assertSame(200, $response->getStatusCode());
-    $payload = json_decode((string) $response->getBody(), TRUE);
-    $this->assertIsArray($payload);
-    $this->assertArrayHasKey('errors', $payload);
-    $this->assertSame($before + 1, $this->deniedAccessCount());
   }
 
   /**
