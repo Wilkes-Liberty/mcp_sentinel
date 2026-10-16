@@ -33,7 +33,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   JSON:API `errors[].detail` and `meta.omitted` no longer repeat IP,
   entity-type, tenant, classification, bundle-floor, or write-gate
   text. Size-cap and config-set secret/validation tool failures stay
-  generic too, including an approval-gated config-set refusal. IP, read/page budget, result cap, response-size cap,
+  generic too, including an approval-gated config-set refusal. IP,
+  read/page budget, result cap, response-size cap,
   classification refusal, no-profile, publish-gate, and
   save/transition exception text stay off the caller body. HTTP
   403/503/429/413/400 remain as a deliberate disclosure of the deny
