@@ -72,27 +72,37 @@ final class McpPrincipalContextHolderTest extends UnitTestCase {
   }
 
   /**
-   * An invisible leftover seal is replaced, not treated as a parent.
+   * A nested subrequest cannot replace an active parent's seal.
    *
-   * Kernel tests keep the master request under a pushed fixture, then
-   * push another current request. That leftover is not a visible
-   * parent. A seal on main while current is a subrequest still
-   * refuses a different identity (testSubrequestDifferentPrincipalIsRefused).
+   * Main → A (sealed P) → B (Q) must throw RESEAL_REFUSED. The
+   * leftover fixture in kernel tests is reset in the test helper,
+   * not by weakening this guard.
    *
    * @covers ::seal
    */
-  public function testInvisibleSealIsReplacedOnStackedRequest(): void {
+  public function testNestedSubrequestCannotReplaceParentSeal(): void {
     $stack = new RequestStack();
     $main = Request::create('/kernel');
-    $fixture = Request::create('/fixture');
-    $current = Request::create('/jsonapi/node/memo');
+    $parent = Request::create('/parent');
+    $nested = Request::create('/nested');
     $stack->push($main);
-    $stack->push($fixture);
+    $stack->push($parent);
     $holder = new McpPrincipalContextHolder($stack);
-    $holder->seal($this->ctx('human-1', 'agent-a'), $fixture);
-    $stack->push($current);
-    $holder->seal($this->ctx('human-2', 'agent-b'), $current);
-    $this->assertSame('human-2', $holder->get()?->subject());
+    $holder->seal($this->ctx('human-1', 'agent-a'), $parent);
+    $stack->push($nested);
+    try {
+      $holder->seal($this->ctx('human-2', 'agent-b'), $nested);
+      $this->fail('A nested subrequest must not replace a parent seal.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESEAL_REFUSED,
+        $e->reasonCode,
+      );
+    }
+    $this->assertNull($holder->get());
+    $stack->pop();
+    $this->assertSame('human-1', $holder->get()?->subject());
   }
 
   /**

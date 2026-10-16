@@ -86,17 +86,6 @@ final class McpPrincipalContextHolder {
     }
     $current = $this->requestStack->getCurrentRequest();
     $main = $this->requestStack->getMainRequest();
-    // A leftover seal for a request that is neither current nor main
-    // is not a visible parent. Replace it. A seal on the main request
-    // while current is a subrequest still refuses a different identity
-    // (#298).
-    if ($current !== NULL
-      && $this->sealedFor !== $current
-      && $this->sealedFor !== $main) {
-      $this->context = $ctx;
-      $this->sealedFor = $token;
-      return;
-    }
     $isSubrequest = $current !== NULL && $main !== NULL && $current !== $main;
     if ($isSubrequest) {
       if ($this->identityOf($this->context) !== $this->identityOf($ctx)) {
@@ -105,6 +94,15 @@ final class McpPrincipalContextHolder {
           'A subrequest cannot reseal a different principal.',
         );
       }
+      return;
+    }
+    // Replace only when the sealed request is gone from the stack.
+    // A leftover that is still a parent (or any intermediate) is not
+    // replaced here; the subrequest branch above already refused a
+    // different identity.
+    if ($current !== NULL && !$this->sealedRequestStillOnStack()) {
+      $this->context = $ctx;
+      $this->sealedFor = $token;
       return;
     }
     if ($current !== NULL
@@ -283,6 +281,26 @@ final class McpPrincipalContextHolder {
     $this->sealedFor = NULL;
     $this->scopeHandles = [];
     $this->carriedByHandle = [];
+  }
+
+  /**
+   * TRUE when the sealed request is still current, parent, or main.
+   *
+   * RequestStack exposes only those three windows. Combined with the
+   * subrequest identity check, a nested request cannot replace an
+   * intermediate parent's seal.
+   */
+  private function sealedRequestStillOnStack(): bool {
+    if ($this->sealedFor === NULL) {
+      return FALSE;
+    }
+    $current = $this->requestStack->getCurrentRequest();
+    $main = $this->requestStack->getMainRequest();
+    if ($this->sealedFor === $current || $this->sealedFor === $main) {
+      return TRUE;
+    }
+    $parent = $this->requestStack->getParentRequest();
+    return $parent !== NULL && $this->sealedFor === $parent;
   }
 
   /**

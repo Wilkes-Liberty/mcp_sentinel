@@ -15,10 +15,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   require `mcp_read`; unknown operation types are refused.
   `governed_role_fallback` also requires
   `$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
-  settings.php (or PHPUnit / the PHP built-in server). HTTP
-  fallback is refused when
-  `reverse_proxy` is on or any Forwarded / X-Forwarded-* header is
-  present. The ready path on all three surfaces requires a
+  settings.php (or PHPUnit). That flag is for local-only stacks:
+  header-based proxy detection misses a proxy that adds no
+  Forwarded / X-Forwarded-* headers. HTTP fallback is refused when
+  `reverse_proxy` is on or any of those headers is present. The PHP
+  built-in server is not a permit; functional tests write the
+  settings.php flag. The ready path on all three surfaces requires a
   principal, matching GraphQL operations and context.
 
 ### Security
@@ -49,12 +51,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   confirm fails closed.
 
 ### Fixed
-- A claimless request on the PHP built-in server is no longer sealed
-  before readiness stamps role fallback. That early seal left
-  JSON:API, GraphQL, and context with `missing_iss` for functional
-  tests. `settings['mcp_sentinel_role_fallback_test_principal']` is
-  applied only on that fallback path, only under PHPUnit or
-  cli-server, and never when the request looks proxied.
+- A claimless request on a Drupal test child served by the PHP
+  built-in server is no longer sealed before readiness stamps role
+  fallback. That early seal left JSON:API, GraphQL, and context with
+  `missing_iss` for functional tests. Production cli-server seals
+  immediately. `settings['mcp_sentinel_role_fallback_test_principal']`
+  is applied only on that fallback path, only under PHPUnit or a
+  Drupal test child on cli-server, and never when the request looks
+  proxied.
 
 ### Changed
 - Kill-switch docs state that the Drush/shell path sits outside

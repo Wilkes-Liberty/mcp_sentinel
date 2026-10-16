@@ -12,10 +12,13 @@ use Symfony\Component\HttpFoundation\Request;
  *
  * The config checkbox governed_role_fallback is not enough. Production
  * enablement is $settings['mcp_sentinel_allow_role_fallback'] = TRUE in
- * settings.php; config import cannot set that key. PHPUnit and the
- * PHP built-in server (cli-server) are the kernel / functional test
- * permits. HTTP fallback is refused when reverse_proxy is on or when
- * any Forwarded or X-Forwarded-* header is present.
+ * settings.php; config import cannot set that key. That flag is for
+ * local-only stacks: header-based proxy detection misses a proxy that
+ * adds no Forwarded or X-Forwarded-* headers. PHPUnit is the kernel /
+ * unit-test permit. Functional tests write the settings.php flag.
+ * HTTP fallback is refused when reverse_proxy is on or when any
+ * Forwarded or X-Forwarded-* header is present. cli-server is not a
+ * permit.
  */
 final class McpRoleFallbackGate {
 
@@ -29,7 +32,8 @@ final class McpRoleFallbackGate {
    *
    * Functional tests cannot mint a Paladin bearer. The factory reads
    * this map only after readiness has taken the role-fallback path,
-   * and only in PHPUnit or cli-server. Other SAPIs ignore it.
+   * and only in PHPUnit or a Drupal test child on cli-server. Other
+   * SAPIs ignore it.
    */
   public const TEST_PRINCIPAL_KEY = 'mcp_sentinel_role_fallback_test_principal';
 
@@ -38,15 +42,23 @@ final class McpRoleFallbackGate {
    *
    * @param \Symfony\Component\HttpFoundation\Request|null $request
    *   The current HTTP request, or NULL on CLI.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process. Tests inject a
+   *   production SAPI so the settings.php requirement is not hidden
+   *   by PHPUnit.
    */
-  public static function permitted(?Request $request): bool {
+  public static function permitted(
+    ?Request $request,
+    ?McpRoleFallbackEnvironment $environment = NULL,
+  ): bool {
+    $environment ??= McpRoleFallbackEnvironment::detect();
     if (self::looksProxied($request)) {
       return FALSE;
     }
     if (Settings::get(self::SETTINGS_KEY) === TRUE) {
       return TRUE;
     }
-    return self::inPhpUnit() || self::inLocalDevSapi();
+    return $environment->inPhpUnit();
   }
 
   /**
@@ -81,17 +93,26 @@ final class McpRoleFallbackGate {
    * TRUE when this process is PHPUnit.
    */
   public static function inPhpUnit(): bool {
-    return defined('PHPUNIT_COMPOSER_INSTALL') || defined('__PHPUNIT_PHAR__');
+    return McpRoleFallbackEnvironment::detect()->inPhpUnit();
   }
 
   /**
-   * TRUE on the PHP built-in server used by Drupal functional tests.
+   * TRUE on the PHP built-in server for a Drupal functional-test child.
    *
-   * Production SAPIs (fpm-fcgi, apache2handler) are not permitted
-   * here. Generic CLI / Drush still needs the settings.php flag.
+   * Production cli-server (php -S, drush runserver, a PaaS image)
+   * is not a permit. Functional tests also write the settings.php
+   * flag; this is only for the test-principal map and the deferred
+   * claimless seal.
+   *
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process.
    */
-  public static function inLocalDevSapi(): bool {
-    return PHP_SAPI === 'cli-server';
+  public static function inTestChildServer(
+    ?McpRoleFallbackEnvironment $environment = NULL,
+  ): bool {
+    $environment ??= McpRoleFallbackEnvironment::detect();
+    return $environment->sapi() === 'cli-server'
+      && $environment->inDrupalTestChildSite();
   }
 
 }

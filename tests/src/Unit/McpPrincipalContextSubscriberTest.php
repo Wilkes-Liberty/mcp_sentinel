@@ -8,6 +8,7 @@ use Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -88,22 +89,26 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
   }
 
   /**
-   * The built-in server must not freeze a claimless request.
+   * The built-in server must not freeze a claimless test-child request.
    *
-   * A bearer, sealed token, network mark, or fixture still seals.
-   * fpm-fcgi does not defer.
+   * Production cli-server and fpm-fcgi do not defer. A bearer still
+   * seals on a test child.
    *
    * @covers ::deferClaimlessBuiltinServer
    */
-  public function testBuiltinServerDefersOnlyClaimlessRequests(): void {
+  public function testBuiltinServerDefersOnlyClaimlessTestChild(): void {
     $claimless = Request::create('/jsonapi/node/page');
     $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
       $claimless,
-      'cli-server',
+      new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
     ));
     $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
       $claimless,
-      'fpm-fcgi',
+      new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE),
+    ));
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, TRUE),
     ));
     $bearer = Request::create('/jsonapi/node/page');
     $bearer->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
@@ -111,7 +116,7 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     ]);
     $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
       $bearer,
-      'cli-server',
+      new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
     ));
   }
 

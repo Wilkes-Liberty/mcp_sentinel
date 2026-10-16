@@ -8,6 +8,7 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -59,7 +60,7 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     }
     $request = $event->getRequest();
     if ($this->isLeftoverCliRequest($request)
-      || self::deferClaimlessBuiltinServer($request, PHP_SAPI)) {
+      || self::deferClaimlessBuiltinServer($request)) {
       return;
     }
     $ctx = $this->factory->fromRequest($request);
@@ -84,18 +85,24 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    * Drupal functional tests serve HTTP from cli-server, which is not
    * the PHPUnit process. Sealing there before readiness runs freezes
    * an empty principal, and the later ready-path check cannot replace
-   * it. Production SAPIs still seal immediately.
+   * it. Only a Drupal test child on cli-server defers. Production
+   * php -S / drush runserver seals immediately.
    *
    * @param \Symfony\Component\HttpFoundation\Request $request
    *   The main request.
-   * @param string $sapi
-   *   PHP_SAPI of this process.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process.
    *
    * @return bool
    *   TRUE when this process must not seal a claimless request yet.
    */
-  public static function deferClaimlessBuiltinServer(Request $request, string $sapi): bool {
-    if ($sapi !== 'cli-server') {
+  public static function deferClaimlessBuiltinServer(
+    Request $request,
+    ?McpRoleFallbackEnvironment $environment = NULL,
+  ): bool {
+    $environment ??= McpRoleFallbackEnvironment::detect();
+    if ($environment->sapi() !== 'cli-server'
+      || !$environment->inDrupalTestChildSite()) {
       return FALSE;
     }
     $network = $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE);

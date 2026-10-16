@@ -19,9 +19,12 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * agent scope on the request's access token). The Phase-1 role-based check is
  * retained only as a local-dev fallback, enabled by the
  * governed_role_fallback setting plus
- * $settings['mcp_sentinel_allow_role_fallback'] or PHPUnit. HTTP
- * fallback is refused when reverse_proxy is on or a Forwarded /
- * X-Forwarded-* header is present. Profile selection still uses the
+ * $settings['mcp_sentinel_allow_role_fallback'] or PHPUnit. That
+ * settings.php flag is for local-only stacks: header-based proxy
+ * detection misses a proxy that adds no Forwarded /
+ * X-Forwarded-* headers. HTTP fallback is refused when
+ * reverse_proxy is on or a Forwarded / X-Forwarded-* header is
+ * present. Profile selection still uses the
  * account's roles so per-admin policy stays intact even on
  * OAuth-authenticated requests (TokenAuthUser returns the subject's
  * roles via getRoles()).

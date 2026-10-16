@@ -142,8 +142,8 @@ final class McpPrincipalContextFactory {
    * Test principal for a readiness-stamped role-fallback request.
    *
    * Empty unless the request already took the fallback path, the
-   * process is PHPUnit or the PHP built-in server, and the request
-   * does not look proxied. A real bearer is never replaced.
+   * process is PHPUnit or a Drupal test child on cli-server, and the
+   * request does not look proxied. A real bearer is never replaced.
    *
    * @param \Symfony\Component\HttpFoundation\Request|null $request
    *   The request readiness has already stamped.
@@ -157,7 +157,7 @@ final class McpPrincipalContextFactory {
     }
     $fallback = $request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE);
     $testSapi = McpRoleFallbackGate::inPhpUnit()
-      || McpRoleFallbackGate::inLocalDevSapi();
+      || McpRoleFallbackGate::inTestChildServer();
     if ($fallback !== TRUE
       || McpRoleFallbackGate::looksProxied($request)
       || !$testSapi) {

@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Traits;
 
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -60,9 +61,39 @@ trait McpClassificationTestTrait {
     }
     $stack->push($request);
     $this->pushedRequest = TRUE;
+    // A leftover fixture seal on an intermediate request is still an
+    // active parent. Reset it here instead of asking the holder to
+    // replace a visible seal (#298).
+    if (method_exists($this, 'principalContextHolder')) {
+      $holder = $this->principalContextHolder();
+      if ($holder instanceof McpPrincipalContextHolder) {
+        $holder->resetForTest();
+        if ($request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) === TRUE
+          || $request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+          || $request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)) {
+          $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+            ->fromRequest($request);
+          $holder->seal($ctx, $request);
+        }
+      }
+    }
     if (\Drupal::entityTypeManager()->hasDefinition('node')) {
       \Drupal::entityTypeManager()->getAccessControlHandler('node')->resetCache();
     }
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    if ($this->pushedRequest) {
+      $this->container->get('request_stack')->pop();
+      $this->pushedRequest = FALSE;
+    }
+    if (method_exists($this, 'principalContextHolder')) {
+      $this->principalContextHolder()->resetForTest();
+    }
+    parent::tearDown();
   }
 
   /**

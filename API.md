@@ -142,14 +142,17 @@ required name, including a token that lists no scopes, is refused
 (`required_scope_missing`). Role-fallback and kernel fixture
 sources skip that scope check. JSON:API, GraphQL, and
 `/drupal-mcp/context` require a verified principal on the ready
-  path. A claimless PHP built-in server request waits for that
-  fallback stamp. `mcp_sentinel_role_fallback_test_principal` in
+  path. A claimless Drupal test child on the PHP built-in server
+  waits for that fallback stamp. Production cli-server seals
+  immediately. `mcp_sentinel_role_fallback_test_principal` in
   settings.php fills iss, sub, and azp only for that stamp, only
-  under PHPUnit or cli-server, and only when the request is not
-  proxied. Role fallback also requires
+  under PHPUnit or a Drupal test child on cli-server, and only when
+  the request is not proxied. Role fallback also requires
 `$settings['mcp_sentinel_allow_role_fallback'] = TRUE` in
-settings.php (or PHPUnit) and is refused when `reverse_proxy` is
-on or any Forwarded / X-Forwarded-* header is present. They are
+settings.php (or PHPUnit). That flag is for local-only stacks:
+header-based proxy detection misses a proxy that adds no Forwarded
+/ X-Forwarded-* headers. HTTP fallback is refused when
+`reverse_proxy` is on or any of those headers is present. They are
 not admitted
 through `admit()`/`dispatch()`. `drush mcp-sentinel:sql-query` calls
 that check only when `hasSealedContext()` is already true; a local

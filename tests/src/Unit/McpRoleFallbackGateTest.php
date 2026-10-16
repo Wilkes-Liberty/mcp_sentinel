@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\Core\Site\Settings;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -39,9 +40,64 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
     $this->assertTrue(McpRoleFallbackGate::permitted(Request::create('/')));
     $this->assertTrue(McpRoleFallbackGate::permitted(NULL));
     $this->assertFalse(
-      McpRoleFallbackGate::inLocalDevSapi(),
-      'PHPUnit runs as cli, not cli-server.',
+      McpRoleFallbackGate::inTestChildServer(),
+      'PHPUnit runs as cli, not a Drupal test child on cli-server.',
     );
+  }
+
+  /**
+   * A production SAPI without the settings.php flag is refused.
+   *
+   * @covers ::permitted
+   */
+  public function testProductionSapiWithoutSettingsFlagIsRefused(): void {
+    $environment = new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE);
+    $this->assertFalse(McpRoleFallbackGate::permitted(
+      Request::create('/'),
+      $environment,
+    ));
+    $this->assertFalse(McpRoleFallbackGate::permitted(NULL, $environment));
+  }
+
+  /**
+   * A production SAPI with the settings.php flag is permitted.
+   *
+   * @covers ::permitted
+   */
+  public function testProductionSapiWithSettingsFlagIsPermitted(): void {
+    new Settings([McpRoleFallbackGate::SETTINGS_KEY => TRUE]);
+    $environment = new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE);
+    $this->assertTrue(McpRoleFallbackGate::permitted(
+      Request::create('/'),
+      $environment,
+    ));
+    $this->assertTrue(McpRoleFallbackGate::permitted(NULL, $environment));
+  }
+
+  /**
+   * The PHP built-in server without the settings.php flag is refused.
+   *
+   * A php -S or drush runserver process, and a PaaS image that serves
+   * with the built-in server, stay closed unless settings.php opts in.
+   * A Drupal test child without the flag is also refused; functional
+   * tests write the flag.
+   *
+   * @covers ::permitted
+   * @covers ::inTestChildServer
+   */
+  public function testCliServerWithoutSettingsFlagIsRefused(): void {
+    $plain = new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE);
+    $this->assertFalse(McpRoleFallbackGate::permitted(
+      Request::create('/'),
+      $plain,
+    ));
+    $this->assertFalse(McpRoleFallbackGate::inTestChildServer($plain));
+    $testChild = new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE);
+    $this->assertFalse(McpRoleFallbackGate::permitted(
+      Request::create('/'),
+      $testChild,
+    ));
+    $this->assertTrue(McpRoleFallbackGate::inTestChildServer($testChild));
   }
 
   /**
@@ -60,6 +116,10 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
     ]);
     $this->assertTrue(McpRoleFallbackGate::looksProxied($request));
     $this->assertFalse(McpRoleFallbackGate::permitted($request));
+    $this->assertFalse(McpRoleFallbackGate::permitted(
+      $request,
+      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE),
+    ));
   }
 
   /**
@@ -118,6 +178,10 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
     ]);
     $this->assertFalse(McpRoleFallbackGate::looksProxied($request));
     $this->assertTrue(McpRoleFallbackGate::permitted($request));
+    $this->assertFalse(McpRoleFallbackGate::permitted(
+      $request,
+      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE),
+    ));
   }
 
 }

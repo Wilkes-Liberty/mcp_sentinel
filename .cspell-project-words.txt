@@ -38,6 +38,7 @@ exfiltration
 fataled
 fataling
 fatals
+fcgi
 fieldable
 fieldsets
 filebeat
@@ -117,6 +118,7 @@ replayable
 Revisionable
 rollup
 runbook
+runserver
 serialised
 SIEM
 sixteenbytekey
