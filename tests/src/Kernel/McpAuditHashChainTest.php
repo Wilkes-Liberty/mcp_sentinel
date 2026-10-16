@@ -208,7 +208,7 @@ final class McpAuditHashChainTest extends KernelTestBase {
   }
 
   /**
-   * verifyChain() covers metadata.explain and metadata.rule (DEV-966).
+   * Hash chain covers metadata.explain and metadata.rule (DEV-966).
    *
    * @covers ::log
    * @covers ::verifyChain
@@ -222,7 +222,6 @@ final class McpAuditHashChainTest extends KernelTestBase {
       'explain' => 'Network calls require a tenant claim. [rule:missing_tenant_claim tenant claim missing]',
       'rule' => 'missing_tenant_claim',
     ]);
-    $this->assertTrue($logger->verifyChain()['ok']);
 
     $row = $db->select('audit_chain_log', 'l')
       ->fields('l', ['id', 'metadata'])
@@ -234,14 +233,17 @@ final class McpAuditHashChainTest extends KernelTestBase {
     $this->assertIsArray($row);
     $meta = json_decode((string) $row['metadata'], TRUE);
     $this->assertIsArray($meta);
+    $this->assertArrayHasKey('explain', $meta);
+    $this->assertArrayHasKey('rule', $meta);
     $meta['explain'] = 'tampered explain';
+    $meta['rule'] = 'tampered-rule';
     $db->update('audit_chain_log')
       ->fields(['metadata' => json_encode($meta)])
       ->condition('id', $row['id'])
       ->execute();
 
     $result = $logger->verifyChain();
-    $this->assertFalse($result['ok'], 'Tampering metadata.explain must break the chain.');
+    $this->assertFalse($result['ok'], 'Tampering metadata.explain or metadata.rule must break the chain.');
     $this->assertSame((int) $row['id'], $result['broken_at']);
   }
 

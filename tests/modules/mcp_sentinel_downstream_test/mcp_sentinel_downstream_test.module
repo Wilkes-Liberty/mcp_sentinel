@@ -14,7 +14,12 @@ use Drupal\Core\Entity\EntityInterface;
  */
 function mcp_sentinel_downstream_test_entity_presave(EntityInterface $entity): void {
   $message = \Drupal::state()->get('mcp_sentinel_downstream_test.throw_on_save');
-  if (is_string($message) && $message !== '') {
-    throw new \RuntimeException($message);
+  if (!is_string($message) || $message === '') {
+    return;
   }
+  // Skip account entities so test setup can still save users after the flag.
+  if (in_array($entity->getEntityTypeId(), ['user', 'user_role'], TRUE)) {
+    return;
+  }
+  throw new \RuntimeException($message);
 }
