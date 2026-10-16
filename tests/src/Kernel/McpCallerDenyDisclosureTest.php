@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\DownstreamContractTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\UntrustedReadFixtureTool;
@@ -89,6 +91,18 @@ final class McpCallerDenyDisclosureTest extends KernelTestBase {
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_content_locks']);
     $this->installConfig(['system', 'user', 'mcp_sentinel']);
     $this->switchToGovernedUser();
+    // The page-limit subscriber seals whatever request is on the stack.
+    // These tests push a bearer-less request so the IP check can see
+    // REMOTE_ADDR. Without a PHPUnit role-fallback principal, that seal
+    // denies before the budget and IP rules run.
+    new Settings(Settings::getAll() + [
+      McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
+        'iss' => self::ENTRY_POINT_ISS,
+        'sub' => 'role-fallback-disclosure',
+        'azp' => 'role-fallback-disclosure-client',
+        'tenant' => 'tenant-a',
+      ],
+    ]);
   }
 
   /**
