@@ -587,7 +587,12 @@ final class McpPrincipalContextDispatcher {
         ],
       );
     }
-    throw new McpPrincipalContextDeniedException($reasonCode, $message);
+    throw new McpPrincipalContextDeniedException(
+      $reasonCode,
+      $reasonCode === McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING
+        ? McpDenyExplainer::CALLER_MESSAGE
+        : $message,
+    );
   }
 
   /**

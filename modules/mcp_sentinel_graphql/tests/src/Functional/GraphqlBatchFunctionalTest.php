@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel_graphql\Functional;
 
 use Drupal\graphql\Entity\Server;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\Tests\BrowserTestBase;
 use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
@@ -128,7 +129,12 @@ final class GraphqlBatchFunctionalTest extends BrowserTestBase {
   private function assertGraphqlPrincipalDenied(ResponseInterface $response): void {
     $body = (string) $response->getBody();
     $this->assertSame(403, $response->getStatusCode(), $body);
-    $this->assertStringContainsString('A verified principal is required', $body);
+    $this->assertSame(
+      McpDenyExplainer::CALLER_MESSAGE,
+      json_decode($body, TRUE)['message'] ?? $body,
+    );
+    $this->assertStringNotContainsString('verified principal', $body);
+    $this->assertStringNotContainsString('required_scope_missing', $body);
   }
 
   /**
