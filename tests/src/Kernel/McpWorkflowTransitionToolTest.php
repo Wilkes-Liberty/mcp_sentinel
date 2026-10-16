@@ -67,6 +67,7 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
     'content_moderation',
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_downstream_test',
   ];
 
   /**
@@ -292,6 +293,79 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
       (string) $tool->getResultMessage(),
       'Failure message must mention the missing governance profile.'
     );
+  }
+
+  /**
+   * Publish-gate deny hides the policy rule (DEV-966).
+   */
+  public function testPublishGateHidesPolicyRule(): void {
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('deny_publish', TRUE)
+      ->save();
+    \Drupal::entityTypeManager()->getStorage('mcp_policy_profile')->resetCache();
+
+    $this->createGovernedAccount();
+    $node = $this->createDraftArticle();
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_workflow_transition');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('id', (string) $node->id());
+    $tool->setInputValue('state', 'published');
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame('MCP access is denied.', $message);
+    $this->assertStringNotContainsString('publishing is not permitted', $message);
+    $this->assertStringNotContainsString('[rule:', $message);
+  }
+
+  /**
+   * Ungoverned workflow deny hides the profile rule (DEV-966).
+   */
+  public function testUngovernedHidesProfileRule(): void {
+    $node = $this->createDraftArticle();
+    $ungoverned = $this->createUser(['access mcp sentinel context', 'administer nodes']);
+    \Drupal::currentUser()->setAccount($ungoverned);
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_workflow_transition');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('id', (string) $node->id());
+    $tool->setInputValue('state', 'published');
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame('MCP access is denied.', $message);
+    $this->assertStringNotContainsString('no governance profile', $message);
+  }
+
+  /**
+   * Transition exceptions are not forwarded to the caller (DEV-966).
+   */
+  public function testTransitionExceptionHidesExceptionText(): void {
+    $this->createGovernedAccount();
+    $node = $this->createDraftArticle();
+    \Drupal::state()->set(
+      'mcp_sentinel_downstream_test.throw_on_save',
+      'secret-transition-xyz',
+    );
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_workflow_transition');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('id', (string) $node->id());
+    $tool->setInputValue('state', 'published');
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame('MCP access is denied.', $message);
+    $this->assertStringNotContainsString('secret-transition-xyz', $message);
+    $this->assertStringNotContainsString('Transition failed', $message);
   }
 
   /**

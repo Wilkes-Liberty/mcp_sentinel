@@ -1,0 +1,20 @@
+<?php
+
+/**
+ * @file
+ * Test hooks for MCP Sentinel downstream contract tests.
+ */
+
+declare(strict_types=1);
+
+use Drupal\Core\Entity\EntityInterface;
+
+/**
+ * Throws on save when a disclosure test asks for a caller-visible exception.
+ */
+function mcp_sentinel_downstream_test_entity_presave(EntityInterface $entity): void {
+  $message = \Drupal::state()->get('mcp_sentinel_downstream_test.throw_on_save');
+  if (is_string($message) && $message !== '') {
+    throw new \RuntimeException($message);
+  }
+}

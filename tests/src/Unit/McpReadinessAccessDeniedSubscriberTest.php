@@ -53,6 +53,25 @@ final class McpReadinessAccessDeniedSubscriberTest extends UnitTestCase {
   }
 
   /**
+   * The JSON refusal has no reason field (DEV-966).
+   *
+   * @covers ::onException
+   */
+  public function testAnonymousReadinessJsonHidesReason(): void {
+    $event = $this->exceptionEvent(
+      new AccessDeniedHttpException(),
+      'mcp_sentinel.readiness',
+    );
+    $this->subscriber(FALSE)->onException($event);
+    $payload = json_decode((string) $event->getResponse()?->getContent(), TRUE);
+    $this->assertIsArray($payload);
+    $this->assertSame('MCP access is denied.', $payload['error']);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertArrayNotHasKey('rule', $payload);
+    $this->assertArrayNotHasKey('explain', $payload);
+  }
+
+  /**
    * An invalid-bearer 401 on readiness is JSON and keeps WWW-Authenticate.
    *
    * @covers ::onException

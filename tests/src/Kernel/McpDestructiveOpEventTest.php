@@ -161,6 +161,27 @@ final class McpDestructiveOpEventTest extends KernelTestBase {
   }
 
   /**
+   * Ungoverned bulk deny hides the profile rule (DEV-966).
+   */
+  public function testBulkOperationsHidesNoProfileRule(): void {
+    $account = $this->createUser(['delete any article content', 'access mcp sentinel context']);
+    $this->container->get('current_user')->setAccount($account);
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_bulk_operations');
+    $tool->setInputValue('operation', 'delete');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('ids', ['1']);
+    $tool->setInputValue('confirm', TRUE);
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame('MCP access is denied.', $message);
+    $this->assertStringNotContainsString('no governance profile', $message);
+  }
+
+  /**
    * With no veto subscriber the bulk delete proceeds (regression guard).
    */
   public function testBulkDeleteProceedsWhenNotVetoed(): void {
