@@ -4,10 +4,10 @@ The kill switch lets an operator stop an agent from acting on your site.
 This page explains what it does, how to set it up, and how to issue,
 confirm, check, and lift a stop.
 
-The kill switch shipped in release 3.2.0. Everything on this page
-describes 3.2.0 unless a section says it is newer. The section
-[Planned (DEV-985)](#planned-dev-985) describes work that is not in any
-release.
+The kill switch shipped in release 3.2.0. Freeze-first mass stops,
+held side effects, and break-glass (DEV-985) are on the `1.x`
+branch and listed under Unreleased in `CHANGELOG.md`. They are not
+in 3.2.0.
 
 ## What it does
 
@@ -44,19 +44,21 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
 - A stop does not revoke tokens at your token issuer.
 - A stop does not block the agent from signing in again at the issuer.
   It blocks the agent at this site only.
-- A stop does not cancel webhook deliveries that were already queued.
-  See [Known limits](#known-limits).
+- A stop does not release held webhook deliveries. Release is a
+  separate operator action. See [Held webhook deliveries](#held-webhook-deliveries).
 - Token lifetimes are set by your token issuer, not by this module.
 
 ## Before you rely on it
 
 1. Run database updates before the site serves traffic:
-   `drush updb -y`. Update 10030 creates the registry table.
-2. Until that table exists, every governed call is refused. The module
-   fails closed when it cannot read the registry.
-3. Make sure cron runs. Cron writes the expiry of stops and of
-   confirmation windows. The access check does not wait for cron: a stop
-   past its end time no longer blocks, even before cron runs.
+   `drush updb -y`. Update 10030 creates the registry table. Update
+   10034 adds hold-queue columns and the escalation stamp.
+2. Until the registry table exists, every governed call is refused.
+   The module fails closed when it cannot read the registry.
+3. Make sure cron runs. Cron writes kill-block expiry (the 24 hour /
+   7 day stop lifetime) and escalates an unconfirmed freeze when the
+   confirm window ends. Cron does not lift that freeze. A stop past
+   its `block_until` no longer blocks, even before cron runs.
 4. Give each operator an individual OS account on the machine where
    Drush runs. See [Operator identity](#operator-identity).
 5. Rehearse every command on a test site before you need it.
@@ -166,9 +168,11 @@ The second operator must have a different operator identity from the
 first. The same identity confirming its own request is refused. A
 confirmation without a verified identity is refused.
 
-There is no fallback when the second operator is unavailable. There is
-no timeout that turns a request into a one-operator action. There is no
-skip.
+There is no timeout that turns a mass stop into a one-operator action.
+The freeze stays until a distinct second operator keeps, extends, or
+lifts it. When the named second person cannot be reached, use
+[Break-glass](#break-glass). That still needs a distinct verified
+operator. It is not a skip of the two-operator rule.
 
 ## Stop one agent
 
@@ -214,41 +218,51 @@ needs_confirm: yes (named second person / secondary account holder)
 ttl: <seconds>
 ```
 
-**A pending stop is not in force.** The agents in scope keep working
-until a second operator confirms. Give the batch id to the second
-operator at once.
+**A mass stop freezes immediately.** `kill_pending` is an active freeze.
+In-scope agents are refused from that moment, the same as a single-agent
+stop. Give the batch id to the second operator at once.
 
 If every target is already stopped, no confirmation is needed. The
 command prints `status: killed` and an empty batch id.
 
-### Confirm a pending stop
+### Confirm, extend, or lift the freeze
 
 The second operator runs, from their own OS account:
 
 ```bash
 drush mcp-sentinel:kill-confirm BATCH_ID
+drush mcp-sentinel:kill-extend BATCH_ID --ttl=604800
+drush mcp-sentinel:kill-lift BATCH_ID
 ```
 
-The command prints `status: killed`, the batch id, `block_until`, and the
-TTL. The stop is in force from that moment.
+`kill-confirm` keeps the freeze and records the second operator. The
+agents were already refused. The stop's end time is counted from the
+first operator's request, not from the confirmation.
 
-The stop's end time is counted from the first operator's request, not
-from the confirmation.
+`kill-extend` moves the end time later, up to 7 days from now. A
+requested lifetime above 7 days is refused.
+
+`kill-lift` ends an unconfirmed freeze. Held deliveries stay held.
+Lifting a mass freeze always takes two operators. The requester cannot
+lift their own stop.
+
+The requesting operator cannot confirm their own stop.
 
 ### When the confirmation window runs out
 
-After the window ends, `kill-confirm` fails with
-`The confirm window has elapsed.`
+The freeze stays in place. It never lifts on that timeout. On the next
+cron run the audit log gets an `agent_kill_escalate` row. The module
+calls `hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify
+the named second person and the break-glass path.
 
-On the next cron run, the pending rows change to `expired`. The audit log
-gets an `agent_kill_expire` row with the reason `confirm_window`. The
-module also calls `hook_mcp_sentinel_kill_unavailable_confirmer`.
+A distinct second operator can still confirm, extend, or lift after the
+window, or use [Break-glass](#break-glass) when that person cannot be
+reached.
 
-The stop never took effect. To stop those agents, start a new request.
+## Extend a confirmed stop
 
-## Extend a stop
-
-Run `mcp-sentinel:kill` again on a stopped target. The target stays
+Run `mcp-sentinel:kill` again on a stopped target, or
+`mcp-sentinel:kill-extend` on a freeze batch. The target stays
 stopped. The end time can move later, up to 7 days from now. It never
 moves earlier.
 
@@ -278,7 +292,7 @@ drush mcp-sentinel:unkill --confirm-batch=BATCH_ID
 ```
 
 The command prints `status: expired`. The target can act again from that
-moment.
+moment. Held deliveries stay held. Lifting a stop never releases them.
 
 If the window runs out first, the confirmation fails with
 `The confirm window has elapsed.` On the next cron run, the row goes back
@@ -288,6 +302,44 @@ A new stop on a target with a pending lift cancels the lift.
 
 You cannot lift a stop that has already ended. The request fails with
 `That kill-block has already expired.`
+
+## Break-glass
+
+Use this when the named second person cannot be reached and the freeze
+must be kept, extended, or lifted.
+
+```bash
+drush mcp-sentinel:kill-break-glass BATCH --keep
+drush mcp-sentinel:kill-break-glass BATCH --extend --ttl=604800
+drush mcp-sentinel:kill-break-glass BATCH --lift
+```
+
+The pinned break-glass operator is Aleksandra Cerda (`acerda`). The
+command still requires a distinct verified operator. The requester
+cannot break-glass their own stop. The audit row is
+`agent_kill_break_glass`, not a confirm / extend / lift row.
+
+Rehearse this with `McpKillSwitchBreakGlassDrillTest` alongside the
+scheduled kill-switch drill (DEV-855).
+
+## Held webhook deliveries
+
+On any stop (one agent, person-wide, or tenant-wide), webhook
+deliveries already queued for that scope move to `held` and are not
+sent. Items outside the scope still send. Lifting the stop does not
+release them.
+
+Review held rows, then release or discard each one, or a batch:
+
+```bash
+drush mcp-sentinel:webhook-held
+drush mcp-sentinel:webhook-release --id=12 --id=13
+drush mcp-sentinel:webhook-discard --id=12
+```
+
+A released item delivers exactly as originally queued: same payload,
+same delivery id, same body signature. A discarded item is never sent.
+Do not use `drush queue:delete`. Cron does not re-queue held rows.
 
 ## Check a stop
 
@@ -312,10 +364,12 @@ key (`iss|sub`), so check it with `--human-key`, not with each agent's key.
 
 ### Confirm that a stop works
 
-1. Run `kill-status` and confirm `status: killed` and a future
-   `block_until`.
+1. Run `kill-status`. A mass freeze shows `status: kill_pending` or
+   `killed` and a future `block_until`. Agents in scope are refused
+   in either state.
 2. Open the audit log at `/admin/reports/mcp-sentinel/audit` and filter
-   by operation `agent_kill`. Confirmations are `agent_kill_confirm`.
+   by operation `agent_kill` or `agent_kill_freeze`. Confirmations are
+   `agent_kill_confirm`.
 3. After the agent's next call, filter by operation `denied_access`. A
    row with the reason `principal_killed` shows the refusal.
 
@@ -329,56 +383,41 @@ Every transition writes an audit row. These rows are written even when
 
 | Operation | When |
 | --- | --- |
-| `agent_kill` | A stop request, in force or pending. |
-| `agent_kill_confirm` | A second operator confirmed a stop. |
-| `agent_kill_expire` | A stop ended (`ttl`), a stop window ran out (`confirm_window`), or a lift window ran out (`unkill_confirm_window`). |
-| `agent_unkill_request` | A lift was requested. |
-| `agent_unkill` | A second operator confirmed a lift. |
+| `agent_kill` | A single-agent stop. |
+| `agent_kill_freeze` | A person-wide or tenant-wide freeze. |
+| `agent_kill_confirm` | A second operator kept a freeze. |
+| `agent_kill_extend` | A second operator extended a freeze. |
+| `agent_kill_lift` | A second operator lifted an unconfirmed freeze. |
+| `agent_kill_escalate` | The confirm window ended and the freeze stayed. |
+| `agent_kill_break_glass` | Break-glass keep, extend, or lift. |
+| `agent_kill_expire` | A stop ended (`ttl`) or a lift window ran out (`unkill_confirm_window`). |
+| `agent_unkill_request` | A lift of a confirmed stop was requested. |
+| `agent_unkill` | A second operator confirmed that lift. |
+| `agent_side_effect_hold` | Queued deliveries in scope were held. |
+| `agent_side_effect_release` | An operator released held deliveries. |
+| `agent_side_effect_discard` | An operator discarded held deliveries. |
 
-Each row records the operator identity hash, the targets, the reason,
-the TTL, the end time, and the batch id. Tokens are never recorded.
+Each row records the operator, the scope, the timestamp, and the
+correlation or batch / item ids. Tokens are never recorded. Each of
+those events writes exactly one row.
 
 ## Hooks and events
 
-When a confirmation window runs out, the module calls
-`hook_mcp_sentinel_kill_unavailable_confirmer()`. The module's own
-implementation dispatches `McpKillUnavailableConfirmerEvent`.
+When a confirmation window runs out, the freeze stays and the module
+calls `hook_mcp_sentinel_kill_unavailable_confirmer()`. The module's
+own implementation dispatches `McpKillUnavailableConfirmerEvent`.
 
-Use these to notify people. An implementation must not apply a pending
-stop or complete a pending lift. See `mcp_sentinel.api.php`.
+Use these to notify the named second person and the break-glass path.
+An implementation must not lift the freeze or complete a pending lift.
+See `mcp_sentinel.api.php`.
 
 ## Known limits
 
 - There is no admin UI for stops. There is no stop route over `/mcp`.
-  Drush is the only operator surface.
-- A pending person-wide or tenant-wide stop is not in force until a
-  second operator confirms.
-- Webhook deliveries already in the `mcp_sentinel_webhook_delivery`
-  queue still go out after a stop. If they must not go out, purge the
-  queue with `drush queue:delete mcp_sentinel_webhook_delivery`. Purging
-  removes every queued delivery, not only the stopped agent's. The
-  delivery log at `/admin/reports/mcp-sentinel/webhooks` lists pending
-  rows. It has replay and prune actions, but no action to delete or fail
-  a pending row.
+  Drush is the only operator surface. Drupal-side kill-block records
+  are DEV-925.
 - A stop does not revoke tokens at your issuer.
 - A stop lasts at most 7 days. Extend it before it ends if you need
   longer.
-
-## Planned (DEV-985)
-
-**None of this is in a release. Do not rely on it.** It is planned work,
-tracked as DEV-985. Details may change before it ships.
-
-- **Freeze first.** A person-wide or tenant-wide stop would take effect
-  at once, as a freeze, when the first operator issues it. The second
-  operator would then keep, extend, or lift the freeze.
-- **Fail safe when nobody confirms.** The proposed default is that an
-  unconfirmed freeze stays in place when the window ends. It would
-  escalate instead of lifting on its own. Lifting it would take two
-  operators.
-- **Hold queued webhooks.** On any stop, queued webhook deliveries and
-  other queued side effects for the stopped scope would be held. An
-  operator would release or discard each one. Lifting a stop would not
-  release them.
-
-Until this ships, use the behavior described above.
+- Lifting a stop never releases held deliveries. Release or discard
+  each one explicitly.
