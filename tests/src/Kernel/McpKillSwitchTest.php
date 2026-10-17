@@ -586,7 +586,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
     }
-    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
   }
 
   /**

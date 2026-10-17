@@ -540,7 +540,10 @@ final class McpWebhookQueueManager {
       return [];
     }
     $this->database->update('mcp_sentinel_webhook_delivery')
-      ->fields(['status' => self::STATUS_HELD])
+      ->fields([
+        'status' => self::STATUS_HELD,
+        'released' => 0,
+      ])
       ->condition('id', $ids, 'IN')
       ->condition('status', ['pending', 'in_progress'], 'IN')
       ->execute();
@@ -561,6 +564,7 @@ final class McpWebhookQueueManager {
     $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $deliveryId)
       ->condition('status', ['pending', 'in_progress'], 'IN')
+      ->condition('released', 0)
       ->fields(['status' => self::STATUS_HELD])
       ->execute();
   }
@@ -731,6 +735,7 @@ final class McpWebhookQueueManager {
       ->fields([
         'status' => 'pending',
         'next_attempt' => NULL,
+        'released' => 1,
       ])
       ->condition('id', $heldIds, 'IN')
       ->condition('status', self::STATUS_HELD)

@@ -311,7 +311,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $principalKey = trim((string) ($row['principal_key'] ?? $fromItem['principal_key'] ?? ''));
     $humanKey = trim((string) ($row['human_key'] ?? $fromItem['human_key'] ?? ''));
     $tenant = trim((string) ($row['tenant'] ?? $fromItem['tenant'] ?? ''));
-    if ($this->killSwitch->shouldHoldSideEffects()
+    $operatorReleased = (int) ($row['released'] ?? 0) === 1;
+    if (!$operatorReleased
+      && $this->killSwitch->shouldHoldSideEffects()
       && ($principalKey !== '' || $humanKey !== '' || $tenant !== '')
       && $this->killSwitch->isKilled($principalKey, $humanKey, $tenant)) {
       $this->webhookQueue->markHeld($deliveryId);
