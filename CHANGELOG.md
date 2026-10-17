@@ -116,6 +116,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   proxied.
 
 ### Changed
+- Add `docs/kill-switch.md`, an operator guide to the agent kill
+  switch, and link it from the README. It covers setup, permissions,
+  operator identity, configuration, the two-operator rule, issuing,
+  confirming, checking, and lifting stops, audit records, and known
+  limits. Planned DEV-985 work is in its own section.
 - **Behaviour change.** Anything that parsed `[rule:` or a rule id
   from a tool failure, GraphQL error, JSON:API exception, or context
   JSON must stop. The suffix is operator-only. Downstream tools that
