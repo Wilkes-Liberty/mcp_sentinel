@@ -714,9 +714,6 @@ final class McpWebhookQueueManager {
     $rows = [];
     if ($statement !== NULL) {
       while ($row = $statement->fetchAssoc()) {
-        if (!is_array($row)) {
-          continue;
-        }
         $id = (int) ($row['id'] ?? 0);
         if ($id > 0) {
           $rows[$id] = $row;
