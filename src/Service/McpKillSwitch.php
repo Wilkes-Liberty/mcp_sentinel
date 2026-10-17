@@ -1807,6 +1807,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * Whether a PHPUnit weaken flag is on.
    */
   private function weakened(string $flag): bool {
+    // DEV-985 red run: turn the new freeze-first / hold behaviour off
+    // so the acceptance tests fail. Restored in the next commit.
+    if (in_array($flag, [
+      self::WEAKEN_SKIP_MASS_FREEZE,
+      self::WEAKEN_LIFT_ON_CONFIRM_TIMEOUT,
+      self::WEAKEN_SKIP_QUEUE_HOLD,
+      self::WEAKEN_AUTO_RELEASE_ON_LIFT,
+    ], TRUE)) {
+      return TRUE;
+    }
     return isset($this->weakenForTest[$flag]);
   }
 

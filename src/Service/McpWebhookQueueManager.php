@@ -842,6 +842,10 @@ final class McpWebhookQueueManager {
    * Whether a PHPUnit weaken flag is on.
    */
   private function weakened(string $flag): bool {
+    // DEV-985 red run: re-queue held rows so the cron-hold test fails.
+    if ($flag === self::WEAKEN_REQUEUE_HELD) {
+      return TRUE;
+    }
     return isset($this->weakenForTest[$flag]);
   }
 
