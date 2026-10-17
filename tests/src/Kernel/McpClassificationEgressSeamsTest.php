@@ -362,6 +362,8 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
       ->set('audit_enabled', FALSE)
       ->save();
     $this->container->get('database')->delete('audit_chain_log')->execute();
+    // A new request so refuse() does not reuse the caller's dedupe slot.
+    $this->pushRequest(Request::create('/jsonapi/node/memo'));
     $response = $this->container->get('mcp_sentinel.classification')
       ->refusalResponse();
     $this->assertRefusal($response);

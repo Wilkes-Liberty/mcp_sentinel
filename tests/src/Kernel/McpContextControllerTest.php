@@ -8,6 +8,7 @@ use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\node\Entity\NodeType;
@@ -16,6 +17,7 @@ use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\RoleInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * @coversDefaultClass \Drupal\mcp_sentinel\Controller\McpContextController
@@ -360,6 +362,25 @@ final class McpContextControllerTest extends KernelTestBase {
       ->set('audit_enabled', FALSE)
       ->save();
     $this->container->get('database')->delete('audit_chain_log')->execute();
+    $request = Request::create('/drupal-mcp/context');
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $request->attributes->set(McpPrincipalContext::FIXTURE_ATTRIBUTE, TRUE);
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'kernel-test',
+      'azp' => 'kernel-test-client',
+      'tenant' => 'kernel-test',
+    ]);
+    $stack->push($request);
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
     $response = $this->container->get('mcp_sentinel.classification')
       ->refusalResponse();
     $this->assertSame(403, $response->getStatusCode());
