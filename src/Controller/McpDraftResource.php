@@ -24,6 +24,7 @@ use Drupal\jsonapi\JsonApiResource\ResourceObject;
 use Drupal\jsonapi\JsonApiResource\ResourceObjectData;
 use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\jsonapi\ResourceResponse;
+use Drupal\mcp_sentinel\Draft\McpDraftHeaders;
 use Drupal\mcp_sentinel\Draft\McpNestedReplacement;
 use Drupal\mcp_sentinel\Draft\McpNestedReplacementPlan;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
@@ -81,12 +82,12 @@ final class McpDraftResource extends EntityResource {
   /**
    * Header that selects the translation to create, read, or continue.
    */
-  public const LANGCODE_HEADER = 'X-MCP-Draft-Langcode';
+  public const LANGCODE_HEADER = McpDraftHeaders::LANGCODE_HEADER;
 
   /**
    * Header that selects create (omitted) or revise.
    */
-  public const MODE_HEADER = 'X-MCP-Draft-Mode';
+  public const MODE_HEADER = McpDraftHeaders::MODE_HEADER;
 
   /**
    * Inventory name for opening a draft over a published translation.

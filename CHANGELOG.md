@@ -78,6 +78,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Kill-switch docs state that the Drush/shell path sits outside
   governance. The two-person rule on that path requires individual
   OS accounts and no shared deploy user.
+- Draft mode and langcode header names live on `McpDraftHeaders`,
+  so the audit logger no longer imports the JSON:API draft
+  controller. `limitExceedsCap()` lives on `McpReadBudgetResolver`;
+  the JSON:API page-limit subscriber and install verifier call the
+  resolver. `McpSecurityPolicyTool` uses the base
+  `governancePolicyResolver` instead of a duplicate `$resolver`.
 
 ## [3.2.0] - 2026-10-15
 

@@ -6,7 +6,6 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
-use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolOperation;
@@ -28,11 +27,6 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpSecurityPolicyTool extends McpGovernedToolBase {
 
   /**
-   * Active policy profile for the caller.
-   */
-  protected McpPolicyResolver $resolver;
-
-  /**
    * Settings used to describe the active policy.
    */
   protected ConfigFactoryInterface $configFactory;
@@ -42,7 +36,6 @@ final class McpSecurityPolicyTool extends McpGovernedToolBase {
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
     $instance = parent::create($container, $configuration, $plugin_id, $plugin_definition);
-    $instance->resolver = $container->get('mcp_sentinel.policy_resolver');
     $instance->configFactory = $container->get('config.factory');
     return $instance;
   }
@@ -52,7 +45,7 @@ final class McpSecurityPolicyTool extends McpGovernedToolBase {
    */
   protected function doExecute(array $values): ExecutableResult {
     $enabled = (bool) $this->configFactory->get('mcp_sentinel.settings')->get('enabled');
-    $profile = $this->resolver->resolve();
+    $profile = $this->governancePolicyResolver?->resolve();
     if ($profile === NULL) {
       return ExecutableResult::success($this->t('No MCP policy applies to this account.'), [
         'enabled' => $enabled,
