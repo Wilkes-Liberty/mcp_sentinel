@@ -62,7 +62,10 @@ final class McpWebhookWorkerTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_webhook_delivery']);
+    $this->installSchema('mcp_sentinel', [
+      'mcp_sentinel_webhook_delivery',
+      'mcp_sentinel_kill_block',
+    ]);
     $this->installConfig(['mcp_sentinel']);
   }
 
@@ -294,6 +297,8 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       $time,
       $this->container->get('logger.channel.mcp_sentinel'),
       new McpPrincipalContextJob($holder),
+      $this->container->get('mcp_sentinel.kill_switch'),
+      $this->container->get('mcp_sentinel.webhook_queue_manager'),
     );
     try {
       $worker->processItem([

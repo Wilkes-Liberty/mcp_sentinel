@@ -1164,9 +1164,9 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
  * depend on the event dispatcher (config-save subscribers also
  * consult the kill registry).
  *
- * @todo DEV-846 operator decision: the unavailable-confirmer rule is
- *   not decided. This hook must not apply a pending mass kill or
- *   complete a pending un-kill.
+ * DEV-985: an unconfirmed mass freeze stays frozen. This hook
+ * notifies the named second person and the break-glass path. It
+ * must not lift the freeze or complete a pending un-kill.
  */
 function mcp_sentinel_kill_unavailable_confirmer(array $context): void {
   $type = McpKillSelectorType::tryFrom((string) ($context['selector_type'] ?? ''));

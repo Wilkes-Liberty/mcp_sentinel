@@ -12,7 +12,9 @@ use Drupal\Core\Queue\QueueWorkerBase;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
+use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -194,6 +196,10 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The MCP Sentinel logger channel.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextJob $principalJob
    *   Internal job-boundary overlay (per queue item).
+   * @param \Drupal\mcp_sentinel\Service\McpKillSwitch $killSwitch
+   *   Kill registry checked before a row is claimed.
+   * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
+   *   Moves in-scope rows to held.
    */
   public function __construct(
     array $configuration,
@@ -205,6 +211,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     protected TimeInterface $time,
     protected LoggerInterface $logger,
     protected McpPrincipalContextJob $principalJob,
+    protected McpKillSwitch $killSwitch,
+    protected McpWebhookQueueManager $webhookQueue,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }
@@ -228,6 +236,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
       $container->get('mcp_sentinel.principal_context_job'),
+      $container->get('mcp_sentinel.kill_switch'),
+      $container->get('mcp_sentinel.webhook_queue_manager'),
     );
   }
 
@@ -280,12 +290,31 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     if ($row === NULL) {
       return;
     }
-    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf', 'failed_redirect', 'failed_key'], TRUE)) {
-      // Terminal states: already delivered or permanently failed.
+    if (in_array($row['status'], [
+      'sent',
+      'failed',
+      'failed_ssrf',
+      'failed_redirect',
+      'failed_key',
+      McpWebhookQueueManager::STATUS_HELD,
+      McpWebhookQueueManager::STATUS_DISCARDED,
+    ], TRUE)) {
+      // Terminal or held: already delivered, failed, held, or discarded.
       return;
     }
     // in_progress rows were claimed by another worker; skip without re-sending.
     if ($row['status'] === 'in_progress') {
+      return;
+    }
+
+    $fromItem = is_array($data) ? $data : [];
+    $principalKey = trim((string) ($row['principal_key'] ?? $fromItem['principal_key'] ?? ''));
+    $humanKey = trim((string) ($row['human_key'] ?? $fromItem['human_key'] ?? ''));
+    $tenant = trim((string) ($row['tenant'] ?? $fromItem['tenant'] ?? ''));
+    if ($this->killSwitch->shouldHoldSideEffects()
+      && ($principalKey !== '' || $humanKey !== '' || $tenant !== '')
+      && $this->killSwitch->isKilled($principalKey, $humanKey, $tenant)) {
+      $this->webhookQueue->markHeld($deliveryId);
       return;
     }
 

@@ -8,6 +8,11 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Queue\QueueFactory;
+use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
+use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\Value\McpKillSelector;
+use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -18,7 +23,10 @@ use Psr\Log\LoggerInterface;
  * faithful replay), then enqueues the item for the McpWebhookWorker QueueWorker
  * plugin to process. A fast (DNS-free) SSRF check runs here (Layer 1); the
  * worker re-validates with DNS resolution (Layer 2) at send time, since DNS
- * can rebind between enqueue and delivery.
+ * can rebind between enqueue and delivery. Each row stores principal_key,
+ * human_key, and tenant at enqueue so a kill can hold in-scope deliveries
+ * (DEV-985). Held rows are never re-queued by cron. Release and discard
+ * are explicit operator actions.
  */
 final class McpWebhookQueueManager {
 
@@ -28,12 +36,54 @@ final class McpWebhookQueueManager {
   public const QUEUE_NAME = 'mcp_sentinel_webhook_delivery';
 
   /**
+   * Delivery row held after a kill. Never delivered until released.
+   */
+  public const STATUS_HELD = 'held';
+
+  /**
+   * Delivery row discarded by an operator. Never delivered.
+   */
+  public const STATUS_DISCARDED = 'discarded';
+
+  /**
+   * Audit operation for holding in-scope queued deliveries.
+   */
+  public const AUDIT_HOLD = 'agent_side_effect_hold';
+
+  /**
+   * Audit operation for releasing held deliveries.
+   */
+  public const AUDIT_RELEASE = 'agent_side_effect_release';
+
+  /**
+   * Audit operation for discarding held deliveries.
+   */
+  public const AUDIT_DISCARD = 'agent_side_effect_discard';
+
+  /**
+   * PHPUnit-only: cron re-queues held rows.
+   */
+  public const WEAKEN_REQUEUE_HELD = 'requeue_held';
+
+  /**
+   * PHPUnit-only: skip hold/release/discard audit rows.
+   */
+  public const WEAKEN_SKIP_AUDIT = 'skip_audit';
+
+  /**
    * Maximum bytes stored in the payload column (safety cap for large payloads).
    *
    * Entity-event payloads are typically small; this bound guards against
    * pathological cases (e.g. huge metadata arrays).
    */
   private const MAX_PAYLOAD_BYTES = 65535;
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * @var array<string, true>
+   */
+  private array $weakenForTest = [];
 
   /**
    * Constructs a new McpWebhookQueueManager.
@@ -48,6 +98,10 @@ final class McpWebhookQueueManager {
    *   The time service.
    * @param \Psr\Log\LoggerInterface $logger
    *   The MCP Sentinel logger channel.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
+   *   Sealed or carried principal keys stored on each delivery row.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   HMAC audit chain writer.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -55,6 +109,8 @@ final class McpWebhookQueueManager {
     private readonly Connection $database,
     private readonly TimeInterface $time,
     private readonly LoggerInterface $logger,
+    private readonly McpPrincipalContextHolder $holder,
+    private readonly McpAuditLogger $auditLogger,
   ) {}
 
   /**
@@ -117,16 +173,26 @@ final class McpWebhookQueueManager {
     $now = $this->time->getRequestTime();
     // Fetch pending rows that are either newly created (next_attempt IS NULL)
     // or whose backoff has elapsed.
-    $rows = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d', ['id', 'endpoint_id', 'event_name', 'payload'])
-      ->condition('d.status', 'pending')
-      ->condition(
-        $this->database->condition('OR')
-          ->isNull('d.next_attempt')
-          ->condition('d.next_attempt', $now, '<='),
-      )
-      ->execute()
-      ->fetchAll();
+    $status = $this->weakened(self::WEAKEN_REQUEUE_HELD)
+      ? ['pending', self::STATUS_HELD]
+      : ['pending'];
+    $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d', [
+        'id',
+        'endpoint_id',
+        'event_name',
+        'payload',
+        'principal_key',
+        'human_key',
+        'tenant',
+      ]);
+    $query->condition('d.status', $status, 'IN');
+    $query->condition(
+      $this->database->condition('OR')
+        ->isNull('d.next_attempt')
+        ->condition('d.next_attempt', $now, '<='),
+    );
+    $rows = $query->execute()->fetchAll();
 
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
     $count = 0;
@@ -142,6 +208,9 @@ final class McpWebhookQueueManager {
         'endpoint'    => $endpoint,
         'event_name'  => (string) $row->event_name,
         'payload'     => $payloadJson,
+        'principal_key' => (string) ($row->principal_key ?? ''),
+        'human_key' => (string) ($row->human_key ?? ''),
+        'tenant' => (string) ($row->tenant ?? ''),
       ]);
       if ($itemId !== FALSE) {
         $this->database->update('mcp_sentinel_webhook_delivery')
@@ -232,6 +301,9 @@ final class McpWebhookQueueManager {
     if (!$row) {
       return FALSE;
     }
+    if (in_array((string) $row['status'], [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+      return FALSE;
+    }
     $endpoint = $this->findEndpoint((string) $row['endpoint_id']);
     if ($endpoint === NULL) {
       $this->logger->warning(
@@ -270,6 +342,9 @@ final class McpWebhookQueueManager {
       'endpoint'    => $endpoint,
       'event_name'  => (string) $row['event_name'],
       'payload'     => $payloadJson,
+      'principal_key' => (string) ($row['principal_key'] ?? ''),
+      'human_key' => (string) ($row['human_key'] ?? ''),
+      'tenant' => (string) ($row['tenant'] ?? ''),
     ]);
     if ($itemId !== FALSE) {
       $this->database->update('mcp_sentinel_webhook_delivery')
@@ -314,6 +389,7 @@ final class McpWebhookQueueManager {
       : substr($payloadJson, 0, self::MAX_PAYLOAD_BYTES);
 
     $now = $this->time->getRequestTime();
+    [$principalKey, $humanKey, $tenant] = $this->currentPrincipalKeys();
     $rowId = (int) $this->database
       ->insert('mcp_sentinel_webhook_delivery')
       ->fields([
@@ -324,6 +400,9 @@ final class McpWebhookQueueManager {
         'status'       => 'pending',
         'attempts'     => 0,
         'created'      => $now,
+        'principal_key' => substr($principalKey, 0, 770),
+        'human_key' => substr($humanKey, 0, 770),
+        'tenant' => substr($tenant, 0, 128),
       ])->execute();
 
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
@@ -332,6 +411,9 @@ final class McpWebhookQueueManager {
       'endpoint'    => $endpoint,
       'event_name'  => $eventName,
       'payload'     => $payloadJson,
+      'principal_key' => $principalKey,
+      'human_key' => $humanKey,
+      'tenant' => $tenant,
     ]);
     if ($itemId !== FALSE) {
       $this->database->update('mcp_sentinel_webhook_delivery')
@@ -414,6 +496,353 @@ final class McpWebhookQueueManager {
       }
     }
     return FALSE;
+  }
+
+  /**
+   * Holds pending and in-progress deliveries that match the kill scope.
+   *
+   * Writes exactly one hold audit row when any item is held.
+   *
+   * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
+   *   Kill selectors.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   * @param string $batchId
+   *   Kill batch id (correlation).
+   *
+   * @return list<int>
+   *   Held delivery ids.
+   */
+  public function holdMatching(array $selectors, McpOperatorIdentity $operator, string $batchId): array {
+    if (!$this->database->schema()->tableExists('mcp_sentinel_webhook_delivery')) {
+      return [];
+    }
+    $ids = [];
+    foreach ($selectors as $selector) {
+      if (!$selector instanceof McpKillSelector) {
+        continue;
+      }
+      $column = match ($selector->type) {
+        McpKillSelectorType::PrincipalKey => 'principal_key',
+        McpKillSelectorType::HumanKey => 'human_key',
+        McpKillSelectorType::Tenant => 'tenant',
+      };
+      $statement = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d', ['id'])
+        ->condition($column, $selector->key)
+        ->condition('status', ['pending', 'in_progress'], 'IN')
+        ->execute();
+      if ($statement === NULL) {
+        continue;
+      }
+      foreach ($statement->fetchCol() as $id) {
+        $ids[] = (int) $id;
+      }
+    }
+    $ids = array_values(array_unique($ids));
+    if ($ids === []) {
+      return [];
+    }
+    $this->database->update('mcp_sentinel_webhook_delivery')
+      ->fields(['status' => self::STATUS_HELD])
+      ->condition('id', $ids, 'IN')
+      ->condition('status', ['pending', 'in_progress'], 'IN')
+      ->execute();
+    $this->auditSideEffect(self::AUDIT_HOLD, $operator, $selectors, $ids, $batchId);
+    return $ids;
+  }
+
+  /**
+   * Marks one pending row held because the worker saw an active kill.
+   *
+   * Does not write a hold audit row. The stop that created the freeze
+   * already wrote one.
+   */
+  public function markHeld(int $deliveryId): void {
+    if ($deliveryId <= 0) {
+      return;
+    }
+    $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $deliveryId)
+      ->condition('status', ['pending', 'in_progress'], 'IN')
+      ->fields(['status' => self::STATUS_HELD])
+      ->execute();
+  }
+
+  /**
+   * Held delivery rows for the Drupal-side UI (DEV-925).
+   *
+   * @return list<array<string, mixed>>
+   *   Associative rows.
+   */
+  public function listHeld(): array {
+    if (!$this->database->schema()->tableExists('mcp_sentinel_webhook_delivery')) {
+      return [];
+    }
+    $statement = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')
+      ->condition('status', self::STATUS_HELD)
+      ->orderBy('id')
+      ->execute();
+    if ($statement === NULL) {
+      return [];
+    }
+    $rows = [];
+    while ($row = $statement->fetchAssoc()) {
+      $rows[] = $row;
+    }
+    return $rows;
+  }
+
+  /**
+   * Releases held deliveries so they deliver as originally queued.
+   *
+   * Same payload, same delivery id. Signature is recomputed at send
+   * over that unchanged body.
+   *
+   * @param list<int> $deliveryIds
+   *   Held row ids.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   *
+   * @return list<int>
+   *   Released ids.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  public function releaseHeld(array $deliveryIds, McpOperatorIdentity $operator): array {
+    return $this->finishHeld($deliveryIds, $operator, 'release');
+  }
+
+  /**
+   * Discards held deliveries. They are never delivered.
+   *
+   * @param list<int> $deliveryIds
+   *   Held row ids.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   *
+   * @return list<int>
+   *   Discarded ids.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  public function discardHeld(array $deliveryIds, McpOperatorIdentity $operator): array {
+    return $this->finishHeld($deliveryIds, $operator, 'discard');
+  }
+
+  /**
+   * Releases held deliveries matching selectors (PHPUnit weaken only).
+   *
+   * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
+   *   Kill selectors.
+   */
+  public function releaseMatching(array $selectors, McpOperatorIdentity $operator, string $batchId): void {
+    $ids = [];
+    foreach ($this->listHeld() as $row) {
+      foreach ($selectors as $selector) {
+        if (!$selector instanceof McpKillSelector) {
+          continue;
+        }
+        $value = match ($selector->type) {
+          McpKillSelectorType::PrincipalKey => (string) ($row['principal_key'] ?? ''),
+          McpKillSelectorType::HumanKey => (string) ($row['human_key'] ?? ''),
+          McpKillSelectorType::Tenant => (string) ($row['tenant'] ?? ''),
+        };
+        if ($value === $selector->key) {
+          $ids[] = (int) $row['id'];
+        }
+      }
+    }
+    if ($ids !== []) {
+      $this->releaseHeld($ids, $operator);
+    }
+  }
+
+  /**
+   * PHPUnit-only injection that disables one hold invariant.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Webhook-hold weaken flags can be set only under PHPUnit.',
+      );
+    }
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
+   * Releases or discards held rows and writes one audit entry.
+   *
+   * @param list<int> $deliveryIds
+   *   Candidate ids.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   * @param string $action
+   *   release or discard.
+   *
+   * @return list<int>
+   *   Affected ids.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function finishHeld(array $deliveryIds, McpOperatorIdentity $operator, string $action): array {
+    $ids = [];
+    foreach ($deliveryIds as $id) {
+      $id = (int) $id;
+      if ($id > 0) {
+        $ids[] = $id;
+      }
+    }
+    $ids = array_values(array_unique($ids));
+    if ($ids === []) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::NOT_HELD,
+        'A held delivery id is required.',
+      );
+    }
+    $rows = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')
+      ->condition('id', $ids, 'IN')
+      ->condition('status', self::STATUS_HELD)
+      ->execute()
+      ?->fetchAllAssoc('id') ?? [];
+    if ($rows === []) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::NOT_HELD,
+        'No held delivery matches those ids.',
+      );
+    }
+    $heldIds = array_map(static fn ($id): int => (int) $id, array_keys($rows));
+    if ($action === 'discard') {
+      $this->database->update('mcp_sentinel_webhook_delivery')
+        ->fields(['status' => self::STATUS_DISCARDED])
+        ->condition('id', $heldIds, 'IN')
+        ->condition('status', self::STATUS_HELD)
+        ->execute();
+      $this->auditSideEffect(self::AUDIT_DISCARD, $operator, [], $heldIds, '');
+      return $heldIds;
+    }
+    $this->database->update('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'status' => 'pending',
+        'next_attempt' => NULL,
+      ])
+      ->condition('id', $heldIds, 'IN')
+      ->condition('status', self::STATUS_HELD)
+      ->execute();
+    $queue = $this->queueFactory->get(self::QUEUE_NAME);
+    foreach ($heldIds as $id) {
+      $row = $rows[$id] ?? $rows[(string) $id] ?? NULL;
+      if (!is_array($row)) {
+        continue;
+      }
+      $endpoint = $this->findEndpoint((string) $row['endpoint_id']);
+      if ($endpoint === NULL) {
+        continue;
+      }
+      $itemId = $queue->createItem([
+        'delivery_id' => $id,
+        'endpoint' => $endpoint,
+        'event_name' => (string) $row['event_name'],
+        'payload' => (string) ($row['payload'] ?? ''),
+        'principal_key' => (string) ($row['principal_key'] ?? ''),
+        'human_key' => (string) ($row['human_key'] ?? ''),
+        'tenant' => (string) ($row['tenant'] ?? ''),
+      ]);
+      if ($itemId !== FALSE) {
+        $this->database->update('mcp_sentinel_webhook_delivery')
+          ->condition('id', $id)
+          ->fields(['item_id' => $itemId])
+          ->execute();
+      }
+    }
+    $this->auditSideEffect(self::AUDIT_RELEASE, $operator, [], $heldIds, '');
+    return $heldIds;
+  }
+
+  /**
+   * Principal keys from the sealed or carried context.
+   *
+   * @return array{0: string, 1: string, 2: string}
+   *   principalKey, humanKey, tenant.
+   */
+  private function currentPrincipalKeys(): array {
+    $ctx = $this->holder->get();
+    $carried = $this->holder->carriedPrincipal();
+    $principalKey = '';
+    $humanKey = '';
+    $tenant = '';
+    if ($ctx !== NULL) {
+      try {
+        $keys = McpPrincipalKey::fromClaims($ctx->keyClaims());
+        $principalKey = $keys['principalKey'];
+        $humanKey = $keys['humanKey'];
+      }
+      catch (McpPrincipalKeyException) {
+      }
+      $tenant = $ctx->tenant();
+    }
+    if ($carried !== NULL) {
+      if ($principalKey === '') {
+        $principalKey = $carried->principalKey;
+      }
+      if ($humanKey === '') {
+        $humanKey = $carried->humanKey;
+      }
+      if ($tenant === '') {
+        $tenant = $carried->tenant;
+      }
+    }
+    return [$principalKey, $humanKey, $tenant];
+  }
+
+  /**
+   * One HMAC audit row for hold, release, or discard.
+   *
+   * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
+   *   Scope selectors, when known.
+   * @param list<int> $itemIds
+   *   Delivery ids.
+   */
+  private function auditSideEffect(
+    string $operation,
+    McpOperatorIdentity $operator,
+    array $selectors,
+    array $itemIds,
+    string $batchId,
+  ): void {
+    if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
+      return;
+    }
+    $scope = [];
+    foreach ($selectors as $selector) {
+      if ($selector instanceof McpKillSelector) {
+        $scope[] = $selector->type->value . ':' . $selector->key;
+      }
+    }
+    if ($scope === [] && $itemIds !== []) {
+      $scope[] = 'delivery:' . implode(',', $itemIds);
+    }
+    $this->auditLogger->logAlways($operation, [
+      'actor' => $operator->storageId(),
+      'scope' => implode(',', $scope),
+      'target_selector' => implode(',', $scope),
+      'timestamp' => (string) $this->time->getRequestTime(),
+      'batch_id' => $batchId,
+      'correlation_id' => $batchId !== '' ? $batchId : implode(',', $itemIds),
+      'item_ids' => implode(',', $itemIds),
+    ]);
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
   }
 
 }
