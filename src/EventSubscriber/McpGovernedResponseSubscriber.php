@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpExfiltrationGuard;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -26,8 +27,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * a governed agent could exfiltrate any volume in a single request on those
  * channels (#3616540). This subscriber measures the rendered response for
  * governed traffic on both paths and replaces an over-budget body with a
- * bounded 413 refusal carrying the stable reason code
- * `response_size_cap_exceeded`, plus a bounded, non-sensitive audit row.
+ * bounded 413 refusal (`MCP access is denied.`), plus a bounded,
+ * non-sensitive audit row. The rule id stays on the audit row.
  *
  * The refusal deliberately happens after rendering: the budget is an
  * egress control, not a query planner. Row-level bounding happens earlier
@@ -46,6 +47,7 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
     private readonly McpAuditLogger $auditLogger,
     private readonly ?McpClassificationResolver $classification = NULL,
     private readonly ?ResourceTypeRepositoryInterface $resourceTypes = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -129,17 +131,17 @@ final class McpGovernedResponseSubscriber implements EventSubscriberInterface {
       'cap' => $cap,
     ]);
 
+    $this->denyExplainer?->refuse(sprintf(
+      'The rendered response (%d bytes) exceeds the effective cap of %d bytes for the active profile (response_size_cap_exceeded).',
+      $bytes,
+      $cap,
+    ), NULL, FALSE);
     $refusal = new JsonResponse([
       'errors' => [
         [
           'status' => '413',
-          'code' => 'response_size_cap_exceeded',
-          'title' => 'Response exceeds the MCP Sentinel response-size budget',
-          'detail' => sprintf(
-            'The rendered response (%d bytes) exceeds the effective cap of %d bytes for the active profile. Narrow the query, request fewer fields, or lower page[limit].',
-            $bytes,
-            $cap,
-          ),
+          'title' => McpDenyExplainer::CALLER_MESSAGE,
+          'detail' => McpDenyExplainer::CALLER_MESSAGE,
         ],
       ],
     ], 413);

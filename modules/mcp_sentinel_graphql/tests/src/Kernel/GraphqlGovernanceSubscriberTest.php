@@ -11,7 +11,6 @@ use Drupal\graphql\Event\OperationEvent;
 use Drupal\graphql\GraphQL\Execution\ResolveContext;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
-use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel_graphql\EventSubscriber\GraphqlGovernanceSubscriber;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
@@ -151,7 +150,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $this->container->get('current_user')->setAccount($agent);
 
     $this->expectException(Error::class);
-    $this->expectExceptionMessage('module_disabled');
+    $this->expectExceptionMessage('MCP access is denied.');
 
     $this->subscriber()->onOperation($this->makeEvent('query'));
   }
@@ -168,7 +167,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $this->setUpGovernedAgent(['allow_write' => FALSE, 'allow_graphql_mutations' => FALSE]);
 
     $this->expectException(Error::class);
-    $this->expectExceptionMessage('GraphQL mutations are disabled by MCP Sentinel.');
+    $this->expectExceptionMessage('MCP access is denied.');
 
     $this->subscriber()->onOperation($this->makeEvent('mutation'));
   }
@@ -195,7 +194,9 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $this->fail('A GraphQL operation was admitted without a principal.');
     }
     catch (Error $exception) {
-      $this->assertStringContainsString('verified principal', $exception->getMessage());
+      $this->assertSame('MCP access is denied.', $exception->getMessage());
+      $this->assertStringNotContainsString('[rule:', $exception->getMessage());
+      $this->assertStringNotContainsString('missing_principal', $exception->getMessage());
     }
 
     $after = (int) $this->container->get('database')
@@ -218,6 +219,8 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       ->decodeMetadata((string) $row['metadata']);
     $this->assertSame('graphql', $metadata['tool']);
     $this->assertSame('missing_principal', $metadata['reason']);
+    $this->assertStringContainsString('[rule:', (string) ($metadata['explain'] ?? ''));
+    $this->assertStringContainsString('missing_principal', (string) ($metadata['explain'] ?? ''));
     $this->assertNotContains('graphql_query', $this->container->get('database')
       ->select('audit_chain_log', 'l')
       ->fields('l', ['operation'])
@@ -253,7 +256,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $this->setUpGovernedAgent(['allow_read' => FALSE]);
 
     $this->expectException(Error::class);
-    $this->expectExceptionMessage('GraphQL read access is disabled by MCP Sentinel.');
+    $this->expectExceptionMessage('MCP access is denied.');
 
     $this->subscriber()->onOperation($this->makeEvent('query'));
   }
@@ -303,7 +306,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $this->setUpGovernedAgent(['allow_read' => FALSE, 'allow_write' => FALSE]);
 
     $this->expectException(Error::class);
-    $this->expectExceptionMessage('GraphQL read access is disabled by MCP Sentinel.');
+    $this->expectExceptionMessage('MCP access is denied.');
     $this->subscriber()->onOperation($this->makeEvent('subscription'));
   }
 
@@ -416,7 +419,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
     $this->container->get('mcp_sentinel.policy_bundle_registry')->emergencyDeny();
 
     $this->expectException(Error::class);
-    $this->expectExceptionMessage(McpAccessChecker::BUNDLE_DENIAL_CODE);
+    $this->expectExceptionMessage('MCP access is denied.');
 
     $this->subscriber()->onOperation($this->makeEvent('query'));
   }
@@ -439,6 +442,7 @@ final class GraphqlGovernanceSubscriberTest extends KernelTestBase {
       $graphqlResultsCache,
       $this->container->get('request_stack'),
       $this->container->get('mcp_sentinel.principal_context_dispatcher'),
+      $this->container->get('mcp_sentinel.deny_explainer'),
     );
   }
 

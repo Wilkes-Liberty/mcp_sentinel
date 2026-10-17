@@ -101,6 +101,8 @@ final class McpScheduledPublishGate {
    * @param \Drupal\content_moderation\ModerationInformationInterface|null $moderationInformation
    *   The moderation information service, or NULL when Content Moderation is
    *   not installed.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer. Nullable for the deploy window.
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,
@@ -109,6 +111,7 @@ final class McpScheduledPublishGate {
     private readonly McpAuditLogger $auditLogger,
     private readonly TimeInterface $time,
     private readonly ?ModerationInformationInterface $moderationInformation = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -466,7 +469,17 @@ final class McpScheduledPublishGate {
         continue;
       }
       if ($this->stateRefusal($entity, $profile, $pair['from'], $pair['state']) !== NULL) {
-        return AccessResult::forbidden('Scheduled transition is not permitted by the MCP Sentinel profile.')
+        return AccessResult::forbidden(
+          $this->denyExplainer?->refuse(
+            'Scheduled transition is not permitted by the MCP Sentinel profile.',
+            NULL,
+            TRUE,
+            $entity->getEntityTypeId(),
+            (string) $entity->id(),
+            $operation,
+          )
+            ?? McpDenyExplainer::CALLER_MESSAGE,
+        )
           ->addCacheContexts(['user.roles', 'oauth2_scopes'])
           ->addCacheableDependency($profile)
           ->addCacheableDependency($entity);

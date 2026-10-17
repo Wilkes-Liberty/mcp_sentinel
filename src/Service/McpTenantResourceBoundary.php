@@ -38,10 +38,13 @@ final class McpTenantResourceBoundary {
    *   The database connection.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
    *   The sealed principal for this request.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer. Nullable for the deploy window.
    */
   public function __construct(
     private readonly Connection $connection,
     private readonly McpPrincipalContextHolder $holder,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -64,13 +67,13 @@ final class McpTenantResourceBoundary {
       return NULL;
     }
     if (strlen($tenant) > self::TENANT_MAX || !$this->tableReady()) {
-      return $this->forbidden();
+      return $this->forbidden($entity, $operation);
     }
     $owner = $this->owner($entity);
     if ($owner === NULL || $this->sameTenant($owner, $tenant)) {
       return NULL;
     }
-    return $this->forbidden();
+    return $this->forbidden($entity, $operation);
   }
 
   /**
@@ -253,9 +256,30 @@ final class McpTenantResourceBoundary {
 
   /**
    * Uncacheable tenant denial.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The refused entity, when known.
+   * @param string $operation
+   *   The entity operation that was refused.
    */
-  private function forbidden(): AccessResult {
-    return AccessResult::forbidden('tenant_mismatch')->setCacheMaxAge(0);
+  private function forbidden(
+    ?EntityInterface $entity = NULL,
+    string $operation = '',
+  ): AccessResult {
+    $entityId = NULL;
+    if ($entity !== NULL) {
+      $entityId = $entity->isNew() ? '(new)' : (string) $entity->id();
+    }
+    return AccessResult::forbidden(
+      $this->denyExplainer?->refuse(
+        'tenant_mismatch',
+        NULL,
+        TRUE,
+        $entity?->getEntityTypeId(),
+        $entityId,
+        $operation !== '' ? $operation : NULL,
+      ) ?? McpDenyExplainer::CALLER_MESSAGE,
+    )->setCacheMaxAge(0);
   }
 
 }

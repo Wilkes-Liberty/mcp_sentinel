@@ -64,6 +64,7 @@ final class McpMediaUploadToolTest extends KernelTestBase {
     'encrypt',
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_downstream_test',
   ];
 
   /**
@@ -182,11 +183,57 @@ final class McpMediaUploadToolTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'Media creation must be denied for an ungoverned account.');
-    $this->assertStringContainsStringIgnoringCase(
-      'no governance profile',
+    $this->assertSame(
+      'MCP access is denied.',
       (string) $tool->getResultMessage(),
-      'Failure message must mention the missing governance profile.'
+      'Caller-facing no-profile denials must be generic (DEV-966).',
     );
+  }
+
+  /**
+   * Ungoverned media deny hides the profile rule (DEV-966).
+   */
+  public function testUngovernedUploadHidesProfileRule(): void {
+    $media_type = $this->createTestMediaType();
+    $ungoverned = $this->createUser(['access mcp sentinel context', 'create media']);
+    \Drupal::currentUser()->setAccount($ungoverned);
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_media_create');
+    $tool->setInputValue('bundle', $media_type->id());
+    $tool->setInputValue('name', 'Ungoverned Test');
+    $tool->setInputValue('source_value', 'test-value');
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame('MCP access is denied.', $message);
+    $this->assertStringNotContainsString('no governance profile', $message);
+  }
+
+  /**
+   * Media create exceptions are not forwarded to the caller (DEV-966).
+   */
+  public function testCreateExceptionHidesExceptionText(): void {
+    $media_type = $this->createTestMediaType();
+    $this->createGovernedAccount();
+    \Drupal::state()->set(
+      'mcp_sentinel_downstream_test.throw_on_save',
+      'secret-media-error-xyz',
+    );
+
+    $tool = \Drupal::service('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_media_create');
+    $tool->setInputValue('bundle', $media_type->id());
+    $tool->setInputValue('name', 'Throwing upload');
+    $tool->setInputValue('source_value', 'test-value');
+    $tool->execute();
+
+    $this->assertFalse($tool->getResultStatus());
+    $message = (string) $tool->getResultMessage();
+    $this->assertSame('MCP access is denied.', $message);
+    $this->assertStringNotContainsString('secret-media-error-xyz', $message);
+    $this->assertStringNotContainsString('Failed to create media', $message);
   }
 
   /**
@@ -261,11 +308,12 @@ final class McpMediaUploadToolTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'Second media-create call within the window must fail due to rate limiting.');
-    $this->assertStringContainsStringIgnoringCase(
-      'rate limit',
+    $this->assertSame(
+      'MCP access is denied.',
       (string) $tool->getResultMessage(),
-      'Failure message must mention the rate limit.'
+      'Caller-facing rate-limit denials must be generic (DEV-966).',
     );
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
   }
 
   /**

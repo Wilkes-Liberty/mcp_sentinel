@@ -9,6 +9,7 @@ use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpClassificationTestTrait;
@@ -129,7 +130,7 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $this->onRequest('/jsonapi/node/memo');
 
     $this->setCeilings(['jsonapi' => 'internal']);
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
     $this->assertNull($this->reason($this->article), 'An unlabelled bundle is unaffected by the ceiling.');
     $this->assertTrue($this->article->access('view', $this->agent));
 
@@ -151,7 +152,7 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $this->assertNull($this->reason($this->memo));
 
     $this->onRequest('/graphql');
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
   }
 
   /**
@@ -160,7 +161,7 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
   public function testToolSurfaceIsHonoured(): void {
     $this->setCeilings(['tool' => 'internal', 'jsonapi' => 'restricted']);
     $this->onRequest('/_mcp', [], [McpClassificationResolver::REQUEST_ATTRIBUTE_SURFACE => 'tool']);
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
 
     $this->onRequest('/_mcp', [], [McpClassificationResolver::REQUEST_ATTRIBUTE_SURFACE => 'jsonapi']);
     $this->assertNull($this->reason($this->memo));
@@ -172,7 +173,7 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
   public function testUnknownSurfaceTakesStrictestCeiling(): void {
     $this->setCeilings(['jsonapi' => 'restricted', 'tool' => 'internal']);
     $this->onRequest('/node/1');
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
 
     $this->setCeilings(['jsonapi' => 'restricted', 'tool' => 'restricted']);
     $this->onRequest('/node/1');
@@ -185,11 +186,11 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
   public function testDeclaredCeilingNarrowsOnly(): void {
     $this->setCeilings(['jsonapi' => 'restricted']);
     $this->onRequest('/jsonapi/node/memo', [McpClassificationResolver::HEADER_DECLARED_CEILING => 'internal']);
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
 
     $this->setCeilings(['jsonapi' => 'internal']);
     $this->onRequest('/jsonapi/node/memo', [McpClassificationResolver::HEADER_DECLARED_CEILING => 'restricted']);
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo), 'Declaring above the profile ceiling changes nothing.');
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo), 'Declaring above the profile ceiling changes nothing.');
 
     $this->setCeilings(['jsonapi' => 'restricted']);
     $this->onRequest('/jsonapi/node/memo', [McpClassificationResolver::HEADER_DECLARED_CEILING => 'restricted']);
@@ -207,8 +208,9 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
     $this->onRequest('/jsonapi/node/memo');
     $reason = $this->reason($this->memo);
     $this->assertNotNull($reason);
-    $this->assertStringContainsString("Entity type 'node' is denied", $reason);
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $reason);
     $this->assertStringNotContainsString(McpClassificationResolver::DENIAL_CODE, $reason);
+    $this->assertStringNotContainsString("Entity type 'node' is denied", $reason);
     $this->assertSame([], $this->evidenceRows(), 'The hard deny short-circuits before any classification evidence.');
   }
 
@@ -221,16 +223,16 @@ final class McpClassificationEgressAccessTest extends KernelTestBase {
       McpClassificationResolver::HEADER_DECLARED_CEILING => 'internal',
       McpClassificationResolver::HEADER_DECLARED_DESTINATION => 'tenant-a:export',
     ]);
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
     // A second check of the same subject in the same request adds no row.
     \Drupal::entityTypeManager()->getAccessControlHandler('node')->resetCache();
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
 
     $rows = $this->evidenceRows();
     $this->assertCount(1, $rows, 'One bounded row per subject per request.');
     // A new request starts a new de-duplication set.
     $this->onRequest('/jsonapi/node/memo');
-    $this->assertSame(McpClassificationResolver::DENIAL_CODE, $this->reason($this->memo));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($this->memo));
     $this->assertCount(2, $this->evidenceRows(), 'The next request records its own row.');
     $row = $rows[0];
     $this->assertSame('jsonapi', $row['surface']);

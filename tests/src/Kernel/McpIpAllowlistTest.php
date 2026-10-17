@@ -8,6 +8,7 @@ use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use PHPUnit\Framework\Attributes\Group;
@@ -138,10 +139,10 @@ final class McpIpAllowlistTest extends KernelTestBase {
     $result = $this->checker()->checkEntityAccess($this->node, 'view', $profile);
     $this->assertTrue($result->isForbidden(), 'IP 192.0.2.1 outside /24 block must be denied.');
     $this->assertInstanceOf(AccessResultReasonInterface::class, $result);
-    $this->assertStringContainsString(
-      'Source IP not permitted',
+    $this->assertSame(
+      McpDenyExplainer::CALLER_MESSAGE,
       $result->getReason(),
-      'Reason must mention source IP.'
+      'JSON:API copies the AccessResult reason to the caller.',
     );
     $this->container->get('request_stack')->pop();
   }

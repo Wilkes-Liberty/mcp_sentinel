@@ -60,6 +60,7 @@ final class McpContextEndpointTest extends BrowserTestBase {
   public function testReadinessEndpointBoundary(): void {
     $this->assertAnonymousReadinessDeniedJson(
       'Anonymous GET readiness must be 403 JSON, not a login bounce.',
+      FALSE,
     );
 
     user_role_grant_permissions(
@@ -68,6 +69,7 @@ final class McpContextEndpointTest extends BrowserTestBase {
     );
     $this->assertAnonymousReadinessDeniedJson(
       'Hostile anonymous permission grant must still be 403 JSON.',
+      TRUE,
     );
 
     $this->drupalGet('/drupal-mcp/health');
@@ -87,8 +89,11 @@ final class McpContextEndpointTest extends BrowserTestBase {
    *
    * @param string $message
    *   Failure message when the status, Location, or body is wrong.
+   * @param bool $diagnosticReason
+   *   TRUE when the controller diagnostic document may name unauthenticated.
+   *   FALSE when the AccessDenied rewrite must hide the reason (DEV-966).
    */
-  private function assertAnonymousReadinessDeniedJson(string $message): void {
+  private function assertAnonymousReadinessDeniedJson(string $message, bool $diagnosticReason = FALSE): void {
     $response = $this->getHttpClient()->request(
       'GET',
       $this->buildUrl('/drupal-mcp/readiness'),
@@ -106,7 +111,12 @@ final class McpContextEndpointTest extends BrowserTestBase {
     $this->assertStringContainsString('MCP access is denied.', $body);
     $payload = json_decode($body, TRUE);
     $this->assertIsArray($payload, $message);
-    $this->assertSame('unauthenticated', $payload['reason'] ?? NULL);
+    if ($diagnosticReason) {
+      $this->assertSame('unauthenticated', $payload['reason'] ?? NULL);
+    }
+    else {
+      $this->assertArrayNotHasKey('reason', $payload);
+    }
     $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
     $this->assertArrayNotHasKey('contract_ready', $payload);
   }

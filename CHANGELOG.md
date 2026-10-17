@@ -24,6 +24,47 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   principal, matching GraphQL operations and context.
 
 ### Security
+- Deny responses no longer append a `[rule:<id> ...]` explainer suffix
+  or name the rule to the caller (DEV-966). Every caller-facing deny
+  goes through `McpDenyExplainer::refuse()`. `tools/call` (tool plugin
+  result and MCP body), GraphQL errors, JSON:API exceptions, and
+  `/drupal-mcp/context` return `MCP access is denied.` Governed
+  `AccessResult::forbidden()` reasons are the same generic string, so
+  JSON:API `errors[].detail` and `meta.omitted` no longer repeat IP,
+  entity-type, tenant, classification, bundle-floor, or write-gate
+  text. Size-cap and config-set secret/validation tool failures stay
+  generic too, including an approval-gated config-set refusal. IP,
+  read/page budget, result cap, response-size cap,
+  classification refusal, no-profile, publish-gate, and
+  save/transition exception text stay off the caller body. HTTP
+  403/503/429/413/400 remain as a deliberate disclosure of the deny
+  class. GraphQL Errors do not attach `previous`. Rate-limit rows use
+  `logAlways()`. The HMAC `denied_access` / budget row and the
+  operator log still carry the annotated suffix (`metadata.explain`,
+  `metadata.rule`), including governed JSON:API access-hook 403s
+  from entity, tenant, and scheduled-publish gates, with the
+  principal when it is known. JSON:API classification 403s write
+  `denied_access` through `refuse()` even when `audit_enabled` is
+  off; `classification_egress_denied` evidence may still accompany
+  that row. JSON:API request and response seams and
+  `/drupal-mcp/context` write the same `denied_access` row through
+  `refusalResponse()`. The access hook, the JSON:API request seam,
+  the response seam, and `/drupal-mcp/context` also write a
+  `classification_egress_denied` evidence row (`reason`, `surface`,
+  `profile`, `entity_type`, `bundle`, `field`, `classification`,
+  `ceiling`, `declared_ceiling`, `declared_destination`, `origin`).
+  That evidence row does not carry the rule, explainer, or principal;
+  the `denied_access` row does. Tools that call `$entity->access()`
+  after a pre-check skip their own HMAC row when `refuse()` already
+  recorded the deny for that entity and operation. A single update
+  refused by both the tenant and scheduled-publish gates writes
+  one row. The `refuse()` dedupe key includes the rule, entity
+  type, id, and operation, and never collapses writes when there
+  is no current request. The
+  row records the operation. Paths that already audit pass
+  `refuse(..., audit: false)` so a deny is written once.
+  `/drupal-mcp/readiness` stays a diagnostic
+  document and still names the contract reason.
 - GraphQL `requirePrincipal()`, JSON:API, and
   `/drupal-mcp/context` pass the surface's required OAuth scope into
   `assertDispatchAllowed()`. A Paladin or sealed-token context that
@@ -75,6 +116,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   proxied.
 
 ### Changed
+- **Behaviour change.** Anything that parsed `[rule:` or a rule id
+  from a tool failure, GraphQL error, JSON:API exception, or context
+  JSON must stop. The suffix is operator-only. Downstream tools that
+  forwarded `denyReason()` or `McpDenyExplainer::annotate()` to the
+  caller should call `McpDenyExplainer::refuse()` (or return
+  `CALLER_MESSAGE`) instead. Do not parse
+  `read_budget_exceeded` / `page_budget_exceeded` /
+  `response_size_cap_exceeded` / `classification_egress_denied` from
+  caller bodies; use the HTTP status class.
 - Kill-switch docs state that the Drush/shell path sits outside
   governance. The two-person rule on that path requires individual
   OS accounts and no shared deploy user.

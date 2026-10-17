@@ -158,7 +158,9 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
   public function testUidInFieldsRefused(): void {
     $tool = $this->executeNodeCreate('page', ['uid' => 2]);
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('fields.uid', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('fields.uid', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
   }
 
   /**
@@ -167,7 +169,8 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
   public function testUserReferenceFieldRefused(): void {
     $tool = $this->executeNodeCreate('page', ['actor' => 1]);
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('fields.actor', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('fields.actor', (string) $tool->getResultMessage());
   }
 
   /**
@@ -176,7 +179,8 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
   public function testNonexistentSubjectRefused(): void {
     $tool = $this->executeNodeCreate('article', ['subject' => 'No such field']);
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('fields.subject', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('fields.subject', (string) $tool->getResultMessage());
   }
 
   /**
@@ -185,7 +189,8 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
   public function testSubFieldNeverExempt(): void {
     $tool = $this->executeNodeCreate('page', ['sub' => 'spoof']);
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('fields.sub', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('fields.sub', (string) $tool->getResultMessage());
   }
 
   /**
@@ -211,10 +216,8 @@ final class McpReservedFieldAllowlistTest extends KernelTestBase {
     $tool->execute();
 
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString(
-      'fields.field_author',
-      (string) $tool->getResultMessage(),
-    );
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('fields.field_author', (string) $tool->getResultMessage());
   }
 
   /**

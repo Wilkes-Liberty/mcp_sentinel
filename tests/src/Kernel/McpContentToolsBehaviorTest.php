@@ -472,7 +472,8 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
     $tool = \Drupal::service('plugin.manager.tool')->createInstance('mcp_sentinel_site_context');
     $tool->execute();
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('classification_egress_denied', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('classification_egress_denied', (string) $tool->getResultMessage());
 
     // At the schema label the document is served, minus over-ceiling bundles.
     \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')

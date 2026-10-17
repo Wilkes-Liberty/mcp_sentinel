@@ -713,7 +713,7 @@ call, preventing mass-read attacks and accidental data exfiltration.
 | **JSON:API** | A `KernelEvents::REQUEST` subscriber blocks `page[limit]` values above `result_count_cap` for governed requests with HTTP 400 before the DB query runs. (`hook_jsonapi_resource_params_alter` does not exist in Drupal 11.3; the subscriber is the correct implementation.) |
 | **GraphQL** | `hook_graphql_compose_field_results_alter` in `mcp_sentinel_graphql` truncates multi-value field result lists to `result_count_cap` as a third pass after redaction and DLP masking. |
 
-| **Response bytes** | `McpGovernedResponseSubscriber` measures every governed JSON:API/GraphQL response and replaces an over-budget body with a bounded 413 refusal (`response_size_cap_exceeded`) plus a non-sensitive audit row. |
+| **Response bytes** | `McpGovernedResponseSubscriber` measures every governed JSON:API/GraphQL response and replaces an over-budget body with a bounded 413 refusal (`MCP access is denied.`) plus a non-sensitive audit row. The rule id stays on the audit row. |
 
 Ungoverned requests are never capped. A profile cap of `0` is clamped to the
 finite defaults unless the explicit override is active (next section).
@@ -917,8 +917,8 @@ single canonical implementation used by all governed paths. Enforcement covers:
 | **`McpSiteContextTool`** | `checkAccess()` — IP-denied governed accounts cannot read the site schema. |
 | **`/drupal-mcp/context` endpoint** | `McpContextController::context()` — returns 403 with a `no-store` response header before any schema data is serialized. |
 
-A denied request returns a "Source IP not permitted by MCP Sentinel policy."
-message. CIDR matching (including IPv6) is performed by
+A denied request returns `MCP access is denied.` (HTTP 403). The IP rule is
+recorded on the HMAC row and the operator log. CIDR matching (including IPv6) is performed by
 `Symfony\Component\HttpFoundation\IpUtils::checkIp()`, which is bundled with
 Drupal core.
 
@@ -1422,12 +1422,23 @@ default rather than merely guarded.
 | `drush mcp-sentinel:agent-provision <tier> --env=<env>` | (submodule) Provision an agent tier — `content`, `content-auditor`, `auditor`, `developer`, or `admin` — as a role + service account + OAuth consumer (`<tier>-<env>`). Never creates or rotates secrets. |
 | `drush mcp-sentinel:break-glass <uid>` | (approval submodule) Request the time-boxed `mcp_admin` break-glass role for a user; always approval-gated, auto-revoked at the configured TTL. |
 
-### Deny-path explain (DEV-764)
+### Deny-path explain (DEV-764, DEV-966)
 
-When a tool is denied, the failure names the **rule** and whether a human
-may consider widening. Sentinel never auto-widens an allowlist.
+When a tool is denied, the **HMAC audit row** and the operator log name the
+rule and whether a human may consider widening. Sentinel never auto-widens
+an allowlist. Every caller-facing deny goes through
+`McpDenyExplainer::refuse()`. The caller (tools/call, GraphQL, JSON:API,
+`/drupal-mcp/context`) receives only `MCP access is denied.` — no `[rule:]`
+suffix, rule id, reason, cap value, or exception text.
+`/drupal-mcp/readiness` stays a diagnostic document for operators and still
+names the contract reason.
 
-Good deny (agent-visible):
+HTTP status codes are a deliberate disclosure of the deny *class*, not the
+rule: `403` policy/auth, `503` not ready, `429` rate or read budget, `413`
+response-size cap, `400` request page[limit] above the result cap. The
+status is the only caller-visible distinction.
+
+Good deny (operator / audit):
 
 ```
 Entity type 'taxonomy_term' is not in the MCP Sentinel allowlist.
@@ -1436,7 +1447,7 @@ Widening may be appropriate after a human review; it is never automatic.
 Next: A human may add "taxonomy_term" to allowed_entity_types if that type is editorial.
 ```
 
-Good deny that must stay denied:
+Good deny that must stay denied (operator / audit):
 
 ```
 Entity type 'user' is denied by MCP Sentinel.
@@ -1445,15 +1456,23 @@ Widening is not appropriate; this deny must stay.
 Next: Keep "user" on the denylist. Credential-bearing types must stay denied.
 ```
 
-Bad deny (do not ship this shape):
+Good deny (caller-visible):
+
+```
+MCP access is denied.
+```
+
+Bad deny (do not ship this shape to a caller):
 
 ```
 denied
+Entity type 'taxonomy_term' is not in the MCP Sentinel allowlist. [rule:entity_type_allowlist ...]
 ```
 
 or any message that echoes a bearer token, consumer secret, signing key,
-or hashed material. Rule ids and next-step prose are the contract; secrets
-are not.
+or hashed material. Rule ids and next-step prose belong on the audit row
+and in operator logs; secrets are not. Anything that parsed `[rule:` from
+a tool result or MCP error body must read the HMAC row instead.
 
 ### Sealed-token mint (DEV-762)
 

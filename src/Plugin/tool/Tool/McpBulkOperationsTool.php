@@ -9,6 +9,7 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveOpEvent;
 use Drupal\mcp_sentinel\Service\McpContentLock;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
 use Drupal\tool\Tool\ToolOperation;
@@ -114,7 +115,11 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
 
     $profileForRateLimit = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profileForRateLimit === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profileForRateLimit, 'mcp_sentinel_bulk_operations')) {
       return $rateLimited;
@@ -127,14 +132,14 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
         continue;
       }
       $profile = $profileForRateLimit;
-      $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, $entity_op, $profile);
+      $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, $entity_op, $profile, FALSE);
       if ($reason = $this->denyReason($policyResult)) {
-        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $operation, $reason);
-        $results['failed'][$id] = $reason;
+        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $entity_op, $reason);
+        $results['failed'][$id] = (string) $this->t('MCP access is denied.');
         continue;
       }
       if (!$entity->access($entity_op, $this->currentUser)) {
-        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $operation, 'access denied');
+        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $entity_op, 'access denied');
         $results['failed'][$id] = (string) $this->t('access denied');
         continue;
       }

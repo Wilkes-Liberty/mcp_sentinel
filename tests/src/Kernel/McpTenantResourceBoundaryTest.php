@@ -11,6 +11,7 @@ use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\EntityStorageException;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpTenantResourceBoundary;
@@ -136,14 +137,14 @@ final class McpTenantResourceBoundaryTest extends KernelTestBase {
       $view->isForbidden(),
       'Another tenant cannot view an owned fixture.',
     );
-    $this->assertSame('tenant_mismatch', $this->reason($view));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($view));
     $this->assertSame(0, $view->getCacheMaxAge());
     $update = $this->nodeAccess($node, 'update', $editor);
     $this->assertTrue(
       $update->isForbidden(),
       'Another tenant cannot update an owned fixture.',
     );
-    $this->assertSame('tenant_mismatch', $this->reason($update));
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $this->reason($update));
 
     $node->setTitle('taken');
     $this->assertStorageRefused(static fn () => $node->save());
