@@ -6,7 +6,6 @@ namespace Drupal\mcp_sentinel\EventSubscriber;
 
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
-use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
@@ -279,26 +278,9 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     if ($limit < 1) {
       return;
     }
-    $this->refuseLimitAboveCap($limit, $cap);
-  }
-
-  /**
-   * Whether a requested page size exceeds the profile's effective cap.
-   *
-   * Public so the install verifier applies the same bound the JSON:API
-   * request subscriber throws on, rather than re-deriving the comparison.
-   *
-   * @param int $limit
-   *   Requested page[limit].
-   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
-   *   The resolved profile.
-   *
-   * @return bool
-   *   TRUE when the subscriber would throw BadRequestHttpException.
-   */
-  public function limitExceedsCap(int $limit, McpPolicyProfileInterface $profile): bool {
-    $cap = $this->budgets->effectiveResultCap($profile);
-    return $cap > 0 && $limit > $cap;
+    if ($this->budgets->limitExceedsCap($limit, $profile)) {
+      $this->refuseLimitAboveCap($limit, $cap);
+    }
   }
 
   /**

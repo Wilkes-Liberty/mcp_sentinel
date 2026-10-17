@@ -110,6 +110,32 @@ final class McpReadBudgetResolverTest extends KernelTestBase {
   }
 
   /**
+   * A requested limit exceeds the cap when it is strictly above it.
+   */
+  public function testLimitExceedsCap(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', TRUE)
+      ->set('read_budget_defaults', ['results' => 10])
+      ->save();
+    $profile = $this->defaultProfile();
+    $this->assertSame(0, $profile->getResultCountCap(), 'Precondition: profile cap is unlimited so the default binds.');
+    $resolver = $this->resolver();
+    $this->assertSame(10, $resolver->effectiveResultCap($profile));
+    $this->assertTrue($resolver->limitExceedsCap(11, $profile));
+    $this->assertFalse($resolver->limitExceedsCap(10, $profile));
+    $this->assertFalse($resolver->limitExceedsCap(1, $profile));
+
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('require_finite_read_budgets', FALSE)
+      ->save();
+    $this->assertSame(0, $resolver->effectiveResultCap($profile));
+    $this->assertFalse(
+      $resolver->limitExceedsCap(5000, $profile),
+      'An unlimited cap is never exceeded.',
+    );
+  }
+
+  /**
    * An explicit finite profile value wins, even above the default.
    */
   public function testExplicitFiniteProfileValueWins(): void {

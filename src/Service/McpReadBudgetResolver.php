@@ -90,6 +90,25 @@ final class McpReadBudgetResolver {
   }
 
   /**
+   * Whether a requested page size exceeds the profile's effective cap.
+   *
+   * Shared by the JSON:API request subscriber and the install verifier so
+   * both apply the same bound rather than re-deriving the comparison.
+   *
+   * @param int $limit
+   *   Requested page[limit].
+   * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
+   *   The resolved profile.
+   *
+   * @return bool
+   *   TRUE when the effective cap is positive and $limit is above it.
+   */
+  public function limitExceedsCap(int $limit, McpPolicyProfileInterface $profile): bool {
+    $cap = $this->effectiveResultCap($profile);
+    return $cap > 0 && $limit > $cap;
+  }
+
+  /**
    * Effective max response bytes for a profile.
    *
    * @param \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile
