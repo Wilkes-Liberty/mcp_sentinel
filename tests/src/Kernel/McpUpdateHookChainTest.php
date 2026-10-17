@@ -1048,6 +1048,29 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10034 adds the operator-binding uid column and is idempotent.
+   */
+  public function testUpdate10034AddsOperatorBindingUid(): void {
+    $schema = $this->container->get('database')->schema();
+    $this->assertTrue($schema->tableExists('mcp_sentinel_operator_binding'));
+    if ($schema->indexExists('mcp_sentinel_operator_binding', 'uid')) {
+      $schema->dropIndex('mcp_sentinel_operator_binding', 'uid');
+    }
+    if ($schema->fieldExists('mcp_sentinel_operator_binding', 'uid')) {
+      $schema->dropField('mcp_sentinel_operator_binding', 'uid');
+    }
+    $this->assertFalse($schema->fieldExists('mcp_sentinel_operator_binding', 'uid'));
+
+    $message = mcp_sentinel_update_10034();
+    $this->assertStringContainsString('uid', $message);
+    $this->assertTrue($schema->fieldExists('mcp_sentinel_operator_binding', 'uid'));
+    $this->assertTrue($schema->indexExists('mcp_sentinel_operator_binding', 'uid'));
+
+    $again = mcp_sentinel_update_10034();
+    $this->assertStringContainsString('already present', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

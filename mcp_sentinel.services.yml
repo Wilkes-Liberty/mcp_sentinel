@@ -244,6 +244,8 @@ services:
     arguments:
       - '@mcp_sentinel.principal_context_holder'
       - '@private_key'
+      - '@settings'
+      - '@mcp_sentinel.paladin_introspection'
 
   mcp_sentinel.principal_context_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher

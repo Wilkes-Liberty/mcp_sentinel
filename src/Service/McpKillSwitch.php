@@ -32,9 +32,9 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * (iss|sub, all agents of this person), or tenant. Writes are
  * transactional. A killed row is never downgraded to kill_pending.
  * Re-killing stays killed and may extend block_until up to 7 d
- * from now. Two-person confirm binds Paladin iss|sub or a Drush
- * OS assertion, never a Drupal uid. Mixed-channel confirm requires
- * both identities to resolve to one bound operator record; unbound
+ * from now. Two-person confirm binds Paladin iss|sub and mapped
+ * Drupal uids, never the OS user. Mixed-channel confirm requires
+ * both identities to resolve to bound records; unbound
  * mixed-channel confirm is refused. Tokens never appear in audit
  * metadata. expireDue() runs from hook_cron, not admit() or save.
  */
@@ -1131,7 +1131,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
       return;
     }
-    $this->auditLogger->logAlways($operation, $metadata);
+    $this->auditLogger->logAlways(
+      $operation,
+      $metadata + $this->bindings->advisoryProcessMetadata(),
+    );
   }
 
   /**
