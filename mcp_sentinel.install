@@ -1829,10 +1829,82 @@ function mcp_sentinel_update_10035(): string {
     $messages[] = 'mcp_sentinel_kill_block is missing; run update 10030.';
   }
 
-  if ($messages === []) {
-    return 'DEV-985 hold-queue and escalation columns already present.';
+  $held = mcp_sentinel_hold_keyless_pending_on_upgrade();
+  if ($held > 0) {
+    $messages[] = 'Held ' . $held . ' keyless pending webhook row(s) because a kill-block or freeze is active.';
+  }
+  $messages[] = 'Drain or review the webhook queue before updb.';
+
+  if (count($messages) === 1) {
+    return 'DEV-985 hold-queue and escalation columns already present. Drain or review the webhook queue before updb.';
   }
   return implode(' ', $messages);
+}
+
+/**
+ * Holds keyless pending deliveries when any kill-block or freeze is active.
+ *
+ * Rows queued before principal keys were stored cannot be scoped. If
+ * any stop is in force, they are held and audited so they are not
+ * delivered after upgrade.
+ *
+ * @return int
+ *   Number of rows held.
+ */
+function mcp_sentinel_hold_keyless_pending_on_upgrade(): int {
+  $database = \Drupal::database();
+  $delivery = 'mcp_sentinel_webhook_delivery';
+  $kill = 'mcp_sentinel_kill_block';
+  if (!$database->schema()->tableExists($delivery)
+    || !$database->schema()->fieldExists($delivery, 'principal_key')
+    || !$database->schema()->tableExists($kill)) {
+    return 0;
+  }
+  $active = (int) $database->select($kill, 'k')
+    ->condition('status', ['killed', 'kill_pending', 'unkill_pending'], 'IN')
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+  if ($active < 1) {
+    return 0;
+  }
+  $ids = $database->select($delivery, 'd')
+    ->fields('d', ['id'])
+    ->condition('status', 'pending')
+    ->condition('principal_key', '')
+    ->condition('human_key', '')
+    ->condition('tenant', '')
+    ->execute()
+    ->fetchCol();
+  $count = 0;
+  $now = (string) \Drupal::time()->getRequestTime();
+  foreach ($ids as $id) {
+    $id = (int) $id;
+    $updated = (int) $database->update($delivery)
+      ->fields(['status' => 'held'])
+      ->condition('id', $id)
+      ->condition('status', 'pending')
+      ->execute();
+    if ($updated < 1) {
+      continue;
+    }
+    if (\Drupal::hasService('mcp_sentinel.audit_logger')) {
+      \Drupal::service('mcp_sentinel.audit_logger')->logAlways(
+        'agent_side_effect_hold',
+        [
+          'actor' => 'system',
+          'scope' => 'keyless_upgrade',
+          'target_selector' => 'keyless_upgrade',
+          'timestamp' => $now,
+          'batch_id' => '',
+          'correlation_id' => (string) $id,
+          'item_ids' => (string) $id,
+        ],
+      );
+    }
+    $count++;
+  }
+  return $count;
 }
 
 /**

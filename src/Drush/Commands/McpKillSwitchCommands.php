@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
+use Drupal\Component\Uuid\UuidInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
@@ -83,6 +84,8 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Switches to the mapped operator for the permission check.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   User storage for --operator and mapped uids.
+   * @param \Drupal\Component\Uuid\UuidInterface $uuid
+   *   Correlation ids for release and discard.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
@@ -101,6 +104,8 @@ final class McpKillSwitchCommands extends DrushCommands {
     private readonly AccountSwitcherInterface $accountSwitcher,
     #[Autowire(service: 'entity_type.manager')]
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    #[Autowire(service: 'uuid')]
+    private readonly UuidInterface $uuid,
   ) {
     parent::__construct();
   }
@@ -229,7 +234,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds when extending. Default 86400, max 604800.')]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --keep', description: 'Break-glass keep of a mass freeze.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --keep', description: 'Break-glass keep of a mass freeze.')]
   public function breakGlassKill(
     string $batch,
     array $options = [
@@ -312,8 +317,10 @@ final class McpKillSwitchCommands extends DrushCommands {
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
       $ids = $this->idList($options['id'] ?? []);
-      $released = $this->webhookQueue->releaseHeld($ids, $identity);
+      $correlationId = $this->uuid->generate();
+      $released = $this->webhookQueue->releaseHeld($ids, $identity, $correlationId);
       $this->io()->writeln('released: ' . implode(',', $released));
+      $this->io()->writeln('correlation_id: ' . $correlationId);
       return self::EXIT_SUCCESS;
     });
   }
@@ -335,8 +342,10 @@ final class McpKillSwitchCommands extends DrushCommands {
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
       $ids = $this->idList($options['id'] ?? []);
-      $discarded = $this->webhookQueue->discardHeld($ids, $identity);
+      $correlationId = $this->uuid->generate();
+      $discarded = $this->webhookQueue->discardHeld($ids, $identity, $correlationId);
       $this->io()->writeln('discarded: ' . implode(',', $discarded));
+      $this->io()->writeln('correlation_id: ' . $correlationId);
       return self::EXIT_SUCCESS;
     });
   }

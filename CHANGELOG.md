@@ -119,13 +119,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   kill registry before claim, and `requeueDuePendingRows()` never
   re-queues held rows. Operators release or discard held items
   (`mcp-sentinel:webhook-held`, `:webhook-release`,
-  `:webhook-discard`). A released item delivers as originally
+  `:webhook-discard`). Confirm, extend, lift, break-glass, and
+  those hold commands take `PALADIN_TOKEN` and `--operator`
+  (DEV-986 path). A released item delivers as originally
   queued; a discarded item is never sent; lifting a stop does not
-  release holds. Each freeze, confirm, extend, lift, escalation,
-  break-glass use, hold, release, and discard writes exactly one
+  release holds. Release is refused while the scope is still
+  stopped. An unconfirmed freeze never expires at `block_until`;
+  it stays frozen until two operators lift it or break-glass is
+  used. Confirmed stops still expire at their TTL. Break-glass is
+  limited to the identity configured in `settings.php`. Escalation
+  notifies once per batch. `kill-extend` never shortens a stop.
+  Each freeze, confirm, extend, lift, escalation, break-glass
+  use, hold, release, and discard writes exactly one
   `logAlways()` row with operator, scope, timestamp, and
-  correlation or item ids. Run update 10035. Deny-path tests fail
-  when `weakenForTest()` turns the new behaviour off.
+  correlation or item ids. Run update 10035. Drain or review the
+  webhook queue before updb: keyless pending rows are held when
+  any kill-block or freeze is active.
 
 ### Fixed
 - A claimless request on a Drupal test child served by the PHP

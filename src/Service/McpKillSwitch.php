@@ -13,6 +13,7 @@ use Drupal\Core\Database\StatementInterface;
 use Drupal\Core\Database\Transaction;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Enum\McpKillBlockStatus;
 use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
@@ -169,6 +170,26 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const WEAKEN_TRUST_UID = 'trust_uid';
 
   /**
+   * PHPUnit-only: allow extend to shorten block_until.
+   */
+  public const WEAKEN_SKIP_EXTEND_MAX = 'skip_extend_max';
+
+  /**
+   * PHPUnit-only: expire unconfirmed freezes at block_until.
+   */
+  public const WEAKEN_EXPIRE_UNCONFIRMED = 'expire_unconfirmed';
+
+  /**
+   * PHPUnit-only: skip unavailable-confirmer hook and event.
+   */
+  public const WEAKEN_SKIP_ESCALATION = 'skip_escalation';
+
+  /**
+   * PHPUnit-only: accept any distinct operator as break-glass.
+   */
+  public const WEAKEN_SKIP_BREAK_GLASS_IDENTITY = 'skip_break_glass_identity';
+
+  /**
    * Test-only weaken flags. Empty in production.
    *
    * @var array<string, true>
@@ -201,6 +222,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Paladin/Drush operator-record bindings for mixed-channel confirm.
    * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
    *   Holds queued webhook deliveries in the stopped scope.
+   * @param \Drupal\Core\Site\Settings $settings
+   *   settings.php pin for the break-glass operator.
    */
   public function __construct(
     private readonly Connection $connection,
@@ -213,7 +236,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     private readonly UuidInterface $uuid,
     private readonly McpOperatorBinding $bindings,
     private readonly McpWebhookQueueManager $webhookQueue,
-  ) {}
+    private readonly Settings $settings,
+  ) {
+    $this->webhookQueue->setKillSwitch($this);
+  }
 
   /**
    * {@inheritdoc}
@@ -241,6 +267,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       }
       if ($status === McpKillBlockStatus::KillPending
         && $this->weakened(self::WEAKEN_SKIP_MASS_FREEZE)) {
+        continue;
+      }
+      if ($status === McpKillBlockStatus::KillPending
+        && $this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)
+        && (int) $row['block_until'] <= $now) {
         continue;
       }
       if ($status->isBlocking((int) $row['block_until'], $now)) {
@@ -381,6 +412,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           $anyPending = TRUE;
         }
       }
+      if (!$this->weakened(self::WEAKEN_SKIP_QUEUE_HOLD)) {
+        $this->webhookQueue->holdMatching($selectors, $operator, $batchId);
+      }
       unset($txn);
     }
     catch (\Throwable $e) {
@@ -410,9 +444,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       'needs_confirm' => $anyPending ? '1' : '0',
       'timestamp' => (string) $now,
     ]);
-    if (!$this->weakened(self::WEAKEN_SKIP_QUEUE_HOLD)) {
-      $this->webhookQueue->holdMatching($selectors, $operator, $batchId);
-    }
 
     return new McpKillSwitchResult(
       $resultStatus,
@@ -470,12 +501,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           throw new McpKillSwitchException(
             McpKillSwitchException::NOT_PENDING,
             'That batch is not waiting for kill confirmation.',
-          );
-        }
-        if ((int) $row['block_until'] <= $now) {
-          throw new McpKillSwitchException(
-            McpKillSwitchException::NOT_FROZEN,
-            'That freeze has already expired.',
           );
         }
         $this->assertDistinctOperator((string) $row['requested_by'], $operatorId);
@@ -584,6 +609,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     McpOperatorIdentity $operator,
     ?int $ttl = NULL,
   ): McpKillSwitchResult {
+    $this->assertBreakGlassIdentity($operator);
     return match ($action) {
       McpKillBreakGlassAction::Keep => $this->confirmFreeze($batchId, $operator, TRUE),
       McpKillBreakGlassAction::Extend => $this->extendFreeze($batchId, $operator, $ttl, TRUE),
@@ -609,13 +635,27 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         McpKillBlockStatus::KillPending->value,
         McpKillBlockStatus::UnkillPending->value,
       ], 'IN')
-      ->condition('block_until', $now, '>')
       ->orderBy('selector_hash')
       ->execute();
     if ($statement === NULL) {
       return [];
     }
-    return $this->assocRows($statement);
+    $active = [];
+    foreach ($this->assocRows($statement) as $row) {
+      $status = McpKillBlockStatus::tryFrom((string) $row['status']);
+      if ($status === NULL) {
+        continue;
+      }
+      if ($status === McpKillBlockStatus::KillPending
+        && !$this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
+        $active[] = $row;
+        continue;
+      }
+      if ($status->isBlocking((int) $row['block_until'], $now)) {
+        $active[] = $row;
+      }
+    }
+    return $active;
   }
 
   /**
@@ -657,9 +697,14 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           );
         }
         $status = McpKillBlockStatus::tryFrom((string) $row['status']);
+        if ($status === McpKillBlockStatus::KillPending) {
+          throw new McpKillSwitchException(
+            McpKillSwitchException::INVALID_ACTION,
+            'Un-kill a confirmed stop. Lift an unconfirmed freeze with mcp-sentinel:kill-lift.',
+          );
+        }
         if ($status !== McpKillBlockStatus::Killed
-          && $status !== McpKillBlockStatus::UnkillPending
-          && $status !== McpKillBlockStatus::KillPending) {
+          && $status !== McpKillBlockStatus::UnkillPending) {
           throw new McpKillSwitchException(
             McpKillSwitchException::NOT_PENDING,
             'That selector is not currently killed.',
@@ -893,7 +938,12 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $ttl = $this->resolveTtl($ttl);
     $operatorId = $operator->storageId();
     $now = $this->time->getRequestTime();
-    $blockUntil = McpKillTtl::blockUntil($now, $ttl);
+    $requestedUntil = McpKillTtl::blockUntil($now, $ttl);
+    $cap = $now + McpKillTtl::MAX;
+    $blockUntil = $requestedUntil;
+    $selectors = [];
+    $reason = '';
+    $rows = [];
 
     $txn = $this->connection->startTransaction();
     try {
@@ -904,8 +954,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           'No mass freeze matches that batch.',
         );
       }
-      $selectors = [];
-      $reason = '';
+      $existingUntil = 0;
       foreach ($rows as $row) {
         $status = McpKillBlockStatus::tryFrom((string) $row['status']);
         if ($status !== McpKillBlockStatus::KillPending
@@ -921,7 +970,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
             'That batch is not a mass freeze.',
           );
         }
-        if ((int) $row['block_until'] <= $now) {
+        if ($status === McpKillBlockStatus::Killed
+          && (int) $row['block_until'] <= $now) {
           throw new McpKillSwitchException(
             McpKillSwitchException::NOT_FROZEN,
             'That freeze has already expired.',
@@ -933,7 +983,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           (string) $row['selector_key'],
         );
         $reason = (string) $row['reason'];
+        $existingUntil = max($existingUntil, (int) $row['block_until']);
       }
+      $blockUntil = $this->weakened(self::WEAKEN_SKIP_EXTEND_MAX)
+        ? $requestedUntil
+        : min($cap, max($existingUntil, $requestedUntil));
       $this->connection->update(self::TABLE)
         ->fields([
           'block_until' => $blockUntil,
@@ -1039,7 +1093,22 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     }
 
     if ($this->weakened(self::WEAKEN_AUTO_RELEASE_ON_LIFT)) {
-      $this->webhookQueue->releaseMatching($selectors, $operator, $batchId);
+      $heldIds = [];
+      foreach ($this->webhookQueue->listHeld() as $held) {
+        foreach ($selectors as $selector) {
+          $value = match ($selector->type) {
+            McpKillSelectorType::PrincipalKey => (string) ($held['principal_key'] ?? ''),
+            McpKillSelectorType::HumanKey => (string) ($held['human_key'] ?? ''),
+            McpKillSelectorType::Tenant => (string) ($held['tenant'] ?? ''),
+          };
+          if ($value === $selector->key) {
+            $heldIds[] = (int) $held['id'];
+          }
+        }
+      }
+      if ($heldIds !== []) {
+        $this->webhookQueue->releaseHeld($heldIds, $operator, $batchId);
+      }
     }
 
     $this->auditTransition($breakGlass ? self::AUDIT_BREAK_GLASS : self::AUDIT_LIFT, [
@@ -1405,16 +1474,22 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Expires killed and frozen rows whose block_until has passed.
+   * Expires confirmed stops whose block_until has passed.
+   *
+   * Unconfirmed (kill_pending) freezes stay frozen past TTL until
+   * two operators lift them or break-glass is used.
    */
   private function expireBlocking(int $now): int {
+    $statuses = [
+      McpKillBlockStatus::Killed->value,
+      McpKillBlockStatus::UnkillPending->value,
+    ];
+    if ($this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
+      $statuses[] = McpKillBlockStatus::KillPending->value;
+    }
     $statement = $this->connection->select(self::TABLE, 'k')
       ->fields('k')
-      ->condition('status', [
-        McpKillBlockStatus::Killed->value,
-        McpKillBlockStatus::UnkillPending->value,
-        McpKillBlockStatus::KillPending->value,
-      ], 'IN')
+      ->condition('status', $statuses, 'IN')
       ->condition('block_until', $now, '<=')
       ->execute();
     if ($statement === NULL) {
@@ -1457,15 +1532,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     foreach ($byBatch as $batchId => $rows) {
       $first = $rows[0];
       if ($this->weakened(self::WEAKEN_LIFT_ON_CONFIRM_TIMEOUT)) {
+        $this->notifyUnavailableConfirmer($first, 'kill');
         foreach ($rows as $row) {
-          $this->notifyUnavailableConfirmer($row, 'kill');
           $this->markExpired($row, 'confirm_window', $now);
           $count++;
         }
         continue;
       }
+      $this->notifyUnavailableConfirmer($first, 'kill');
       foreach ($rows as $row) {
-        $this->notifyUnavailableConfirmer($row, 'kill');
         $this->connection->update(self::TABLE)
           ->fields([
             'escalated_at' => $now,
@@ -1581,6 +1656,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Kill or unkill.
    */
   private function notifyUnavailableConfirmer(array $row, string $transition): void {
+    if ($this->weakened(self::WEAKEN_SKIP_ESCALATION)) {
+      return;
+    }
     $selector = new McpKillSelector(
       McpKillSelectorType::from((string) $row['selector_type']),
       (string) $row['selector_key'],
@@ -1780,6 +1858,64 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       McpKillSwitchException::UNVERIFIED_OPERATOR,
       'A verified operator identity is required.',
     );
+  }
+
+  /**
+   * Break-glass is limited to the identity pinned in settings.php.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function assertBreakGlassIdentity(McpOperatorIdentity $operator): void {
+    if ($this->weakened(self::WEAKEN_SKIP_BREAK_GLASS_IDENTITY)) {
+      return;
+    }
+    $configured = trim((string) $this->settings->get(
+      'mcp_sentinel.kill_switch.break_glass_operator',
+      '',
+    ));
+    if ($configured === '') {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::BREAK_GLASS_DENIED,
+        'Break-glass is not configured. Set mcp_sentinel.kill_switch.break_glass_operator in settings.php.',
+      );
+    }
+    if ($this->matchesBreakGlassPin($operator, $configured)) {
+      return;
+    }
+    throw new McpKillSwitchException(
+      McpKillSwitchException::BREAK_GLASS_DENIED,
+      'Break-glass is limited to the identity configured in settings.php.',
+    );
+  }
+
+  /**
+   * Whether the operator is the pinned Paladin iss|sub or bound account.
+   */
+  private function matchesBreakGlassPin(McpOperatorIdentity $operator, string $configured): bool {
+    if ($operator->kind === McpOperatorIdentity::KIND_PALADIN
+      && strlen($configured) === strlen($operator->id)
+      && hash_equals($configured, $operator->id)) {
+      return TRUE;
+    }
+    $storageId = $operator->storageId();
+    if (strlen($configured) === strlen($storageId)
+      && hash_equals($configured, $storageId)) {
+      return TRUE;
+    }
+    $uid = $this->bindings->uidFor($operator);
+    if ($uid <= 0 || !$this->connection->schema()->tableExists('users_field_data')) {
+      return FALSE;
+    }
+    $name = $this->connection->select('users_field_data', 'u')
+      ->fields('u', ['name'])
+      ->condition('uid', $uid)
+      ->range(0, 1)
+      ->execute()
+      ?->fetchField();
+    return is_string($name)
+      && $name !== ''
+      && strlen($configured) === strlen($name)
+      && hash_equals($configured, $name);
   }
 
   /**

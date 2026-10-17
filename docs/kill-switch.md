@@ -53,15 +53,24 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
 1. Run database updates before the site serves traffic:
    `drush updb -y`. Update 10030 creates the registry table. Update
    10035 adds hold-queue columns and the escalation stamp.
+   Drain or review the webhook queue before updb: keyless pending
+   rows are held when any kill-block or freeze is active.
 2. Until the registry table exists, every governed call is refused.
    The module fails closed when it cannot read the registry.
-3. Make sure cron runs. Cron writes kill-block expiry (the 24 hour /
-   7 day stop lifetime) and escalates an unconfirmed freeze when the
-   confirm window ends. Cron does not lift that freeze. A stop past
-   its `block_until` no longer blocks, even before cron runs.
+3. Make sure cron runs. Cron writes kill-block expiry for confirmed
+   stops (the 24 hour / 7 day lifetime) and escalates an unconfirmed
+   freeze when the confirm window ends. Cron does not lift that
+   freeze. An unconfirmed freeze stays frozen after `block_until`
+   until two operators lift it or break-glass is used. A confirmed
+   stop past its `block_until` no longer blocks, even before cron
+   runs.
 4. Give each operator an individual OS account on the machine where
    Drush runs. See [Operator identity](#operator-identity).
 5. Rehearse every command on a test site before you need it.
+6. Pin the break-glass operator in `settings.php` as a Paladin
+   `iss|sub` or a bound account:
+   `$settings['mcp_sentinel.kill_switch.break_glass_operator']`.
+   Without that pin, break-glass is refused.
 
 ## Permissions
 
@@ -214,7 +223,9 @@ The command prints:
 ```text
 status: kill_pending
 batch: <batch id>
-needs_confirm: yes (named second person / secondary account holder)
+needs_confirm: yes (named second person / secondary account holder).
+freeze: in force now. Unconfirmed timeout keeps it and escalates.
+block_until: <unix>
 ttl: <seconds>
 ```
 
@@ -250,10 +261,13 @@ The requesting operator cannot confirm their own stop.
 
 ### When the confirmation window runs out
 
-The freeze stays in place. It never lifts on that timeout. On the next
-cron run the audit log gets an `agent_kill_escalate` row. The module
-calls `hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify
-the named second person and the break-glass path.
+The freeze stays in place. It never lifts on that timeout. An
+unconfirmed freeze also stays frozen after its TTL (`block_until`)
+until two operators lift it or break-glass is used. Confirmed stops
+still expire at their TTL. On the next cron run the audit log gets an
+`agent_kill_escalate` row. The module calls
+`hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify the
+named second person and the break-glass path.
 
 A distinct second operator can still confirm, extend, or lift after the
 window, or use [Break-glass](#break-glass) when that person cannot be
@@ -309,14 +323,16 @@ Use this when the named second person cannot be reached and the freeze
 must be kept, extended, or lifted.
 
 ```bash
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --keep
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --extend --ttl=604800
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --lift
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --keep
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --extend --ttl=604800
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --lift
 ```
 
-The pinned break-glass operator is Aleksandra Cerda (`acerda`). The
-command still requires a distinct verified operator. The requester
-cannot break-glass their own stop. The audit row is
+The break-glass operator is configured in `settings.php` as a Paladin
+`iss|sub` or a bound account
+(`$settings['mcp_sentinel.kill_switch.break_glass_operator']`). Only
+that identity can use this path. Everyone else is refused. The
+requester cannot break-glass their own stop. The audit row is
 `agent_kill_break_glass`, not a confirm / extend / lift row.
 
 Rehearse this with `McpKillSwitchBreakGlassDrillTest` alongside the
@@ -338,8 +354,11 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-discard --operator=alice -
 ```
 
 A released item delivers exactly as originally queued: same payload,
-same delivery id, same body signature. A discarded item is never sent.
-Do not use `drush queue:delete`. Cron does not re-queue held rows.
+same delivery id, and the same `X-MCP-Signature`. `X-MCP-Timestamp`
+and `X-MCP-Signature-256` are new on each attempt. A discarded item
+is never sent. Release is refused while the scope is still stopped:
+lift or unkill first. Do not use `drush queue:delete`. Cron does not
+re-queue held rows.
 
 ## Check a stop
 
@@ -420,4 +439,20 @@ See `mcp_sentinel.api.php`.
 - A stop lasts at most 7 days. Extend it before it ends if you need
   longer.
 - Lifting a stop never releases held deliveries. Release or discard
-  each one explicitly.
+  each one explicitly. Release is refused while the scope is still
+  stopped.
+- An unconfirmed freeze does not expire at `block_until`. It stays
+  frozen until two operators lift it or break-glass is used.
+- `mcp-sentinel:unkill` is refused on a `kill_pending` row. Use
+  `mcp-sentinel:kill-lift`.
+- Break-glass is limited to the identity configured in
+  `settings.php`. The requester is always refused.
+- An in-flight webhook POST cannot be recalled. A retry cannot
+  overwrite a held row.
+- Rows queued before update 10035 have empty keys. Drain or review
+  the webhook queue before `drush updb`; keyless pending rows are
+  held when any kill-block or freeze is active.
+- `kill-extend` never shortens a stop. `block_until` is
+  `max(existing, now+ttl)`, capped at now + 7 days.
+- The worker re-checks the kill registry after a successful claim.
+- Escalation notifies once per batch, not once per row.

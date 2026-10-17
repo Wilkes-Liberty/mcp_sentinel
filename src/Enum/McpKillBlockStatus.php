@@ -9,10 +9,11 @@ namespace Drupal\mcp_sentinel\Enum;
  *
  * A kill_pending row is an active mass freeze: in-scope agents are
  * refused immediately. A distinct second operator confirms, extends,
- * or lifts it. The confirm window never lifts the freeze; expiry of
- * block_until still follows the 24 h / 7 d kill-block policy.
- * An unkill_pending row stays refused until the named second person
- * (secondary account holder) confirms the lift.
+ * or lifts it. The confirm window never lifts the freeze. An
+ * unconfirmed freeze also stays frozen after block_until until two
+ * operators lift it or break-glass is used. Confirmed stops still
+ * expire at their TTL. An unkill_pending row stays refused until
+ * the named second person confirms the lift.
  */
 enum McpKillBlockStatus: string {
 
@@ -26,7 +27,8 @@ enum McpKillBlockStatus: string {
    */
   public function isBlocking(int $blockUntil, int $now): bool {
     return match ($this) {
-      self::Killed, self::UnkillPending, self::KillPending => $blockUntil > $now,
+      self::Killed, self::UnkillPending => $blockUntil > $now,
+      self::KillPending => TRUE,
       self::Expired => FALSE,
     };
   }

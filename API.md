@@ -311,10 +311,21 @@ discard never delivers. Lifting a stop does not release held items.
 `hook_mcp_sentinel_kill_unavailable_confirmer` and
 `McpKillUnavailableConfirmerEvent` notify the named second person
 and the break-glass path when a freeze stays unconfirmed. They must
-not lift the freeze. Break-glass keep / extend / lift still needs a
-distinct verified operator (`mcp-sentinel:kill-break-glass`).
-`expireDue()` runs from `hook_cron`. Run update 10035 before serving
-traffic so hold-queue columns exist. The Drupal-side kill-block UI
+not lift the freeze. They fire once per batch. Break-glass keep /
+extend / lift is limited to the identity configured in
+`settings.php` (`mcp-sentinel:kill-break-glass`).
+`expireDue()` runs from `hook_cron`. An unconfirmed freeze never
+expires at `block_until`; it stays frozen until two operators lift
+it or break-glass is used. Confirmed stops still expire at their
+TTL. `unkill` is refused on a `kill_pending` row (use `kill-lift`).
+Break-glass is limited to the identity configured in
+`settings.php` (`mcp_sentinel.kill_switch.break_glass_operator`).
+The requester is always refused. Release is refused while the
+scope is still stopped. Escalation notifies once per batch.
+`kill-extend` never shortens a stop. Run update 10035 before
+serving traffic so hold-queue columns exist. Drain or review the
+webhook queue before updb: keyless pending rows are held when any
+kill-block or freeze is active. The Drupal-side kill-block UI
 (DEV-925) reads freeze state through `listActiveBlocks()` and held
 items through `listHeld()`.
 

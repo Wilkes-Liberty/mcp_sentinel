@@ -117,8 +117,10 @@ stop.
 the window (15 minutes by default), the freeze stays in place and
 escalates. The unavailable-confirmer hook notifies the named second
 person and the break-glass path. The freeze never lifts on that
-timeout. Lifting a mass freeze always takes two operators. Kill-block
-limits stay 24 hours default, 7 days maximum.
+timeout. An unconfirmed freeze also stays frozen after its TTL until
+two operators lift it or break-glass is used. Confirmed stops still
+expire at their TTL. Lifting a mass freeze always takes two operators.
+Kill-block limits stay 24 hours default, 7 days maximum.
 
 **Queued side effects are held.** On any stop (single agent,
 person-wide, or tenant-wide), webhook deliveries already queued for
@@ -133,18 +135,21 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-discard --operator=alice -
 ```
 
 A released item delivers exactly as originally queued (same payload,
-same delivery id, same body signature). A discarded item is never
-sent.
+same delivery id, same `X-MCP-Signature`). `X-MCP-Timestamp` and
+`X-MCP-Signature-256` are new on each attempt. A discarded item is
+never sent. Release is refused while the scope is still stopped.
 
-**Break-glass** (when the named second person cannot be reached): a
-distinct verified operator — the pinned break-glass user, Aleksandra
-Cerda (`acerda`) — keeps, extends, or lifts the freeze. That action
-is audited as break-glass use, not as a skip of the two-person rule.
+**Break-glass** (when the named second person cannot be reached): only
+the identity configured in `settings.php`
+(`mcp_sentinel.kill_switch.break_glass_operator`, a Paladin `iss|sub`
+or a bound account) can keep, extend, or lift the freeze. Everyone
+else is refused. The requester is always refused. That action is
+audited as break-glass use, not as a skip of the two-person rule.
 
 ```
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --keep
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --extend --ttl=604800
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --lift
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --keep
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --extend --ttl=604800
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --lift
 ```
 
 Run the break-glass drill (`McpKillSwitchBreakGlassDrillTest`)
@@ -1448,7 +1453,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:kill-confirm` | Confirm (keep) a mass freeze as a distinct operator. |
 | `drush mcp-sentinel:kill-extend` | Extend a mass freeze as a distinct operator (7-day cap). |
 | `drush mcp-sentinel:kill-lift` | Lift an unconfirmed mass freeze as a distinct operator. Held deliveries stay held. |
-| `drush mcp-sentinel:kill-break-glass` | Keep, extend, or lift a freeze when the named second person cannot be reached. Still requires a distinct verified operator. |
+| `drush mcp-sentinel:kill-break-glass` | Keep, extend, or lift a freeze when the named second person cannot be reached. Limited to the identity configured in settings.php. The requester is always refused. |
 | `drush mcp-sentinel:unkill` | Request or confirm an un-kill of a confirmed stop. Always needs two distinct operators. |
 | `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. |
 | `drush mcp-sentinel:webhook-held` | List webhook deliveries held by a kill. |

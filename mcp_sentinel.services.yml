@@ -223,6 +223,7 @@ services:
       - '@uuid'
       - '@mcp_sentinel.operator_binding'
       - '@mcp_sentinel.webhook_queue_manager'
+      - '@settings'
 
   mcp_sentinel.operator_binding:
     class: Drupal\mcp_sentinel\Service\McpOperatorBinding

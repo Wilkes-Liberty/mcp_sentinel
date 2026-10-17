@@ -69,14 +69,18 @@ final class McpKillSwitchBreakGlassDrillTest extends KernelTestBase {
     $this->installAuditChainSchema();
     $this->installEntitySchema('user');
     $this->installConfig(['system', 'user', 'mcp_sentinel']);
+    $this->setSetting(
+      'mcp_sentinel.kill_switch.break_glass_operator',
+      self::ISS . '|breakglass-op',
+    );
   }
 
   /**
    * The documented break-glass path keeps, extends, and lifts a freeze.
    */
   public function testBreakGlassDrillKeepExtendLift(): void {
-    $requester = McpOperatorIdentity::paladin(self::ISS . '|jmcerda');
-    $breakGlass = McpOperatorIdentity::paladin(self::ISS . '|acerda');
+    $requester = McpOperatorIdentity::paladin(self::ISS . '|operator-requester');
+    $breakGlass = McpOperatorIdentity::paladin(self::ISS . '|breakglass-op');
 
     $keepHuman = McpKillSelector::humanKey(self::ISS . '|drill-keep');
     $keep = $this->killSwitch()->kill([$keepHuman], 'drill-keep', $requester);

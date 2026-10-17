@@ -575,12 +575,10 @@ final class McpKillSwitchTest extends KernelTestBase {
   public function testSameShellPosingAsTwoAccountIdsIsRefused(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-accounts');
     $asUidA = McpOperatorIdentity::fromDrupalUid($this->operatorA);
-    $asUidB = McpOperatorIdentity::fromDrupalUid($this->operatorB);
     try {
-      $result = $this->killSwitch()->kill([$human], 'uid-pose', $asUidA);
-      $this->killSwitch()->confirm($result->batchId, $asUidB);
+      $this->killSwitch()->kill([$human], 'uid-pose', $asUidA);
       $this->fail(
-        'The same shell posing as two Drupal account ids must be refused.',
+        'kill() must throw UNVERIFIED_OPERATOR for a Drupal uid identity.',
       );
     }
     catch (McpKillSwitchException $e) {
