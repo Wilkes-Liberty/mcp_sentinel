@@ -13,14 +13,15 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 
 /**
- * RFC 7662 Paladin token introspection for operator bind (DEV-846).
+ * RFC 7662 Paladin token introspection for operator commands (DEV-986).
  *
  * The iss|sub is taken only from an active introspection response. The
  * token string and any --human-key input are never used as identity.
- * The introspection URL, issuer, audience, and client credentials
- * come from settings.php, not from importable config. HTTPS and
- * client authentication are required. A numeric future exp is
- * required. Redirects are not followed. Paladin unreachable,
+ * The introspection URL, issuer, audience, operator audience, and
+ * client credentials come from settings.php, not from importable
+ * config. HTTPS and client authentication are required. A numeric
+ * future exp is required. Redirects are not followed. Tokens with
+ * an act or actor claim are refused. Paladin unreachable,
  * misconfigured, a missing or elapsed exp, a 3xx, or a claim
  * mismatch: fail closed.
  */
@@ -40,6 +41,16 @@ final class McpPaladinIntrospection {
    * PHPUnit-only: follow HTTP redirects instead of refusing 3xx.
    */
   public const WEAKEN_SKIP_REDIRECT = 'skip_redirect';
+
+  /**
+   * PHPUnit-only: allow tokens that carry act or actor claims.
+   */
+  public const WEAKEN_SKIP_ACT_CLAIM = 'skip_act_claim';
+
+  /**
+   * PHPUnit-only: skip the pinned operator audience or role.
+   */
+  public const WEAKEN_SKIP_OPERATOR_AUDIENCE = 'skip_operator_audience';
 
   /**
    * Test-only weaken flags. Empty in production.
@@ -162,6 +173,38 @@ final class McpPaladinIntrospection {
         || $this->claimMatches($audience, $payload['azp'] ?? NULL)
         || $this->claimMatches($audience, $payload['client_id'] ?? NULL);
       if (!$audienceOk) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'A verified operator identity is required.',
+        );
+      }
+    }
+    if (!$this->weakened(self::WEAKEN_SKIP_ACT_CLAIM)) {
+      if (array_key_exists('act', $payload)
+        || array_key_exists('actor', $payload)) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'A verified operator identity is required.',
+        );
+      }
+    }
+    if (!$this->weakened(self::WEAKEN_SKIP_OPERATOR_AUDIENCE)) {
+      $operatorAudience = $this->setting('operator_audience');
+      if ($operatorAudience === '') {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::PALADIN_UNAVAILABLE,
+          'Paladin is unavailable.',
+        );
+      }
+      $operatorAudOk = $this->claimMatches($operatorAudience, $payload['aud'] ?? NULL)
+        || $this->claimMatches($operatorAudience, $payload['azp'] ?? NULL)
+        || $this->claimMatches($operatorAudience, $payload['client_id'] ?? NULL);
+      $roles = $payload['role'] ?? $payload['roles'] ?? NULL;
+      if ($roles === NULL && isset($payload['realm_access']) && is_array($payload['realm_access'])) {
+        $roles = $payload['realm_access']['roles'] ?? NULL;
+      }
+      $operatorRoleOk = $this->claimMatches($operatorAudience, $roles);
+      if (!$operatorAudOk && !$operatorRoleOk) {
         throw new McpKillSwitchException(
           McpKillSwitchException::UNVERIFIED_OPERATOR,
           'A verified operator identity is required.',

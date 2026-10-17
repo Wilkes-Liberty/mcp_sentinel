@@ -240,7 +240,7 @@ function mcp_sentinel_schema(): array {
   // operator record. identity_id can be 770 characters (a Paladin
   // human key), so the unique index is a hash, matching kill_block.
   $schema['mcp_sentinel_operator_binding'] = [
-    'description' => 'Bound Paladin and Drush identities for one operator (DEV-846).',
+    'description' => 'Bound Paladin identities and Drupal uids for one operator (DEV-986).',
     'fields' => [
       'identity_hash' => [
         'type' => 'varchar',
@@ -261,6 +261,12 @@ function mcp_sentinel_schema(): array {
         'type' => 'varchar',
         'length' => 36,
         'not null' => TRUE,
+      ],
+      'uid' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
       ],
       'unbind_batch_id' => [
         'type' => 'varchar',
@@ -290,6 +296,7 @@ function mcp_sentinel_schema(): array {
     'primary key' => ['identity_hash'],
     'indexes' => [
       'operator_id' => ['operator_id'],
+      'uid' => ['uid'],
       'unbind_batch_id' => ['unbind_batch_id'],
     ],
   ];
@@ -1745,6 +1752,39 @@ function mcp_sentinel_update_10033(): string {
     return 'Dead paladin_introspection_* config keys already absent.';
   }
   return 'Removed ' . implode(', ', $removed) . '.';
+}
+
+/**
+ * Map Paladin operator identities to Drupal accounts (DEV-986).
+ */
+function mcp_sentinel_update_10034(): string {
+  $schema = \Drupal::database()->schema();
+  if (!$schema->tableExists('mcp_sentinel_operator_binding')) {
+    return 'mcp_sentinel_operator_binding is missing; run update 10031.';
+  }
+  $messages = [];
+  $spec = mcp_sentinel_schema()['mcp_sentinel_operator_binding'];
+  if (!$schema->fieldExists('mcp_sentinel_operator_binding', 'uid')) {
+    $schema->addField(
+      'mcp_sentinel_operator_binding',
+      'uid',
+      $spec['fields']['uid'],
+    );
+    $messages[] = 'Added uid.';
+  }
+  if (!$schema->indexExists('mcp_sentinel_operator_binding', 'uid')) {
+    $schema->addIndex(
+      'mcp_sentinel_operator_binding',
+      'uid',
+      ['uid'],
+      $spec,
+    );
+    $messages[] = 'Added uid index.';
+  }
+  if ($messages === []) {
+    return 'Operator-binding uid column already present.';
+  }
+  return implode(' ', $messages);
 }
 
 /**

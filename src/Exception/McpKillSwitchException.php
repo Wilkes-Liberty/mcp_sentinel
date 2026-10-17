@@ -60,6 +60,11 @@ final class McpKillSwitchException extends \RuntimeException {
   public const OPERATOR_BINDING_CONFLICT = 'operator_binding_conflict';
 
   /**
+   * --operator does not match the Drupal account bound to this token.
+   */
+  public const OPERATOR_MISMATCH = 'operator_mismatch';
+
+  /**
    * Paladin introspection is unreachable or not configured.
    */
   public const PALADIN_UNAVAILABLE = 'paladin_unavailable';

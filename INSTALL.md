@@ -217,28 +217,44 @@ full explanation and spoofing-protection details.
 
 ## Paladin operator-bind introspection
 
-Operator bind and unbind introspect a Paladin access token. The URL,
-issuer, audience, and client credentials are pinned in `settings.php`,
-not in exported config, so a config import cannot redirect
-introspection. HTTPS and HTTP Basic client authentication are
-required. Missing any of these fails closed.
+Every kill-switch Drush command introspects a Paladin access token.
+The URL, issuer, audience, operator audience, and client credentials
+are pinned in `settings.php`, not in exported config, so a config
+import cannot redirect introspection. HTTPS and HTTP Basic client
+authentication are required. Missing any of these fails closed.
 
 ```php
 $settings['mcp_sentinel.paladin.introspection_url'] = 'https://idp.example/realms/agents/protocol/openid-connect/token/introspect';
 $settings['mcp_sentinel.paladin.issuer'] = 'https://idp.example/realms/agents';
 $settings['mcp_sentinel.paladin.audience'] = 'mcp-sentinel-operator-bind';
+$settings['mcp_sentinel.paladin.operator_audience'] = 'mcp-sentinel-operator';
 $settings['mcp_sentinel.paladin.client_id'] = 'mcp-sentinel-introspect';
 $settings['mcp_sentinel.paladin.client_secret'] = 'the-introspection-client-secret';
 ```
 
 The token is passed as `PALADIN_TOKEN` or on stdin, never `--token`.
-The introspection response must be `active` with a numeric future
-`exp`, `iss` must match the pinned issuer, and `aud` / `azp` /
-`client_id` must match the pinned audience. A 3xx from Paladin is
-refused; the token is never sent to a hop. A delegated agent token
-minted for a different client is refused. Run database updates:
-10032 and 10033 delete dead `paladin_introspection_*` keys if an
-earlier update wrote them into importable config.
+Pass `--operator=<Drupal account name>` on every command. Bind that
+account first with `mcp-sentinel:operator-bind`. The introspection
+response must be `active` with a numeric future `exp`, `iss` must
+match the pinned issuer, `aud` / `azp` / `client_id` must match the
+pinned audience, and `aud` or a role claim must match
+`operator_audience`. A token with an `act` or `actor` claim is
+refused. A 3xx from Paladin is refused; the token is never sent to
+a hop. Paladin down fails closed.
+
+The OS-user HMAC is off unless you set this in `settings.php` (never
+in config):
+
+```php
+$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE;
+$settings['mcp_sentinel.web_server_user'] = 'www-data';
+```
+
+Even with that flag, euid 0 and the web-server user are refused.
+Run database updates: 10034 adds the Drupal uid column on
+`mcp_sentinel_operator_binding`. 10032 and 10033 delete dead
+`paladin_introspection_*` keys if an earlier update wrote them
+into importable config.
 
 ## Updating
 
