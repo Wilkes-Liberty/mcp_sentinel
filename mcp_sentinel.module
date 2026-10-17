@@ -1160,6 +1160,10 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
 /**
  * Implements hook_mcp_sentinel_kill_unavailable_confirmer().
  *
+ * The function name is {module}_{hook}: the hook already starts
+ * with mcp_sentinel_, so the prefix is repeated. The previous
+ * mcp_sentinel_kill_unavailable_confirmer() name was not invoked.
+ *
  * Dispatches the OO event from the hook so McpKillSwitch does not
  * depend on the event dispatcher (config-save subscribers also
  * consult the kill registry).
@@ -1168,7 +1172,9 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
  * notifies the named second person and the break-glass path. It
  * must not lift the freeze or complete a pending un-kill.
  */
-function mcp_sentinel_kill_unavailable_confirmer(array $context): void {
+function mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer(
+  array $context,
+): void {
   $type = McpKillSelectorType::tryFrom((string) ($context['selector_type'] ?? ''));
   $key = (string) ($context['selector_key'] ?? '');
   if ($type === NULL || $key === '') {

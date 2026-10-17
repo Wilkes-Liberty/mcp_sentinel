@@ -706,24 +706,32 @@ final class McpWebhookQueueManager {
         'A held delivery id is required.',
       );
     }
-    $rows = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+    $statement = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
       ->fields('d')
       ->condition('id', $ids, 'IN')
       ->condition('status', self::STATUS_HELD)
-      ->execute()
-      ?->fetchAllAssoc('id') ?? [];
+      ->execute();
+    $rows = [];
+    if ($statement !== NULL) {
+      while ($row = $statement->fetchAssoc()) {
+        if (!is_array($row)) {
+          continue;
+        }
+        $id = (int) ($row['id'] ?? 0);
+        if ($id > 0) {
+          $rows[$id] = $row;
+        }
+      }
+    }
     if ($rows === []) {
       throw new McpKillSwitchException(
         McpKillSwitchException::NOT_HELD,
         'No held delivery matches those ids.',
       );
     }
-    $heldIds = array_map(static fn ($id): int => (int) $id, array_keys($rows));
+    $heldIds = array_keys($rows);
     if ($action === 'release' && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
       foreach ($rows as $row) {
-        if (!is_array($row)) {
-          continue;
-        }
         if ($this->rowIsStopped($row)) {
           throw new McpKillSwitchException(
             McpKillSwitchException::SCOPE_STOPPED,
