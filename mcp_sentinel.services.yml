@@ -376,7 +376,6 @@ services:
       - '@mcp_sentinel.unmoderated_redirect'
       - '@current_user'
       - '@datetime.time'
-      - '@mcp_sentinel.jsonapi_page_limit_subscriber'
       - '@mcp_sentinel.audit_logger'
       - '@database'
       - '@?content_moderation.moderation_information'

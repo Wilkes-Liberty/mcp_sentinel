@@ -16,7 +16,7 @@ use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\Core\Session\UserSession;
-use Drupal\mcp_sentinel\Controller\McpDraftResource;
+use Drupal\mcp_sentinel\Draft\McpDraftHeaders;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -515,10 +515,10 @@ class McpAuditLogger {
 
     $request = $this->requestStack->getCurrentRequest();
     $mode = $request
-      ? strtolower(trim((string) $request->headers->get(McpDraftResource::MODE_HEADER, '')))
+      ? strtolower(trim((string) $request->headers->get(McpDraftHeaders::MODE_HEADER, '')))
       : '';
     $requested = $request
-      ? strtolower(trim((string) $request->headers->get(McpDraftResource::LANGCODE_HEADER, '')))
+      ? strtolower(trim((string) $request->headers->get(McpDraftHeaders::LANGCODE_HEADER, '')))
       : '';
     $original = $this->originalOf($entity);
     // The saved object may be the default translation even when the request

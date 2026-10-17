@@ -66,6 +66,11 @@ identity source.
 
 ### Agent kill switch (DEV-986)
 
+Operator guide: [`docs/kill-switch.md`](docs/kill-switch.md). It covers
+setup, permissions, the two-operator rule, how to issue, confirm, check,
+and lift a stop, the limits, and planned work (DEV-985) that is not in a
+release.
+
 A durable kill-block registry (`mcp_sentinel.kill_switch`) keyed by
 `iss|sub|actor`, `iss|sub`, or tenant is checked on every governed
 `admit()` and again before a governed write commits. Callers see the

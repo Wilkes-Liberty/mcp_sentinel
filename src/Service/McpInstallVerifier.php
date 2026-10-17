@@ -11,7 +11,6 @@ use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber;
 use Drupal\Core\Extension\ModuleExtensionList;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Session\AccountInterface;
@@ -148,7 +147,6 @@ final class McpInstallVerifier {
     private readonly McpUnmoderatedForwardRevision $unmoderatedRedirect,
     private readonly AccountProxyInterface $currentUser,
     private readonly TimeInterface $time,
-    private readonly McpJsonApiPageLimitSubscriber $pageLimitSubscriber,
     private readonly McpAuditLogger $auditLogger,
     private readonly Connection $database,
     private readonly ?ModerationInformationInterface $moderationInformation = NULL,
@@ -653,7 +651,7 @@ final class McpInstallVerifier {
         'the effective result cap is unlimited.',
       ], [], ['cap' => $cap]);
     }
-    if (!$this->pageLimitSubscriber->limitExceedsCap(self::MASS_READ_LIMIT, $profile)) {
+    if (!$this->readBudgets->limitExceedsCap(self::MASS_READ_LIMIT, $profile)) {
       return McpInstallCheck::fail('probe_mass_read', $title, [
         sprintf('the JSON:API page-limit subscriber would not refuse a %d-item page (cap %d).', self::MASS_READ_LIMIT, $cap),
       ], [], ['cap' => $cap]);

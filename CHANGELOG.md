@@ -144,6 +144,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   proxied.
 
 ### Changed
+- Add `docs/kill-switch.md`, an operator guide to the agent kill
+  switch, and link it from the README. It covers setup, permissions,
+  operator identity, configuration, the two-operator rule, issuing,
+  confirming, checking, and lifting stops, audit records, and known
+  limits. Planned DEV-985 work is in its own section.
 - **Behaviour change.** Anything that parsed `[rule:` or a rule id
   from a tool failure, GraphQL error, JSON:API exception, or context
   JSON must stop. The suffix is operator-only. Downstream tools that
@@ -153,11 +158,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `read_budget_exceeded` / `page_budget_exceeded` /
   `response_size_cap_exceeded` / `classification_egress_denied` from
   caller bodies; use the HTTP status class.
-- Kill-switch operator docs describe the Paladin token plus
-  `--operator` flow (DEV-986). Queued webhook deliveries are not
-  cancelled by a kill in this release; holding them is DEV-985.
-  The docs no longer recommend `drush queue:delete` or a
-  delete/fail action on the webhook admin page.
+- Kill-switch operator docs (`docs/kill-switch.md` and the README)
+  describe the Paladin token plus `--operator` flow (DEV-986).
+  Queued webhook deliveries are not cancelled by a kill in this
+  release; holding them is DEV-985. The docs no longer recommend
+  `drush queue:delete` or a delete/fail action on the webhook
+  admin page.
+- Draft mode and langcode header names live on `McpDraftHeaders`,
+  so the audit logger no longer imports the JSON:API draft
+  controller. `limitExceedsCap()` lives on `McpReadBudgetResolver`;
+  the JSON:API page-limit subscriber and install verifier call the
+  resolver. `McpSecurityPolicyTool` uses the base
+  `governancePolicyResolver` instead of a duplicate `$resolver`.
 
 ## [3.2.0] - 2026-10-15
 
