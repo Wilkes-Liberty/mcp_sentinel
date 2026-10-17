@@ -75,6 +75,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   proxied.
 
 ### Changed
+- Add `docs/kill-switch.md`, an operator guide to the agent kill
+  switch, and link it from the README. It covers setup, permissions,
+  operator identity, configuration, the two-operator rule, issuing,
+  confirming, checking, and lifting stops, audit records, and known
+  limits. Planned DEV-985 work is in its own section.
 - Kill-switch docs state that the Drush/shell path sits outside
   governance. The two-person rule on that path requires individual
   OS accounts and no shared deploy user.
