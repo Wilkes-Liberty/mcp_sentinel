@@ -127,9 +127,9 @@ scope still send. Lifting the stop does not release them. An operator
 reviews held rows and releases or discards each one, or a batch:
 
 ```
-drush mcp-sentinel:webhook-held
-drush mcp-sentinel:webhook-release --id=12 --id=13
-drush mcp-sentinel:webhook-discard --id=12
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-held --operator=alice
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-release --operator=alice --id=12 --id=13
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-discard --operator=alice --id=12
 ```
 
 A released item delivers exactly as originally queued (same payload,
@@ -142,9 +142,9 @@ Cerda (`acerda`) — keeps, extends, or lifts the freeze. That action
 is audited as break-glass use, not as a skip of the two-person rule.
 
 ```
-drush mcp-sentinel:kill-break-glass BATCH --keep
-drush mcp-sentinel:kill-break-glass BATCH --extend --ttl=604800
-drush mcp-sentinel:kill-break-glass BATCH --lift
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --keep
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --extend --ttl=604800
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --lift
 ```
 
 Run the break-glass drill (`McpKillSwitchBreakGlassDrillTest`)

@@ -124,7 +124,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   release holds. Each freeze, confirm, extend, lift, escalation,
   break-glass use, hold, release, and discard writes exactly one
   `logAlways()` row with operator, scope, timestamp, and
-  correlation or item ids. Run update 10034. Deny-path tests fail
+  correlation or item ids. Run update 10035. Deny-path tests fail
   when `weakenForTest()` turns the new behaviour off.
 
 ### Fixed

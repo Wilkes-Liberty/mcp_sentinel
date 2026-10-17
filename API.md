@@ -313,7 +313,7 @@ discard never delivers. Lifting a stop does not release held items.
 and the break-glass path when a freeze stays unconfirmed. They must
 not lift the freeze. Break-glass keep / extend / lift still needs a
 distinct verified operator (`mcp-sentinel:kill-break-glass`).
-`expireDue()` runs from `hook_cron`. Run update 10034 before serving
+`expireDue()` runs from `hook_cron`. Run update 10035 before serving
 traffic so hold-queue columns exist. The Drupal-side kill-block UI
 (DEV-925) reads freeze state through `listActiveBlocks()` and held
 items through `listHeld()`.

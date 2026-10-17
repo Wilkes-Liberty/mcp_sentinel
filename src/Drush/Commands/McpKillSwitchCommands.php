@@ -4,17 +4,21 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
+use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
+use Drupal\mcp_sentinel\Service\McpPaladinIntrospection;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
+use Drupal\user\UserInterface;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
@@ -49,18 +53,36 @@ final class McpKillSwitchCommands extends DrushCommands {
   use AutowireTrait;
 
   /**
+   * PHPUnit-only: skip --operator matching the mapped account.
+   */
+  public const WEAKEN_SKIP_OPERATOR_MATCH = 'skip_operator_match';
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * @var array<string, true>
+   */
+  private array $weakenForTest = [];
+
+  /**
    * Constructs the command file.
    *
    * @param \Drupal\mcp_sentinel\Service\McpKillSwitch $killSwitch
    *   Kill registry.
    * @param \Drupal\Core\Session\AccountProxyInterface $currentUser
-   *   Drupal account for permission only. Not the two-person identity.
+   *   Drupal account for existing commands until DEV-986 lands.
    * @param \Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory $operatorIdentities
    *   Paladin or Drush-assertion identity resolver.
    * @param \Drupal\mcp_sentinel\Service\McpOperatorBinding $operatorBindings
    *   Paladin/Drush operator-record bindings.
    * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
    *   Held webhook deliveries.
+   * @param \Drupal\mcp_sentinel\Service\McpPaladinIntrospection $introspection
+   *   Token introspection for new commands (DEV-986 path).
+   * @param \Drupal\Core\Session\AccountSwitcherInterface $accountSwitcher
+   *   Switches to the mapped operator for the permission check.
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
+   *   User storage for --operator and mapped uids.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
@@ -73,6 +95,12 @@ final class McpKillSwitchCommands extends DrushCommands {
     private readonly McpOperatorBinding $operatorBindings,
     #[Autowire(service: 'mcp_sentinel.webhook_queue_manager')]
     private readonly McpWebhookQueueManager $webhookQueue,
+    #[Autowire(service: 'mcp_sentinel.paladin_introspection')]
+    private readonly McpPaladinIntrospection $introspection,
+    #[Autowire(service: 'account_switcher')]
+    private readonly AccountSwitcherInterface $accountSwitcher,
+    #[Autowire(service: 'entity_type.manager')]
+    private readonly EntityTypeManagerInterface $entityTypeManager,
   ) {
     parent::__construct();
   }
@@ -124,20 +152,21 @@ final class McpKillSwitchCommands extends DrushCommands {
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-confirm', aliases: ['mcps:kill-confirm'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:kill-confirm BATCH', description: 'Confirm a mass freeze as a distinct operator.')]
-  public function confirmKill(string $batch): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    try {
-      $result = $this->killSwitch->confirm($batch, $this->operatorIdentity());
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-confirm BATCH --operator=bob', description: 'Confirm a mass freeze as a distinct operator.')]
+  public function confirmKill(
+    string $batch,
+    array $options = [
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch): int {
+      $result = $this->killSwitch->confirm($batch, $identity);
       $this->printResult($result);
       return self::EXIT_SUCCESS;
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->getMessage());
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -146,27 +175,24 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Command(name: 'mcp-sentinel:kill-extend', aliases: ['mcps:kill-extend'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
   #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds from now. Default 86400, max 604800.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:kill-extend BATCH --ttl=604800', description: 'Extend a mass freeze as a distinct operator.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-extend BATCH --operator=bob --ttl=604800', description: 'Extend a mass freeze as a distinct operator.')]
   public function extendKill(
     string $batch,
     array $options = [
       'ttl' => NULL,
+      'operator' => '',
+      'token' => '',
     ],
   ): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    try {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch, $options): int {
       $ttlRaw = $options['ttl'] ?? '';
       $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
-      $result = $this->killSwitch->extend($batch, $this->operatorIdentity(), $ttl);
+      $result = $this->killSwitch->extend($batch, $identity, $ttl);
       $this->printResult($result);
       return self::EXIT_SUCCESS;
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->getMessage());
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -174,21 +200,22 @@ final class McpKillSwitchCommands extends DrushCommands {
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-lift', aliases: ['mcps:kill-lift'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:kill-lift BATCH', description: 'Lift an unconfirmed mass freeze as a distinct operator. Held deliveries stay held.')]
-  public function liftKill(string $batch): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    try {
-      $result = $this->killSwitch->lift($batch, $this->operatorIdentity());
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-lift BATCH --operator=bob', description: 'Lift an unconfirmed mass freeze. Held deliveries stay held.')]
+  public function liftKill(
+    string $batch,
+    array $options = [
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch): int {
+      $result = $this->killSwitch->lift($batch, $identity);
       $this->printResult($result);
       $this->io()->writeln('held_items: unchanged (release or discard explicitly)');
       return self::EXIT_SUCCESS;
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->getMessage());
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -200,7 +227,9 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'extend', description: 'Extend the freeze. Pass seconds with --ttl.')]
   #[CLI\Option(name: 'lift', description: 'Lift the freeze. Held deliveries stay held.')]
   #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds when extending. Default 86400, max 604800.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:kill-break-glass BATCH --keep', description: 'Break-glass keep of a mass freeze.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=acerda --keep', description: 'Break-glass keep of a mass freeze.')]
   public function breakGlassKill(
     string $batch,
     array $options = [
@@ -208,61 +237,62 @@ final class McpKillSwitchCommands extends DrushCommands {
       'extend' => FALSE,
       'lift' => FALSE,
       'ttl' => NULL,
+      'operator' => '',
+      'token' => '',
     ],
   ): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    try {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch, $options): int {
       $action = $this->breakGlassAction($options);
       $ttlRaw = $options['ttl'] ?? '';
       $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
       $result = $this->killSwitch->breakGlass(
         $batch,
         $action,
-        $this->operatorIdentity(),
+        $identity,
         $ttl,
       );
       $this->printResult($result);
       $this->io()->writeln('break_glass: ' . $action->value);
       return self::EXIT_SUCCESS;
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->getMessage());
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
    * List held webhook deliveries.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-held', aliases: ['mcps:webhook-held'])]
-  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-held', description: 'List webhook deliveries held by a kill.')]
-  public function listHeld(): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    $rows = $this->webhookQueue->listHeld();
-    if ($rows === []) {
-      $this->io()->writeln('held: none');
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-held --operator=alice', description: 'List webhook deliveries held by a kill.')]
+  public function listHeld(
+    array $options = [
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (): int {
+      $rows = $this->webhookQueue->listHeld();
+      if ($rows === []) {
+        $this->io()->writeln('held: none');
+        return self::EXIT_SUCCESS;
+      }
+      $table = [];
+      foreach ($rows as $row) {
+        $table[] = [
+          (string) $row['id'],
+          (string) ($row['endpoint_id'] ?? ''),
+          (string) ($row['event_name'] ?? ''),
+          (string) ($row['principal_key'] ?? ''),
+          (string) ($row['human_key'] ?? ''),
+          (string) ($row['tenant'] ?? ''),
+        ];
+      }
+      $this->io()->table(
+        ['id', 'endpoint', 'event', 'principal_key', 'human_key', 'tenant'],
+        $table,
+      );
       return self::EXIT_SUCCESS;
-    }
-    $table = [];
-    foreach ($rows as $row) {
-      $table[] = [
-        (string) $row['id'],
-        (string) ($row['endpoint_id'] ?? ''),
-        (string) ($row['event_name'] ?? ''),
-        (string) ($row['principal_key'] ?? ''),
-        (string) ($row['human_key'] ?? ''),
-        (string) ($row['tenant'] ?? ''),
-      ];
-    }
-    $this->io()->table(
-      ['id', 'endpoint', 'event', 'principal_key', 'human_key', 'tenant'],
-      $table,
-    );
-    return self::EXIT_SUCCESS;
+    });
   }
 
   /**
@@ -270,25 +300,22 @@ final class McpKillSwitchCommands extends DrushCommands {
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-release', aliases: ['mcps:webhook-release'])]
   #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-release --id=12 --id=13', description: 'Release held deliveries. Same payload, id, and body signature.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-release --operator=alice --id=12 --id=13', description: 'Release held deliveries. Same payload, id, and body signature.')]
   public function releaseHeld(
     array $options = [
       'id' => [],
+      'operator' => '',
+      'token' => '',
     ],
   ): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    try {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
       $ids = $this->idList($options['id'] ?? []);
-      $released = $this->webhookQueue->releaseHeld($ids, $this->operatorIdentity());
+      $released = $this->webhookQueue->releaseHeld($ids, $identity);
       $this->io()->writeln('released: ' . implode(',', $released));
       return self::EXIT_SUCCESS;
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->getMessage());
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -296,25 +323,22 @@ final class McpKillSwitchCommands extends DrushCommands {
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-discard', aliases: ['mcps:webhook-discard'])]
   #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-discard --id=12', description: 'Discard held deliveries. They are never sent.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-discard --operator=alice --id=12', description: 'Discard held deliveries. They are never sent.')]
   public function discardHeld(
     array $options = [
       'id' => [],
+      'operator' => '',
+      'token' => '',
     ],
   ): int {
-    if (($denied = $this->requirePermission()) !== NULL) {
-      return $denied;
-    }
-    try {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
       $ids = $this->idList($options['id'] ?? []);
-      $discarded = $this->webhookQueue->discardHeld($ids, $this->operatorIdentity());
+      $discarded = $this->webhookQueue->discardHeld($ids, $identity);
       $this->io()->writeln('discarded: ' . implode(',', $discarded));
       return self::EXIT_SUCCESS;
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->getMessage());
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -588,6 +612,173 @@ final class McpKillSwitchCommands extends DrushCommands {
     }
     $fromStdin = stream_get_contents(STDIN);
     return is_string($fromStdin) ? trim($fromStdin) : '';
+  }
+
+  /**
+   * Token plus mapped --operator, then switchTo for the permission check.
+   *
+   * Identity comes from Paladin introspection of PALADIN_TOKEN, not
+   * the OS user. Service calls still take McpOperatorIdentity.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
+   *   Work to run as the mapped operator.
+   */
+  private function runAsBoundOperator(array $options, callable $callback): int {
+    return $this->withOperatorSwitch($options, function (McpOperatorIdentity $identity) use ($options, $callback): int {
+      $account = $this->mappedAccount($identity, $options);
+      $this->assertOperatorOption($options, $account);
+      return $this->switchAndRun($account, $identity, $callback);
+    });
+  }
+
+  /**
+   * Reads and verifies the token, then runs the callback.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
+   *   Work after the token is verified.
+   */
+  private function withOperatorSwitch(array $options, callable $callback): int {
+    try {
+      $token = $this->paladinToken($options);
+      if (trim($token) === '') {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'A verified operator identity is required.',
+        );
+      }
+      $identity = $this->introspection->activeIdentity($token);
+      return $callback($identity);
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->reasonCode . ': ' . $e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Switch to the mapped account, check permission, then switch back.
+   *
+   * @param \Drupal\user\UserInterface $account
+   *   Drupal account bound to the Paladin token.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $identity
+   *   Verified Paladin operator identity.
+   * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
+   *   Work to run as $account.
+   */
+  private function switchAndRun(UserInterface $account, McpOperatorIdentity $identity, callable $callback): int {
+    $this->accountSwitcher->switchTo($account);
+    try {
+      $this->killSwitch->assertOperatorAccess($account);
+      return $callback($identity);
+    }
+    finally {
+      $this->accountSwitcher->switchBack();
+    }
+  }
+
+  /**
+   * Drupal account bound to this Paladin identity, or --operator.
+   *
+   * When DEV-986's uid column is present, the mapped uid wins.
+   * Until then --operator names the permission account only.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function mappedAccount(McpOperatorIdentity $identity, array $options): UserInterface {
+    $uid = $this->operatorBindings->uidFor($identity);
+    if ($uid > 0) {
+      $account = $this->entityTypeManager->getStorage('user')->load($uid);
+      if (!$account instanceof UserInterface || (int) $account->id() === 0) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::UNVERIFIED_OPERATOR,
+          'This Paladin identity is not bound to a Drupal operator account.',
+        );
+      }
+      return $account;
+    }
+    return $this->accountFromOperatorOption($options);
+  }
+
+  /**
+   * Drupal account named by --operator.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function accountFromOperatorOption(array $options): UserInterface {
+    $name = trim((string) ($options['operator'] ?? ''));
+    if ($name === '') {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::OPERATOR_MISMATCH,
+        '--operator must be the Drupal account bound to this Paladin token.',
+      );
+    }
+    $accounts = $this->entityTypeManager->getStorage('user')->loadByProperties([
+      'name' => $name,
+    ]);
+    $account = reset($accounts);
+    if (!$account instanceof UserInterface || (int) $account->id() === 0) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::OPERATOR_MISMATCH,
+        '--operator must be the Drupal account bound to this Paladin token.',
+      );
+    }
+    return $account;
+  }
+
+  /**
+   * The --operator option must equal the mapped Drupal account name.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param \Drupal\user\UserInterface $account
+   *   Drupal account bound to the Paladin token.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function assertOperatorOption(array $options, UserInterface $account): void {
+    if ($this->weakened(self::WEAKEN_SKIP_OPERATOR_MATCH)) {
+      return;
+    }
+    $name = trim((string) ($options['operator'] ?? ''));
+    $expected = $account->getAccountName();
+    if ($name === '' || strlen($name) !== strlen($expected) || !hash_equals($expected, $name)) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::OPERATOR_MISMATCH,
+        '--operator must be the Drupal account bound to this Paladin token.',
+      );
+    }
+  }
+
+  /**
+   * PHPUnit-only injection that disables --operator matching.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Kill-switch command weaken flags can be set only under PHPUnit.',
+      );
+    }
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
   }
 
   /**
