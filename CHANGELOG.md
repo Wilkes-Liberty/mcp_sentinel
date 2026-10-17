@@ -104,6 +104,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the table; 10032 adds unbind columns and deletes dead
   `paladin_introspection_*` config keys; 10033 deletes those keys on
   sites that already ran 10032.
+- Kill-switch freeze-first mass stop and held side effects
+  (DEV-985). A person-wide or tenant-wide stop freezes immediately;
+  in-scope agents are refused before a second operator confirms,
+  extends (7-day cap), or lifts. An unconfirmed freeze stays frozen
+  when the confirm window ends and escalates through the
+  unavailable-confirmer hook; it never lifts on that timeout.
+  Lifting a mass freeze always takes two operators. Break-glass
+  keep / extend / lift (`mcp-sentinel:kill-break-glass`) is the
+  documented path when the named second person cannot be reached
+  and is covered by `McpKillSwitchBreakGlassDrillTest` (alongside
+  DEV-855). On any stop, queued webhook deliveries in scope are
+  held: principal keys are stored at enqueue, the worker checks the
+  kill registry before claim, and `requeueDuePendingRows()` never
+  re-queues held rows. Operators release or discard held items
+  (`mcp-sentinel:webhook-held`, `:webhook-release`,
+  `:webhook-discard`). A released item delivers as originally
+  queued; a discarded item is never sent; lifting a stop does not
+  release holds. Each freeze, confirm, extend, lift, escalation,
+  break-glass use, hold, release, and discard writes exactly one
+  `logAlways()` row with operator, scope, timestamp, and
+  correlation or item ids. Run update 10034. Deny-path tests fail
+  when `weakenForTest()` turns the new behaviour off.
 
 ### Fixed
 - A claimless request on a Drupal test child served by the PHP
@@ -128,6 +150,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Kill-switch docs state that the Drush/shell path sits outside
   governance. The two-person rule on that path requires individual
   OS accounts and no shared deploy user.
+- Mass-stop docs and the operator runbook: mass stops freeze
+  immediately, the unconfirmed-freeze default is fail-safe, queued
+  side effects are held, and `drush queue:delete` is no longer the
+  remedy for leftover webhook deliveries.
 
 ## [3.2.0] - 2026-10-15
 

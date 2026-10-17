@@ -31,6 +31,8 @@ final class McpWebhookFilterForm extends FormBase {
     'failed_ssrf' => 'Failed (SSRF blocked)',
     'failed_redirect' => 'Failed (endpoint redirects)',
     'failed_key' => 'Failed (signing key unresolvable)',
+    'held' => 'Held (kill switch)',
+    'discarded' => 'Discarded',
   ];
 
   /**

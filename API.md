@@ -235,27 +235,36 @@ overlay via PRE/POST_COMMAND_HOOK (`*` — every command). A
 Drush-hosted stdio server is therefore never admitted for
 governed tools.
 
-### Agent kill switch (DEV-846)
+### Agent kill switch (DEV-846, DEV-985)
 
 `mcp_sentinel.kill_switch` is the operator API and the registry
 `admit()` and governed writes consult. Selectors are
 `McpKillSelector::principalKey()`, `humanKey()` (every agent of this
 person), and `tenant()`, canonicalized with `McpPrincipalKey` (same
 rules and error codes as `tests/fixtures/principal-key-vectors.json`).
-A single principal kill is immediate. A mass kill and every un-kill
-wait for the named second person (secondary account holder), each
-bound to a verified operator identity: Paladin `iss|sub` from the
-sealed principal context, or a Drush assertion HMAC of the OS
-effective uid. The login name and `USER` are not part of that
-assertion. `drush --user` / `--uid` sets `currentUser` for the
-`administer agent kill switch` permission only; that uid is not
-trusted for the two-person rule. Confirm without a verified identity
-fails closed. The Drush/shell path sits outside governance: the
-two-person rule there is two distinct OS accounts, and it holds only
-with individual OS accounts and no shared deploy user. When a web or
-Paladin kill route arrives, Paladin `iss|sub` and the Drush assertion
-must resolve to one bound operator record
-(`mcp_sentinel.operator_binding` / `mcp-sentinel:operator-bind`).
+A single principal kill is immediate. A person-wide or tenant-wide
+stop freezes immediately: in-scope agents are refused before a
+second operator acts. A distinct verified operator then confirms
+(keep), extends (up to 7 days), or lifts. The requester cannot
+confirm or lift their own stop. If the confirm window elapses with
+no second operator, the freeze stays and escalates
+(`agent_kill_escalate`); it never lifts on that timeout. Lifting a
+mass freeze always takes two operators (`kill-lift` for an
+unconfirmed freeze, or `unkill` plus confirm for a confirmed stop).
+Every un-kill still waits for the named second person (secondary
+account holder). Each operator is bound to a verified identity:
+Paladin `iss|sub` from the sealed principal context, or a Drush
+assertion HMAC of the OS effective uid. The login name and `USER`
+are not part of that assertion. `drush --user` / `--uid` sets
+`currentUser` for the `administer agent kill switch` permission
+only; that uid is not trusted for the two-person rule. Confirm
+without a verified identity fails closed. The Drush/shell path sits
+outside governance: the two-person rule there is two distinct OS
+accounts, and it holds only with individual OS accounts and no
+shared deploy user. When a web or Paladin kill route arrives,
+Paladin `iss|sub` and the Drush assertion must resolve to one bound
+operator record (`mcp_sentinel.operator_binding` /
+`mcp-sentinel:operator-bind`).
 Bind introspects a Paladin access token (RFC 7662) over HTTPS with
 client authentication, requires `active` and a numeric future `exp`,
 and derives `iss|sub` from the introspection, never from
@@ -279,22 +288,35 @@ keys) still work without a binding. One person holding two Paladin
 accounts cannot be detected. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
-`kill_pending`. Audit operations `agent_kill`, `agent_kill_confirm`,
-`agent_kill_expire`, `agent_unkill_request`, and `agent_unkill` go
-through `logAlways()` and never include tokens. Callers of `admit()`
-never see a distinct killed or overlay signal (same code, message,
-and exception shape); the deny row holds the reason. Queue keys
-carried for the kill check are written as `unverified` on deny rows.
-Queue workers may pass `principal_key` / `human_key` / `tenant` on
-the item; `McpPrincipalContextJob::beginCarrying()` attaches those
-keys for the kill check without sealing identity. Already-queued
-webhook deliveries still run after a kill; purge
-`mcp_sentinel_webhook_delivery` until DEV-846 job cancellation.
-The unavailable-confirmer rule is not decided:
+`kill_pending`. `kill_pending` is an active freeze. Audit operations
+`agent_kill`, `agent_kill_freeze`, `agent_kill_confirm`,
+`agent_kill_extend`, `agent_kill_lift`, `agent_kill_escalate`,
+`agent_kill_break_glass`, `agent_unkill_request`, `agent_unkill`,
+`agent_side_effect_hold`, `agent_side_effect_release`, and
+`agent_side_effect_discard` go through `logAlways()` and never
+include tokens. Each of those events writes exactly one row with
+operator, scope, timestamp, and correlation or batch / item ids.
+Callers of `admit()` never see a distinct killed or overlay signal
+(same code, message, and exception shape); the deny row holds the
+reason. Queue keys carried for the kill check are written as
+`unverified` on deny rows. Queue workers may pass `principal_key` /
+`human_key` / `tenant` on the item;
+`McpPrincipalContextJob::beginCarrying()` attaches those keys for
+the kill check without sealing identity. Delivery rows store those
+keys at enqueue. The worker checks the kill registry before it
+claims a row and moves in-scope rows to `held`.
+`requeueDuePendingRows()` never re-queues held rows. Release
+delivers the original payload, delivery id, and body signature;
+discard never delivers. Lifting a stop does not release held items.
 `hook_mcp_sentinel_kill_unavailable_confirmer` and
-`McpKillUnavailableConfirmerEvent` are the operator-decision points
-and must not weaken the two-person rule. `expireDue()` runs from
-`hook_cron`.
+`McpKillUnavailableConfirmerEvent` notify the named second person
+and the break-glass path when a freeze stays unconfirmed. They must
+not lift the freeze. Break-glass keep / extend / lift still needs a
+distinct verified operator (`mcp-sentinel:kill-break-glass`).
+`expireDue()` runs from `hook_cron`. Run update 10034 before serving
+traffic so hold-queue columns exist. The Drupal-side kill-block UI
+(DEV-925) reads freeze state through `listActiveBlocks()` and held
+items through `listHeld()`.
 
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
