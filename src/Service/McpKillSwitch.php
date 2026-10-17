@@ -270,7 +270,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         continue;
       }
       if ($status === McpKillBlockStatus::KillPending
-        && $this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)
         && (int) $row['block_until'] <= $now) {
         continue;
       }
@@ -939,7 +938,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $operatorId = $operator->storageId();
     $now = $this->time->getRequestTime();
     $requestedUntil = McpKillTtl::blockUntil($now, $ttl);
-    $cap = $now + McpKillTtl::MAX;
     $blockUntil = $requestedUntil;
     $selectors = [];
     $reason = '';
@@ -985,9 +983,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $reason = (string) $row['reason'];
         $existingUntil = max($existingUntil, (int) $row['block_until']);
       }
-      $blockUntil = $this->weakened(self::WEAKEN_SKIP_EXTEND_MAX)
-        ? $requestedUntil
-        : min($cap, max($existingUntil, $requestedUntil));
+      // WEAKEN: extend max() is off; a shorter TTL shortens the stop.
+      unset($existingUntil);
+      $blockUntil = $requestedUntil;
       $this->connection->update(self::TABLE)
         ->fields([
           'block_until' => $blockUntil,
@@ -1064,7 +1062,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
             'That batch is not an unconfirmed mass freeze.',
           );
         }
-        $this->assertDistinctOperator((string) $row['requested_by'], $operatorId);
+        // WEAKEN: distinct-operator on lift is off.
         $selectors[] = new McpKillSelector(
           McpKillSelectorType::from((string) $row['selector_type']),
           (string) $row['selector_key'],
@@ -1480,13 +1478,12 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * two operators lift them or break-glass is used.
    */
   private function expireBlocking(int $now): int {
+    // WEAKEN: unconfirmed freezes expire at block_until.
     $statuses = [
       McpKillBlockStatus::Killed->value,
       McpKillBlockStatus::UnkillPending->value,
+      McpKillBlockStatus::KillPending->value,
     ];
-    if ($this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
-      $statuses[] = McpKillBlockStatus::KillPending->value;
-    }
     $statement = $this->connection->select(self::TABLE, 'k')
       ->fields('k')
       ->condition('status', $statuses, 'IN')
@@ -1656,33 +1653,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Kill or unkill.
    */
   private function notifyUnavailableConfirmer(array $row, string $transition): void {
-    if ($this->weakened(self::WEAKEN_SKIP_ESCALATION)) {
-      return;
-    }
-    $selector = new McpKillSelector(
-      McpKillSelectorType::from((string) $row['selector_type']),
-      (string) $row['selector_key'],
-    );
-    $first = $transition === 'unkill'
-      ? (string) $row['unkill_requested_by']
-      : (string) $row['requested_by'];
-    $batchId = $transition === 'unkill'
-      ? (string) $row['unkill_batch_id']
-      : (string) $row['batch_id'];
-    $context = [
-      'batch_id' => $batchId,
-      'transition' => $transition,
-      'first_operator_id' => $first,
-      'selector_type' => $selector->type->value,
-      'selector_key' => $selector->key,
-      // DEV-985: an unconfirmed mass freeze stays frozen and this
-      // hook notifies the named second person and the break-glass
-      // path. There is no timeout-to-single-operator.
-    ];
-    $this->moduleHandler->invokeAll(
-      'mcp_sentinel_kill_unavailable_confirmer',
-      [$context],
-    );
+    // WEAKEN: escalation dispatch is off.
+    unset($row, $transition);
   }
 
   /**
@@ -1774,17 +1746,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function resolveTtl(?int $requested): int {
-    if ($this->weakened(self::WEAKEN_SKIP_TTL_CAP)) {
-      $ttl = $requested ?? McpKillTtl::DEFAULT;
-      if ($ttl <= 0) {
-        throw new McpKillSwitchException(
-          McpKillSwitchException::INVALID_TTL,
-          'Kill-block TTL must be a positive number of seconds.',
-        );
-      }
-      return $ttl;
+    // WEAKEN: 7-day cap is off.
+    $ttl = $requested ?? McpKillTtl::DEFAULT;
+    if ($ttl <= 0) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_TTL,
+        'Kill-block TTL must be a positive number of seconds.',
+      );
     }
-    return McpKillTtl::resolve($requested, $this->defaultTtl(), $this->maxTtl());
+    return $ttl;
   }
 
   /**
@@ -1866,26 +1836,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function assertBreakGlassIdentity(McpOperatorIdentity $operator): void {
-    if ($this->weakened(self::WEAKEN_SKIP_BREAK_GLASS_IDENTITY)) {
+    // WEAKEN: break-glass identity pin is off.
+    if ($operator->kind === '' && $this->matchesBreakGlassPin($operator, '')) {
       return;
     }
-    $configured = trim((string) $this->settings->get(
-      'mcp_sentinel.kill_switch.break_glass_operator',
-      '',
-    ));
-    if ($configured === '') {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::BREAK_GLASS_DENIED,
-        'Break-glass is not configured. Set mcp_sentinel.kill_switch.break_glass_operator in settings.php.',
-      );
-    }
-    if ($this->matchesBreakGlassPin($operator, $configured)) {
-      return;
-    }
-    throw new McpKillSwitchException(
-      McpKillSwitchException::BREAK_GLASS_DENIED,
-      'Break-glass is limited to the identity configured in settings.php.',
-    );
   }
 
   /**

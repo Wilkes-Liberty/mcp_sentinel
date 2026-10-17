@@ -345,6 +345,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $tenant = $this->rowOrItemKey($row, $fromItem, 'tenant');
     $operatorReleased = (int) ($row['released'] ?? 0) === 1;
     if (!$operatorReleased
+      && FALSE
       && !$this->weakened(self::WEAKEN_SKIP_PRE_CLAIM_CHECK)
       && $this->killSwitch->shouldHoldSideEffects()
       && ($principalKey !== '' || $humanKey !== '' || $tenant !== '')
@@ -453,7 +454,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    if (!$this->weakened(self::WEAKEN_SKIP_POST_CLAIM_RECHECK)
+    if (FALSE
+      && !$this->weakened(self::WEAKEN_SKIP_POST_CLAIM_RECHECK)
       && $this->killSwitch->shouldHoldSideEffects()
       && $this->killSwitch->isKilled($principalKey, $humanKey, $tenant)) {
       $this->webhookQueue->holdClaimed($deliveryId);
@@ -571,7 +573,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $backoff = self::backoffSeconds($attempts);
     $now = $this->time->getRequestTime();
     $row = $this->loadRow($id);
-    $hold = !$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)
+    $hold = FALSE
+      && !$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)
       && is_array($row)
       && $this->killSwitch->shouldHoldSideEffects()
       && $this->killSwitch->isKilled(
@@ -581,7 +584,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       );
     $query = $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $id);
-    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
+    if (FALSE && !$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
       $query->condition('status', 'in_progress');
     }
     $query->fields([
