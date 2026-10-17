@@ -271,10 +271,10 @@ final class McpIpAllowlistToolGateTest extends KernelTestBase {
       'The context endpoint must return 403 when the client IP is not in the allowlist.');
 
     $payload = json_decode($response->getContent(), TRUE);
-    $this->assertStringContainsString(
-      'Source IP not permitted',
+    $this->assertSame(
+      'MCP access is denied.',
       $payload['error'] ?? '',
-      'The 403 response must include the IP denial reason.'
+      'The 403 response must be the generic caller deny (DEV-966).'
     );
 
     $this->popRequest();

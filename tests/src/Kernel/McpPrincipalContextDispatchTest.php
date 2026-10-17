@@ -161,7 +161,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       ['tenant' => 'tenant-evil'],
     );
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('identity or tenant keys', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
   }
 
   /**
@@ -207,7 +208,9 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       ['wrap' => ['Tenant' => 'evil']],
     );
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('payload.wrap.Tenant', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('payload.wrap.Tenant', (string) $tool->getResultMessage());
   }
 
   /**
@@ -264,7 +267,9 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       ['params' => ['arguments' => ['note' => 'ok']]],
     );
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('tenant claim', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('[rule:', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('missing_tenant_claim', (string) $tool->getResultMessage());
   }
 
   /**
@@ -364,7 +369,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       ['user' => '2'],
     );
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('payload.user', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('payload.user', (string) $tool->getResultMessage());
     $this->assertSame(1, $this->deniedAccessCount());
     $meta = $this->lastDenialMetadata();
     $this->assertSame('mcp_sentinel_principal_context_probe', $meta['tool']);
@@ -392,7 +398,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $tool->setInputValue('payload', ['sub' => 'spoof']);
     $tool->execute();
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString('payload.sub', (string) $tool->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('payload.sub', (string) $tool->getResultMessage());
     $this->assertSame(1, $this->deniedAccessCount());
     // KernelTestBase::tearDown() reads the session off the current request
     // on Drupal 11.3, so hand the bootstrap request(s) back.
@@ -417,10 +424,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $tool->setInputValue('note', 'ok');
     $tool->execute();
     $this->assertFalse($tool->getResultStatus());
-    $this->assertStringContainsString(
-      'dispatcher is required',
-      (string) $tool->getResultMessage(),
-    );
+    $this->assertSame('MCP access is denied.', (string) $tool->getResultMessage());
+    $this->assertStringNotContainsString('dispatcher is required', (string) $tool->getResultMessage());
     $this->assertSame(1, $this->deniedAccessCount());
   }
 
@@ -509,7 +514,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $denied->setInputValue('sub', 'spoof');
     $denied->execute();
     $this->assertFalse($denied->getResultStatus());
-    $this->assertStringContainsString('sub', (string) $denied->getResultMessage());
+    $this->assertSame('MCP access is denied.', (string) $denied->getResultMessage());
   }
 
   /**

@@ -9,6 +9,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Tool\ConfigScopeToolInterface;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -115,15 +116,19 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     }
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_config_set')) {
       return $rateLimited;
     }
-    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'write', $profile);
+    $policyResult = $this->governanceAccessChecker->checkConfigAccess($name, 'write', $profile, FALSE);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', $reason);
-      return ExecutableResult::failure($this->t('MCP Sentinel denied the config write: @reason', ['@reason' => $reason]));
+      return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
 
     // A config name that holds secrets by nature is not written through this
@@ -133,7 +138,13 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     // one fixed message, so nothing about the submitted data is stored.
     if ($this->configSecrets->isSecretBearing($name)) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', 'secret-bearing configuration name');
-      return ExecutableResult::failure($this->t('MCP Sentinel refused the config write: this configuration holds secrets and cannot be written through a governed tool.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'secret-bearing configuration name',
+          NULL,
+          FALSE,
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     // Validate the object this write would produce before anything is queued
@@ -141,7 +152,13 @@ final class McpConfigSetTool extends McpGovernedToolBase implements ConfigScopeT
     $verdict = $this->configWriteValidator->validate($name, $data, $profile->allowsSchemalessConfigWrite());
     if (!$verdict->valid) {
       $this->logDeniedAccess('mcp_sentinel_config_set', 'config', $name, 'write', 'config validation: ' . $verdict->summary());
-      return ExecutableResult::failure($this->t('MCP Sentinel refused the config write: @summary.', ['@summary' => $verdict->summary()]));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'config validation: ' . $verdict->summary(),
+          NULL,
+          FALSE,
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     // Give the approval submodule a chance to gate this write. A veto means the

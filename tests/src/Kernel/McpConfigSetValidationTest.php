@@ -11,6 +11,7 @@ use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Event\McpDestructiveActionEvent;
 use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel_config_validation_test\EventSubscriber\ImportValidator;
 use Drupal\tool\Tool\ToolInterface;
 use Drupal\user\Entity\Role;
@@ -169,10 +170,11 @@ final class McpConfigSetValidationTest extends KernelTestBase {
   /**
    * Asserts a refusal: failed, unchanged, audited once more, nothing echoed.
    */
-  private function assertRefused(ToolInterface $tool, string $name, array $before, int $deniedBefore, string $expectedInMessage): void {
+  private function assertRefused(ToolInterface $tool, string $name, array $before, int $deniedBefore, string $expectedInAudit): void {
     $message = (string) $tool->getResultMessage();
     self::assertFalse($tool->getResultStatus(), $message);
-    self::assertStringContainsString($expectedInMessage, $message);
+    self::assertSame(McpDenyExplainer::CALLER_MESSAGE, $message);
+    self::assertStringNotContainsString($expectedInAudit, $message);
     // Read the factory's mutable object before anything resets its cache: a
     // refused value left there would be saved by the next writer.
     self::assertSame($before, $this->container->get('config.factory')->getEditable($name)->getRawData(), 'A refused write must not linger in the config factory.');
@@ -182,6 +184,7 @@ final class McpConfigSetValidationTest extends KernelTestBase {
     self::assertStringNotContainsString(self::SECRET, (string) json_encode($tool->getResult()->getContextValues()));
     self::assertStringNotContainsString(self::SECRET, $this->auditText());
     self::assertStringContainsString('config validation', $this->auditText());
+    self::assertStringContainsString($expectedInAudit, $this->auditText());
   }
 
   /**
@@ -191,7 +194,7 @@ final class McpConfigSetValidationTest extends KernelTestBase {
     $before = $this->stored(ImportValidator::NAME);
     $tool = $this->configSet(ImportValidator::NAME, ['limit' => self::SECRET, 'enabled' => self::SECRET]);
     $this->assertRefused($tool, ImportValidator::NAME, $before, 0, 'limit');
-    self::assertStringContainsString('enabled', (string) $tool->getResultMessage());
+    self::assertStringContainsString('enabled', $this->auditText());
   }
 
   /**
@@ -271,7 +274,8 @@ final class McpConfigSetValidationTest extends KernelTestBase {
     // Its error text repeats the staged label.
     $tool = $this->configSet(ImportValidator::NAME, ['mode' => 'import_refused', 'nested.label' => 'S3CR3T-lbl']);
     self::assertFalse($tool->getResultStatus());
-    self::assertStringContainsString('1 config import validator error(s)', (string) $tool->getResultMessage());
+    self::assertSame(McpDenyExplainer::CALLER_MESSAGE, (string) $tool->getResultMessage());
+    self::assertStringContainsString('1 config import validator error(s)', $this->auditText());
     self::assertStringNotContainsString('S3CR3T-lbl', (string) $tool->getResultMessage());
     self::assertStringNotContainsString('S3CR3T-lbl', $this->auditText());
     self::assertSame($before, $this->stored(ImportValidator::NAME));

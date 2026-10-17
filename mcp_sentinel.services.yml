@@ -64,6 +64,7 @@ services:
       - '@entity_type.manager'
       - '@mcp_sentinel.classification'
       - '@?mcp_sentinel.policy_bundle_registry'
+      - '@?mcp_sentinel.deny_explainer'
 
   mcp_sentinel.moderation_gate:
     class: Drupal\mcp_sentinel\Service\McpModerationGate
@@ -79,6 +80,7 @@ services:
       - '@mcp_sentinel.audit_logger'
       - '@datetime.time'
       - '@?content_moderation.moderation_information'
+      - '@?mcp_sentinel.deny_explainer'
 
   mcp_sentinel.pinned_composite_locator:
     class: Drupal\mcp_sentinel\Service\McpPinnedCompositeLocator
@@ -198,6 +200,7 @@ services:
     arguments:
       - '@database'
       - '@mcp_sentinel.principal_context_holder'
+      - '@?mcp_sentinel.deny_explainer'
 
   mcp_sentinel.principal_context_factory:
     class: Drupal\mcp_sentinel\Service\McpPrincipalContextFactory
@@ -252,6 +255,7 @@ services:
       - '@mcp_sentinel.audit_logger'
       - '@logger.channel.mcp_sentinel'
       - '@mcp_sentinel.kill_switch'
+      - '@mcp_sentinel.deny_explainer'
 
   mcp_sentinel.principal_key:
     class: Drupal\mcp_sentinel\Service\McpPrincipalKey
@@ -296,6 +300,11 @@ services:
 
   mcp_sentinel.deny_explainer:
     class: Drupal\mcp_sentinel\Service\McpDenyExplainer
+    arguments:
+      - '@logger.channel.mcp_sentinel'
+      - '@?mcp_sentinel.audit_logger'
+      - '@?mcp_sentinel.principal_context_holder'
+      - '@?request_stack'
 
   mcp_sentinel.whoami_recorder:
     class: Drupal\mcp_sentinel\Service\McpWhoamiRecorder
@@ -401,6 +410,7 @@ services:
       # ($settings['mcp_sentinel.environment']), never from config.
       - '@settings'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.deny_explainer'
 
   mcp_sentinel.site_schema_builder:
     class: Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder
@@ -443,6 +453,7 @@ services:
       - '@mcp_sentinel.audit_logger'
       - '@mcp_sentinel.classification'
       - '@mcp_sentinel.principal_context_dispatcher'
+      - '@mcp_sentinel.deny_explainer'
     tags:
       - { name: event_subscriber }
 
@@ -457,6 +468,7 @@ services:
       # Optional: kernel tests boot the module without jsonapi; the seam then
       # never re-types a body (there is no JSON:API to serve one).
       - '@?jsonapi.resource_type.repository'
+      - '@mcp_sentinel.deny_explainer'
     tags:
       - { name: event_subscriber }
 

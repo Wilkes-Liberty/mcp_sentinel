@@ -12,6 +12,7 @@ use Drupal\jsonapi\ResourceType\ResourceType;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
@@ -81,6 +82,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher|null $principalDispatcher
    *   Principal and tenant gate. Nullable only while a cached container
    *   still has the previous argument list; a missing dispatcher fails closed.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
+   *   Operator explainer. Nullable for a cached container that predates it.
    */
   public function __construct(
     private readonly McpAccessChecker $accessChecker,
@@ -91,6 +94,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     private readonly McpAuditLogger $auditLogger,
     private readonly ?McpClassificationResolver $classification = NULL,
     private readonly ?McpPrincipalContextDispatcher $principalDispatcher = NULL,
+    private readonly ?McpDenyExplainer $denyExplainer = NULL,
   ) {}
 
   /**
@@ -149,21 +153,20 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     }
     if (!$readiness->isReady()) {
       $reason = $readiness->reason();
-      if ($reason?->isAuthorizationFailure()) {
-        throw new AccessDeniedHttpException('MCP access is denied.');
+      $message = $this->denyExplainer?->refuse($reason->value)
+        ?? McpDenyExplainer::CALLER_MESSAGE;
+      if ($reason->isAuthorizationFailure()) {
+        throw new AccessDeniedHttpException($message);
       }
-      throw new ServiceUnavailableHttpException(
-        NULL,
-        'MCP source governance is not ready: '
-        . $reason->value . '.',
-      );
+      throw new ServiceUnavailableHttpException(NULL, $message);
     }
 
     $profile = $readiness->profile();
     if ($profile === NULL) {
       throw new ServiceUnavailableHttpException(
         NULL,
-        'MCP source governance is not ready: active_profile_missing.',
+        $this->denyExplainer?->refuse('active_profile_missing')
+          ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
 
@@ -175,7 +178,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
     // result can be re-served across IPs from this seam.
     if (!$this->accessChecker->isClientIpAllowed($profile)) {
       throw new AccessDeniedHttpException(
-        'Source IP not permitted by MCP Sentinel policy.'
+        $this->denyExplainer?->refuse('Source IP not permitted by MCP Sentinel policy.')
+          ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
 
@@ -192,7 +196,11 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         'path' => $request->getPathInfo(),
       ]);
       throw new TooManyRequestsHttpException(NULL,
-        'MCP Sentinel request budget exceeded for the active profile (read_budget_exceeded). Retry after the current window.'
+        $this->denyExplainer?->refuse(
+          'MCP Sentinel request budget exceeded for the active profile (read_budget_exceeded). Retry after the current window.',
+          NULL,
+          FALSE,
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
     $this->rateLimiter->register($profile, $uid, NULL);
@@ -235,7 +243,11 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
           'path' => $request->getPathInfo(),
         ]);
         throw new TooManyRequestsHttpException(NULL,
-          'MCP Sentinel collection page budget exceeded for the active profile (page_budget_exceeded). Retry after the current window.'
+          $this->denyExplainer?->refuse(
+            'MCP Sentinel collection page budget exceeded for the active profile (page_budget_exceeded). Retry after the current window.',
+            NULL,
+            FALSE,
+          ) ?? McpDenyExplainer::CALLER_MESSAGE,
         );
       }
       $this->rateLimiter->registerPageBudget($profile, $uid);
@@ -303,12 +315,12 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   public function refuseLimitAboveCap(int $limit, int $cap): void {
     if ($limit > $cap) {
       throw new BadRequestHttpException(
-        sprintf(
+        $this->denyExplainer?->refuse(sprintf(
           'Requested page[limit] %d exceeds the MCP Sentinel result cap of %d '
           . 'for the active profile. Reduce page[limit] or contact the site admin.',
           $limit,
           $cap,
-        ),
+        )) ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
   }
@@ -337,7 +349,10 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(string $surfaceId, array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
-      throw new AccessDeniedHttpException('A verified principal is required.');
+      throw new AccessDeniedHttpException(
+        $this->denyExplainer?->refuse('missing_principal')
+          ?? McpDenyExplainer::CALLER_MESSAGE,
+      );
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
@@ -349,8 +364,8 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
         $requiredScopes,
       );
     }
-    catch (McpPrincipalContextDeniedException $e) {
-      throw new AccessDeniedHttpException($e->getMessage(), $e);
+    catch (McpPrincipalContextDeniedException) {
+      throw new AccessDeniedHttpException(McpDenyExplainer::CALLER_MESSAGE);
     }
   }
 

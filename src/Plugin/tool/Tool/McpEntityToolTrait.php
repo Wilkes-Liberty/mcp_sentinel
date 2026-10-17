@@ -8,6 +8,7 @@ use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\tool\ExecutableResult;
 
 /**
@@ -43,14 +44,6 @@ trait McpEntityToolTrait {
     $reason = $result instanceof AccessResultReasonInterface && $result->getReason()
       ? (string) $result->getReason()
       : 'denied by policy';
-    if ($this->governanceDenyExplainer !== NULL) {
-      $profileId = NULL;
-      if (isset($this->governancePolicyResolver)) {
-        $profile = $this->governancePolicyResolver->resolve();
-        $profileId = $profile?->id();
-      }
-      $reason = $this->governanceDenyExplainer->annotate($reason, $profileId);
-    }
     return $reason;
   }
 
@@ -63,7 +56,9 @@ trait McpEntityToolTrait {
    * security event that is always written. audit_enabled gates allow rows
    * only.
    *
-   * JSON:API / GraphQL denial logging is a future enhancement (F10 v2).
+   * JSON:API access-hook denies write denied_access through refuse().
+   * When refuse() already recorded a deny for this entity and
+   * operation on this request, this method writes nothing.
    *
    * @param string $toolId
    *   The plugin ID of the tool handling the denial.
@@ -89,13 +84,24 @@ trait McpEntityToolTrait {
     if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
       $logger = \Drupal::service('mcp_sentinel.audit_logger');
     }
+    if ($this->governanceDenyExplainer?->recordedThisRequest($entityType, $entityId, $operation)) {
+      return;
+    }
     if ($logger !== NULL) {
+      $profileId = NULL;
+      if (isset($this->governancePolicyResolver)) {
+        $profileId = $this->governancePolicyResolver->resolve()?->id();
+      }
+      $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
+        ?? $reason;
       $logger->log('denied_access', [
         'tool'        => $toolId,
         'entity_type' => $entityType,
         'id'          => $entityId,
         'operation'   => $operation,
         'reason'      => $reason,
+        'explain'     => $explain,
+        'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
       ]);
     }
   }
@@ -150,15 +156,17 @@ trait McpEntityToolTrait {
       if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
         $logger = \Drupal::service('mcp_sentinel.audit_logger');
       }
+      $limited = (string) $this->t('Rate limit exceeded. Retry after the current window expires.');
+      $caller = $this->governanceDenyExplainer?->refuse($limited, NULL, FALSE)
+        ?? McpDenyExplainer::CALLER_MESSAGE;
       if ($logger !== NULL) {
-        $logger->log('rate_limit_exceeded', ['tool' => $toolId]);
+        $logger->logAlways('rate_limit_exceeded', [
+          'tool' => $toolId,
+          'explain' => $this->governanceDenyExplainer?->annotate($limited) ?? $limited,
+          'rule' => $this->governanceDenyExplainer?->explain($limited)->ruleId,
+        ]);
       }
-      $message = $this->t('Rate limit exceeded. Retry after the current window expires.');
-      if ($this->governanceDenyExplainer !== NULL) {
-        $annotated = $this->governanceDenyExplainer->annotate((string) $message);
-        $message = $this->t('@message', ['@message' => $annotated]);
-      }
-      return ExecutableResult::failure($message);
+      return ExecutableResult::failure($this->t('@msg', ['@msg' => $caller]));
     }
     $limiter->register($profile, $uid, $toolId);
     return NULL;
@@ -229,18 +237,14 @@ trait McpEntityToolTrait {
     }
     $bytes = strlen($serialized);
     if ($guard->exceedsResponseSizeCap($bytes, $profile)) {
-      $message = $this->t(
+      $caller = $this->governanceDenyExplainer?->refuse((string) $this->t(
         'Response size @bytes bytes exceeds the MCP Sentinel cap of @cap bytes for this profile. Narrow your query.',
         [
           '@bytes' => $bytes,
           '@cap'   => $guard->effectiveResponseSizeCap($profile),
         ]
-      );
-      if ($this->governanceDenyExplainer !== NULL) {
-        $annotated = $this->governanceDenyExplainer->annotate((string) $message);
-        $message = $this->t('@message', ['@message' => $annotated]);
-      }
-      return ExecutableResult::failure($message);
+      )) ?? McpDenyExplainer::CALLER_MESSAGE;
+      return ExecutableResult::failure($this->t('@msg', ['@msg' => $caller]));
     }
     return NULL;
   }

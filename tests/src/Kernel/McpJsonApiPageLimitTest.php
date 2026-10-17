@@ -150,7 +150,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
 
     $event = $this->makeRequestEvent('/jsonapi/node/article', ['limit' => 500]);
     $this->expectException(BadRequestHttpException::class);
-    $this->expectExceptionMessageMatches('/500.*10|cap.*10/i');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($event);
   }
 
@@ -224,7 +224,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $event = $this->makeRequestEvent('/jsonapi/node/article');
 
     $this->expectException(ServiceUnavailableHttpException::class);
-    $this->expectExceptionMessage('module_disabled');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($event);
   }
 
@@ -239,7 +239,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $event = $this->makeRequestEvent('/jsonapi/node/article/example', [], 'PATCH');
 
     $this->expectException(ServiceUnavailableHttpException::class);
-    $this->expectExceptionMessage('module_disabled');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($event);
   }
 
@@ -293,7 +293,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber = $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber');
     $event = $this->makeRequestEvent('/en/jsonapi/node/article', ['limit' => 500]);
     $this->expectException(BadRequestHttpException::class);
-    $this->expectExceptionMessageMatches('/500.*10|cap.*10/i');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($event);
   }
 
@@ -386,7 +386,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
     $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
     $this->expectException(TooManyRequestsHttpException::class);
-    $this->expectExceptionMessageMatches('/read_budget_exceeded/');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article'));
   }
 
@@ -409,7 +409,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article', ['offset' => 0]));
     $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article', ['offset' => 50]));
     $this->expectException(TooManyRequestsHttpException::class);
-    $this->expectExceptionMessageMatches('/page_budget_exceeded/');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($this->makeRequestEvent('/jsonapi/node/article', ['offset' => 100]));
   }
 
@@ -427,7 +427,7 @@ final class McpJsonApiPageLimitTest extends KernelTestBase {
     $subscriber->onRequest($this->makeRequestEvent('/graphql', [], 'POST'));
     $subscriber->onRequest($this->makeRequestEvent('/graphql', [], 'POST'));
     $this->expectException(TooManyRequestsHttpException::class);
-    $this->expectExceptionMessageMatches('/read_budget_exceeded/');
+    $this->expectExceptionMessage('MCP access is denied.');
     $subscriber->onRequest($this->makeRequestEvent('/graphql', [], 'POST'));
   }
 

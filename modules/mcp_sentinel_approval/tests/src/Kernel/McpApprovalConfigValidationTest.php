@@ -12,6 +12,7 @@ use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpConfigWriteValidator;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 use Drupal\mcp_sentinel_config_validation_test\EventSubscriber\ImportValidator;
 use Drupal\user\Entity\Role;
@@ -200,16 +201,27 @@ final class McpApprovalConfigValidationTest extends KernelTestBase {
   }
 
   /**
+   * Every audit row, serialized.
+   */
+  private function auditText(): string {
+    return (string) json_encode($this->container->get('database')->select('audit_chain_log', 'l')
+      ->fields('l')->execute()->fetchAll(\PDO::FETCH_ASSOC));
+  }
+
+  /**
    * An invalid change is refused by the tool and never becomes a request.
    */
   public function testInvalidChangeIsNeverQueued(): void {
     $result = $this->agentConfigSet(ImportValidator::NAME, ['limit' => 99]);
     self::assertFalse($result['status']);
-    self::assertStringContainsString('limit', $result['message']);
+    self::assertSame(McpDenyExplainer::CALLER_MESSAGE, $result['message']);
+    self::assertStringNotContainsString('limit', $result['message']);
+    self::assertStringContainsString('limit', $this->auditText());
     self::assertSame([], $this->requests());
 
     $result = $this->agentConfigSet(self::SCHEMALESS, ['anything' => 'goes']);
     self::assertFalse($result['status']);
+    self::assertSame(McpDenyExplainer::CALLER_MESSAGE, $result['message']);
     self::assertSame([], $this->requests());
   }
 

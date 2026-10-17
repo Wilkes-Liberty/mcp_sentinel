@@ -248,12 +248,9 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     $over = $this->call('checkResponseSizeCap', str_repeat('a', 101));
     self::assertFalse($over->getResultStatus());
     $overMessage = (string) $over->getResultMessage();
-    self::assertStringContainsString(
-      'Response size 101 bytes exceeds the MCP Sentinel cap of 100 bytes for this profile. Narrow your query.',
-      $overMessage,
-    );
-    self::assertStringContainsString('[rule:response_size_cap', $overMessage);
-    self::assertStringContainsString('never automatic', $overMessage);
+    self::assertSame('MCP access is denied.', $overMessage);
+    self::assertStringNotContainsString('[rule:', $overMessage);
+    self::assertStringNotContainsString('response_size_cap', $overMessage);
     self::assertEmpty($over->getResult()->getContextValues());
   }
 
@@ -293,9 +290,22 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     $second = $this->call('checkRateLimit');
     self::assertFalse($second->getResultStatus());
     $limited = (string) $second->getResultMessage();
-    self::assertStringContainsString('Rate limit exceeded', $limited);
-    self::assertStringContainsString('[rule:rate_limit', $limited);
+    self::assertSame('MCP access is denied.', $limited);
+    self::assertStringNotContainsString('[rule:', $limited);
+    self::assertStringNotContainsString('rate_limit', $limited);
     self::assertSame(1, $this->auditCount('rate_limit_exceeded'));
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'rate_limit_exceeded')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    self::assertStringContainsString('[rule:rate_limit', (string) ($meta['explain'] ?? ''));
   }
 
   /**
@@ -303,15 +313,29 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
    */
   public function testDenialHelpers(): void {
     $reasons = $this->call('denyReason')->getResult()->getContextValues()['returned'];
-    // denyReason() appends the explainer suffix when the service exists.
+    // denyReason() is operator-facing. It must not append [rule:] — callers
+    // that forwarded it used to leak the suffix (DEV-966).
     self::assertIsString($reasons['forbidden']);
-    self::assertStringStartsWith('contract reason', $reasons['forbidden']);
-    self::assertStringContainsString('[rule:unspecified', $reasons['forbidden']);
+    self::assertSame('contract reason', $reasons['forbidden']);
+    self::assertStringNotContainsString('[rule:', $reasons['forbidden']);
     self::assertNull($reasons['allowed']);
 
     self::assertSame(0, $this->auditCount('denied_access'));
     self::assertTrue($this->call('logDeniedAccess')->getResultStatus());
     self::assertSame(1, $this->auditCount('denied_access'));
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    self::assertSame('contract reason', $meta['reason'] ?? NULL);
+    self::assertStringContainsString('[rule:unspecified', (string) ($meta['explain'] ?? ''));
 
     $messages = $this->call('validationMessages')->getResult()->getContextValues()['returned'];
     self::assertNotEmpty($messages);

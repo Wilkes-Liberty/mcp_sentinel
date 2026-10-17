@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpEntityFieldReservedAllowlist;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\Exception\RequirementsException;
@@ -123,15 +124,19 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
 
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);
     if ($profile === NULL) {
-      return ExecutableResult::failure($this->t('MCP Sentinel denied: no governance profile applies to this account.'));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'MCP Sentinel denied: no governance profile applies to this account.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
     if ($rateLimited = $this->checkRateLimit($profile, 'mcp_sentinel_media_create')) {
       return $rateLimited;
     }
-    $policyResult = $this->governanceAccessChecker->checkEntityAccess($media, 'create', $profile);
+    $policyResult = $this->governanceAccessChecker->checkEntityAccess($media, 'create', $profile, FALSE);
     if ($reason = $this->denyReason($policyResult)) {
       $this->logDeniedAccess('mcp_sentinel_media_create', 'media', '(new)', 'create', $reason);
-      return ExecutableResult::failure($this->t('MCP Sentinel denied media creation: @reason', ['@reason' => $reason]));
+      return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
     $core = $this->entityTypeManager->getAccessControlHandler('media')->createAccess($bundle, $this->currentUser, [], TRUE);
     if (!$core->isAllowed()) {
@@ -162,7 +167,11 @@ final class McpMediaUploadTool extends McpGovernedToolBase {
       $media->save();
     }
     catch (\Exception $e) {
-      return ExecutableResult::failure($this->t('Failed to create media: @message', ['@message' => $e->getMessage()]));
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'Failed to create media: ' . $e->getMessage(),
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
     }
 
     return ExecutableResult::success(

@@ -8,6 +8,7 @@ use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\node\Entity\NodeType;
@@ -16,6 +17,7 @@ use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\RoleInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * @coversDefaultClass \Drupal\mcp_sentinel\Controller\McpContextController
@@ -96,7 +98,12 @@ final class McpContextControllerTest extends KernelTestBase {
     $payload = json_decode((string) $response->getContent(), TRUE);
 
     $this->assertSame(503, $response->getStatusCode());
-    $this->assertSame('module_disabled', $payload['reason']);
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertArrayNotHasKey('rule', $payload);
+    $this->assertArrayNotHasKey('explain', $payload);
+    $this->assertArrayNotHasKey('next_step', $payload);
+    $this->assertStringNotContainsString('module_disabled', (string) $response->getContent());
     $this->assertArrayNotHasKey('site', $payload);
   }
 
@@ -265,7 +272,8 @@ final class McpContextControllerTest extends KernelTestBase {
 
     $second = $controller->context();
     $this->assertSame(429, $second->getStatusCode());
-    $this->assertStringContainsString('read_budget_exceeded', (string) $second->getContent());
+    $this->assertStringContainsString('MCP access is denied.', (string) $second->getContent());
+    $this->assertStringNotContainsString('read_budget_exceeded', (string) $second->getContent());
   }
 
   /**
@@ -311,7 +319,8 @@ final class McpContextControllerTest extends KernelTestBase {
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(403, $response->getStatusCode());
     $payload = json_decode((string) $response->getContent(), TRUE);
-    $this->assertSame('classification_egress_denied', $payload['errors'][0]['code'] ?? NULL);
+    $this->assertSame('MCP access is denied.', $payload['errors'][0]['title'] ?? NULL);
+    $this->assertArrayNotHasKey('code', $payload['errors'][0]);
     $this->assertArrayNotHasKey('site', $payload);
 
     \Drupal::configFactory()->getEditable('mcp_sentinel.mcp_policy_profile.default')
@@ -321,6 +330,61 @@ final class McpContextControllerTest extends KernelTestBase {
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(200, $response->getStatusCode());
     $this->assertArrayHasKey('site', json_decode((string) $response->getContent(), TRUE));
+  }
+
+  /**
+   * Context classification 403 writes denied_access with audit off.
+   */
+  public function testContextClassificationDenyWritesDeniedAccessWhenAuditDisabled(): void {
+    $this->installAuditChainSchema();
+    $this->switchToDevelopmentGovernedUser();
+    $this->stampDefaultPrincipalContext();
+    \Drupal::configFactory()
+      ->getEditable('mcp_sentinel.mcp_policy_profile.default')
+      ->set('egress_ceilings', ['context' => 'public'])
+      ->save();
+    \Drupal::entityTypeManager()
+      ->getStorage('mcp_policy_profile')
+      ->resetCache();
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $response = McpContextController::create($this->container)->context();
+    $this->assertSame(403, $response->getStatusCode());
+    $payload = json_decode((string) $response->getContent(), TRUE);
+    $this->assertSame(
+      'MCP access is denied.',
+      $payload['errors'][0]['title'] ?? NULL,
+    );
+    $this->assertArrayNotHasKey('code', $payload['errors'][0]);
+    $this->assertClassificationDeniedAccessRow();
+
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->save();
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+    $request = Request::create('/drupal-mcp/context');
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $request->attributes->set(McpPrincipalContext::FIXTURE_ATTRIBUTE, TRUE);
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'kernel-test',
+      'azp' => 'kernel-test-client',
+      'tenant' => 'kernel-test',
+    ]);
+    $stack->push($request);
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
+    $response = $this->container->get('mcp_sentinel.classification')
+      ->refusalResponse();
+    $this->assertSame(403, $response->getStatusCode());
+    $this->assertClassificationDeniedAccessRow();
   }
 
   /**
@@ -366,8 +430,60 @@ final class McpContextControllerTest extends KernelTestBase {
     $response = McpContextController::create($this->container)->context();
     $this->assertSame(403, $response->getStatusCode());
     $payload = json_decode((string) $response->getContent(), TRUE);
-    $this->assertStringContainsString(McpAccessChecker::BUNDLE_DENIAL_CODE, (string) ($payload['error'] ?? ''));
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertStringNotContainsString(McpAccessChecker::BUNDLE_DENIAL_CODE, (string) $response->getContent());
     $this->assertArrayNotHasKey('site', $payload);
+  }
+
+  /**
+   * Asserts one denied_access row for a classification refuse.
+   */
+  private function assertClassificationDeniedAccessRow(): void {
+    $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('classification_egress_denied', $meta['rule'] ?? NULL);
+    $this->assertStringContainsString(
+      'classification_egress_denied',
+      (string) ($meta['explain'] ?? ''),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|kernel-test|kernel-test-client',
+      $meta['principal_key'] ?? NULL,
+    );
+  }
+
+  /**
+   * Counts denied_access rows written during this test.
+   */
+  private function deniedAccessCount(): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+  }
+
+  /**
+   * Decodes the latest denied_access metadata.
+   *
+   * @return array<string, mixed>
+   *   Metadata keys.
+   */
+  private function lastDenialMetadata(): array {
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id', 'metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $meta['id'] = (string) $row['entity_id'];
+    return $meta;
   }
 
 }

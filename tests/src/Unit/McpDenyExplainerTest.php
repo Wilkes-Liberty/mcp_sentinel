@@ -134,4 +134,43 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertFalse($explained->widenAppropriate);
   }
 
+  /**
+   * Callers receive a generic deny; annotate stays operator-only (DEV-966).
+   *
+   * @covers ::callerMessage
+   * @covers ::annotate
+   */
+  public function testCallerMessageHidesTheRuleSuffix(): void {
+    $explainer = new McpDenyExplainer();
+    $this->assertSame('MCP access is denied.', $explainer->callerMessage());
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $explainer->callerMessage());
+    $this->assertStringNotContainsString('[rule:', $explainer->callerMessage());
+    $annotated = $explainer->annotate(
+      'Network calls require a tenant claim on the validated token (DEV-839).',
+    );
+    $this->assertStringContainsString('[rule:missing_tenant_claim', $annotated);
+    $this->assertNotSame($explainer->callerMessage(), $annotated);
+  }
+
+  /**
+   * Refuse() logs the explainer and returns only the generic caller deny.
+   *
+   * @covers ::refuse
+   */
+  public function testRefuseReturnsCallerMessageOnly(): void {
+    $explainer = new McpDenyExplainer();
+    $this->assertSame(
+      McpDenyExplainer::CALLER_MESSAGE,
+      $explainer->refuse('Source IP not permitted by MCP Sentinel policy.'),
+    );
+    $this->assertSame(
+      'no_governance_profile',
+      $explainer->explain('MCP Sentinel denied: no governance profile applies to this account.')->ruleId,
+    );
+    $this->assertSame(
+      'deny_publish',
+      $explainer->explain('publishing is not permitted for this agent')->ruleId,
+    );
+  }
+
 }

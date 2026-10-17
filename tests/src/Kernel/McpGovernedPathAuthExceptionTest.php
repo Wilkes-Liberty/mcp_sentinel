@@ -155,7 +155,7 @@ final class McpGovernedPathAuthExceptionTest extends KernelTestBase {
     $payload = json_decode((string) $response->getContent(), TRUE);
     $this->assertIsArray($payload);
     $this->assertSame('MCP access is denied.', $payload['error']);
-    $this->assertSame('unauthenticated', $payload['reason']);
+    $this->assertArrayNotHasKey('reason', $payload);
     $this->assertArrayNotHasKey('contract_ready', $payload);
     $this->assertTrue($event->isPropagationStopped());
     if ($challenge === NULL) {

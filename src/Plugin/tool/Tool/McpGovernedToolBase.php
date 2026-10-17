@@ -367,22 +367,19 @@ abstract class McpGovernedToolBase extends ToolBase {
     }
     elseif ($audit && $this->governanceAuditLogger !== NULL) {
       $ctx = new McpPrincipalContext('', '', '', '', [], '', [], FALSE);
-      $this->governanceAuditLogger->logAlways(
-        'denied_access',
-        McpPrincipalContextDispatcher::denialAuditMetadata(
-          $this->getPluginId(),
-          $e->reasonCode,
-          $ctx,
-        ),
+      $meta = McpPrincipalContextDispatcher::denialAuditMetadata(
+        $this->getPluginId(),
+        $e->reasonCode,
+        $ctx,
       );
+      if ($this->governanceDenyExplainer !== NULL) {
+        $meta['explain'] = $this->governanceDenyExplainer->operatorNotice(
+          $e->getMessage(),
+        );
+      }
+      $this->governanceAuditLogger->logAlways('denied_access', $meta);
     }
-    $message = $e->getMessage();
-    if ($this->governanceDenyExplainer !== NULL) {
-      $message = $this->governanceDenyExplainer->annotate($message);
-    }
-    return ExecutableResult::failure($this->t('@message', [
-      '@message' => $message,
-    ]));
+    return ExecutableResult::failure($this->t('MCP access is denied.'));
   }
 
   /**
@@ -407,7 +404,11 @@ abstract class McpGovernedToolBase extends ToolBase {
     $context = $this->result->getContextValues();
     $context[self::UNTRUSTED_READ_MARKER] = self::UNTRUSTED_READ_VALUE;
     if ($this->markedPayloadExceedsSizeCap($context)) {
-      $this->result = ExecutableResult::failure($this->t('MCP Sentinel refused a read that exceeds the response size cap.'));
+      $this->result = ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          'Response size exceeds the MCP Sentinel cap.',
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
+      ]));
       return;
     }
     $this->result = ExecutableResult::success($this->result->getMessage(), $context);
@@ -538,22 +539,22 @@ abstract class McpGovernedToolBase extends ToolBase {
     );
     if (!$readiness->isReady()) {
       $reason = $readiness->reason()->value;
-      $message = 'MCP Sentinel source governance is not ready: ' . $reason . '.';
-      if ($this->governanceDenyExplainer !== NULL) {
-        $message = $this->governanceDenyExplainer->annotate(
-          $message,
-          $readiness->profile()?->id(),
-        );
-      }
-      $denied = AccessResult::forbidden($message)->addCacheableDependency($readiness);
+      $this->governanceDenyExplainer?->refuse(
+        'MCP Sentinel source governance is not ready: ' . $reason . '.',
+        $readiness->profile()?->id(),
+      );
+      $denied = AccessResult::forbidden(McpDenyExplainer::CALLER_MESSAGE)
+        ->addCacheableDependency($readiness);
       return $denied;
     }
 
     $profile = $readiness->profile();
     if ($profile === NULL || !$this->governanceAccessChecker->isClientIpAllowed($profile)) {
-      $denied = AccessResult::forbidden(
+      $this->governanceDenyExplainer?->refuse(
         'Source IP not permitted by MCP Sentinel policy.',
-      )->setCacheMaxAge(0);
+      );
+      $denied = AccessResult::forbidden(McpDenyExplainer::CALLER_MESSAGE)
+        ->setCacheMaxAge(0);
       return $denied;
     }
 

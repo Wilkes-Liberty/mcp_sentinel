@@ -217,10 +217,10 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
 
     $this->assertFalse($tool->getResultStatus(),
       'Node creation must be denied for an ungoverned account.');
-    $this->assertStringContainsStringIgnoringCase(
-      'no governance profile',
+    $this->assertSame(
+      'MCP access is denied.',
       (string) $tool->getResultMessage(),
-      'Failure message must mention the missing governance profile.'
+      'Caller-facing no-profile denials must be generic (DEV-966).',
     );
   }
 

@@ -10,6 +10,7 @@ use Drupal\Tests\mcp_sentinel\Traits\McpGovernedRequestTrait;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
 use PHPUnit\Framework\Attributes\Group;
@@ -240,7 +241,7 @@ final class McpConfigSecretRedactionTest extends KernelTestBase {
       $tool->setInputValue('data', ['key_provider_settings' => ['key_value' => self::SECRET]]);
       $tool->execute();
       self::assertFalse($tool->getResultStatus(), $name);
-      self::assertStringContainsString('holds secrets', (string) $tool->getResultMessage());
+      self::assertSame(McpDenyExplainer::CALLER_MESSAGE, (string) $tool->getResultMessage());
       self::assertSame([], $this->container->get('config.storage')->read($name) ?: [], $name);
     }
     [, $text] = $this->lastConfigSave();

@@ -8,6 +8,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpSiteSchemaBuilder;
 use Drupal\tool\Attribute\Tool;
 use Drupal\tool\ExecutableResult;
@@ -55,8 +56,13 @@ final class McpSiteContextTool extends McpGovernedToolBase {
       ? NULL
       : $this->governanceClassification->effectiveCeiling($profile, McpGovernedSurface::Tool);
     if ($profile !== NULL && $this->governanceClassification?->schemaDenied($profile, McpGovernedSurface::Tool, $ceiling)) {
-      return ExecutableResult::failure($this->t("The site schema is classified above this principal's egress ceiling (@code).", [
-        '@code' => McpClassificationResolver::DENIAL_CODE,
+      return ExecutableResult::failure($this->t('@msg', [
+        '@msg' => $this->governanceDenyExplainer?->refuse(
+          "The site schema is classified above this principal's egress ceiling ("
+          . McpClassificationResolver::DENIAL_CODE . ').',
+          NULL,
+          FALSE,
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }
 
