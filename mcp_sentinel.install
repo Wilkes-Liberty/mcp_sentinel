@@ -47,16 +47,40 @@ function mcp_sentinel_schema(): array {
       'last_response_body' => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
       'created'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
       'item_id'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
+      // Principal keys stored at enqueue so a later kill can hold the
+      // row without reading the queue item (DEV-985).
+      'principal_key'      => [
+        'type' => 'varchar',
+        'length' => 770,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'human_key'          => [
+        'type' => 'varchar',
+        'length' => 770,
+        'not null' => TRUE,
+        'default' => '',
+      ],
+      'tenant'             => [
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ],
     ],
     'primary key' => ['id'],
     // 'status' + 'next_attempt' support the cron scan for due pending rows;
     // 'created' backs retention pruning; 'endpoint_id' backs per-endpoint
-    // filtering in the delivery log UI.
+    // filtering in the delivery log UI. Principal-key columns back the
+    // kill-switch hold scan.
     'indexes' => [
       'status'       => ['status'],
       'next_attempt' => ['next_attempt'],
       'created'      => ['created'],
       'endpoint_id'  => ['endpoint_id'],
+      'principal_key' => ['principal_key'],
+      'human_key'    => ['human_key'],
+      'tenant'       => ['tenant'],
     ],
   ];
 
@@ -221,6 +245,12 @@ function mcp_sentinel_schema(): array {
         'default' => 0,
       ],
       'changed' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ],
+      'escalated_at' => [
         'type' => 'int',
         'unsigned' => TRUE,
         'not null' => TRUE,
@@ -1745,6 +1775,53 @@ function mcp_sentinel_update_10033(): string {
     return 'Dead paladin_introspection_* config keys already absent.';
   }
   return 'Removed ' . implode(', ', $removed) . '.';
+}
+
+/**
+ * Hold-queue columns and freeze escalation stamp (DEV-985).
+ */
+function mcp_sentinel_update_10034(): string {
+  $schema = \Drupal::database()->schema();
+  $messages = [];
+  $delivery = 'mcp_sentinel_webhook_delivery';
+  if ($schema->tableExists($delivery)) {
+    $fields = mcp_sentinel_schema()[$delivery]['fields'];
+    foreach (['principal_key', 'human_key', 'tenant'] as $field) {
+      if (!$schema->fieldExists($delivery, $field)) {
+        $schema->addField($delivery, $field, $fields[$field]);
+        $messages[] = 'Added ' . $delivery . '.' . $field . '.';
+      }
+      if (!$schema->indexExists($delivery, $field)) {
+        $schema->addIndex(
+          $delivery,
+          $field,
+          [$field],
+          mcp_sentinel_schema()[$delivery],
+        );
+        $messages[] = 'Added ' . $field . ' index.';
+      }
+    }
+  }
+  else {
+    $messages[] = 'mcp_sentinel_webhook_delivery is missing; run update 10007.';
+  }
+
+  $kill = 'mcp_sentinel_kill_block';
+  if ($schema->tableExists($kill)) {
+    $spec = mcp_sentinel_schema()[$kill]['fields']['escalated_at'];
+    if (!$schema->fieldExists($kill, 'escalated_at')) {
+      $schema->addField($kill, 'escalated_at', $spec);
+      $messages[] = 'Added mcp_sentinel_kill_block.escalated_at.';
+    }
+  }
+  else {
+    $messages[] = 'mcp_sentinel_kill_block is missing; run update 10030.';
+  }
+
+  if ($messages === []) {
+    return 'DEV-985 hold-queue and escalation columns already present.';
+  }
+  return implode(' ', $messages);
 }
 
 /**

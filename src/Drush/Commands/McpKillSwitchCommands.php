@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
@@ -57,6 +59,8 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Paladin or Drush-assertion identity resolver.
    * @param \Drupal\mcp_sentinel\Service\McpOperatorBinding $operatorBindings
    *   Paladin/Drush operator-record bindings.
+   * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
+   *   Held webhook deliveries.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
@@ -67,6 +71,8 @@ final class McpKillSwitchCommands extends DrushCommands {
     private readonly McpOperatorIdentityFactory $operatorIdentities,
     #[Autowire(service: 'mcp_sentinel.operator_binding')]
     private readonly McpOperatorBinding $operatorBindings,
+    #[Autowire(service: 'mcp_sentinel.webhook_queue_manager')]
+    private readonly McpWebhookQueueManager $webhookQueue,
   ) {
     parent::__construct();
   }
@@ -81,7 +87,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'reason', description: 'Operator reason. Required. No tokens.')]
   #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds. Default 86400, max 604800.')]
   #[CLI\Usage(name: 'drush mcp-sentinel:kill --principal-key=iss|sub|actor --reason="compromise"', description: 'Kill one principal immediately.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:kill --human-key=iss|sub --reason="mass revoke"', description: 'Mass kill pending second-operator confirm.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:kill --human-key=iss|sub --reason="mass revoke"', description: 'Person-wide freeze. In-scope agents are refused immediately; a second operator confirms, extends, or lifts.')]
   public function kill(
     array $options = [
       'principal-key' => [],
@@ -114,11 +120,11 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Second operator confirms a pending mass kill.
+   * Second operator confirms a mass freeze (keeps it).
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-confirm', aliases: ['mcps:kill-confirm'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
-  #[CLI\Usage(name: 'drush mcp-sentinel:kill-confirm BATCH', description: 'Confirm a pending mass kill as a distinct operator.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:kill-confirm BATCH', description: 'Confirm a mass freeze as a distinct operator.')]
   public function confirmKill(string $batch): int {
     if (($denied = $this->requirePermission()) !== NULL) {
       return $denied;
@@ -126,6 +132,183 @@ final class McpKillSwitchCommands extends DrushCommands {
     try {
       $result = $this->killSwitch->confirm($batch, $this->operatorIdentity());
       $this->printResult($result);
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Second operator extends a mass freeze (7-day cap).
+   */
+  #[CLI\Command(name: 'mcp-sentinel:kill-extend', aliases: ['mcps:kill-extend'])]
+  #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
+  #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds from now. Default 86400, max 604800.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:kill-extend BATCH --ttl=604800', description: 'Extend a mass freeze as a distinct operator.')]
+  public function extendKill(
+    string $batch,
+    array $options = [
+      'ttl' => NULL,
+    ],
+  ): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $ttlRaw = $options['ttl'] ?? '';
+      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
+      $result = $this->killSwitch->extend($batch, $this->operatorIdentity(), $ttl);
+      $this->printResult($result);
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Second operator lifts an unconfirmed mass freeze.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:kill-lift', aliases: ['mcps:kill-lift'])]
+  #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:kill-lift BATCH', description: 'Lift an unconfirmed mass freeze as a distinct operator. Held deliveries stay held.')]
+  public function liftKill(string $batch): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $result = $this->killSwitch->lift($batch, $this->operatorIdentity());
+      $this->printResult($result);
+      $this->io()->writeln('held_items: unchanged (release or discard explicitly)');
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Break-glass keep, extend, or lift when the named second person cannot be reached.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:kill-break-glass', aliases: ['mcps:kill-break-glass'])]
+  #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
+  #[CLI\Option(name: 'keep', description: 'Confirm (keep) the freeze.')]
+  #[CLI\Option(name: 'extend', description: 'Extend the freeze. Pass seconds with --ttl.')]
+  #[CLI\Option(name: 'lift', description: 'Lift the freeze. Held deliveries stay held.')]
+  #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds when extending. Default 86400, max 604800.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:kill-break-glass BATCH --keep', description: 'Break-glass keep of a mass freeze.')]
+  public function breakGlassKill(
+    string $batch,
+    array $options = [
+      'keep' => FALSE,
+      'extend' => FALSE,
+      'lift' => FALSE,
+      'ttl' => NULL,
+    ],
+  ): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $action = $this->breakGlassAction($options);
+      $ttlRaw = $options['ttl'] ?? '';
+      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
+      $result = $this->killSwitch->breakGlass(
+        $batch,
+        $action,
+        $this->operatorIdentity(),
+        $ttl,
+      );
+      $this->printResult($result);
+      $this->io()->writeln('break_glass: ' . $action->value);
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * List held webhook deliveries.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-held', aliases: ['mcps:webhook-held'])]
+  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-held', description: 'List webhook deliveries held by a kill.')]
+  public function listHeld(): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    $rows = $this->webhookQueue->listHeld();
+    if ($rows === []) {
+      $this->io()->writeln('held: none');
+      return self::EXIT_SUCCESS;
+    }
+    $table = [];
+    foreach ($rows as $row) {
+      $table[] = [
+        (string) $row['id'],
+        (string) ($row['endpoint_id'] ?? ''),
+        (string) ($row['event_name'] ?? ''),
+        (string) ($row['principal_key'] ?? ''),
+        (string) ($row['human_key'] ?? ''),
+        (string) ($row['tenant'] ?? ''),
+      ];
+    }
+    $this->io()->table(
+      ['id', 'endpoint', 'event', 'principal_key', 'human_key', 'tenant'],
+      $table,
+    );
+    return self::EXIT_SUCCESS;
+  }
+
+  /**
+   * Release held webhook deliveries so they deliver as originally queued.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-release', aliases: ['mcps:webhook-release'])]
+  #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-release --id=12 --id=13', description: 'Release held deliveries. Same payload, id, and body signature.')]
+  public function releaseHeld(
+    array $options = [
+      'id' => [],
+    ],
+  ): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $ids = $this->idList($options['id'] ?? []);
+      $released = $this->webhookQueue->releaseHeld($ids, $this->operatorIdentity());
+      $this->io()->writeln('released: ' . implode(',', $released));
+      return self::EXIT_SUCCESS;
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logger()->error($e->getMessage());
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Discard held webhook deliveries. They are never delivered.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-discard', aliases: ['mcps:webhook-discard'])]
+  #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:webhook-discard --id=12', description: 'Discard held deliveries. They are never sent.')]
+  public function discardHeld(
+    array $options = [
+      'id' => [],
+    ],
+  ): int {
+    if (($denied = $this->requirePermission()) !== NULL) {
+      return $denied;
+    }
+    try {
+      $ids = $this->idList($options['id'] ?? []);
+      $discarded = $this->webhookQueue->discardHeld($ids, $this->operatorIdentity());
+      $this->io()->writeln('discarded: ' . implode(',', $discarded));
       return self::EXIT_SUCCESS;
     }
     catch (McpKillSwitchException | McpPrincipalKeyException $e) {
@@ -362,7 +545,10 @@ final class McpKillSwitchCommands extends DrushCommands {
     $this->io()->writeln('batch: ' . $result->batchId);
     if ($result->needsConfirm) {
       $this->io()->writeln(
-        'needs_confirm: yes (named second person / secondary account holder)',
+        'needs_confirm: yes (named second person / secondary account holder).',
+      );
+      $this->io()->writeln(
+        'freeze: in force now. Unconfirmed timeout keeps it and escalates.',
       );
     }
     if ($result->blockUntil > 0) {
@@ -402,6 +588,54 @@ final class McpKillSwitchCommands extends DrushCommands {
     }
     $fromStdin = stream_get_contents(STDIN);
     return is_string($fromStdin) ? trim($fromStdin) : '';
+  }
+
+  /**
+   * Break-glass action from mutually exclusive flags.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function breakGlassAction(array $options): McpKillBreakGlassAction {
+    $keep = !empty($options['keep']);
+    $extend = !empty($options['extend']);
+    $lift = !empty($options['lift']);
+    $chosen = (int) $keep + (int) $extend + (int) $lift;
+    if ($chosen !== 1) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_ACTION,
+        'Pass exactly one of --keep, --extend, or --lift.',
+      );
+    }
+    if ($keep) {
+      return McpKillBreakGlassAction::Keep;
+    }
+    if ($extend) {
+      return McpKillBreakGlassAction::Extend;
+    }
+    return McpKillBreakGlassAction::Lift;
+  }
+
+  /**
+   * Positive delivery ids from a repeated Drush option.
+   *
+   * @param mixed $value
+   *   Option value.
+   *
+   * @return list<int>
+   *   Ids.
+   */
+  private function idList(mixed $value): array {
+    $ids = [];
+    foreach ($this->optionList($value) as $item) {
+      $id = (int) $item;
+      if ($id > 0) {
+        $ids[] = $id;
+      }
+    }
+    return $ids;
   }
 
   /**

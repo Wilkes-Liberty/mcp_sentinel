@@ -308,7 +308,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * A mass kill stays pending without a second operator.
+   * A mass kill freezes immediately without a second operator (DEV-985).
    */
   public function testMassKillStaysPendingWithoutSecondOperator(): void {
     $one = $this->principalSelector('subject-m1', 'agent-m1');
@@ -316,9 +316,9 @@ final class McpKillSwitchTest extends KernelTestBase {
     $result = $this->killSwitch()->kill([$one, $two], 'mass', $this->paladinA());
     $this->assertTrue($result->needsConfirm);
     $this->assertSame(McpKillBlockStatus::KillPending, $result->status);
-    $this->assertFalse($this->killSwitch()->isKilled($one->key));
+    $this->assertTrue($this->killSwitch()->isKilled($one->key));
     $this->sealSubject('subject-m1', 'agent-m1');
-    $this->assertSame('subject-m1', $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject());
+    $this->expectGenericDeny();
   }
 
   /**
@@ -335,7 +335,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
     }
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
   }
 
   /**
@@ -369,8 +369,8 @@ final class McpKillSwitchTest extends KernelTestBase {
   public function testAuditRowForEachTransition(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-audit');
     $kill = $this->killSwitch()->kill([$human], 'audit-kill', $this->paladinA());
-    $this->assertSame($this->paladinA()->storageId(), $this->lastAuditMetadata(McpKillSwitch::AUDIT_KILL)['actor']);
-    $this->assertSame('', $this->lastAuditMetadata(McpKillSwitch::AUDIT_KILL)['second_confirmer']);
+    $this->assertSame($this->paladinA()->storageId(), $this->lastAuditMetadata(McpKillSwitch::AUDIT_FREEZE)['actor']);
+    $this->assertSame('', $this->lastAuditMetadata(McpKillSwitch::AUDIT_FREEZE)['second_confirmer']);
 
     $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
     $confirm = $this->lastAuditMetadata(McpKillSwitch::AUDIT_CONFIRM);
@@ -393,7 +393,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * A pending mass kill that times out does not apply and does not weaken.
+   * An unconfirmed mass freeze stays frozen and escalates (DEV-985).
    */
   public function testUnavailableConfirmerDoesNotWeakenTwoPersonRule(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-unavailable');
@@ -403,9 +403,10 @@ final class McpKillSwitchTest extends KernelTestBase {
       ->condition('batch_id', $result->batchId)
       ->execute();
     $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
-    $expire = $this->lastAuditMetadata(McpKillSwitch::AUDIT_EXPIRE);
-    $this->assertSame('confirm_window', $expire['reason']);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $escalate = $this->lastAuditMetadata(McpKillSwitch::AUDIT_ESCALATE);
+    $this->assertSame('confirm_window', $escalate['reason']);
+    $this->assertSame($result->batchId, $escalate['batch_id']);
   }
 
   /**
@@ -501,8 +502,8 @@ final class McpKillSwitchTest extends KernelTestBase {
   /**
    * A mass re-kill cancels an in-flight un-kill and stays blocking.
    *
-   * The new request is not blocking by itself. It must not leave the
-   * un-kill confirmable, and it must not open a phantom confirm batch.
+   * The new request must not leave the un-kill confirmable, and it
+   * must not open a phantom confirm batch.
    */
   public function testNewKillCancelsInFlightUnkill(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-cancel-unkill');
@@ -585,7 +586,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
     }
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
   }
 
   /**
@@ -646,7 +647,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::UNBOUND_OPERATOR, $e->reasonCode);
     }
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
   }
 
   /**
@@ -665,7 +666,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
     }
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
   }
 
   /**

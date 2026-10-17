@@ -80,6 +80,21 @@ final class McpKillSwitchException extends \RuntimeException {
   public const TABLE_MISSING = 'table_missing';
 
   /**
+   * Break-glass action is not keep, extend, or lift.
+   */
+  public const INVALID_ACTION = 'invalid_action';
+
+  /**
+   * Target is not an active mass freeze.
+   */
+  public const NOT_FROZEN = 'not_frozen';
+
+  /**
+   * Held delivery row is missing or not in a held state.
+   */
+  public const NOT_HELD = 'not_held';
+
+  /**
    * Constructs the refusal.
    *
    * @param string $reasonCode

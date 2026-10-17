@@ -1048,6 +1048,40 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Update 10034 adds hold-queue columns and the escalation stamp.
+   */
+  public function testUpdate10034AddsHoldAndEscalationColumns(): void {
+    $schema = $this->container->get('database')->schema();
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    $this->assertTrue($schema->tableExists($delivery));
+    foreach (['principal_key', 'human_key', 'tenant'] as $field) {
+      if ($schema->indexExists($delivery, $field)) {
+        $schema->dropIndex($delivery, $field);
+      }
+      if ($schema->fieldExists($delivery, $field)) {
+        $schema->dropField($delivery, $field);
+      }
+    }
+    $kill = 'mcp_sentinel_kill_block';
+    if ($schema->fieldExists($kill, 'escalated_at')) {
+      $schema->dropField($kill, 'escalated_at');
+    }
+    $this->assertFalse($schema->fieldExists($delivery, 'principal_key'));
+    $this->assertFalse($schema->fieldExists($kill, 'escalated_at'));
+
+    $message = mcp_sentinel_update_10034();
+    $this->assertStringContainsString('principal_key', $message);
+    $this->assertStringContainsString('escalated_at', $message);
+    $this->assertTrue($schema->fieldExists($delivery, 'principal_key'));
+    $this->assertTrue($schema->fieldExists($delivery, 'human_key'));
+    $this->assertTrue($schema->fieldExists($delivery, 'tenant'));
+    $this->assertTrue($schema->fieldExists($kill, 'escalated_at'));
+
+    $again = mcp_sentinel_update_10034();
+    $this->assertStringContainsString('already present', $again);
+  }
+
+  /**
    * Recreates the pre-1.14 audit table, without its hash columns.
    *
    * Update 10003 predates the extraction of the chain into audit_chain, so it

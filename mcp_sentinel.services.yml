@@ -164,6 +164,8 @@ services:
       - '@database'
       - '@datetime.time'
       - '@logger.channel.mcp_sentinel'
+      - '@mcp_sentinel.principal_context_holder'
+      - '@mcp_sentinel.audit_logger'
 
   mcp_sentinel.event_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpEventDispatcher
@@ -220,6 +222,7 @@ services:
       - '@module_handler'
       - '@uuid'
       - '@mcp_sentinel.operator_binding'
+      - '@mcp_sentinel.webhook_queue_manager'
 
   mcp_sentinel.operator_binding:
     class: Drupal\mcp_sentinel\Service\McpOperatorBinding
