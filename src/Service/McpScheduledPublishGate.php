@@ -476,6 +476,7 @@ final class McpScheduledPublishGate {
             TRUE,
             $entity->getEntityTypeId(),
             (string) $entity->id(),
+            $operation,
           )
             ?? McpDenyExplainer::CALLER_MESSAGE,
         )

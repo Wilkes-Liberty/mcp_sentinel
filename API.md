@@ -604,6 +604,11 @@ if ($classification->exceeds($classification->labelForEntity($entity), $ceiling)
 }
 ```
 
+`refusalResponse()` writes `denied_access` through `refuse()` even when
+`audit_enabled` is off. An access-hook classification deny can also write
+a companion `classification_egress_denied` evidence row; that evidence
+row honours `audit_enabled`.
+
 Deny-more rules: no ceiling → nothing exceeds; a label outside the vocabulary
 is the highest label as data and the lowest as a ceiling; an unknown surface
 takes the profile's strictest ceiling; a northbound `X-MCP-Declared-Ceiling`

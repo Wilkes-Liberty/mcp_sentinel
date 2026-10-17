@@ -430,6 +430,8 @@ final class McpDenyExplainer {
    *   Entity type of the refused subject, when known.
    * @param string|null $entityId
    *   Entity id of the refused subject, or '(new)'.
+   * @param string|null $operation
+   *   Entity operation that was refused, when known.
    *
    * @return string
    *   CALLER_MESSAGE. Never the annotated reason.
@@ -440,6 +442,7 @@ final class McpDenyExplainer {
     bool $audit = TRUE,
     ?string $entityType = NULL,
     ?string $entityId = NULL,
+    ?string $operation = NULL,
   ): string {
     $annotated = $this->operatorNotice($reason, $profileId);
     if ($audit) {
@@ -449,6 +452,7 @@ final class McpDenyExplainer {
         $profileId,
         $entityType,
         $entityId,
+        $operation,
       );
     }
     return self::CALLER_MESSAGE;
@@ -466,6 +470,8 @@ final class McpDenyExplainer {
    *   Entity type to match, or NULL for any deny this request.
    * @param string|null $entityId
    *   Entity id to match.
+   * @param string|null $operation
+   *   Entity operation to match, or NULL for any operation.
    *
    * @return bool
    *   TRUE when this request already has a refuse() HMAC row.
@@ -473,6 +479,7 @@ final class McpDenyExplainer {
   public function recordedThisRequest(
     ?string $entityType = NULL,
     ?string $entityId = NULL,
+    ?string $operation = NULL,
   ): bool {
     $request = $this->requestStack?->getCurrentRequest();
     if ($request === NULL) {
@@ -485,6 +492,9 @@ final class McpDenyExplainer {
       return $this->written !== [];
     }
     $subject = ($entityType ?? '') . "\0" . ($entityId ?? '');
+    if ($operation !== NULL && $operation !== '') {
+      $subject .= "\0" . $operation;
+    }
     return isset($this->recordedSubjects[$subject]);
   }
 
@@ -504,6 +514,8 @@ final class McpDenyExplainer {
    *   Entity type of the refused subject, when known.
    * @param string|null $entityId
    *   Entity id of the refused subject, or '(new)'.
+   * @param string|null $operation
+   *   Entity operation that was refused, when known.
    */
   private function writeDeniedAccess(
     string $reason,
@@ -511,6 +523,7 @@ final class McpDenyExplainer {
     ?string $profileId,
     ?string $entityType = NULL,
     ?string $entityId = NULL,
+    ?string $operation = NULL,
   ): void {
     if ($this->auditLogger === NULL) {
       return;
@@ -531,6 +544,9 @@ final class McpDenyExplainer {
     }
     if ($entityId !== NULL && $entityId !== '') {
       $meta['id'] = $entityId;
+    }
+    if ($operation !== NULL && $operation !== '') {
+      $meta['operation'] = $operation;
     }
     if ($profileId !== NULL && $profileId !== '') {
       $meta['profile'] = $profileId;
@@ -566,13 +582,18 @@ final class McpDenyExplainer {
     $hasSubject = $entityType !== NULL && $entityType !== ''
       && $entityId !== NULL && $entityId !== '';
     $subject = ($entityType ?? '') . "\0" . ($entityId ?? '');
-    $fingerprint = $explanation->ruleId . "\0" . $reason;
+    $fingerprint = $explanation->ruleId . "\0" . $reason . "\0"
+      . ($entityType ?? '') . "\0" . ($entityId ?? '') . "\0"
+      . ($operation ?? '');
     if (isset($this->written[$fingerprint])) {
       return;
     }
     $this->written[$fingerprint] = TRUE;
     if ($hasSubject) {
       $this->recordedSubjects[$subject] = TRUE;
+      if ($operation !== NULL && $operation !== '') {
+        $this->recordedSubjects[$subject . "\0" . $operation] = TRUE;
+      }
     }
     $this->emitDeniedAccess($meta);
   }

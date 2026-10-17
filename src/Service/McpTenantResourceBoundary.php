@@ -67,13 +67,13 @@ final class McpTenantResourceBoundary {
       return NULL;
     }
     if (strlen($tenant) > self::TENANT_MAX || !$this->tableReady()) {
-      return $this->forbidden($entity);
+      return $this->forbidden($entity, $operation);
     }
     $owner = $this->owner($entity);
     if ($owner === NULL || $this->sameTenant($owner, $tenant)) {
       return NULL;
     }
-    return $this->forbidden($entity);
+    return $this->forbidden($entity, $operation);
   }
 
   /**
@@ -259,8 +259,13 @@ final class McpTenantResourceBoundary {
    *
    * @param \Drupal\Core\Entity\EntityInterface|null $entity
    *   The refused entity, when known.
+   * @param string $operation
+   *   The entity operation that was refused.
    */
-  private function forbidden(?EntityInterface $entity = NULL): AccessResult {
+  private function forbidden(
+    ?EntityInterface $entity = NULL,
+    string $operation = '',
+  ): AccessResult {
     $entityId = NULL;
     if ($entity !== NULL) {
       $entityId = $entity->isNew() ? '(new)' : (string) $entity->id();
@@ -272,6 +277,7 @@ final class McpTenantResourceBoundary {
         TRUE,
         $entity?->getEntityTypeId(),
         $entityId,
+        $operation !== '' ? $operation : NULL,
       ) ?? McpDenyExplainer::CALLER_MESSAGE,
     )->setCacheMaxAge(0);
   }
