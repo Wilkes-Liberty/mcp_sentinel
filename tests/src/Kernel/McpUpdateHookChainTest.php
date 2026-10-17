@@ -1069,12 +1069,6 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $this->assertFalse($schema->fieldExists($delivery, 'principal_key'));
     $this->assertFalse($schema->fieldExists($kill, 'escalated_at'));
 
-    if (!$schema->tableExists($kill)) {
-      $this->installSchema('mcp_sentinel', [$kill]);
-    }
-    if ($schema->fieldExists($kill, 'escalated_at')) {
-      $schema->dropField($kill, 'escalated_at');
-    }
     $id = (int) $this->container->get('database')
       ->insert($delivery)
       ->fields([

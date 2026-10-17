@@ -695,6 +695,8 @@ final class McpKillSwitchCommands extends DrushCommands {
    * When DEV-986's uid column is present, the mapped uid wins.
    * Until then --operator names the permission account only.
    *
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $identity
+   *   Verified Paladin operator identity.
    * @param array<string, mixed> $options
    *   Command options.
    *

@@ -681,7 +681,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $row = $this->latestDelivery();
     $history = [];
     $worker = $this->worker500($history);
-    $worker->afterClaimForTest(function () use ($row): void {
+    $worker->afterClaimForTest(function (): void {
       $this->killSwitch()->kill(
         [$this->principalSelector('subject-500', 'agent-500')],
         'during-post',
@@ -725,7 +725,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $history = [];
     $worker = $this->worker500($history);
     $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_RETRY_STATUS_GUARD);
-    $worker->afterClaimForTest(function () use ($row): void {
+    $worker->afterClaimForTest(function (): void {
       $this->killSwitch()->kill(
         [$this->principalSelector('subject-500-w', 'agent-500-w')],
         'during-post',
@@ -776,7 +776,8 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->sealSubject('subject-after-w', 'agent-after-w');
     $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'after']);
     $row = $this->latestDelivery();
-    $this->worker($history = [])->processItem($this->queueItem((int) $row['id'], $row));
+    $history = [];
+    $this->worker($history)->processItem($this->queueItem((int) $row['id'], $row));
     $this->assertSame(
       McpWebhookQueueManager::STATUS_HELD,
       $this->loadDelivery((int) $row['id'])['status'],
@@ -812,7 +813,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
    * An unconfirmed freeze does not expire at block_until.
    */
   public function testUnconfirmedFreezeDoesNotExpireAtTtl(): void {
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-noexp');
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-stays');
     $kill = $this->killSwitch()->kill([$human], 'stay', $this->paladinA());
     $this->container->get('database')->update(McpKillSwitch::TABLE)
       ->fields(['block_until' => 1])
@@ -825,7 +826,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       McpKillBlockStatus::KillPending->value,
       $this->killSwitch()->status($human)['status'],
     );
-    $this->sealSubject('subject-noexp', 'agent-a');
+    $this->sealSubject('subject-stays', 'agent-a');
     $this->expectGenericDeny();
   }
 

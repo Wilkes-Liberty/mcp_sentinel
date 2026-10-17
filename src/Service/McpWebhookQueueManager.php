@@ -641,6 +641,8 @@ final class McpWebhookQueueManager {
    *   Held row ids.
    * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
    *   Acting operator.
+   * @param string $batchId
+   *   Kill batch id used as the discard correlation.
    *
    * @return list<int>
    *   Discarded ids.
@@ -717,7 +719,7 @@ final class McpWebhookQueueManager {
       );
     }
     $heldIds = array_map(static fn ($id): int => (int) $id, array_keys($rows));
-    if ($action === 'release' && FALSE && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
+    if ($action === 'release' && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
       foreach ($rows as $row) {
         if (!is_array($row)) {
           continue;
@@ -803,8 +805,13 @@ final class McpWebhookQueueManager {
     }
     $selectors = $this->selectorsFromRow($row);
     $batchId = $this->matchingKillBatchId($selectors);
-    // WEAKEN: hold audit is off.
-    unset($selectors, $batchId);
+    $this->auditSideEffect(
+      self::AUDIT_HOLD,
+      McpOperatorIdentity::system(),
+      $selectors,
+      [$deliveryId],
+      $batchId,
+    );
   }
 
   /**
