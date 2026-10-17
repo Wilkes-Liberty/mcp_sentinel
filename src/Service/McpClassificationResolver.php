@@ -560,7 +560,7 @@ final class McpClassificationResolver {
    * decision is per principal, per surface and per declaration.
    */
   public function refusalResponse(): JsonResponse {
-    $this->denyExplainer?->refuse(self::DENIAL_CODE);
+    $this->denyExplainer?->refuse(self::DENIAL_CODE, NULL, FALSE);
     $refusal = new JsonResponse([
       'errors' => [
         [
