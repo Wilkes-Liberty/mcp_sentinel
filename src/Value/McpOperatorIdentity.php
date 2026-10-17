@@ -11,10 +11,11 @@ use Drupal\mcp_sentinel\Service\McpPrincipalKey;
  * Verified operator identity for the two-person kill rule (DEV-846).
  *
  * Drupal uid is never this value. Paladin is iss|sub from a verified
- * principal. Drush is an HMAC of the OS effective uid, which --uid,
- * the login name, and the USER environment variable cannot change.
- * Mixed-channel confirm resolves both kinds through one bound
- * operator record; storage ids of different kinds never compare equal.
+ * token or principal. The OS-user HMAC is off unless settings.php
+ * enables it; --uid, the login name, and USER cannot change it.
+ * Distinct operators compare iss|sub and mapped Drupal uids.
+ * Mixed-channel confirm resolves both kinds through bound records;
+ * storage ids of different kinds never compare equal.
  */
 final readonly class McpOperatorIdentity {
 
