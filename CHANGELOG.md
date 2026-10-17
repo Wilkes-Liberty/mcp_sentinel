@@ -56,10 +56,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   That evidence row does not carry the rule, explainer, or principal;
   the `denied_access` row does. Tools that call `$entity->access()`
   after a pre-check skip their own HMAC row when `refuse()` already
-  recorded the deny for that entity, operation, and rule. A single update refused by both the tenant and
-  scheduled-publish gates writes one row. The `refuse()` dedupe
-  key includes the rule, entity type, id, and operation, and
-  never collapses writes when there is no current request. The
+  recorded the deny for that entity and operation. A single update
+  refused by both the tenant and scheduled-publish gates writes
+  one row. The `refuse()` dedupe key includes the rule, entity
+  type, id, and operation, and never collapses writes when there
+  is no current request. The
   row records the operation. Paths that already audit pass
   `refuse(..., audit: false)` so a deny is written once.
   `/drupal-mcp/readiness` stays a diagnostic

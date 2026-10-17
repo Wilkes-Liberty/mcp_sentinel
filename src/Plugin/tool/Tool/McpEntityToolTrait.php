@@ -57,8 +57,8 @@ trait McpEntityToolTrait {
    * only.
    *
    * JSON:API access-hook denies write denied_access through refuse().
-   * When refuse() already recorded a deny for this entity, operation,
-   * and rule on this request, this method writes nothing.
+   * When refuse() already recorded a deny for this entity and
+   * operation on this request, this method writes nothing.
    *
    * @param string $toolId
    *   The plugin ID of the tool handling the denial.
@@ -84,15 +84,14 @@ trait McpEntityToolTrait {
     if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
       $logger = \Drupal::service('mcp_sentinel.audit_logger');
     }
-    $profileId = NULL;
-    if (isset($this->governancePolicyResolver)) {
-      $profileId = $this->governancePolicyResolver->resolve()?->id();
-    }
-    $ruleId = $this->governanceDenyExplainer?->explain($reason, $profileId)?->ruleId;
-    if ($this->governanceDenyExplainer?->recordedThisRequest($entityType, $entityId, $operation, $ruleId)) {
+    if ($this->governanceDenyExplainer?->recordedThisRequest($entityType, $entityId, $operation)) {
       return;
     }
     if ($logger !== NULL) {
+      $profileId = NULL;
+      if (isset($this->governancePolicyResolver)) {
+        $profileId = $this->governancePolicyResolver->resolve()?->id();
+      }
       $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
         ?? $reason;
       $logger->log('denied_access', [
@@ -102,7 +101,7 @@ trait McpEntityToolTrait {
         'operation'   => $operation,
         'reason'      => $reason,
         'explain'     => $explain,
-        'rule'        => $ruleId,
+        'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
       ]);
     }
   }

@@ -164,6 +164,61 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
   }
 
   /**
+   * Tool skip is by entity and operation, not by rule.
+   *
+   * The tool's own reasons map to a different rule than the hook's
+   * tenant_mismatch, so a same-operation skip must still collapse the
+   * second write. A later different operation on the same entity writes.
+   */
+  public function testToolSkipMatchesEntityAndOperationNotRule(): void {
+    $this->actAsGovernedAgent();
+    $node = $this->createOwnedPage();
+    $this->sealTenant(self::TENANT_B, 'subject-b');
+    $account = $this->container->get('current_user')->getAccount();
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $this->assertTrue($node->access('view', $account, TRUE)->isForbidden());
+    $this->assertSame(1, $this->deniedAccessCount());
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_node_operations');
+    $log = new \ReflectionMethod($tool, 'logDeniedAccess');
+    $id = (string) $node->id();
+
+    $log->invoke(
+      $tool,
+      'mcp_sentinel_node_operations',
+      'node',
+      $id,
+      'view',
+      'core access denied',
+    );
+    $this->assertSame(
+      1,
+      $this->deniedAccessCount(),
+      'The same entity and operation must not write a second row.',
+    );
+
+    $log->invoke(
+      $tool,
+      'mcp_sentinel_node_operations',
+      'node',
+      $id,
+      'update',
+      'core access denied',
+    );
+    $this->assertSame(
+      2,
+      $this->deniedAccessCount(),
+      'A different operation on the same entity must write its own row.',
+    );
+    $this->assertEqualsCanonicalizing(
+      ['view', 'update'],
+      $this->deniedAccessOperations(),
+    );
+  }
+
+  /**
    * Workflow-transition tenant deny writes exactly one denied_access row.
    */
   public function testWorkflowTransitionTenantUpdateWritesOneDeniedAccessRow(): void {
