@@ -300,9 +300,6 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
    * Request-seam classification 403 writes denied_access with audit off.
    */
   public function testRequestSeamWritesDeniedAccessWhenAuditDisabled(): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_enabled', FALSE)
-      ->save();
     $this->setCeilings(['jsonapi' => 'internal']);
     $this->container->get('database')->delete('audit_chain_log')->execute();
 
@@ -311,15 +308,13 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
       ->onRequest($event);
     $this->assertRefusal($event->getResponse());
     $this->assertClassificationDeniedAccessRow();
+    $this->assertRefusalResponseWritesWhenAuditDisabled();
   }
 
   /**
    * Response-seam classification 403 writes denied_access with audit off.
    */
   public function testResponseSeamWritesDeniedAccessWhenAuditDisabled(): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_enabled', FALSE)
-      ->save();
     $this->setCeilings(['jsonapi' => 'internal']);
     $this->container->get('database')->delete('audit_chain_log')->execute();
 
@@ -336,6 +331,7 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
       ->onResponse($event);
     $this->assertRefusal($event->getResponse());
     $this->assertClassificationDeniedAccessRow();
+    $this->assertRefusalResponseWritesWhenAuditDisabled();
   }
 
   /**
@@ -353,6 +349,23 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
     $event = $this->responseEvent('/jsonapi/node/memo/a', $body);
     $this->container->get('mcp_sentinel.governed_response_subscriber')->onResponse($event);
     $this->assertSame($body, $event->getResponse()->getContent());
+  }
+
+  /**
+   * Asserts refusalResponse() still writes when audit_enabled is off.
+   *
+   * Readiness 503s the HTTP seams when audit is off, so the caller is
+   * exercised with audit on and the method itself with audit off.
+   */
+  private function assertRefusalResponseWritesWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->save();
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+    $response = $this->container->get('mcp_sentinel.classification')
+      ->refusalResponse();
+    $this->assertRefusal($response);
+    $this->assertClassificationDeniedAccessRow();
   }
 
   /**

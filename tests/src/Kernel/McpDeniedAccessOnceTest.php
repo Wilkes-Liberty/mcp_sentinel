@@ -436,8 +436,8 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
   /**
    * Creates a scheduled article owned by tenant A.
    *
-   * allow_scheduled_publish is on and there is no ceiling, so the
-   * owning tenant may store the schedule. The caller then tightens
+   * The profile allows scheduled publishing and there is no ceiling, so
+   * the owning tenant may store the schedule. The caller then tightens
    * max_moderation_state so a later update is refused.
    */
   private function createOwnedScheduledArticle(): Node {

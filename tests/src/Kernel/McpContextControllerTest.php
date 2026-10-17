@@ -337,9 +337,6 @@ final class McpContextControllerTest extends KernelTestBase {
     $this->installAuditChainSchema();
     $this->switchToDevelopmentGovernedUser();
     $this->stampDefaultPrincipalContext();
-    $this->config('mcp_sentinel.settings')
-      ->set('audit_enabled', FALSE)
-      ->save();
     \Drupal::configFactory()
       ->getEditable('mcp_sentinel.mcp_policy_profile.default')
       ->set('egress_ceilings', ['context' => 'public'])
@@ -357,17 +354,16 @@ final class McpContextControllerTest extends KernelTestBase {
       $payload['errors'][0]['title'] ?? NULL,
     );
     $this->assertArrayNotHasKey('code', $payload['errors'][0]);
-    $this->assertSame(1, $this->deniedAccessCount());
-    $meta = $this->lastDenialMetadata();
-    $this->assertSame('classification_egress_denied', $meta['rule'] ?? NULL);
-    $this->assertStringContainsString(
-      'classification_egress_denied',
-      (string) ($meta['explain'] ?? ''),
-    );
-    $this->assertSame(
-      'https://idp.example/realms/agents|kernel-test|kernel-test-client',
-      $meta['principal_key'] ?? NULL,
-    );
+    $this->assertClassificationDeniedAccessRow();
+
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->save();
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+    $response = $this->container->get('mcp_sentinel.classification')
+      ->refusalResponse();
+    $this->assertSame(403, $response->getStatusCode());
+    $this->assertClassificationDeniedAccessRow();
   }
 
   /**
@@ -416,6 +412,23 @@ final class McpContextControllerTest extends KernelTestBase {
     $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
     $this->assertStringNotContainsString(McpAccessChecker::BUNDLE_DENIAL_CODE, (string) $response->getContent());
     $this->assertArrayNotHasKey('site', $payload);
+  }
+
+  /**
+   * Asserts one denied_access row for a classification refuse.
+   */
+  private function assertClassificationDeniedAccessRow(): void {
+    $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('classification_egress_denied', $meta['rule'] ?? NULL);
+    $this->assertStringContainsString(
+      'classification_egress_denied',
+      (string) ($meta['explain'] ?? ''),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|kernel-test|kernel-test-client',
+      $meta['principal_key'] ?? NULL,
+    );
   }
 
   /**
