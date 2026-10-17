@@ -659,7 +659,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * euid 0 is refused even when the OS-assertion flag is on.
+   * Effective uid 0 is refused even when the OS-assertion flag is on.
    */
   public function testOsAssertionRefusesEuidZero(): void {
     $this->pinPaladinSettings([
@@ -1441,7 +1441,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       $introspection->weakenForTest($flag);
     }
     $factory = new McpOperatorIdentityFactory(
-      $this->container->get('mcp_sentinel.principal_context_holder'),
+      $this->principalContextHolder(),
       $this->container->get('private_key'),
       $this->container->get('settings'),
       $introspection,

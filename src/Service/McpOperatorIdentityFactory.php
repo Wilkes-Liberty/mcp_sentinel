@@ -25,12 +25,12 @@ use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 final class McpOperatorIdentityFactory {
 
   /**
-   * settings.php flag that enables the OS-user HMAC fallback.
+   * Settings.php flag that enables the OS-user HMAC fallback.
    */
   public const SETTING_ALLOW_OS_ASSERTION = 'mcp_sentinel.allow_drush_os_assertion';
 
   /**
-   * settings.php pin for the web-server account name.
+   * Settings.php pin for the web-server account name.
    */
   public const SETTING_WEB_SERVER_USER = 'mcp_sentinel.web_server_user';
 
@@ -249,8 +249,7 @@ final class McpOperatorIdentityFactory {
    * Whether settings.php enabled the OS-user HMAC.
    */
   private function osAssertionEnabled(): bool {
-    // DEV-986 red run: OS HMAC on without settings.php.
-    return TRUE || $this->settings->get(self::SETTING_ALLOW_OS_ASSERTION) === TRUE;
+    return $this->settings->get(self::SETTING_ALLOW_OS_ASSERTION) === TRUE;
   }
 
   /**
@@ -280,7 +279,7 @@ final class McpOperatorIdentityFactory {
       return '';
     }
     $info = posix_getpwuid($euid);
-    if (!is_array($info) || !isset($info['name']) || !is_string($info['name'])) {
+    if ($info === FALSE) {
       return '';
     }
     return $info['name'];

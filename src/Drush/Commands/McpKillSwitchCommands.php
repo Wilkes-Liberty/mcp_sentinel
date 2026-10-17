@@ -479,8 +479,12 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * switchTo, permission check, callback, switchBack in finally.
+   * Switch to the mapped account, check permission, then switch back.
    *
+   * @param \Drupal\user\UserInterface $account
+   *   Drupal account bound to the Paladin token.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $identity
+   *   Verified Paladin operator identity.
    * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
    *   Work to run as $account.
    */
@@ -548,10 +552,12 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * --operator must equal the mapped Drupal account name.
+   * The --operator option must equal the mapped Drupal account name.
    *
    * @param array<string, mixed> $options
    *   Command options.
+   * @param \Drupal\user\UserInterface $account
+   *   Drupal account bound to the Paladin token.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */

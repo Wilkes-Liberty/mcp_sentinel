@@ -190,7 +190,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   }
 
   /**
-   * A valid token and mapped permitted account can kill; user is anonymous after.
+   * A valid token and mapped account can kill; user is anonymous after.
    *
    * @covers ::kill
    */
@@ -232,7 +232,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   }
 
   /**
-   * --operator that does not match the token is OPERATOR_MISMATCH.
+   * An --operator that does not match the token is OPERATOR_MISMATCH.
    *
    * @covers ::kill
    */
@@ -408,7 +408,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   }
 
   /**
-   * --token is refused and the token never appears in audit, log, or output.
+   * The --token flag is refused and the token never appears in output.
    *
    * @covers ::kill
    */
@@ -473,6 +473,8 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   /**
    * Runs a callback with PALADIN_TOKEN set.
    *
+   * @param string $token
+   *   Paladin access token placed on PALADIN_TOKEN.
    * @param callable(): int $callback
    *   Command invocation.
    */
@@ -604,7 +606,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       $introspection->weakenForTest($flag);
     }
     $factory = new McpOperatorIdentityFactory(
-      $this->container->get('mcp_sentinel.principal_context_holder'),
+      $this->principalContextHolder(),
       $this->container->get('private_key'),
       $this->container->get('settings'),
       $introspection,

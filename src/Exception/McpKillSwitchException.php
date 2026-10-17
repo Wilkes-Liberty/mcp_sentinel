@@ -60,7 +60,7 @@ final class McpKillSwitchException extends \RuntimeException {
   public const OPERATOR_BINDING_CONFLICT = 'operator_binding_conflict';
 
   /**
-   * --operator does not match the Drupal account bound to this token.
+   * The --operator option does not match the bound Drupal account.
    */
   public const OPERATOR_MISMATCH = 'operator_mismatch';
 
