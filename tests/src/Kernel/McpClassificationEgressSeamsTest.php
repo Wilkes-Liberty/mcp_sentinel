@@ -297,6 +297,48 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
   }
 
   /**
+   * Request-seam classification 403 writes denied_access with audit off.
+   */
+  public function testRequestSeamWritesDeniedAccessWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->save();
+    $this->setCeilings(['jsonapi' => 'internal']);
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $event = $this->requestEvent('memo');
+    $this->container->get('mcp_sentinel.jsonapi_page_limit_subscriber')
+      ->onRequest($event);
+    $this->assertRefusal($event->getResponse());
+    $this->assertClassificationDeniedAccessRow();
+  }
+
+  /**
+   * Response-seam classification 403 writes denied_access with audit off.
+   */
+  public function testResponseSeamWritesDeniedAccessWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('audit_enabled', FALSE)
+      ->save();
+    $this->setCeilings(['jsonapi' => 'internal']);
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $event = $this->responseEvent('/jsonapi/node/article', [
+      'data' => [
+        [
+          'type' => 'node--memo',
+          'id' => 'a',
+          'attributes' => ['title' => self::SENTINEL_VALUE],
+        ],
+      ],
+    ]);
+    $this->container->get('mcp_sentinel.governed_response_subscriber')
+      ->onResponse($event);
+    $this->assertRefusal($event->getResponse());
+    $this->assertClassificationDeniedAccessRow();
+  }
+
+  /**
    * Ungoverned traffic is never touched by either seam.
    */
   public function testUngovernedTrafficUntouched(): void {
@@ -311,6 +353,57 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
     $event = $this->responseEvent('/jsonapi/node/memo/a', $body);
     $this->container->get('mcp_sentinel.governed_response_subscriber')->onResponse($event);
     $this->assertSame($body, $event->getResponse()->getContent());
+  }
+
+  /**
+   * Asserts one denied_access row for a classification HTTP refuse.
+   */
+  private function assertClassificationDeniedAccessRow(): void {
+    $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame('classification_egress_denied', $meta['rule'] ?? NULL);
+    $this->assertStringContainsString(
+      'classification_egress_denied',
+      (string) ($meta['explain'] ?? ''),
+    );
+    $this->assertSame(
+      'https://idp.example/realms/agents|kernel-test|kernel-test-client',
+      $meta['principal_key'] ?? NULL,
+    );
+  }
+
+  /**
+   * Counts denied_access rows written during this test.
+   */
+  private function deniedAccessCount(): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+  }
+
+  /**
+   * Decodes the latest denied_access metadata.
+   *
+   * @return array<string, mixed>
+   *   Metadata keys.
+   */
+  private function lastDenialMetadata(): array {
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id', 'metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $meta['id'] = (string) $row['entity_id'];
+    return $meta;
   }
 
 }

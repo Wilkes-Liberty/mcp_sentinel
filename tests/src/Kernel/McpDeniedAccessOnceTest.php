@@ -8,6 +8,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\Tests\content_moderation\Traits\ContentModerationTestTrait;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
@@ -29,6 +30,7 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
 
   use McpAuditSchemaTestTrait;
   use UserCreationTrait;
+  use ContentModerationTestTrait;
 
   /**
    * Synthetic tenant that owns the fixture.
@@ -57,10 +59,18 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
     'key',
     'image',
     'options',
+    'datetime',
+    'views',
     'path_alias',
     'consumers',
     'simple_oauth',
     'encrypt',
+    'workflows',
+    'content_moderation',
+    'language',
+    'content_translation',
+    'scheduler',
+    'scheduler_content_moderation_integration',
     'audit_chain',
     'mcp_sentinel',
   ];
@@ -75,12 +85,16 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
     $this->installSchema('node', ['node_access']);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
+    $this->installEntitySchema('path_alias');
+    $this->installEntitySchema('content_moderation_state');
     $this->installConfig([
       'field',
       'filter',
       'system',
       'node',
       'user',
+      'content_moderation',
+      'scheduler',
       'mcp_sentinel',
     ]);
     if (!Role::load('mcp_api')) {
@@ -91,6 +105,8 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
       'access user profiles',
       'administer nodes',
       'access mcp sentinel context',
+      'use editorial transition create_new_draft',
+      'use editorial transition publish',
     ]);
     $this->config('mcp_sentinel.settings')
       ->set('enabled', TRUE)
@@ -107,6 +123,15 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
       ->getStorage('mcp_policy_profile')
       ->resetCache();
     NodeType::create(['type' => 'page', 'name' => 'Page'])->save();
+    $article = NodeType::create([
+      'type' => 'article',
+      'name' => 'Article',
+    ]);
+    $article->setThirdPartySetting('scheduler', 'publish_enable', TRUE);
+    $article->setThirdPartySetting('scheduler', 'unpublish_enable', TRUE);
+    $article->save();
+    $workflow = $this->createEditorialWorkflow();
+    $this->addEntityTypeAndBundleToWorkflow($workflow, 'node', 'article');
     // Uid 1 bypasses entity access; burn it so the agent is ordinary.
     $this->createUser();
   }
@@ -139,32 +164,105 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
   }
 
   /**
-   * Tenant and scheduled-publish both refusing one update write one row.
+   * Workflow-transition tenant deny writes exactly one denied_access row.
    */
-  public function testTenantAndScheduledUpdateWritesOneDeniedAccessRow(): void {
+  public function testWorkflowTransitionTenantUpdateWritesOneDeniedAccessRow(): void {
+    $this->actAsGovernedAgent();
+    $node = $this->createOwnedDraftArticle();
+    $this->sealTenant(self::TENANT_B, 'subject-b');
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_workflow_transition');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('id', (string) $node->id());
+    $tool->setInputValue('state', 'published');
+    $tool->execute();
+
+    $this->assertFalse(
+      $tool->getResultStatus(),
+      'Another tenant must not transition the owned article.',
+    );
+    $this->assertSame(
+      1,
+      $this->deniedAccessCount(),
+      'The hook refuse() row must be the only denied_access write.',
+    );
+  }
+
+  /**
+   * Bulk-operations tenant deny writes exactly one denied_access row.
+   */
+  public function testBulkOperationsTenantUpdateWritesOneDeniedAccessRow(): void {
     $this->actAsGovernedAgent();
     $node = $this->createOwnedPage();
     $this->sealTenant(self::TENANT_B, 'subject-b');
     $this->container->get('database')->delete('audit_chain_log')->execute();
 
-    $explainer = $this->container->get('mcp_sentinel.deny_explainer');
-    $explainer->refuse(
-      'Scheduled transition is not permitted by the MCP Sentinel profile.',
-      NULL,
-      TRUE,
-      'node',
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_bulk_operations');
+    $tool->setInputValue('operation', 'unpublish');
+    $tool->setInputValue('entity_type', 'node');
+    $tool->setInputValue('ids', [(string) $node->id()]);
+    $tool->setInputValue('confirm', TRUE);
+    $tool->execute();
+
+    $data = $tool->getResult()->getContextValues();
+    $this->assertArrayHasKey(
       (string) $node->id(),
+      $data['failed'] ?? [],
+      'Another tenant must not unpublish the owned node.',
     );
-    $access = $node->access(
-      'update',
-      $this->container->get('current_user')->getAccount(),
-      TRUE,
+    $this->assertSame(
+      1,
+      $this->deniedAccessCount(),
+      'The hook refuse() row must be the only denied_access write.',
     );
+  }
+
+  /**
+   * Tenant and scheduled-publish both refusing one update write one row.
+   *
+   * Both gates run through hook_entity_access(): the tenant boundary
+   * returns first so the scheduled-publish gate never refuse()s.
+   */
+  public function testTenantAndScheduledUpdateWritesOneDeniedAccessRow(): void {
+    $this->actAsGovernedAgent();
+    $node = $this->createOwnedScheduledArticle();
+    $this->configureProfile([
+      'allow_scheduled_publish' => TRUE,
+      'max_moderation_state' => 'draft',
+    ]);
+    $account = $this->container->get('current_user')->getAccount();
+
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+    $ceiling = $node->access('update', $account, TRUE);
+    $this->assertTrue(
+      $ceiling->isForbidden(),
+      'The scheduled-publish ceiling must refuse the owning tenant.',
+    );
+    $this->assertSame(
+      1,
+      $this->deniedAccessCount(),
+      'The scheduled-publish gate must write one row for tenant A.',
+    );
+    $this->assertSame(
+      'scheduled_transition',
+      $this->lastDenialMetadata()['rule'] ?? NULL,
+    );
+
+    $this->sealTenant(self::TENANT_B, 'subject-b');
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+    $access = $node->access('update', $account, TRUE);
     $this->assertTrue($access->isForbidden());
     $this->assertSame(
       1,
       $this->deniedAccessCount(),
       'One update refused by both gates must leave one denied_access row.',
+    );
+    $this->assertSame(
+      'tenant_mismatch',
+      $this->lastDenialMetadata()['rule'] ?? NULL,
     );
   }
 
@@ -186,6 +284,29 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
       2,
       $this->deniedAccessCount(),
       'The dedupe key must include entity type and id.',
+    );
+  }
+
+  /**
+   * View and update of the same entity in one request write two rows.
+   */
+  public function testSameEntityViewAndUpdateWriteTwoDeniedAccessRows(): void {
+    $this->actAsGovernedAgent();
+    $user = $this->createUser([]);
+    $this->assertInstanceOf(User::class, $user);
+    $account = $this->container->get('current_user')->getAccount();
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $this->assertTrue($user->access('view', $account, TRUE)->isForbidden());
+    $this->assertTrue($user->access('update', $account, TRUE)->isForbidden());
+    $this->assertSame(
+      2,
+      $this->deniedAccessCount(),
+      'The dedupe key must include the rule and the operation.',
+    );
+    $this->assertEqualsCanonicalizing(
+      ['view', 'update'],
+      $this->deniedAccessOperations(),
     );
   }
 
@@ -232,6 +353,50 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
   }
 
   /**
+   * Decodes the latest denied_access metadata.
+   *
+   * @return array<string, mixed>
+   *   Metadata keys.
+   */
+  private function lastDenialMetadata(): array {
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id', 'metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $meta['id'] = (string) $row['entity_id'];
+    return $meta;
+  }
+
+  /**
+   * Entity operations recorded on denied_access rows, oldest first.
+   *
+   * @return list<string|null>
+   *   metadata.operation values.
+   */
+  private function deniedAccessOperations(): array {
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $ops = [];
+    $result = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'ASC')
+      ->execute();
+    foreach ($result as $record) {
+      $meta = $logger->decodeMetadata((string) $record->metadata);
+      $ops[] = $meta['operation'] ?? NULL;
+    }
+    return $ops;
+  }
+
+  /**
    * A governed mcp_api account set as the current user.
    */
   private function actAsGovernedAgent(): void {
@@ -251,6 +416,64 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
     ]);
     $node->save();
     return $node;
+  }
+
+  /**
+   * Creates a moderated draft article owned by tenant A.
+   */
+  private function createOwnedDraftArticle(): Node {
+    $this->sealTenant(self::TENANT_A, 'subject-a');
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Owned article',
+      'moderation_state' => 'draft',
+      'status' => 0,
+    ]);
+    $node->save();
+    return $node;
+  }
+
+  /**
+   * Creates a scheduled article owned by tenant A.
+   *
+   * allow_scheduled_publish is on and there is no ceiling, so the
+   * owning tenant may store the schedule. The caller then tightens
+   * max_moderation_state so a later update is refused.
+   */
+  private function createOwnedScheduledArticle(): Node {
+    $this->configureProfile(['allow_scheduled_publish' => TRUE]);
+    $this->sealTenant(self::TENANT_A, 'subject-a');
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Owned scheduled',
+      'moderation_state' => 'draft',
+      'status' => 0,
+    ]);
+    $now = \Drupal::time()->getRequestTime();
+    $node->set('publish_on', $now + 86400);
+    $node->set('publish_state', 'published');
+    $node->save();
+    return $node;
+  }
+
+  /**
+   * Sets keys on the default policy profile.
+   *
+   * @param array<string, mixed> $values
+   *   Profile keys and their values.
+   */
+  private function configureProfile(array $values): void {
+    $config = $this->config('mcp_sentinel.mcp_policy_profile.default');
+    foreach ($values as $key => $value) {
+      $config->set($key, $value);
+    }
+    $config->save();
+    $this->container->get('entity_type.manager')
+      ->getStorage('mcp_policy_profile')
+      ->resetCache();
+    $this->container->get('entity_type.manager')
+      ->getAccessControlHandler('node')
+      ->resetCache();
   }
 
   /**

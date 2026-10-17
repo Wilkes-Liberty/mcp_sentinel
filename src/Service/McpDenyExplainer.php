@@ -566,11 +566,7 @@ final class McpDenyExplainer {
     $hasSubject = $entityType !== NULL && $entityType !== ''
       && $entityId !== NULL && $entityId !== '';
     $subject = ($entityType ?? '') . "\0" . ($entityId ?? '');
-    if ($hasSubject && isset($this->recordedSubjects[$subject])) {
-      return;
-    }
-    $fingerprint = $explanation->ruleId . "\0" . $reason . "\0"
-      . ($entityType ?? '') . "\0" . ($entityId ?? '');
+    $fingerprint = $explanation->ruleId . "\0" . $reason;
     if (isset($this->written[$fingerprint])) {
       return;
     }

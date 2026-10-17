@@ -661,17 +661,15 @@ function mcp_sentinel_entity_access(
   string $operation,
   AccountInterface $account,
 ): AccessResultInterface {
+  $scheduled = _mcp_sentinel_scheduled_publish_gate()?->entityAccess($entity, $operation, $account)
+    ?? AccessResult::neutral();
+
   /** @var \Drupal\mcp_sentinel\Service\McpTenantResourceBoundary $boundary */
   $boundary = \Drupal::service('mcp_sentinel.tenant_resource_boundary');
   $tenant_denial = $boundary->denyOtherTenant($entity, $operation);
   if ($tenant_denial !== NULL) {
-    // Tenant already wrote the HMAC row. Do not let the scheduled-publish
-    // gate refuse() a second time for the same update.
-    return $tenant_denial;
+    return $tenant_denial->orIf($scheduled);
   }
-
-  $scheduled = _mcp_sentinel_scheduled_publish_gate()?->entityAccess($entity, $operation, $account)
-    ?? AccessResult::neutral();
 
   $resolver = \Drupal::service('mcp_sentinel.policy_resolver');
   $profile = $resolver->resolve($account);

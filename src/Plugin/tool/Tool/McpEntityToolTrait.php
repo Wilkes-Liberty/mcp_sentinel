@@ -84,9 +84,6 @@ trait McpEntityToolTrait {
     if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
       $logger = \Drupal::service('mcp_sentinel.audit_logger');
     }
-    if ($this->governanceDenyExplainer?->recordedThisRequest($entityType, $entityId)) {
-      return;
-    }
     if ($logger !== NULL) {
       $profileId = NULL;
       if (isset($this->governancePolicyResolver)) {
