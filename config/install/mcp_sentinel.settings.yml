@@ -98,6 +98,3 @@ audit_secret_config_prefixes: {  }
 kill_switch_default_ttl: 86400
 kill_switch_max_ttl: 604800
 kill_switch_confirm_window: 900
-paladin_introspection_url: ''
-paladin_introspection_client_id: ''
-paladin_introspection_client_secret_key: ''

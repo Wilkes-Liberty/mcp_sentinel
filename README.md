@@ -89,14 +89,15 @@ When a web or Paladin kill route is added, Paladin `iss|sub` and the
 Drush assertion must resolve to one bound operator record
 (`PALADIN_TOKEN=… drush mcp-sentinel:operator-bind`, or pipe the
 token on stdin). Bind introspects the token at Paladin over HTTPS
-with client authentication, requires `active`, and derives `iss|sub`
-from that response, never from a `--human-key` string or `--token`.
-The introspection URL, issuer, audience, and client credentials are
-pinned in `settings.php` so a config import cannot redirect them.
-The response `iss` and `aud` / `azp` / `client_id` must match those
-pins. Paladin unreachable, HTTP, or missing client auth fails
-closed. An identity already bound to a different operator is
-refused. Unbind needs two distinct verified Paladin operators.
+with client authentication, requires `active` and a numeric future
+`exp`, and derives `iss|sub` from that response, never from a
+`--human-key` string or `--token`. The introspection URL, issuer,
+audience, and client credentials are pinned in `settings.php` so a
+config import cannot redirect them. The response `iss` and `aud` /
+`azp` / `client_id` must match those pins. Paladin unreachable,
+HTTP, a 3xx, or missing client auth fails closed. An identity
+already bound to a different operator is refused. Unbind needs two
+distinct verified Paladin operators.
 Mixed-channel confirm with no binding is refused. A requester cannot
 confirm their own request on the other channel.
 

@@ -62,19 +62,19 @@
   margin: 0;
   padding: 0.25em 0.75em;
   cursor: pointer;
-  color: inherit;
-  font: inherit;
-  font-size: 0.875em;
   white-space: nowrap;
-  line-height: 1.2;
+  color: inherit;
   border: 1px solid currentColor;
   border-radius: 4px;
   background: transparent;
+  font: inherit;
+  font-size: 0.875em;
+  line-height: 1.2;
 }
 
 .mcp-banner__dismiss:hover,
 .mcp-banner__dismiss:focus-visible {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgb(0, 0, 0, 0.08);
 }
 
 .mcp-banner--critical {

@@ -83,20 +83,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   confirm on the other channel. Distinct same-kind identities still
   work without a binding. `mcp-sentinel:operator-bind` introspects a
   Paladin token over HTTPS with client authentication, requires
-  `active`, and derives `iss|sub` from that response, never from
-  `--human-key` or `--token` (token from `PALADIN_TOKEN` or stdin).
-  The introspection URL, issuer, audience, and client credentials
-  are pinned in `settings.php`, not importable config. The response
-  `iss` and `aud` / `azp` / `client_id` must match those pins.
-  Paladin unreachable, HTTP, or missing client auth fails closed.
-  Rebind of an identity already bound to a different operator is
-  refused, including a unique-constraint race. Joining a new Paladin
-  identity onto an existing Drush record is audited as
-  `added_to_existing`. Every bind and every refusal is audited.
-  Unbind (`mcp-sentinel:operator-unbind`) needs two distinct verified
-  operators and is audited. One person with two Paladin accounts
-  cannot be detected. Run database updates: 10031 creates the table;
-  10032 adds unbind columns.
+  `active` and a numeric future `exp`, and derives `iss|sub` from
+  that response, never from `--human-key` or `--token` (token from
+  `PALADIN_TOKEN` or stdin). The introspection URL, issuer, audience,
+  and client credentials are pinned in `settings.php`, not importable
+  config. The response `iss` and `aud` / `azp` / `client_id` must
+  match those pins. Paladin unreachable, HTTP, a 3xx, or missing
+  client auth fails closed. Rebind of an identity already bound to a
+  different operator is refused, including a unique-constraint race.
+  Joining a new Paladin identity onto an existing Drush record is
+  audited as `added_to_existing`. Every bind and every refusal is
+  audited. Unbind (`mcp-sentinel:operator-unbind`) needs two distinct
+  verified operators and is audited. One person with two Paladin
+  accounts cannot be detected. Run database updates: 10031 creates
+  the table; 10032 adds unbind columns and deletes dead
+  `paladin_introspection_*` config keys; 10033 deletes those keys on
+  sites that already ran 10032.
 
 ### Fixed
 - A claimless request on a Drupal test child served by the PHP
