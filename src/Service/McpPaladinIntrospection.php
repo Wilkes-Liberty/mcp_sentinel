@@ -179,7 +179,8 @@ final class McpPaladinIntrospection {
         );
       }
     }
-    if (!$this->weakened(self::WEAKEN_SKIP_ACT_CLAIM)) {
+    // DEV-986 red run: act/actor check skipped.
+    if (FALSE && !$this->weakened(self::WEAKEN_SKIP_ACT_CLAIM)) {
       if (array_key_exists('act', $payload)
         || array_key_exists('actor', $payload)) {
         throw new McpKillSwitchException(

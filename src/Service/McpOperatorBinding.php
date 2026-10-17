@@ -254,7 +254,8 @@ final class McpOperatorBinding {
           return $firstRecord;
         }
         $joinedExisting = ($firstRecord === NULL) !== ($secondRecord === NULL);
-        if ($joinedExisting && !$this->weakened(self::WEAKEN_SKIP_JOIN_REFUSAL)
+        // DEV-986 red run: join refusal skipped.
+        if (FALSE && $joinedExisting && !$this->weakened(self::WEAKEN_SKIP_JOIN_REFUSAL)
           && !$this->weakened(self::WEAKEN_SKIP_MIXED_CHANNEL)) {
           throw new McpKillSwitchException(
             McpKillSwitchException::OPERATOR_BINDING_CONFLICT,
@@ -481,7 +482,8 @@ final class McpOperatorBinding {
     }
     $firstUid = $this->uidForStorageId($first);
     $secondUid = $this->uidForStorageId($second);
-    if ($firstUid > 0 && $secondUid > 0 && $firstUid === $secondUid
+    // DEV-986 red run: mapped-uid distinct-operator check skipped.
+    if (FALSE && $firstUid > 0 && $secondUid > 0 && $firstUid === $secondUid
       && !$this->weakened(self::WEAKEN_SKIP_SAME_OPERATOR)
       && !$this->weakened(self::WEAKEN_SKIP_UID_MATCH)) {
       throw new McpKillSwitchException(

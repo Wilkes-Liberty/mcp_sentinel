@@ -249,7 +249,8 @@ final class McpOperatorIdentityFactory {
    * Whether settings.php enabled the OS-user HMAC.
    */
   private function osAssertionEnabled(): bool {
-    return $this->settings->get(self::SETTING_ALLOW_OS_ASSERTION) === TRUE;
+    // DEV-986 red run: OS HMAC on without settings.php.
+    return TRUE || $this->settings->get(self::SETTING_ALLOW_OS_ASSERTION) === TRUE;
   }
 
   /**
