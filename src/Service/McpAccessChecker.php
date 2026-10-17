@@ -196,7 +196,7 @@ final class McpAccessChecker {
     // 'view label' — a label-only representation is still egress.
     $result = AccessResult::neutral()->addCacheTags($tags);
     if (in_array($operation, ['view', 'view label'], TRUE) && $this->classification !== NULL) {
-      $result = $this->checkClassification($entity, $profile, $result);
+      $result = $this->checkClassification($entity, $profile, $result, $operation);
     }
     $result = $this->checkBundleFloor($operation, $result, $auditDeny);
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
@@ -211,6 +211,8 @@ final class McpAccessChecker {
    *   The resolved policy profile.
    * @param \Drupal\Core\Access\AccessResult $neutral
    *   The neutral result to return (with cacheability) when nothing exceeds.
+   * @param string $operation
+   *   The read operation being judged (`view` or `view label`).
    *
    * @return \Drupal\Core\Access\AccessResult
    *   The neutral result, or a forbidden result carrying the stable code
@@ -221,6 +223,7 @@ final class McpAccessChecker {
     EntityInterface $entity,
     McpPolicyProfileInterface $profile,
     AccessResult $neutral,
+    string $operation,
   ): AccessResult {
     assert($this->classification !== NULL);
     if (!$this->classification->assignsAboveLowest()) {
@@ -252,7 +255,7 @@ final class McpAccessChecker {
       TRUE,
       $entity->getEntityTypeId(),
       $entityId,
-      'view',
+      $operation,
     )
       ->addCacheTags($neutral->getCacheTags())
       ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);

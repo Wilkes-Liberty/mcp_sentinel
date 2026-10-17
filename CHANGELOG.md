@@ -48,11 +48,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   off; `classification_egress_denied` evidence may still accompany
   that row. JSON:API request and response seams and
   `/drupal-mcp/context` write the same `denied_access` row through
-  `refusalResponse()`. An access-hook classification deny can also
-  write a `classification_egress_denied` evidence row. Tools that
-  call `$entity->access()` after a pre-check skip their own HMAC
-  row when `refuse()` already recorded the deny for that entity
-  and operation. A single update refused by both the tenant and
+  `refusalResponse()`. The access hook, the JSON:API request seam,
+  the response seam, and `/drupal-mcp/context` also write a
+  `classification_egress_denied` evidence row (`reason`, `surface`,
+  `profile`, `entity_type`, `bundle`, `field`, `classification`,
+  `ceiling`, `declared_ceiling`, `declared_destination`, `origin`).
+  That evidence row does not carry the rule, explainer, or principal;
+  the `denied_access` row does. Tools that call `$entity->access()`
+  after a pre-check skip their own HMAC row when `refuse()` already
+  recorded the deny for that entity, operation, and rule. A single update refused by both the tenant and
   scheduled-publish gates writes one row. The `refuse()` dedupe
   key includes the rule, entity type, id, and operation, and
   never collapses writes when there is no current request. The

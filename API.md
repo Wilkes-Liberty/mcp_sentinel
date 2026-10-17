@@ -605,9 +605,16 @@ if ($classification->exceeds($classification->labelForEntity($entity), $ceiling)
 ```
 
 `refusalResponse()` writes `denied_access` through `refuse()` even when
-`audit_enabled` is off. An access-hook classification deny can also write
-a companion `classification_egress_denied` evidence row; that evidence
-row honours `audit_enabled`.
+`audit_enabled` is off. That row carries the rule, the explainer, and
+the principal. A companion `classification_egress_denied` evidence row
+is also written (via `evidence()`, which honours `audit_enabled`) on
+every classification deny surface: the access hook (entity access,
+JSON:API filter access, and field access), the JSON:API request seam,
+the response seam, and `/drupal-mcp/context`. The evidence row's fields
+are `reason`, `surface`, `profile`, `entity_type`, `bundle`, `field`,
+`classification`, `ceiling`, `declared_ceiling`, `declared_destination`,
+and `origin`. It does not carry the rule, the explainer, or the
+principal; the `denied_access` row does.
 
 Deny-more rules: no ceiling → nothing exceeds; a label outside the vocabulary
 is the highest label as data and the lowest as a ceiling; an unknown surface

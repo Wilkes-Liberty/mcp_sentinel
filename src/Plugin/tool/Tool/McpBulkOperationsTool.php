@@ -134,12 +134,12 @@ final class McpBulkOperationsTool extends McpGovernedToolBase {
       $profile = $profileForRateLimit;
       $policyResult = $this->governanceAccessChecker->checkEntityAccess($entity, $entity_op, $profile, FALSE);
       if ($reason = $this->denyReason($policyResult)) {
-        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $operation, $reason);
+        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $entity_op, $reason);
         $results['failed'][$id] = (string) $this->t('MCP access is denied.');
         continue;
       }
       if (!$entity->access($entity_op, $this->currentUser)) {
-        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $operation, 'access denied');
+        $this->logDeniedAccess('mcp_sentinel_bulk_operations', $entity_type, $id, $entity_op, 'access denied');
         $results['failed'][$id] = (string) $this->t('access denied');
         continue;
       }

@@ -472,6 +472,8 @@ final class McpDenyExplainer {
    *   Entity id to match.
    * @param string|null $operation
    *   Entity operation to match, or NULL for any operation.
+   * @param string|null $ruleId
+   *   Policy rule to match, or NULL for any rule.
    *
    * @return bool
    *   TRUE when this request already has a refuse() HMAC row.
@@ -480,6 +482,7 @@ final class McpDenyExplainer {
     ?string $entityType = NULL,
     ?string $entityId = NULL,
     ?string $operation = NULL,
+    ?string $ruleId = NULL,
   ): bool {
     $request = $this->requestStack?->getCurrentRequest();
     if ($request === NULL) {
@@ -492,8 +495,18 @@ final class McpDenyExplainer {
       return $this->written !== [];
     }
     $subject = ($entityType ?? '') . "\0" . ($entityId ?? '');
-    if ($operation !== NULL && $operation !== '') {
-      $subject .= "\0" . $operation;
+    $opKey = ($operation !== NULL && $operation !== '')
+      ? $subject . "\0" . $operation
+      : NULL;
+    if ($opKey !== NULL && $ruleId !== NULL && $ruleId !== '') {
+      return isset($this->recordedSubjects[$opKey . "\0" . $ruleId])
+        || isset($this->recordedSubjects[$opKey]);
+    }
+    if ($opKey !== NULL) {
+      return isset($this->recordedSubjects[$opKey]);
+    }
+    if ($ruleId !== NULL && $ruleId !== '') {
+      return isset($this->recordedSubjects[$subject . "\0" . $ruleId]);
     }
     return isset($this->recordedSubjects[$subject]);
   }
@@ -591,8 +604,11 @@ final class McpDenyExplainer {
     $this->written[$fingerprint] = TRUE;
     if ($hasSubject) {
       $this->recordedSubjects[$subject] = TRUE;
+      $this->recordedSubjects[$subject . "\0" . $explanation->ruleId] = TRUE;
       if ($operation !== NULL && $operation !== '') {
-        $this->recordedSubjects[$subject . "\0" . $operation] = TRUE;
+        $opKey = $subject . "\0" . $operation;
+        $this->recordedSubjects[$opKey] = TRUE;
+        $this->recordedSubjects[$opKey . "\0" . $explanation->ruleId] = TRUE;
       }
     }
     $this->emitDeniedAccess($meta);
