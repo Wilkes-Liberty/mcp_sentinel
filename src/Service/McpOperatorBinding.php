@@ -568,32 +568,6 @@ final class McpOperatorBinding {
   }
 
   /**
-   * Mapped Drupal uid for a verified identity, or 0 when unbound.
-   *
-   * Returns 0 until the uid column from DEV-986 is present.
-   */
-  public function uidFor(McpOperatorIdentity $identity): int {
-    if ($identity->kind === '' || $identity->id === '' || !$this->tableReady()) {
-      return 0;
-    }
-    if (!$this->connection->schema()->fieldExists(self::TABLE, 'uid')) {
-      return 0;
-    }
-    $statement = $this->connection->select(self::TABLE, 'b')
-      ->fields('b', ['uid'])
-      ->condition('identity_hash', $this->identityHash($identity->kind, $identity->id))
-      ->execute();
-    if ($statement === NULL) {
-      return 0;
-    }
-    $row = $statement->fetchAssoc();
-    if (!is_array($row) || !isset($row['uid'])) {
-      return 0;
-    }
-    return (int) $row['uid'];
-  }
-
-  /**
    * PHPUnit-only injection that disables bind or unbind invariants.
    *
    * Impossible outside the PHPUnit process. Used so unbound, same-

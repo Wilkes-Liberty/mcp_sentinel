@@ -940,10 +940,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $now = $this->time->getRequestTime();
     $requestedUntil = McpKillTtl::blockUntil($now, $ttl);
     $cap = $now + McpKillTtl::MAX;
-    $blockUntil = $requestedUntil;
     $selectors = [];
     $reason = '';
-    $rows = [];
 
     $txn = $this->connection->startTransaction();
     try {
