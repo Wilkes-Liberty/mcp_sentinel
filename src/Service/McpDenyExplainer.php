@@ -44,6 +44,13 @@ final class McpDenyExplainer {
   private array $written = [];
 
   /**
+   * Entity type+id subjects already recorded for the current request.
+   *
+   * @var array<string, true>
+   */
+  private array $recordedSubjects = [];
+
+  /**
    * Request object-id the fingerprints belong to.
    */
   private mixed $writtenFor = NULL;
@@ -419,6 +426,10 @@ final class McpDenyExplainer {
    *   Active policy profile id when known.
    * @param bool $audit
    *   FALSE when the caller already wrote an HMAC row for this deny.
+   * @param string|null $entityType
+   *   Entity type of the refused subject, when known.
+   * @param string|null $entityId
+   *   Entity id of the refused subject, or '(new)'.
    *
    * @return string
    *   CALLER_MESSAGE. Never the annotated reason.
@@ -427,12 +438,54 @@ final class McpDenyExplainer {
     string $reason,
     ?string $profileId = NULL,
     bool $audit = TRUE,
+    ?string $entityType = NULL,
+    ?string $entityId = NULL,
   ): string {
     $annotated = $this->operatorNotice($reason, $profileId);
     if ($audit) {
-      $this->writeDeniedAccess($reason, $annotated, $profileId);
+      $this->writeDeniedAccess(
+        $reason,
+        $annotated,
+        $profileId,
+        $entityType,
+        $entityId,
+      );
     }
     return self::CALLER_MESSAGE;
+  }
+
+  /**
+   * Whether refuse() already wrote a denied_access row for this request.
+   *
+   * Tools that call $entity->access() after a pre-check skip their own
+   * HMAC row when the access hook already recorded the deny. With no
+   * current request (a queue worker) this is always FALSE so denials
+   * are not collapsed across jobs.
+   *
+   * @param string|null $entityType
+   *   Entity type to match, or NULL for any deny this request.
+   * @param string|null $entityId
+   *   Entity id to match.
+   *
+   * @return bool
+   *   TRUE when this request already has a refuse() HMAC row.
+   */
+  public function recordedThisRequest(
+    ?string $entityType = NULL,
+    ?string $entityId = NULL,
+  ): bool {
+    $request = $this->requestStack?->getCurrentRequest();
+    if ($request === NULL) {
+      return FALSE;
+    }
+    if ($this->writtenFor !== spl_object_id($request)) {
+      return FALSE;
+    }
+    if ($entityType === NULL && $entityId === NULL) {
+      return $this->written !== [];
+    }
+    $subject = ($entityType ?? '') . "\0" . ($entityId ?? '');
+    return isset($this->recordedSubjects[$subject]);
   }
 
   /**
@@ -447,24 +500,23 @@ final class McpDenyExplainer {
    *   Annotated operator suffix already logged.
    * @param string|null $profileId
    *   Active policy profile id when known.
+   * @param string|null $entityType
+   *   Entity type of the refused subject, when known.
+   * @param string|null $entityId
+   *   Entity id of the refused subject, or '(new)'.
    */
-  private function writeDeniedAccess(string $reason, string $explain, ?string $profileId): void {
+  private function writeDeniedAccess(
+    string $reason,
+    string $explain,
+    ?string $profileId,
+    ?string $entityType = NULL,
+    ?string $entityId = NULL,
+  ): void {
     if ($this->auditLogger === NULL) {
       return;
     }
     $request = $this->requestStack?->getCurrentRequest();
-    $requestId = $request === NULL ? 0 : spl_object_id($request);
-    if ($requestId !== $this->writtenFor) {
-      $this->written = [];
-      $this->writtenFor = $requestId;
-    }
     $explanation = $this->explain($reason, $profileId);
-    $fingerprint = $explanation->ruleId . "\0" . $reason;
-    if (isset($this->written[$fingerprint])) {
-      return;
-    }
-    $this->written[$fingerprint] = TRUE;
-
     $surface = $request !== NULL
       ? McpGovernedSurface::fromPath($request->getPathInfo())
       : NULL;
@@ -474,6 +526,12 @@ final class McpDenyExplainer {
       'explain' => $explain,
       'rule' => $explanation->ruleId,
     ];
+    if ($entityType !== NULL && $entityType !== '') {
+      $meta['entity_type'] = $entityType;
+    }
+    if ($entityId !== NULL && $entityId !== '') {
+      $meta['id'] = $entityId;
+    }
     if ($profileId !== NULL && $profileId !== '') {
       $meta['profile'] = $profileId;
     }
@@ -491,6 +549,47 @@ final class McpDenyExplainer {
         $meta['human_key'] = 'unverified';
         $meta['principal_unverified'] = $e->reasonCode;
       }
+    }
+
+    // A queue worker has no request; never collapse those writes.
+    if ($request === NULL) {
+      $this->emitDeniedAccess($meta);
+      return;
+    }
+
+    $requestId = spl_object_id($request);
+    if ($requestId !== $this->writtenFor) {
+      $this->written = [];
+      $this->recordedSubjects = [];
+      $this->writtenFor = $requestId;
+    }
+    $hasSubject = $entityType !== NULL && $entityType !== ''
+      && $entityId !== NULL && $entityId !== '';
+    $subject = ($entityType ?? '') . "\0" . ($entityId ?? '');
+    if ($hasSubject && isset($this->recordedSubjects[$subject])) {
+      return;
+    }
+    $fingerprint = $explanation->ruleId . "\0" . $reason . "\0"
+      . ($entityType ?? '') . "\0" . ($entityId ?? '');
+    if (isset($this->written[$fingerprint])) {
+      return;
+    }
+    $this->written[$fingerprint] = TRUE;
+    if ($hasSubject) {
+      $this->recordedSubjects[$subject] = TRUE;
+    }
+    $this->emitDeniedAccess($meta);
+  }
+
+  /**
+   * Appends one denied_access row, swallowing a missing chain.
+   *
+   * @param array<string, mixed> $meta
+   *   HMAC metadata. Must not contain secrets.
+   */
+  private function emitDeniedAccess(array $meta): void {
+    if ($this->auditLogger === NULL) {
+      return;
     }
     try {
       $this->auditLogger->logAlways('denied_access', $meta);

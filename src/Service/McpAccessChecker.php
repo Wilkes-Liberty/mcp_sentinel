@@ -113,6 +113,7 @@ final class McpAccessChecker {
     bool $auditDeny = TRUE,
   ): AccessResult {
     $entityType = $entity->getEntityTypeId();
+    $entityId = $entity->isNew() ? '(new)' : (string) $entity->id();
     $tags = [
       'config:mcp_sentinel.settings',
       'config:mcp_sentinel.mcp_policy_profile.' . $profile->id(),
@@ -125,7 +126,12 @@ final class McpAccessChecker {
     $ipRestricted = $profile->getAllowedIps() !== [];
 
     if (!$this->configFactory->get('mcp_sentinel.settings')->get('enabled')) {
-      $result = $this->refuseAccess('MCP access is disabled.', $auditDeny)->addCacheTags($tags);
+      $result = $this->refuseAccess(
+        'MCP access is disabled.',
+        $auditDeny,
+        $entityType,
+        $entityId,
+      )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
 
@@ -135,10 +141,18 @@ final class McpAccessChecker {
       return $this->refuseAccess(
         'Source IP not permitted by MCP Sentinel policy.',
         $auditDeny,
+        $entityType,
+        $entityId,
       )->addCacheTags($tags)->setCacheMaxAge(0);
     }
 
-    $typeResult = $this->checkEntityTypePolicy($entityType, $profile, $tags, $auditDeny);
+    $typeResult = $this->checkEntityTypePolicy(
+      $entityType,
+      $profile,
+      $tags,
+      $auditDeny,
+      $entityId,
+    );
     if ($typeResult !== NULL) {
       return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
     }
@@ -147,6 +161,8 @@ final class McpAccessChecker {
       $result = $this->refuseAccess(
         'Read operations are disabled in MCP Sentinel.',
         $auditDeny,
+        $entityType,
+        $entityId,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -154,6 +170,8 @@ final class McpAccessChecker {
       $result = $this->refuseAccess(
         'Write operations are disabled in MCP Sentinel.',
         $auditDeny,
+        $entityType,
+        $entityId,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -161,6 +179,8 @@ final class McpAccessChecker {
       $result = $this->refuseAccess(
         'Delete operations are disabled in MCP Sentinel.',
         $auditDeny,
+        $entityType,
+        $entityId,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -217,9 +237,16 @@ final class McpAccessChecker {
       $label,
       $ceiling,
     );
-    // The classification code is operator-only. JSON:API copies
-    // AccessResult reasons into errors[].detail and meta.omitted.
-    return $this->refuseAccess(McpClassificationResolver::DENIAL_CODE, FALSE)
+    // Classification 403s always write denied_access through refuse().
+    // evidence() may still add classification_egress_denied; that row
+    // honours audit_enabled, the deny row does not.
+    $entityId = $entity->isNew() ? '(new)' : (string) $entity->id();
+    return $this->refuseAccess(
+      McpClassificationResolver::DENIAL_CODE,
+      TRUE,
+      $entity->getEntityTypeId(),
+      $entityId,
+    )
       ->addCacheTags($neutral->getCacheTags())
       ->addCacheContexts(McpClassificationResolver::CACHE_CONTEXTS);
   }
@@ -287,7 +314,13 @@ final class McpAccessChecker {
 
     // Shared allowed/denied entity-type policy (same logic as the existing
     // entity-access path).
-    $typeResult = $this->checkEntityTypePolicy($entityTypeId, $profile, $tags, $auditDeny);
+    $typeResult = $this->checkEntityTypePolicy(
+      $entityTypeId,
+      $profile,
+      $tags,
+      $auditDeny,
+      '(new)',
+    );
     if ($typeResult !== NULL) {
       return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
     }
@@ -450,6 +483,8 @@ final class McpAccessChecker {
    *   Cache tags to attach to any forbidden result.
    * @param bool $auditDeny
    *   FALSE when the caller will write its own HMAC row for this deny.
+   * @param string|null $entityId
+   *   Entity id of the refused subject, or '(new)'.
    *
    * @return \Drupal\Core\Access\AccessResult|null
    *   A forbidden result when the type is disallowed, NULL when permitted.
@@ -459,11 +494,14 @@ final class McpAccessChecker {
     McpPolicyProfileInterface $profile,
     array $tags,
     bool $auditDeny = TRUE,
+    ?string $entityId = NULL,
   ): ?AccessResult {
     if (in_array($entityTypeId, $profile->getDeniedEntityTypes(), TRUE)) {
       return $this->refuseAccess(
         "Entity type '{$entityTypeId}' is denied by MCP Sentinel.",
         $auditDeny,
+        $entityTypeId,
+        $entityId,
       )->addCacheTags($tags);
     }
     $allowed = $profile->getAllowedEntityTypes();
@@ -471,6 +509,8 @@ final class McpAccessChecker {
       return $this->refuseAccess(
         "Entity type '{$entityTypeId}' is not in the MCP Sentinel allowlist.",
         $auditDeny,
+        $entityTypeId,
+        $entityId,
       )->addCacheTags($tags);
     }
     return NULL;
@@ -653,13 +693,28 @@ final class McpAccessChecker {
    *   Operator-facing deny reason. Must not contain secrets.
    * @param bool $audit
    *   FALSE when the caller already wrote an HMAC row for this deny.
+   * @param string|null $entityType
+   *   Entity type of the refused subject, when known.
+   * @param string|null $entityId
+   *   Entity id of the refused subject, or '(new)'.
    *
    * @return \Drupal\Core\Access\AccessResult
    *   Forbidden with CALLER_MESSAGE as the reason.
    */
-  private function refuseAccess(string $reason, bool $audit = TRUE): AccessResult {
+  private function refuseAccess(
+    string $reason,
+    bool $audit = TRUE,
+    ?string $entityType = NULL,
+    ?string $entityId = NULL,
+  ): AccessResult {
     return AccessResult::forbidden(
-      $this->denyExplainer?->refuse($reason, NULL, $audit) ?? McpDenyExplainer::CALLER_MESSAGE,
+      $this->denyExplainer?->refuse(
+        $reason,
+        NULL,
+        $audit,
+        $entityType,
+        $entityId,
+      ) ?? McpDenyExplainer::CALLER_MESSAGE,
     );
   }
 

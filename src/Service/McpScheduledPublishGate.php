@@ -470,7 +470,13 @@ final class McpScheduledPublishGate {
       }
       if ($this->stateRefusal($entity, $profile, $pair['from'], $pair['state']) !== NULL) {
         return AccessResult::forbidden(
-          $this->denyExplainer?->refuse('Scheduled transition is not permitted by the MCP Sentinel profile.')
+          $this->denyExplainer?->refuse(
+            'Scheduled transition is not permitted by the MCP Sentinel profile.',
+            NULL,
+            TRUE,
+            $entity->getEntityTypeId(),
+            (string) $entity->id(),
+          )
             ?? McpDenyExplainer::CALLER_MESSAGE,
         )
           ->addCacheContexts(['user.roles', 'oauth2_scopes'])

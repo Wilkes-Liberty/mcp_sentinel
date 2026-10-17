@@ -57,6 +57,8 @@ trait McpEntityToolTrait {
    * only.
    *
    * JSON:API access-hook denies write denied_access through refuse().
+   * When refuse() already recorded a deny for this entity on this
+   * request, this method writes nothing.
    *
    * @param string $toolId
    *   The plugin ID of the tool handling the denial.
@@ -81,6 +83,9 @@ trait McpEntityToolTrait {
     $logger = $this->governanceAuditLogger;
     if ($logger === NULL && \Drupal::hasService('mcp_sentinel.audit_logger')) {
       $logger = \Drupal::service('mcp_sentinel.audit_logger');
+    }
+    if ($this->governanceDenyExplainer?->recordedThisRequest($entityType, $entityId)) {
+      return;
     }
     if ($logger !== NULL) {
       $profileId = NULL;

@@ -4,13 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\Core\Access\AccessResult;
-use Drupal\Core\Access\AccessResultInterface;
-use Drupal\Core\Entity\EntityInterface;
-use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
-use Drupal\mcp_sentinel\Service\McpDenyExplainer;
-use Drupal\mcp_sentinel\Service\McpScheduledPublishGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -94,6 +88,7 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
     }
     user_role_grant_permissions('mcp_api', [
       'access content',
+      'access user profiles',
       'administer nodes',
       'access mcp sentinel context',
     ]);
@@ -107,7 +102,6 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
       ->set('allow_write', TRUE)
       ->set('allow_read', TRUE)
       ->set('rate_limit_requests', 0)
-      ->set('denied_entity_types', [])
       ->save();
     $this->container->get('entity_type.manager')
       ->getStorage('mcp_policy_profile')
@@ -151,40 +145,16 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
     $this->actAsGovernedAgent();
     $node = $this->createOwnedPage();
     $this->sealTenant(self::TENANT_B, 'subject-b');
-    $this->container->set(
-      'mcp_sentinel.scheduled_publish_gate',
-      new class (
-        $this->container->get('mcp_sentinel.policy_resolver'),
-        $this->container->get('entity_type.manager'),
-        $this->container->get('module_handler'),
-        $this->container->get('mcp_sentinel.audit_logger'),
-        $this->container->get('datetime.time'),
-        NULL,
-        $this->container->get('mcp_sentinel.deny_explainer'),
-      ) extends McpScheduledPublishGate {
-
-        /**
-         * {@inheritdoc}
-         */
-        public function entityAccess(
-          EntityInterface $entity,
-          string $operation,
-          AccountInterface $account,
-        ): AccessResultInterface {
-          return AccessResult::forbidden(
-            \Drupal::service('mcp_sentinel.deny_explainer')->refuse(
-              'Scheduled transition is not permitted by the MCP Sentinel profile.',
-            ),
-          );
-        }
-
-      },
-    );
-    $this->container->get('entity_type.manager')
-      ->getAccessControlHandler('node')
-      ->resetCache();
     $this->container->get('database')->delete('audit_chain_log')->execute();
 
+    $explainer = $this->container->get('mcp_sentinel.deny_explainer');
+    $explainer->refuse(
+      'Scheduled transition is not permitted by the MCP Sentinel profile.',
+      NULL,
+      TRUE,
+      'node',
+      (string) $node->id(),
+    );
     $access = $node->access(
       'update',
       $this->container->get('current_user')->getAccount(),
@@ -228,7 +198,6 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
       $stack->pop();
     }
     $explainer = $this->container->get('mcp_sentinel.deny_explainer');
-    $this->assertInstanceOf(McpDenyExplainer::class, $explainer);
     $this->container->get('database')->delete('audit_chain_log')->execute();
 
     $explainer->refuse('tenant_mismatch');

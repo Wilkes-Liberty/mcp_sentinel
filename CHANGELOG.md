@@ -43,7 +43,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   operator log still carry the annotated suffix (`metadata.explain`,
   `metadata.rule`), including governed JSON:API access-hook 403s
   from entity, tenant, and scheduled-publish gates, with the
-  principal when it is known. Paths that already audit pass
+  principal when it is known. JSON:API classification 403s write
+  `denied_access` through `refuse()` even when `audit_enabled` is
+  off; `classification_egress_denied` evidence may still accompany
+  that row. Tools that call `$entity->access()` after a pre-check
+  skip their own HMAC row when `refuse()` already recorded the
+  deny for that entity. A single update refused by both the tenant
+  and scheduled-publish gates writes one row. The `refuse()` dedupe
+  key includes entity type and id, and never collapses writes when
+  there is no current request. Paths that already audit pass
   `refuse(..., audit: false)` so a deny is written once.
   `/drupal-mcp/readiness` stays a diagnostic
   document and still names the contract reason.

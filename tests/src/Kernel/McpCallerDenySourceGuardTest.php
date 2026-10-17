@@ -99,17 +99,74 @@ PHP;
    */
   private function forbiddenLeaks(string $rel, string $code): array {
     $leaks = [];
-    if (!preg_match_all('/AccessResult::forbidden\s*\((.*?)\)/s', $code, $matches, PREG_OFFSET_CAPTURE)) {
+    if (!preg_match_all('/AccessResult::forbidden\s*\(/', $code, $matches, PREG_OFFSET_CAPTURE)) {
       return $leaks;
     }
-    foreach ($matches[1] as $match) {
-      $arg = $match[0];
+    foreach ($matches[0] as $match) {
+      $open = $match[1] + strlen($match[0]) - 1;
+      $arg = $this->argumentInsideParens($code, $open);
+      if ($arg === NULL) {
+        continue;
+      }
       if (str_contains($arg, 'CALLER_MESSAGE') || str_contains($arg, 'refuse(')) {
         continue;
       }
-      $leaks[] = $rel . ':' . $this->lineAt($code, $match[1]) . ' AccessResult::forbidden(' . $this->oneLine($arg) . ')';
+      $leaks[] = $rel . ':' . $this->lineAt($code, $open + 1)
+        . ' AccessResult::forbidden(' . $this->oneLine($arg) . ')';
     }
     return $leaks;
+  }
+
+  /**
+   * Returns the argument text inside a '(' at $open, matching nested pairs.
+   *
+   * @param string $code
+   *   File contents.
+   * @param int $open
+   *   Byte offset of the opening parenthesis.
+   *
+   * @return string|null
+   *   Inner argument text, or NULL when the pair is unclosed.
+   */
+  private function argumentInsideParens(string $code, int $open): ?string {
+    $depth = 0;
+    $length = strlen($code);
+    $inString = FALSE;
+    $quote = '';
+    $escape = FALSE;
+    for ($i = $open; $i < $length; $i++) {
+      $ch = $code[$i];
+      if ($inString) {
+        if ($escape) {
+          $escape = FALSE;
+          continue;
+        }
+        if ($ch === '\\') {
+          $escape = TRUE;
+          continue;
+        }
+        if ($ch === $quote) {
+          $inString = FALSE;
+        }
+        continue;
+      }
+      if ($ch === "'" || $ch === '"') {
+        $inString = TRUE;
+        $quote = $ch;
+        continue;
+      }
+      if ($ch === '(') {
+        $depth++;
+        continue;
+      }
+      if ($ch === ')') {
+        $depth--;
+        if ($depth === 0) {
+          return substr($code, $open + 1, $i - $open - 1);
+        }
+      }
+    }
+    return NULL;
   }
 
   /**

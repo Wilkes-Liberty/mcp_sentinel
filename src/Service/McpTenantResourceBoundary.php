@@ -67,13 +67,13 @@ final class McpTenantResourceBoundary {
       return NULL;
     }
     if (strlen($tenant) > self::TENANT_MAX || !$this->tableReady()) {
-      return $this->forbidden();
+      return $this->forbidden($entity);
     }
     $owner = $this->owner($entity);
     if ($owner === NULL || $this->sameTenant($owner, $tenant)) {
       return NULL;
     }
-    return $this->forbidden();
+    return $this->forbidden($entity);
   }
 
   /**
@@ -256,10 +256,23 @@ final class McpTenantResourceBoundary {
 
   /**
    * Uncacheable tenant denial.
+   *
+   * @param \Drupal\Core\Entity\EntityInterface|null $entity
+   *   The refused entity, when known.
    */
-  private function forbidden(): AccessResult {
+  private function forbidden(?EntityInterface $entity = NULL): AccessResult {
+    $entityId = NULL;
+    if ($entity !== NULL) {
+      $entityId = $entity->isNew() ? '(new)' : (string) $entity->id();
+    }
     return AccessResult::forbidden(
-      $this->denyExplainer?->refuse('tenant_mismatch') ?? McpDenyExplainer::CALLER_MESSAGE,
+      $this->denyExplainer?->refuse(
+        'tenant_mismatch',
+        NULL,
+        TRUE,
+        $entity?->getEntityTypeId(),
+        $entityId,
+      ) ?? McpDenyExplainer::CALLER_MESSAGE,
     )->setCacheMaxAge(0);
   }
 
