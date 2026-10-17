@@ -11,7 +11,6 @@ use Drupal\Core\Queue\QueueFactory;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
-use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Psr\Log\LoggerInterface;
 
@@ -519,9 +518,6 @@ final class McpWebhookQueueManager {
     }
     $ids = [];
     foreach ($selectors as $selector) {
-      if (!$selector instanceof McpKillSelector) {
-        continue;
-      }
       $column = match ($selector->type) {
         McpKillSelectorType::PrincipalKey => 'principal_key',
         McpKillSelectorType::HumanKey => 'human_key',
@@ -604,14 +600,16 @@ final class McpWebhookQueueManager {
    *   Held row ids.
    * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
    *   Acting operator.
+   * @param string $batchId
+   *   Kill batch id used as the release correlation.
    *
    * @return list<int>
    *   Released ids.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  public function releaseHeld(array $deliveryIds, McpOperatorIdentity $operator): array {
-    return $this->finishHeld($deliveryIds, $operator, 'release');
+  public function releaseHeld(array $deliveryIds, McpOperatorIdentity $operator, string $batchId = ''): array {
+    return $this->finishHeld($deliveryIds, $operator, 'release', $batchId);
   }
 
   /**
@@ -636,14 +634,15 @@ final class McpWebhookQueueManager {
    *
    * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
    *   Kill selectors.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   * @param string $batchId
+   *   Kill batch id used as the release correlation.
    */
   public function releaseMatching(array $selectors, McpOperatorIdentity $operator, string $batchId): void {
     $ids = [];
     foreach ($this->listHeld() as $row) {
       foreach ($selectors as $selector) {
-        if (!$selector instanceof McpKillSelector) {
-          continue;
-        }
         $value = match ($selector->type) {
           McpKillSelectorType::PrincipalKey => (string) ($row['principal_key'] ?? ''),
           McpKillSelectorType::HumanKey => (string) ($row['human_key'] ?? ''),
@@ -655,7 +654,7 @@ final class McpWebhookQueueManager {
       }
     }
     if ($ids !== []) {
-      $this->releaseHeld($ids, $operator);
+      $this->releaseHeld($ids, $operator, $batchId);
     }
   }
 
@@ -682,14 +681,16 @@ final class McpWebhookQueueManager {
    * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
    *   Acting operator.
    * @param string $action
-   *   release or discard.
+   *   Release or discard.
+   * @param string $batchId
+   *   Kill batch or correlation id.
    *
    * @return list<int>
    *   Affected ids.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  private function finishHeld(array $deliveryIds, McpOperatorIdentity $operator, string $action): array {
+  private function finishHeld(array $deliveryIds, McpOperatorIdentity $operator, string $action, string $batchId = ''): array {
     $ids = [];
     foreach ($deliveryIds as $id) {
       $id = (int) $id;
@@ -723,7 +724,7 @@ final class McpWebhookQueueManager {
         ->condition('id', $heldIds, 'IN')
         ->condition('status', self::STATUS_HELD)
         ->execute();
-      $this->auditSideEffect(self::AUDIT_DISCARD, $operator, [], $heldIds, '');
+      $this->auditSideEffect(self::AUDIT_DISCARD, $operator, [], $heldIds, $batchId);
       return $heldIds;
     }
     $this->database->update('mcp_sentinel_webhook_delivery')
@@ -760,7 +761,7 @@ final class McpWebhookQueueManager {
           ->execute();
       }
     }
-    $this->auditSideEffect(self::AUDIT_RELEASE, $operator, [], $heldIds, '');
+    $this->auditSideEffect(self::AUDIT_RELEASE, $operator, [], $heldIds, $batchId);
     return $heldIds;
   }
 
@@ -803,10 +804,16 @@ final class McpWebhookQueueManager {
   /**
    * One HMAC audit row for hold, release, or discard.
    *
+   * @param string $operation
+   *   Audit operation name.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
    * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
    *   Scope selectors, when known.
    * @param list<int> $itemIds
    *   Delivery ids.
+   * @param string $batchId
+   *   Kill batch or correlation id.
    */
   private function auditSideEffect(
     string $operation,
@@ -820,9 +827,7 @@ final class McpWebhookQueueManager {
     }
     $scope = [];
     foreach ($selectors as $selector) {
-      if ($selector instanceof McpKillSelector) {
-        $scope[] = $selector->type->value . ':' . $selector->key;
-      }
+      $scope[] = $selector->type->value . ':' . $selector->key;
     }
     if ($scope === [] && $itemIds !== []) {
       $scope[] = 'delivery:' . implode(',', $itemIds);
@@ -842,10 +847,6 @@ final class McpWebhookQueueManager {
    * Whether a PHPUnit weaken flag is on.
    */
   private function weakened(string $flag): bool {
-    // DEV-985 red run: re-queue held rows so the cron-hold test fails.
-    if ($flag === self::WEAKEN_REQUEUE_HELD) {
-      return TRUE;
-    }
     return isset($this->weakenForTest[$flag]);
   }
 

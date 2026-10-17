@@ -192,7 +192,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Break-glass keep, extend, or lift when the named second person cannot be reached.
+   * Break-glass keep, extend, or lift when the second person is unreachable.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-break-glass', aliases: ['mcps:kill-break-glass'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]

@@ -27,12 +27,12 @@ use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 
 /**
- * Durable agent kill registry and two-person operator API (DEV-846,
- * DEV-985).
+ * Durable agent kill registry and two-person operator API.
  *
- * Storage is keyed by principal_key (iss|sub|actor), human_key
- * (iss|sub, all agents of this person), or tenant. Writes are
- * transactional. A killed row is never downgraded to kill_pending.
+ * DEV-846 and DEV-985. Storage is keyed by principal_key
+ * (iss|sub|actor), human_key (iss|sub, all agents of this person),
+ * or tenant. Writes are transactional. A killed row is never
+ * downgraded to kill_pending.
  * Re-killing stays killed and may extend block_until up to 7 d
  * from now. A person-wide or tenant-wide stop freezes immediately:
  * in-scope agents are refused before a second operator confirms.
@@ -507,7 +507,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     }
 
     $this->auditConfirmOrBreakGlass(
-      FALSE,
+      $breakGlass,
       McpKillBreakGlassAction::Keep,
       $operatorId,
       $selectors,
@@ -562,8 +562,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Break-glass keep, extend, or lift when the named second person
-   * cannot be reached.
+   * Break-glass keep, extend, or lift when the second person is unreachable.
    *
    * Still requires a distinct verified operator. Audited as
    * break-glass use, not as a confirm/extend/lift row.
@@ -895,7 +894,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $operatorId = $operator->storageId();
     $now = $this->time->getRequestTime();
     $blockUntil = McpKillTtl::blockUntil($now, $ttl);
-    $rows = [];
 
     $txn = $this->connection->startTransaction();
     try {
@@ -1072,8 +1070,24 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   /**
    * Writes the confirm or break-glass keep audit row.
    *
+   * @param bool $breakGlass
+   *   TRUE when the write is a break-glass keep.
+   * @param \Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction $action
+   *   Keep, extend, or lift.
+   * @param string $operatorId
+   *   Confirmer storage id.
    * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
    *   Confirmed selectors.
+   * @param string $reason
+   *   Operator reason from the freeze row.
+   * @param int $ttl
+   *   Lifetime in seconds.
+   * @param int $blockUntil
+   *   Unix expiry of the kill block.
+   * @param string $batchId
+   *   Freeze batch id.
+   * @param int $now
+   *   Current request time.
    */
   private function auditConfirmOrBreakGlass(
     bool $breakGlass,
@@ -1807,16 +1821,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * Whether a PHPUnit weaken flag is on.
    */
   private function weakened(string $flag): bool {
-    // DEV-985 red run: turn the new freeze-first / hold behaviour off
-    // so the acceptance tests fail. Restored in the next commit.
-    if (in_array($flag, [
-      self::WEAKEN_SKIP_MASS_FREEZE,
-      self::WEAKEN_LIFT_ON_CONFIRM_TIMEOUT,
-      self::WEAKEN_SKIP_QUEUE_HOLD,
-      self::WEAKEN_AUTO_RELEASE_ON_LIFT,
-    ], TRUE)) {
-      return TRUE;
-    }
     return isset($this->weakenForTest[$flag]);
   }
 

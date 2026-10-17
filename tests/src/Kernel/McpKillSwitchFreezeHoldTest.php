@@ -193,7 +193,9 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
-   * A second operator confirms, extends (7d cap), and lifts. Self-confirm fails.
+   * A second operator confirms, extends (7d cap), and lifts.
+   *
+   * Self-confirm is refused.
    */
   public function testSecondOperatorConfirmExtendLift(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-cel');
@@ -558,6 +560,8 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Queue item payload for a stored row.
    *
+   * @param int $id
+   *   Delivery id.
    * @param array<string, mixed> $row
    *   Delivery row.
    *

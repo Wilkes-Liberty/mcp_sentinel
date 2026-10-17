@@ -1,9 +1,12 @@
 Acquia
+acerda
 actualizado
+Aleksandra
 analysable
 analysed
 analysing
 apikey
+autorelease
 autowires
 Barcos
 behaviour
@@ -86,6 +89,7 @@ msar
 normalise
 normalised
 normalises
+norelease
 nosniff
 optimised
 organisation
