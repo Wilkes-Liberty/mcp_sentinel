@@ -194,19 +194,29 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
    */
   public function testNoRequestNeverDedupesDeniedAccess(): void {
     $stack = $this->container->get('request_stack');
+    $popped = [];
     while ($stack->getCurrentRequest() !== NULL) {
-      $stack->pop();
+      $popped[] = $stack->pop();
     }
-    $explainer = $this->container->get('mcp_sentinel.deny_explainer');
-    $this->container->get('database')->delete('audit_chain_log')->execute();
+    try {
+      $explainer = $this->container->get('mcp_sentinel.deny_explainer');
+      $this->container->get('database')->delete('audit_chain_log')->execute();
 
-    $explainer->refuse('tenant_mismatch');
-    $explainer->refuse('tenant_mismatch');
-    $this->assertSame(
-      2,
-      $this->deniedAccessCount(),
-      'A queue worker with no request must not reuse a dedupe slot.',
-    );
+      $explainer->refuse('tenant_mismatch');
+      $explainer->refuse('tenant_mismatch');
+      $this->assertSame(
+        2,
+        $this->deniedAccessCount(),
+        'A queue worker with no request must not reuse a dedupe slot.',
+      );
+    }
+    finally {
+      // KernelTestBase::tearDown() reads the session off the current
+      // request on Drupal 11.3, so hand the bootstrap request(s) back.
+      foreach (array_reverse($popped) as $request) {
+        $stack->push($request);
+      }
+    }
   }
 
   /**
