@@ -5,9 +5,9 @@ This page explains what it does, how to set it up, and how to issue,
 confirm, check, and lift a stop.
 
 The kill switch shipped in release 3.2.0. Freeze-first mass stops,
-held side effects, and break-glass (DEV-985) are on the `1.x`
-branch and listed under Unreleased in `CHANGELOG.md`. They are not
-in 3.2.0.
+held side effects, and break-glass (DEV-985) and Paladin-token
+operator identity (DEV-986) are on the `1.x` branch and listed
+under Unreleased in `CHANGELOG.md`. They are not in 3.2.0.
 
 ## What it does
 
@@ -52,22 +52,27 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
 
 1. Run database updates before the site serves traffic:
    `drush updb -y`. Update 10030 creates the registry table. Update
+   10034 adds the Drupal uid column on operator bindings. Update
    10035 adds hold-queue columns and the escalation stamp.
    Drain or review the webhook queue before updb: keyless pending
    rows are held when any kill-block or freeze is active.
 2. Until the registry table exists, every governed call is refused.
    The module fails closed when it cannot read the registry.
-3. Make sure cron runs. Cron writes kill-block expiry for confirmed
+3. Pin Paladin introspection in `settings.php`. See
+   [Operator identity](#operator-identity) and `INSTALL.md`. Missing
+   pins fail closed.
+4. Bind each operator token to a Drupal account that holds
+   `administer agent kill switch`. See
+   [Bind a token](#bind-a-token).
+5. Make sure cron runs. Cron writes kill-block expiry for confirmed
    stops (the 24 hour / 7 day lifetime) and escalates an unconfirmed
    freeze when the confirm window ends. Cron does not lift that
    freeze. An unconfirmed freeze stays frozen after `block_until`
    until two operators lift it or break-glass is used. A confirmed
    stop past its `block_until` no longer blocks, even before cron
    runs.
-4. Give each operator an individual OS account on the machine where
-   Drush runs. See [Operator identity](#operator-identity).
-5. Rehearse every command on a test site before you need it.
-6. Pin the break-glass operator in `settings.php` as a Paladin
+6. Rehearse every command on a test site before you need it.
+7. Pin the break-glass operator in `settings.php` as a Paladin
    `iss|sub` or a bound account:
    `$settings['mcp_sentinel.kill_switch.break_glass_operator']`.
    Without that pin, break-glass is refused.
@@ -78,68 +83,90 @@ All kill switch commands need the permission
 `administer agent kill switch`. It is a restricted permission. Grant it
 only to operator roles.
 
-The commands check this permission against the Drupal account Drush is
-running as. They refuse the anonymous account with the message
-`An operator account is required.` Drush 13 starts commands as the
-anonymous account. Check on a test site how your Drush setup runs these
-commands as a permitted account.
-
-The Drupal account is used only for this permission check. It is not the
-identity used for the two-operator rule.
+Drush 13 starts commands as the anonymous account. The commands do not
+use `drush --user` / `--uid` as identity. They read `--operator`, look
+up the Drupal account bound to the Paladin token, switch to that
+account for the permission check, and switch back. Anonymous is
+refused. A mapped account without the permission is refused.
 
 ## Operator identity
 
-The two-operator rule needs to tell operators apart. It does not use the
-Drupal account for this, because anyone with a shell could switch Drupal
-accounts.
+Every kill-switch Drush command needs both of these:
 
-On the Drush path, the operator identity is a keyed hash of the OS user
-id that runs the PHP process. The key is the site's private key. The
-login name and the `USER` environment variable do not change it.
+1. A Paladin access token on `PALADIN_TOKEN` or stdin. Do not pass
+   `--token` (it lands in shell history and `ps`).
+2. `--operator=<Drupal account name>` for the Drupal account bound to
+   that token.
 
-This has three consequences:
+The command introspects the token at Paladin over HTTPS with client
+authentication. The response must be `active`, carry a numeric future
+`exp`, match the issuer and audience pinned in `settings.php`, and
+carry the pinned operator audience or role (for example
+`mcp-sentinel-operator`). A token with an `act` or `actor` claim is
+refused: agent tokens cannot run the kill switch. If Paladin is
+unreachable, the command refuses.
 
-- Each operator needs their own OS account.
-- A shared deploy account counts as one operator.
-- If every operator runs Drush through a wrapper that switches to the
-  same OS user, every operator looks like the same person. The second
-  operator's confirmation is then refused.
+Identity is `paladin:iss|sub` from that response. The token is mapped
+to a Drupal account through `mcp_sentinel_operator_binding`.
+`--operator` must be that account, or the command exits
+`operator_mismatch`.
 
-The Drush shell sits outside the module's governance. Keep agent
-credentials off that shell.
+The two-operator rule is two distinct Paladin identities **and** two
+distinct mapped Drupal accounts. The same `iss|sub`, or two tokens
+mapped to the same Drupal uid, cannot confirm. Empty, unmapped, or
+unverified identities are refused. Binding a second identity onto an
+already-bound record is refused.
+
+The OS-user HMAC is off unless `settings.php` sets
+`$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE`. Config
+cannot turn that on. Even then, euid 0 and the web-server user
+(`www-data` / the `mcp_sentinel.web_server_user` pin) are refused.
+The process user and `SUDO_USER` are written to the audit row as
+advisory metadata only. They are not the operator identity.
 
 The module cannot tell when one person holds two separate accounts at
-the token issuer. It treats them as two operators.
+the token issuer that map to two Drupal accounts. It treats them as
+two operators.
 
-### Binding an issuer identity to a Drush identity (newer than 3.2.0)
+Keep agent credentials off the Drush shell.
 
-This subsection describes code on the `1.x` branch that is listed under
-Unreleased in `CHANGELOG.md`. It is not in 3.2.0.
+### Bind a token
 
-An operator can link their issuer identity and their Drush identity to
-one operator record. After that, the same person cannot request on one
-channel and confirm on the other. A confirmation that mixes channels
-without a binding is refused.
-
-The module's settings and commands call the token issuer "Paladin".
+Bind the token to a Drupal account once:
 
 ```bash
-PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-bind
-drush mcp-sentinel:operator-bind < token.txt
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-bind --operator=alice
+```
+
+Or pipe the token:
+
+```bash
+drush mcp-sentinel:operator-bind --operator=alice < token.txt
 ```
 
 - The command reads the token from `PALADIN_TOKEN` or from standard input.
-- It refuses `--token`, because a token on the command line lands in
-  shell history.
+- It refuses `--token`.
 - It checks the token with the issuer's introspection endpoint over HTTPS.
 - It takes the person's identity from that response, not from any option.
+- `--operator` is the Drupal account this token maps to. If the token is
+  already bound, `--operator` must match that account.
 - If the issuer cannot be reached, the command fails.
+- Binding a second identity onto an already-bound record is refused.
 - Removing a binding (`drush mcp-sentinel:operator-unbind`) needs two
-  distinct operators.
+  distinct operators. Same token and `--operator` rules.
 
-Set the introspection settings in `settings.php`, as shown in
-`INSTALL.md`. They are not importable config. Run database updates
-10031 to 10033 first.
+Set the introspection settings in `settings.php`:
+
+```php
+$settings['mcp_sentinel.paladin.introspection_url'] = 'https://idp.example/realms/agents/protocol/openid-connect/token/introspect';
+$settings['mcp_sentinel.paladin.issuer'] = 'https://idp.example/realms/agents';
+$settings['mcp_sentinel.paladin.audience'] = 'mcp-sentinel-operator-bind';
+$settings['mcp_sentinel.paladin.operator_audience'] = 'mcp-sentinel-operator';
+$settings['mcp_sentinel.paladin.client_id'] = 'mcp-sentinel-introspect';
+$settings['mcp_sentinel.paladin.client_secret'] = 'the-introspection-client-secret';
+```
+
+They are not importable config. Run database updates 10031 to 10034.
 
 ## Configuration
 
@@ -173,9 +200,11 @@ These requests need a second operator:
 - any tenant-wide stop
 - every lift (un-kill), including a lift of one agent
 
-The second operator must have a different operator identity from the
-first. The same identity confirming its own request is refused. A
-confirmation without a verified identity is refused.
+The second operator must present a different Paladin `iss|sub` **and**
+a different mapped Drupal account. The same identity confirming its
+own request is refused. Two tokens mapped to one Drupal uid are
+refused. A confirmation without a verified, mapped identity is
+refused.
 
 There is no timeout that turns a mass stop into a one-operator action.
 The freeze stays until a distinct second operator keeps, extends, or
@@ -186,7 +215,7 @@ operator. It is not a skip of the two-operator rule.
 ## Stop one agent
 
 ```bash
-drush mcp-sentinel:kill --principal-key='ISS|SUB|ACTOR' --reason='Short reason'
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --principal-key='ISS|SUB|ACTOR' --reason='Short reason'
 ```
 
 Quote the key. The `|` character is special in most shells.
@@ -211,8 +240,8 @@ agent is refused.
 ## Stop every agent of one person, or a tenant
 
 ```bash
-drush mcp-sentinel:kill --human-key='ISS|SUB' --reason='Short reason'
-drush mcp-sentinel:kill --tenant='TENANT' --reason='Short reason'
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --human-key='ISS|SUB' --reason='Short reason'
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --tenant='TENANT' --reason='Short reason'
 ```
 
 You can repeat `--principal-key`, `--human-key`, and `--tenant` in one
@@ -238,7 +267,7 @@ command prints `status: killed` and an empty batch id.
 
 ### Confirm, extend, or lift the freeze
 
-The second operator runs, from their own OS account:
+The second operator runs with their own Paladin token and `--operator`:
 
 ```bash
 PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-confirm BATCH_ID --operator=bob
@@ -291,7 +320,7 @@ Every lift needs two operators.
 The first operator requests the lift:
 
 ```bash
-drush mcp-sentinel:unkill --principal-key='ISS|SUB|ACTOR' --reason='Short reason'
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=alice --principal-key='ISS|SUB|ACTOR' --reason='Short reason'
 ```
 
 Use `--human-key` or `--tenant` for those kinds of stop. The command
@@ -299,10 +328,10 @@ prints `status: unkill_pending` and a batch id.
 
 **The target stays stopped while the lift is pending.**
 
-The second operator confirms from their own OS account:
+The second operator confirms with their own token and `--operator`:
 
 ```bash
-drush mcp-sentinel:unkill --confirm-batch=BATCH_ID
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=bob --confirm-batch=BATCH_ID
 ```
 
 The command prints `status: expired`. The target can act again from that
@@ -363,7 +392,7 @@ re-queue held rows.
 ## Check a stop
 
 ```bash
-drush mcp-sentinel:kill-status --principal-key='ISS|SUB|ACTOR'
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-status --operator=alice --principal-key='ISS|SUB|ACTOR'
 ```
 
 Pass exactly one selector. If there is no row, the command prints
@@ -418,7 +447,8 @@ Every transition writes an audit row. These rows are written even when
 
 Each row records the operator, the scope, the timestamp, and the
 correlation or batch / item ids. Tokens are never recorded. Each of
-those events writes exactly one row.
+those events writes exactly one row. The OS user and `SUDO_USER`
+may appear as advisory metadata only.
 
 ## Hooks and events
 

@@ -248,44 +248,39 @@ second operator acts. A distinct verified operator then confirms
 (keep), extends (up to 7 days), or lifts. The requester cannot
 confirm or lift their own stop. If the confirm window elapses with
 no second operator, the freeze stays and escalates
-(`agent_kill_escalate`); it never lifts on that timeout. Lifting a
-mass freeze always takes two operators (`kill-lift` for an
-unconfirmed freeze, or `unkill` plus confirm for a confirmed stop).
-Every un-kill still waits for the named second person (secondary
-account holder). Each operator is bound to a verified identity:
-Paladin `iss|sub` from the sealed principal context, or a Drush
-assertion HMAC of the OS effective uid. The login name and `USER`
-are not part of that assertion. `drush --user` / `--uid` sets
-`currentUser` for the `administer agent kill switch` permission
-only; that uid is not trusted for the two-person rule. Confirm
-without a verified identity fails closed. The Drush/shell path sits
-outside governance: the two-person rule there is two distinct OS
-accounts, and it holds only with individual OS accounts and no
-shared deploy user. When a web or Paladin kill route arrives,
-Paladin `iss|sub` and the Drush assertion must resolve to one bound
-operator record (`mcp_sentinel.operator_binding` /
-`mcp-sentinel:operator-bind`).
-Bind introspects a Paladin access token (RFC 7662) over HTTPS with
-client authentication, requires `active` and a numeric future `exp`,
-and derives `iss|sub` from the introspection, never from
-`--human-key` or `--token` (token from `PALADIN_TOKEN` or stdin).
-The introspection URL, issuer, audience, and client credentials are
-pinned in `settings.php`, not importable config, so a config import
-cannot redirect introspection. The response `iss` and `aud` / `azp`
-/ `client_id` must match those pins. Paladin unreachable, HTTP, a
-3xx, missing client auth, or a claim mismatch fails closed. Rebind of an identity already bound to a
-different operator is refused, including a unique-constraint race.
-Joining a new Paladin identity onto an existing Drush record writes
-`added_to_existing` on the `operator_bind` row. Every bind and every
-refusal writes an audit row (`operator_bind` /
-`operator_bind_refused`). Unbind (`mcp-sentinel:operator-unbind`)
-needs two distinct verified operators and writes
-`operator_unbind_request` / `operator_unbind` /
-`operator_unbind_refused`. Mixed-channel confirm with no binding is
-refused. A requester cannot confirm their own request on the other
-channel. Distinct same-kind identities (two OS accounts, two Paladin
-keys) still work without a binding. One person holding two Paladin
-accounts cannot be detected. Confirm windows default to 15 minutes. Kill-block TTL
+(`agent_kill_escalate`); it never lifts on that timeout. An
+unconfirmed freeze also never expires at `block_until`; it stays
+frozen until two operators lift it or break-glass is used.
+Confirmed stops still expire at their TTL. Lifting a mass freeze
+always takes two operators (`kill-lift` for an unconfirmed freeze,
+or `unkill` plus confirm for a confirmed stop). Drush commands take
+identity from token introspection (`PALADIN_TOKEN` or stdin, never
+`--token`) and require `--operator=<Drupal account name>` matching
+the stored binding (`mcp_sentinel.operator_binding`). The command
+switches to that Drupal account for `administer agent kill switch`
+and switches back. Anonymous is refused. Confirm without a verified
+identity fails closed. The two-person rule compares `iss|sub` and
+mapped Drupal uids. The OS-user HMAC is off unless settings.php
+sets `mcp_sentinel.allow_drush_os_assertion`; even then euid 0 and
+the web-server user are refused. OS user and `SUDO_USER` are
+advisory audit metadata only. Bind introspects a Paladin access
+token (RFC 7662) over HTTPS with client authentication, requires
+`active`, a numeric future `exp`, and the pinned operator audience
+or role, refuses `act` / `actor` claims, and derives `iss|sub`
+from the introspection, never from `--human-key` or `--token`.
+The introspection URL, issuer, audience, operator audience, and
+client credentials are pinned in `settings.php`, not importable
+config. Paladin unreachable, HTTP, a 3xx, missing client auth, or
+a claim mismatch fails closed. Rebind of an identity already bound
+to a different operator is refused, including a unique-constraint
+race. Binding a second identity onto an already-bound record is
+refused. Every bind and every refusal writes an audit row
+(`operator_bind` / `operator_bind_refused`). Unbind
+(`mcp-sentinel:operator-unbind`) needs two distinct verified
+operators and writes `operator_unbind_request` / `operator_unbind`
+/ `operator_unbind_refused`. Mixed-channel confirm with no binding
+is refused. One person holding two Paladin accounts cannot be
+detected. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
 `kill_pending`. `kill_pending` is an active freeze. Audit operations

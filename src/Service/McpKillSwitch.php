@@ -39,12 +39,12 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * in-scope agents are refused before a second operator confirms.
  * The confirm window never lifts that freeze; it escalates through
  * the unavailable-confirmer hook. Lifting a mass freeze always
- * takes two operators. Two-person confirm binds Paladin iss|sub or
- * a Drush OS assertion, never a Drupal uid. Mixed-channel confirm
- * requires both identities to resolve to one bound operator record;
- * unbound mixed-channel confirm is refused. Tokens never appear in
- * audit metadata. expireDue() runs from hook_cron, not admit() or
- * save. Queued webhook deliveries in scope are held on any stop;
+ * takes two operators. Two-person confirm binds Paladin iss|sub
+ * and mapped Drupal uids, never the OS user. Mixed-channel confirm
+ * requires both identities to resolve to bound records; unbound
+ * mixed-channel confirm is refused. Tokens never appear in audit
+ * metadata. expireDue() runs from hook_cron, not admit() or save.
+ * Queued webhook deliveries in scope are held on any stop;
  * lifting never releases them.
  */
 final class McpKillSwitch implements McpKillEnforcerInterface {
@@ -1697,7 +1697,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
       return;
     }
-    $this->auditLogger->logAlways($operation, $metadata);
+    $this->auditLogger->logAlways(
+      $operation,
+      $metadata + $this->bindings->advisoryProcessMetadata(),
+    );
   }
 
   /**

@@ -64,7 +64,7 @@ user reference. Owner/author and user-reference fields stay refused.
 `config_set:data` stays fully scanned. Grant tables are not an
 identity source.
 
-### Agent kill switch (DEV-846, DEV-985)
+### Agent kill switch (DEV-846, DEV-985, DEV-986)
 
 Operator guide: [`docs/kill-switch.md`](docs/kill-switch.md). It covers
 setup, permissions, the two-operator rule, how to issue, confirm, check,
@@ -74,37 +74,53 @@ break-glass.
 A durable kill-block registry (`mcp_sentinel.kill_switch`) keyed by
 `iss|sub|actor`, `iss|sub`, or tenant is checked on every governed
 `admit()` and again before a governed write commits. Callers see the
-same generic deny as a missing principal. Two-person confirm uses a
-verified Paladin `iss|sub` or a Drush assertion bound to the OS
-effective uid (not the login name or `USER`); `drush --uid` is
-permission-only and is not an operator identity.
+same generic deny as a missing principal.
 
-**The Drush/shell path sits outside governance.** Kill and confirm
-commands run as OS processes, not as governed MCP requests. The
-two-person rule on that path is two distinct OS accounts (the HMAC of
-each process's effective uid). It holds only when each operator has
-an individual OS account. A shared deploy user is one operator: the
-same shell cannot confirm its own request by switching Drupal account
-ids. Keep agent credentials off the shell, and do not share the
-account that runs `mcp-sentinel:kill`. One person holding two
-separate Paladin accounts is two operators: this module cannot
-detect that they are the same person.
+**Operator commands.** Every kill-switch Drush command
+(`kill`, `kill-confirm`, `kill-extend`, `kill-lift`,
+`kill-break-glass`, `unkill`, `kill-status`, `webhook-held`,
+`webhook-release`, `webhook-discard`, `operator-bind`,
+`operator-unbind`) needs two things:
 
-When a web or Paladin kill route is added, Paladin `iss|sub` and the
-Drush assertion must resolve to one bound operator record
-(`PALADIN_TOKEN=… drush mcp-sentinel:operator-bind`, or pipe the
-token on stdin). Bind introspects the token at Paladin over HTTPS
-with client authentication, requires `active` and a numeric future
-`exp`, and derives `iss|sub` from that response, never from a
-`--human-key` string or `--token`. The introspection URL, issuer,
-audience, and client credentials are pinned in `settings.php` so a
-config import cannot redirect them. The response `iss` and `aud` /
-`azp` / `client_id` must match those pins. Paladin unreachable,
-HTTP, a 3xx, or missing client auth fails closed. An identity
-already bound to a different operator is refused. Unbind needs two
-distinct verified Paladin operators.
-Mixed-channel confirm with no binding is refused. A requester cannot
-confirm their own request on the other channel.
+1. A Paladin access token on `PALADIN_TOKEN` or stdin. Do not pass
+   `--token` (it lands in shell history and `ps`).
+2. `--operator=<Drupal account name>` for the account bound to that
+   token.
+
+The command introspects the token at Paladin over HTTPS with client
+authentication. The response must be `active`, carry a numeric
+future `exp`, match the issuer and audience pinned in
+`settings.php`, and carry the pinned operator audience or role
+(for example `mcp-sentinel-operator`). A token with an `act` or
+`actor` claim is refused: agent tokens cannot run the kill switch.
+If Paladin is unreachable, the command refuses. Identity is
+`paladin:iss|sub` from that response, not the OS user.
+
+Bind the token to a Drupal account once:
+
+```bash
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-bind --operator=alice
+```
+
+Later commands must use the same `--operator` as that mapping, or
+they exit `operator_mismatch`. The command switches to that Drupal
+account for `administer agent kill switch`, then switches back.
+Anonymous is refused.
+
+The two-person rule is two distinct Paladin identities **and** two
+distinct mapped Drupal accounts. The same `iss|sub`, or two tokens
+mapped to the same Drupal uid, cannot confirm. Binding a second
+Paladin identity onto an already-bound record is refused. One
+person holding two Paladin accounts that map to two Drupal accounts
+is two operators: this module cannot detect that they are the same
+person.
+
+The OS-user HMAC is off unless `settings.php` sets
+`$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE`. Config
+cannot turn that on. Even then, euid 0 and the web-server user
+(`www-data` / the `mcp_sentinel.web_server_user` pin) are refused.
+The process user and `SUDO_USER` are written to the audit row as
+advisory metadata only. They are not the operator identity.
 
 A single-agent stop takes effect immediately. A person-wide or
 tenant-wide (mass) stop also takes effect immediately as a **freeze**.
@@ -1176,9 +1192,9 @@ hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
 
 ### Retry behavior
 
-A kill-block does not cancel items already in this queue (DEV-846 job
-cancellation is pending). Purge `mcp_sentinel_webhook_delivery` after
-a kill when those deliveries must not go out.
+A kill-block does not cancel items already in this queue. Holding
+queued deliveries is DEV-985 and is not in this release. Those
+items still run after a kill.
 
 Delivery runs in the `mcp_sentinel_webhook_delivery` QueueWorker (processed on
 cron). A non-2xx response or network error schedules a retry: **5 attempts**
@@ -1449,17 +1465,17 @@ default rather than merely guarded.
 
 | Command | Purpose |
 |---------|---------|
-| `drush mcp-sentinel:kill` | Kill one principal immediately, or freeze every agent of this person / a tenant immediately. A mass freeze still needs a distinct operator to confirm, extend, or lift. The shell sits outside governance; use individual OS accounts, not a shared deploy user. |
-| `drush mcp-sentinel:kill-confirm` | Confirm (keep) a mass freeze as a distinct operator. |
-| `drush mcp-sentinel:kill-extend` | Extend a mass freeze as a distinct operator (7-day cap). |
+| `drush mcp-sentinel:kill` | Kill one principal immediately, or freeze every agent of this person / a tenant immediately. Requires `PALADIN_TOKEN` (or stdin) and `--operator`. A mass freeze still needs a distinct operator to confirm, extend, or lift. |
+| `drush mcp-sentinel:kill-confirm` | Confirm (keep) a mass freeze as a distinct operator. Same token and `--operator` rules. |
+| `drush mcp-sentinel:kill-extend` | Extend a mass freeze as a distinct operator (7-day cap). Never shortens a stop. |
 | `drush mcp-sentinel:kill-lift` | Lift an unconfirmed mass freeze as a distinct operator. Held deliveries stay held. |
 | `drush mcp-sentinel:kill-break-glass` | Keep, extend, or lift a freeze when the named second person cannot be reached. Limited to the identity configured in settings.php. The requester is always refused. |
-| `drush mcp-sentinel:unkill` | Request or confirm an un-kill of a confirmed stop. Always needs two distinct operators. |
-| `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. |
+| `drush mcp-sentinel:unkill` | Request or confirm an un-kill of a confirmed stop. Always needs two distinct Paladin operators. Refused on `kill_pending`; use `kill-lift`. |
+| `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. Same token and `--operator` rules. |
 | `drush mcp-sentinel:webhook-held` | List webhook deliveries held by a kill. |
-| `drush mcp-sentinel:webhook-release` | Release held deliveries so they send as originally queued. |
+| `drush mcp-sentinel:webhook-release` | Release held deliveries so they send as originally queued. Refused while the scope is still stopped. |
 | `drush mcp-sentinel:webhook-discard` | Discard held deliveries. They are never sent. |
-| `drush mcp-sentinel:operator-bind` | Bind this OS account's Drush assertion to the Paladin `iss|sub` from an active token introspection. Token from `PALADIN_TOKEN` or stdin, never `--token`. Paladin down fails closed. |
+| `drush mcp-sentinel:operator-bind` | Bind this Paladin `iss|sub` to `--operator`. Token from `PALADIN_TOKEN` or stdin, never `--token`. Paladin down fails closed. A second identity on an already-bound record is refused. |
 | `drush mcp-sentinel:operator-unbind` | Request or confirm removal of an operator binding. Always needs two distinct Paladin operators. |
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |

@@ -15,15 +15,15 @@ use Drupal\mcp_sentinel\Value\McpKillTtl;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 
 /**
- * Binds Paladin and Drush identities to one operator record (DEV-846).
+ * Binds Paladin identities to Drupal operator accounts (DEV-986).
  *
- * Mixed-channel confirm (Paladin request, Drush confirm, or the
- * reverse) requires both identities to resolve to bound records.
- * The same person cannot confirm their own request on the other
- * channel. Unbound mixed-channel confirm is refused. Distinct
- * same-kind identities do not need a binding. Bind takes iss|sub
- * only from Paladin introspection. Unbind needs two distinct
- * verified operators.
+ * Bind maps a Paladin iss|sub to one Drupal uid. Joining a second
+ * identity onto an already-bound record is refused. Distinct
+ * operators compare iss|sub and mapped uids. Mixed-channel confirm
+ * (Paladin request, Drush confirm, or the reverse) still requires
+ * both identities to resolve to bound records when OS assertion is
+ * enabled. Bind takes iss|sub only from Paladin introspection.
+ * Unbind needs two distinct verified operators.
  */
 final class McpOperatorBinding {
 
@@ -68,6 +68,16 @@ final class McpOperatorBinding {
   public const WEAKEN_SKIP_SAME_OPERATOR = 'skip_same_operator';
 
   /**
+   * PHPUnit-only: allow joining a second identity onto a bound record.
+   */
+  public const WEAKEN_SKIP_JOIN_REFUSAL = 'skip_join_refusal';
+
+  /**
+   * PHPUnit-only: skip the mapped-Drupal-uid distinct-operator check.
+   */
+  public const WEAKEN_SKIP_UID_MATCH = 'skip_uid_match';
+
+  /**
    * Test-only weaken flags. Empty in production.
    *
    * @var array<string, true>
@@ -108,28 +118,98 @@ final class McpOperatorBinding {
   ) {}
 
   /**
-   * Bind this OS account to the Paladin identity of an introspected token.
+   * Bind a Paladin identity from an introspected token to a Drupal uid.
    *
    * The iss|sub comes from an active introspection response, never from
    * a --human-key string.
    *
    * @param string $token
    *   Paladin access token. Never logged.
+   * @param int $uid
+   *   Drupal account id to bind. Anonymous is refused.
    *
    * @return string
    *   Operator record id.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  public function bindFromToken(string $token): string {
+  public function bindFromToken(string $token, int $uid): string {
     try {
       $paladin = $this->introspection->activeIdentity($token);
-      $drush = $this->identities->fromDrushAssertion();
     }
     catch (McpKillSwitchException $e) {
       $this->auditIdentityFailure(self::AUDIT_BIND_REFUSED, $e);
     }
-    return $this->bind($paladin, $drush);
+    return $this->bindToAccount($paladin, $uid);
+  }
+
+  /**
+   * Bind one verified identity to a Drupal account.
+   *
+   * A second identity is not added to an existing record.
+   *
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $identity
+   *   Paladin identity.
+   * @param int $uid
+   *   Drupal account id. Anonymous is refused.
+   *
+   * @return string
+   *   Operator record id.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  public function bindToAccount(McpOperatorIdentity $identity, int $uid): string {
+    try {
+      $this->assertVerified($identity);
+      if ($uid <= 0) {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::MISSING_OPERATOR,
+          'An operator account is required.',
+        );
+      }
+      $this->requireTable();
+      $txn = $this->connection->startTransaction();
+      try {
+        $existing = $this->recordId($identity->kind, $identity->id);
+        if ($existing !== NULL) {
+          $boundUid = $this->uidFor($identity);
+          if ($boundUid === $uid || $boundUid === 0) {
+            if ($boundUid === 0) {
+              $this->connection->update(self::TABLE)
+                ->fields(['uid' => $uid])
+                ->condition('identity_hash', $this->identityHash($identity->kind, $identity->id))
+                ->execute();
+            }
+            $this->audit(self::AUDIT_BIND, $identity, $identity, $existing);
+            unset($txn);
+            return $existing;
+          }
+          throw new McpKillSwitchException(
+            McpKillSwitchException::OPERATOR_BINDING_CONFLICT,
+            'Those identities are already bound to different operator records.',
+          );
+        }
+        $operatorId = $this->uuid->generate();
+        $this->upsert($identity, $operatorId, $uid);
+        $this->audit(self::AUDIT_BIND, $identity, $identity, $operatorId);
+        unset($txn);
+        return $operatorId;
+      }
+      catch (\Throwable $e) {
+        $txn->rollBack();
+        if ($e instanceof IntegrityConstraintViolationException) {
+          throw new McpKillSwitchException(
+            McpKillSwitchException::OPERATOR_BINDING_CONFLICT,
+            'Those identities are already bound to different operator records.',
+          );
+        }
+        throw $e;
+      }
+    }
+    catch (McpKillSwitchException $e) {
+      $this->auditRefusal(self::AUDIT_BIND_REFUSED, $e, $identity, NULL);
+      throw $e;
+    }
   }
 
   /**
@@ -173,8 +253,15 @@ final class McpOperatorBinding {
           unset($txn);
           return $firstRecord;
         }
-        $operatorId = $firstRecord ?? $secondRecord ?? $this->uuid->generate();
         $joinedExisting = ($firstRecord === NULL) !== ($secondRecord === NULL);
+        if ($joinedExisting && !$this->weakened(self::WEAKEN_SKIP_JOIN_REFUSAL)
+          && !$this->weakened(self::WEAKEN_SKIP_MIXED_CHANNEL)) {
+          throw new McpKillSwitchException(
+            McpKillSwitchException::OPERATOR_BINDING_CONFLICT,
+            'Those identities are already bound to different operator records.',
+          );
+        }
+        $operatorId = $firstRecord ?? $secondRecord ?? $this->uuid->generate();
         $this->upsert($first, $operatorId);
         $this->upsert($second, $operatorId);
         $this->audit(self::AUDIT_BIND, $first, $second, $operatorId, $joinedExisting);
@@ -392,6 +479,16 @@ final class McpOperatorBinding {
         'The named second person (secondary account holder) must be a distinct operator account.',
       );
     }
+    $firstUid = $this->uidForStorageId($first);
+    $secondUid = $this->uidForStorageId($second);
+    if ($firstUid > 0 && $secondUid > 0 && $firstUid === $secondUid
+      && !$this->weakened(self::WEAKEN_SKIP_SAME_OPERATOR)
+      && !$this->weakened(self::WEAKEN_SKIP_UID_MATCH)) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::SAME_OPERATOR,
+        'The named second person (secondary account holder) must be a distinct operator account.',
+      );
+    }
     if ($this->weakened(self::WEAKEN_SKIP_MIXED_CHANNEL)) {
       return;
     }
@@ -539,11 +636,37 @@ final class McpOperatorBinding {
   }
 
   /**
+   * Mapped Drupal uid for a verified identity, or 0 when unbound.
+   */
+  public function uidFor(McpOperatorIdentity $identity): int {
+    return $this->uidForKindAndId($identity->kind, $identity->id);
+  }
+
+  /**
+   * Mapped Drupal uid for a stored operator id, or 0 when unbound.
+   */
+  public function uidForStorageId(string $storageId): int {
+    $kind = $this->storageKind($storageId);
+    $id = $this->storageIdentity($storageId);
+    return $this->uidForKindAndId($kind, $id);
+  }
+
+  /**
+   * OS process fields for audit rows. Never used as identity.
+   *
+   * @return array<string, string>
+   *   euid, process user, and SUDO_USER when present.
+   */
+  public function advisoryProcessMetadata(): array {
+    return $this->identities->advisoryProcessMetadata();
+  }
+
+  /**
    * Inserts an identity row, or confirms it already matches this record.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
-  private function upsert(McpOperatorIdentity $identity, string $operatorId): void {
+  private function upsert(McpOperatorIdentity $identity, string $operatorId, int $uid = 0): void {
     $existing = $this->recordId($identity->kind, $identity->id);
     if ($existing !== NULL) {
       if (!$this->sameRecord($existing, $operatorId)) {
@@ -566,12 +689,37 @@ final class McpOperatorBinding {
         'identity_kind' => $identity->kind,
         'identity_id' => $identity->id,
         'operator_id' => $operatorId,
+        'uid' => $uid,
         'unbind_batch_id' => '',
         'unbind_requested_by' => '',
         'unbind_requested_at' => 0,
         'unbind_confirm_until' => 0,
       ])
       ->execute();
+  }
+
+  /**
+   * Mapped Drupal uid for a kind and identity id, or 0.
+   */
+  private function uidForKindAndId(string $kind, string $id): int {
+    if ($kind === '' || $id === '' || !$this->tableReady()) {
+      return 0;
+    }
+    if (!$this->connection->schema()->fieldExists(self::TABLE, 'uid')) {
+      return 0;
+    }
+    $statement = $this->connection->select(self::TABLE, 'b')
+      ->fields('b', ['uid'])
+      ->condition('identity_hash', $this->identityHash($kind, $id))
+      ->execute();
+    if ($statement === NULL) {
+      return 0;
+    }
+    $row = $statement->fetchAssoc();
+    if (!is_array($row) || !isset($row['uid'])) {
+      return 0;
+    }
+    return (int) $row['uid'];
   }
 
   /**

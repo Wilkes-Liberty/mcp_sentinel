@@ -174,3 +174,4 @@ subrequest
 subrequests
 unkill
 confirmer
+euid

@@ -7,6 +7,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Breaking
+- Kill-switch Drush commands (`kill`, `kill-confirm`, `unkill`,
+  `kill-status`, `operator-bind`, `operator-unbind`) require a
+  Paladin access token on `PALADIN_TOKEN` or stdin and
+  `--operator=<Drupal account name>` (DEV-986). `drush --user` /
+  `--uid` is not an operator identity and is not documented as
+  one. Bind the token to that Drupal account with
+  `mcp-sentinel:operator-bind` before the other commands. The
+  OS-user HMAC is off unless
+  `$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE` in
+  settings.php; config cannot enable it. Binding a second
+  identity onto an already-bound record is refused. Run update
+  10034. See INSTALL.md for the pinned Paladin keys, including
+  `mcp_sentinel.paladin.operator_audience`.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
@@ -24,6 +37,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   principal, matching GraphQL operations and context.
 
 ### Security
+- Kill-switch Drush commands fail closed without a verified Paladin
+  operator token (DEV-986). Introspection still requires `active`,
+  a numeric future `exp`, and the pinned issuer and audience. It
+  now also requires the settings.php-pinned operator audience or
+  role and refuses any token with an `act` or `actor` claim, so
+  agent tokens cannot run the kill switch. Paladin unreachable is
+  a refusal. `--operator` must match the Drupal account bound to
+  that `iss|sub`. The command switches to that account for
+  `administer agent kill switch` and switches back; anonymous
+  stays refused. The two-person rule compares `iss|sub` and
+  mapped Drupal uids. The OS user and `SUDO_USER` are advisory
+  audit metadata only. `--token` stays refused. Tokens never
+  appear in audit, log, or command output. Deny tests fail when
+  `weakenForTest()` skips the act-claim, operator-audience,
+  operator-match, join, uid-match, or euid-0 checks.
 - Deny responses no longer append a `[rule:<id> ...]` explainer suffix
   or name the rule to the caller (DEV-966). Every caller-facing deny
   goes through `McpDenyExplainer::refuse()`. `tools/call` (tool plugin
@@ -82,28 +110,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - Operator binding for the kill-switch two-person rule. Paladin
-  `iss|sub` and a Drush OS effective uid assertion bind to one
-  operator record (`mcp_sentinel_operator_binding`). Mixed-channel
-  confirm with no binding is refused. The same bound person cannot
-  confirm on the other channel. Distinct same-kind identities still
-  work without a binding. `mcp-sentinel:operator-bind` introspects a
+  `iss|sub` maps to a Drupal uid on
+  `mcp_sentinel_operator_binding` (DEV-986).
+  `mcp-sentinel:operator-bind --operator=ACCOUNT` introspects a
   Paladin token over HTTPS with client authentication, requires
-  `active` and a numeric future `exp`, and derives `iss|sub` from
-  that response, never from `--human-key` or `--token` (token from
-  `PALADIN_TOKEN` or stdin). The introspection URL, issuer, audience,
-  and client credentials are pinned in `settings.php`, not importable
-  config. The response `iss` and `aud` / `azp` / `client_id` must
-  match those pins. Paladin unreachable, HTTP, a 3xx, or missing
-  client auth fails closed. Rebind of an identity already bound to a
-  different operator is refused, including a unique-constraint race.
-  Joining a new Paladin identity onto an existing Drush record is
-  audited as `added_to_existing`. Every bind and every refusal is
-  audited. Unbind (`mcp-sentinel:operator-unbind`) needs two distinct
-  verified operators and is audited. One person with two Paladin
-  accounts cannot be detected. Run database updates: 10031 creates
-  the table; 10032 adds unbind columns and deletes dead
-  `paladin_introspection_*` config keys; 10033 deletes those keys on
-  sites that already ran 10032.
+  `active`, a numeric future `exp`, and the pinned operator
+  audience or role, and derives `iss|sub` from that response,
+  never from `--human-key` or `--token` (token from
+  `PALADIN_TOKEN` or stdin). The introspection URL, issuer,
+  audience, operator audience, and client credentials are pinned
+  in `settings.php`, not importable config. Tokens with an `act`
+  or `actor` claim are refused. Paladin unreachable, HTTP, a 3xx,
+  or missing client auth fails closed. Rebind of an identity
+  already bound to a different operator is refused, including a
+  unique-constraint race. Binding a second identity onto an
+  already-bound record is refused. Every bind and every refusal is
+  audited. Unbind (`mcp-sentinel:operator-unbind`) needs two
+  distinct verified operators and is audited. One person with two
+  Paladin accounts cannot be detected. Run database updates:
+  10031 creates the table; 10032 adds unbind columns and deletes
+  dead `paladin_introspection_*` config keys; 10033 deletes those
+  keys on sites that already ran 10032; 10034 adds the uid
+  column.
 - Kill-switch freeze-first mass stop and held side effects
   (DEV-985). A person-wide or tenant-wide stop freezes immediately;
   in-scope agents are refused before a second operator confirms,
@@ -161,9 +189,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `read_budget_exceeded` / `page_budget_exceeded` /
   `response_size_cap_exceeded` / `classification_egress_denied` from
   caller bodies; use the HTTP status class.
-- Kill-switch docs state that the Drush/shell path sits outside
-  governance. The two-person rule on that path requires individual
-  OS accounts and no shared deploy user.
+- Kill-switch operator docs (`docs/kill-switch.md` and the README)
+  describe the Paladin token plus `--operator` flow (DEV-986).
+  Queued webhook deliveries are not cancelled by a kill in this
+  release; holding them is DEV-985. The docs no longer recommend
+  `drush queue:delete` or a delete/fail action on the webhook
+  admin page.
 - Draft mode and langcode header names live on `McpDraftHeaders`,
   so the audit logger no longer imports the JSON:API draft
   controller. `limitExceedsCap()` lives on `McpReadBudgetResolver`;
