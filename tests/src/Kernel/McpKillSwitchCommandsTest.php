@@ -304,6 +304,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       ]);
     });
     $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $confirm, $this->logText());
+    $this->output->fetch();
 
     $unkill = $this->withToken('token-alice', function () use ($human): int {
       return $this->commands->unkill($this->killOptions([
@@ -709,10 +710,10 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
    * Batch id printed by a successful command.
    */
   private function batchFrom(string $output): string {
-    if (preg_match('/^batch: (.+)$/m', $output, $matches) !== 1) {
+    if (preg_match_all('/^batch: (.+)$/m', $output, $matches) < 1) {
       $this->fail('No batch id in output: ' . $output);
     }
-    return trim($matches[1]);
+    return trim((string) end($matches[1]));
   }
 
   /**

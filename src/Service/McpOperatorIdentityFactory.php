@@ -109,10 +109,6 @@ final class McpOperatorIdentityFactory {
     if ($token !== '') {
       return $this->introspection->activeIdentity($token);
     }
-    $paladin = $this->fromVerifiedPrincipal();
-    if ($paladin instanceof McpOperatorIdentity) {
-      return $paladin;
-    }
     if (!$this->osAssertionEnabled()) {
       throw new McpKillSwitchException(
         McpKillSwitchException::UNVERIFIED_OPERATOR,
