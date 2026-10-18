@@ -186,7 +186,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    * client come back unusable at the point of use rather than at the point of
    * the mistake. menu_autopilot 1.0.1 fixed the same defect on a form.
    *
-   * @param array<string, mixed> $configuration
+   * @param array $configuration
    *   The plugin configuration.
    * @param string $plugin_id
    *   The plugin ID.

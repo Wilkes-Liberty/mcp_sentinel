@@ -25,9 +25,7 @@ parameters:
     - src/Service/McpOperatorBinding.php
     - src/Drush/Commands/McpKillSwitchCommands.php
     - src/Service/McpKillSwitch.php
-    - src/Service/McpWebhookQueueManager.php
     - src/Service/McpKillEnforcerInterface.php
-    - src/Plugin/QueueWorker/McpWebhookWorker.php
     - src/Event/McpKillUnavailableConfirmerEvent.php
     - src/Enum/McpKillBlockStatus.php
     - src/Value/McpKillSwitchResult.php

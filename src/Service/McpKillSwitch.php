@@ -193,8 +193,12 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($statement === NULL) {
       return TRUE;
     }
-    while ($row = $statement->fetchAssoc()) {
-      $status = McpKillBlockStatus::tryFrom((string) $row['status']);
+    while ($raw = $statement->fetchAssoc()) {
+      $row = $this->assocRow($raw);
+      if ($row === NULL) {
+        return TRUE;
+      }
+      $status = McpKillBlockStatus::tryFrom($this->rowString($row, 'status'));
       if ($status === NULL) {
         return TRUE;
       }
@@ -1629,7 +1633,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * Drupal 11.3 stringifies integers on every driver. An unreadable
    * value fails closed.
    *
-   * @param array $row
+   * @param array<string, mixed> $row
    *   Stored row.
    */
   private function rowBlockUntil(array $row): ?int {
@@ -1660,6 +1664,25 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       return (string) $value;
     }
     return '';
+  }
+
+  /**
+   * String-keyed row from a fetchAssoc() result.
+   *
+   * @return array<string, mixed>|null
+   *   The row, or NULL when the value is not an array.
+   */
+  private function assocRow(mixed $row): ?array {
+    if (!is_array($row)) {
+      return NULL;
+    }
+    $out = [];
+    foreach ($row as $key => $value) {
+      if (is_string($key)) {
+        $out[$key] = $value;
+      }
+    }
+    return $out;
   }
 
   /**
