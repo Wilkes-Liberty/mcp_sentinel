@@ -9,7 +9,6 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Database\Transaction;
 use Drupal\Core\Queue\QueueFactory;
-use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -78,11 +77,6 @@ final class McpWebhookQueueManager {
   public const WEAKEN_SKIP_RELEASE_UNDER_STOP = 'skip_release_under_stop';
 
   /**
-   * PHPUnit-only: treat keyless rows as not stopped.
-   */
-  public const WEAKEN_SKIP_KEYLESS_STOP = 'skip_keyless_stop';
-
-  /**
    * Audit operation for a refused hold/release/discard.
    */
   public const AUDIT_REFUSE = 'agent_side_effect_refuse';
@@ -146,8 +140,6 @@ final class McpWebhookQueueManager {
    *   HMAC audit chain writer.
    * @param \Closure $killEnforcer
    *   Lazy kill registry (avoids a construct-time cycle).
-   * @param \Drupal\Core\State\StateInterface $state
-   *   Pre-upgrade max delivery id.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -158,7 +150,6 @@ final class McpWebhookQueueManager {
     private readonly McpPrincipalContextHolder $holder,
     private readonly McpAuditLogger $auditLogger,
     private readonly \Closure $killEnforcer,
-    private readonly StateInterface $state,
   ) {}
 
   /**
@@ -1024,9 +1015,6 @@ final class McpWebhookQueueManager {
       return $this->enforcer()->hasActiveStop();
     }
     if ($this->isKeyless($row)) {
-      if ($this->weakened(self::WEAKEN_SKIP_KEYLESS_STOP)) {
-        return FALSE;
-      }
       return $this->enforcer()->hasActiveStop();
     }
     return $this->enforcer()->wouldHoldKeys($principalKey, $humanKey, $tenant);

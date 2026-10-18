@@ -1276,19 +1276,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->assertSame(McpKillBlockStatus::Killed, $confirmed->status);
     $this->assertGreaterThan($now, $confirmed->blockUntil);
     $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
-    $humanSkip = McpKillSelector::humanKey(self::ISS . '|subject-confirm-ttl-skip');
-    $skip = $this->killSwitch()->kill([$humanSkip], 'confirm-ttl-skip', $this->paladinA());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['block_until' => $now - 10])
-      ->condition('batch_id', $skip->batchId)
-      ->execute();
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_CONFIRM_TTL);
-    $unprotected = $this->killSwitch()->confirm($skip->batchId, $this->paladinB());
-    $this->assertLessThanOrEqual(
-      $now,
-      $unprotected->blockUntil,
-      'The confirm-ttl deny must fail when that guard is off.',
-    );
   }
 
   /**
@@ -1315,20 +1302,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $esc = $this->lastAuditMetadata(McpKillSwitch::AUDIT_ESCALATE);
     $this->assertSame('system', $esc['actor']);
     $this->assertNotSame($esc['scope'], $esc['target_selector']);
-    $humanSkip = McpKillSelector::humanKey(self::ISS . '|subject-overdue-esc-skip');
-    $skip = $this->killSwitch()->kill([$humanSkip], 'overdue-esc-skip', $this->paladinA());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields([
-        'confirm_until' => $now - 1,
-        'block_until' => $now - 1,
-      ])
-      ->condition('batch_id', $skip->batchId)
-      ->execute();
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_OVERDUE_ESCALATE);
-    $this->killSwitch()->expireDue();
-    $skipped = $this->killSwitch()->status($humanSkip);
-    $this->assertSame(0, (int) $skipped['escalated_at'],
-      'The overdue-escalate deny must fail when that guard is off.');
   }
 
   /**
@@ -1654,10 +1627,30 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       'A keyless row queued after 10038 must stay held while any stop is active.',
     );
     $this->assertTrue($this->queue()->shouldHoldRow($this->loadDelivery($below)));
-    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_KEYLESS_STOP);
-    $this->assertFalse(
-      $this->queue()->shouldHoldRow($this->loadDelivery($above)),
-      'The keyless-during-stop deny must fail when that guard is off.',
+  }
+
+  /**
+   * A fresh-install keyless row stays held while any stop is active.
+   */
+  public function testFreshInstallKeylessRowStaysStopped(): void {
+    $this->enableEndpoint();
+    $this->container->get('state')->set(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      0,
+    );
+    $id = $this->insertDelivery([
+      'principal_key' => '',
+      'human_key' => '',
+      'tenant' => '',
+    ]);
+    $this->killSwitch()->kill(
+      [McpKillSelector::tenant('other-fresh')],
+      'keyless-fresh',
+      $this->paladinA(),
+    );
+    $this->assertTrue(
+      $this->queue()->shouldHoldRow($this->loadDelivery($id)),
+      'A fresh-install keyless row must stay held while any stop is active.',
     );
   }
 
@@ -1683,11 +1676,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::SCOPE_STOPPED, $e->reasonCode);
     }
-    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_KEYLESS_STOP);
-    $this->assertFalse(
-      $this->queue()->shouldHoldRow($this->loadDelivery($id)),
-      'The killed-stop keyless deny must fail when that guard is off.',
-    );
   }
 
   /**

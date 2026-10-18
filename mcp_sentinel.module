@@ -98,8 +98,7 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
  * it and also requires the context permission. Readiness, scope and IP gates
  * stay in the access check.
  *
- * @param array<string, mixed> $definitions
- *   Tool definitions keyed by plugin id.
+ * @phpstan-param array<string, mixed> $definitions
  */
 function mcp_sentinel_tool_info_alter(array &$definitions): void {
   foreach ($definitions as $definition) {

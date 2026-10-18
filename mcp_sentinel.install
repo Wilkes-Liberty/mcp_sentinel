@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
+use Drupal\Core\Database\StatementInterface;
 use Drupal\Core\Utility\UpdateException;
 use Drupal\Core\Url;
 use Drupal\key\Entity\Key;
@@ -2094,9 +2095,12 @@ function mcp_sentinel_db_int(mixed $value): int {
 
 /**
  * One field from a statement, or NULL when the statement is missing.
+ *
+ * @return mixed
+ *   The first field, or NULL when the statement is missing.
  */
 function mcp_sentinel_fetch_field(mixed $statement): mixed {
-  if (!$statement instanceof \Drupal\Core\Database\StatementInterface) {
+  if (!$statement instanceof StatementInterface) {
     return NULL;
   }
   return $statement->fetchField();
@@ -2106,13 +2110,13 @@ function mcp_sentinel_fetch_field(mixed $statement): mixed {
  * One column from a statement, or empty when the statement is missing.
  *
  * @return list<mixed>
+ *   Column values, or an empty list when the statement is missing.
  */
 function mcp_sentinel_fetch_col(mixed $statement): array {
-  if (!$statement instanceof \Drupal\Core\Database\StatementInterface) {
+  if (!$statement instanceof StatementInterface) {
     return [];
   }
-  $col = $statement->fetchCol();
-  return is_array($col) ? $col : [];
+  return array_values($statement->fetchCol());
 }
 
 /**
