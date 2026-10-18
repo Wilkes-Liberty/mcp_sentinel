@@ -6,8 +6,7 @@ confirm, check, and lift a stop.
 
 The kill switch shipped in release 3.2.0. Freeze-first mass stops,
 held side effects, and break-glass (DEV-985) and Paladin-token
-operator identity (DEV-986) are on the `1.x` branch and listed
-under Unreleased in `CHANGELOG.md`. They are not in 3.2.0.
+operator identity (DEV-986) shipped in 3.3.0.
 
 ## What it does
 

@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-18
+
+Paladin-only kill-switch operator identity (DEV-986: #316, #319,
+#324; #320 superseded by #324) and freeze-first mass stops with
+held side effects (DEV-985: #318, #325).
+
 ### Breaking
 - Kill-switch Drush commands (`kill`, `kill-confirm`, `unkill`,
   `kill-status`, `kill-extend`, `kill-lift`, `kill-break-glass`,
@@ -3293,7 +3299,10 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...1.x
+[3.3.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.2.0...3.3.0
+[3.2.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.1.0...3.2.0
+[3.1.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.1...3.1.0
 [3.0.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.0...3.0.1
 [3.0.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.1...3.0.0
 [2.34.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/2.34.0...2.34.1
