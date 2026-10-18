@@ -298,8 +298,9 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-lift BATCH_ID --operator=bob
 
 `kill-confirm` keeps the freeze and records the second operator. The
 agents were already refused. Confirm also refreshes `block_until` to
-`min(now+7d, max(existing, now+ttl))` so an overdue freeze does not
-lift the moment it is confirmed.
+`min(now+7d, max(existing, now+ttl))` from the batch-max stored
+window, so a mixed-window freeze does not shrink to the last row
+and an overdue freeze does not lift the moment it is confirmed.
 
 `kill-extend` moves the end time later, up to 7 days from now. A
 requested lifetime above 7 days is refused.
@@ -526,5 +527,6 @@ See `mcp_sentinel.api.php`.
   missing.
 - `kill-extend` never shortens a stop. `block_until` is
   `max(existing, now+ttl)`, capped at now + 7 days.
+  `kill-confirm` uses the same batch-max window.
 - The worker re-checks the kill registry after a successful claim.
 - Escalation notifies once per batch, not once per row.

@@ -50,7 +50,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is now `TRUE` for `kill_pending` regardless of `block_until`.
   `McpKillSwitchResult::$blockUntil` is non-zero while a mass
   freeze is pending. Confirming a freeze refreshes `block_until`
-  the same way as extend (`min(now+7d, max(existing, now+ttl))`).
+  the same way as extend (`min(now+7d, max(existing, now+ttl))`)
+  from the batch-max stored window, not the last locked row.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
@@ -200,8 +201,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   expiry reverts to killed and writes `agent_kill_expire`
   before notify; each batch is isolated. Confirm refreshes
   `block_until` the same way as extend
-  (`min(now+7d, max(existing, now+ttl))`) so an overdue freeze
-  stays in force. Run updates 10036, 10037, then 10038. Every
+  (`min(now+7d, max(existing, now+ttl))`) from the batch-max
+  stored `block_until` and `ttl`, so a mixed-window freeze
+  does not shrink to the last locked row and an overdue
+  freeze stays in force. Run updates 10036, 10037, then 10038. Every
   keyless row stays stopped while any stop is active,
   including rows queued after 10038. Refusals write
   `agent_kill_refuse` or `agent_side_effect_refuse` exactly
@@ -209,6 +212,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   documented only in INSTALL.md.
 
 ### Fixed
+- Confirming a mixed-window freeze uses the batch-max
+  `block_until` and `ttl`, the same way as extend. The last
+  locked row no longer shortens the remaining stop. Re-issuing
+  a stop onto an existing selector keeps the longer stored TTL.
 - A claimless request on a Drupal test child served by the PHP
   built-in server is no longer sealed before readiness stamps role
   fallback. That early seal left JSON:API, GraphQL, and context with
