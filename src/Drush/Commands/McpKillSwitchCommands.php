@@ -790,6 +790,8 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Command options.
    * @param callable(string): int $callback
    *   Work that receives the Paladin token string.
+   * @param string $batch
+   *   Kill batch when the command received one.
    */
   private function withPaladinToken(array $options, callable $callback, string $batch = ''): int {
     $actor = '';

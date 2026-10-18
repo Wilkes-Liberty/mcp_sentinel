@@ -313,12 +313,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     }
 
     $fromItem = is_array($data) ? $data : [];
-    $checkRow = $row;
-    $checkRow['principal_key'] = $this->rowOrItemKey($row, $fromItem, 'principal_key');
-    $checkRow['human_key'] = $this->rowOrItemKey($row, $fromItem, 'human_key');
-    $checkRow['tenant'] = $this->rowOrItemKey($row, $fromItem, 'tenant');
-    if ($this->webhookQueue->shouldHoldRow($row)
-      || $this->webhookQueue->shouldHoldRow($checkRow)) {
+    $checkRow = $this->itemMergedRow($row, $fromItem);
+    if ($this->shouldHoldStoredOrItem($row, $checkRow)) {
       $this->webhookQueue->markHeld($deliveryId);
       return;
     }
@@ -424,8 +420,12 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    if ($this->webhookQueue->shouldHoldRow($row)
-      || $this->webhookQueue->shouldHoldRow($checkRow)) {
+    $fresh = $this->loadRow($deliveryId);
+    if (is_array($fresh)) {
+      $row = $fresh;
+      $checkRow = $this->itemMergedRow($row, $fromItem);
+    }
+    if ($this->shouldHoldStoredOrItem($row, $checkRow)) {
       $this->webhookQueue->holdClaimed($deliveryId);
       return;
     }
@@ -587,18 +587,60 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   }
 
   /**
+   * Holds when the stored row or the item-merged keys are stopped.
+   *
+   * Both views are checked so a keyless stored row stays held even
+   * when the queue item supplies keys. Re-evaluated after claim
+   * because a stop can start between the pre-claim check and send.
+   *
+   * @param array<string, mixed> $stored
+   *   Delivery row from the table.
+   * @param array<string, mixed> $merged
+   *   Row with empty keys filled from the queue item.
+   *
+   * @return bool
+   *   TRUE when either view is still stopped.
+   */
+  private function shouldHoldStoredOrItem(array $stored, array $merged): bool {
+    return $this->webhookQueue->shouldHoldRow($stored)
+      || $this->webhookQueue->shouldHoldRow($merged);
+  }
+
+  /**
+   * Copies empty stored keys from the queue item for a second hold view.
+   *
+   * @param array<string, mixed> $row
+   *   Stored delivery row.
+   * @param array<string, mixed> $fromItem
+   *   Queue item payload.
+   *
+   * @return array<string, mixed>
+   *   Row with item keys applied.
+   */
+  private function itemMergedRow(array $row, array $fromItem): array {
+    $merged = $row;
+    $merged['principal_key'] = $this->rowOrItemKey($row, $fromItem, 'principal_key');
+    $merged['human_key'] = $this->rowOrItemKey($row, $fromItem, 'human_key');
+    $merged['tenant'] = $this->rowOrItemKey($row, $fromItem, 'tenant');
+    return $merged;
+  }
+
+  /**
    * Loads a delivery row by ID.
    *
    * @param int $id
    *   The delivery row ID.
    *
-   * @return array|null
+   * @return array<string, mixed>|null
    *   The row as an associative array, or NULL if missing.
    */
   private function loadRow(int $id): ?array {
     $row = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d')->condition('d.id', $id)->execute()->fetchAssoc();
-    return $row ?: NULL;
+      ->fields('d')->condition('d.id', $id)->execute()?->fetchAssoc();
+    if (!is_array($row)) {
+      return NULL;
+    }
+    return $row;
   }
 
   /**

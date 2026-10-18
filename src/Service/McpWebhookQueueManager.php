@@ -696,12 +696,6 @@ final class McpWebhookQueueManager {
   }
 
   /**
-   * PHPUnit-only injection that disables one hold invariant.
-   *
-   * @throws \LogicException
-   *   When called outside PHPUnit.
-   */
-  /**
    * PHPUnit-only hook after holdMatching selects ids and before update.
    *
    * @param \Closure|null $callback

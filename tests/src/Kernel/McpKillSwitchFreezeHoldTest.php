@@ -1102,6 +1102,38 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * A keyless row with an unreadable id fails closed while any stop is active.
+   */
+  public function testKeylessRowWithUnreadableIdIsStopped(): void {
+    $this->enableEndpoint();
+    $this->killSwitch()->kill(
+      [McpKillSelector::tenant('other-bad-id')],
+      'keyless-bad-id',
+      $this->paladinA(),
+    );
+    $this->assertTrue($this->queue()->shouldHoldRow([
+      'id' => 0,
+      'principal_key' => '',
+      'human_key' => '',
+      'tenant' => '',
+    ]));
+  }
+
+  /**
+   * An unreadable stored block_until fails closed.
+   */
+  public function testUnreadableBlockUntilFailsClosed(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-str-block');
+    $kill = $this->killSwitch()->kill([$human], 'str-block', $this->paladinA());
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 'not-a-number'])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->assertTrue($this->killSwitch()->hasActiveStop());
+  }
+
+  /**
    * A keyless row stays stopped under a confirmed (killed) stop.
    */
   public function testKeylessRowStaysStoppedUnderKilledStop(): void {
@@ -1250,6 +1282,9 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     unset($GLOBALS['mcp_sentinel_kill_hook_probe_throw']);
   }
 
+  /**
+   * Holds the in-scope delivery and lets the out-of-scope one send.
+   */
   private function assertHoldForSelector(
     McpKillSelector $selector,
     string $sub,
