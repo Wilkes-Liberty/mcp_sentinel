@@ -10,8 +10,8 @@
 # files already had when they joined this scan. They are not a
 # 1.x / pre-#318 claim: Tests 39115568856 was this PR, and
 # 39110065729 did not scan the module. Hold-path reads go
-# through stringKeyedRow / rowString / mixedString so the
-# QueueManager cast.string bucket is not a #318 absorb.
+# through McpStoredValue so the QueueManager cast.string
+# bucket is not a #318 absorb.
 # New DEV-985 code must not add baseline entries.
 includes:
   - phpstan.operator-baseline.neon
@@ -37,6 +37,7 @@ parameters:
     - src/Event/McpKillUnavailableConfirmerEvent.php
     - src/Enum/McpKillBlockStatus.php
     - src/Value/McpKillSwitchResult.php
+    - src/Value/McpStoredValue.php
     - mcp_sentinel.install
     - mcp_sentinel.module
     - mcp_sentinel.api.php

@@ -14,6 +14,7 @@ use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
+use Drupal\mcp_sentinel\Value\McpStoredValue;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -115,6 +116,11 @@ final class McpWebhookQueueManager {
   private ?\Closure $afterHoldSelectForTest = NULL;
 
   /**
+   * PHPUnit-only callback after holdFromStatus updates and before re-select.
+   */
+  private ?\Closure $afterHoldUpdateForTest = NULL;
+
+  /**
    * Test-only weaken flags. Empty in production.
    *
    * @var array<string, true>
@@ -165,7 +171,7 @@ final class McpWebhookQueueManager {
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');
     foreach ($endpoints as $endpoint) {
-      $endpoint = $this->stringKeyedRow($endpoint);
+      $endpoint = McpStoredValue::stringKeyedRow($endpoint);
       if ($endpoint === NULL) {
         continue;
       }
@@ -177,7 +183,7 @@ final class McpWebhookQueueManager {
       if ($events && !in_array($eventName, $events, TRUE)) {
         continue;
       }
-      $url = $this->mixedString($endpoint['url'] ?? '');
+      $url = McpStoredValue::string($endpoint['url'] ?? '');
       if (!str_starts_with($url, 'https://')) {
         $this->logger->error(
           'Webhook endpoint @id skipped: URL must use HTTPS.',
@@ -241,24 +247,24 @@ final class McpWebhookQueueManager {
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
     $count = 0;
     foreach ($rows as $row) {
-      $endpoint = $this->findEndpoint($this->mixedString($row->endpoint_id ?? NULL));
+      $endpoint = $this->findEndpoint(McpStoredValue::string($row->endpoint_id ?? NULL));
       if ($endpoint === NULL) {
         continue;
       }
       // Use the stored payload; fall back to empty string for legacy rows.
-      $payloadJson = $this->mixedString($row->payload ?? NULL);
+      $payloadJson = McpStoredValue::string($row->payload ?? NULL);
       $itemId = $queue->createItem([
-        'delivery_id' => $this->mixedInt($row->id ?? NULL),
+        'delivery_id' => McpStoredValue::int($row->id ?? NULL),
         'endpoint'    => $endpoint,
-        'event_name'  => $this->mixedString($row->event_name ?? NULL),
+        'event_name'  => McpStoredValue::string($row->event_name ?? NULL),
         'payload'     => $payloadJson,
-        'principal_key' => $this->mixedString($row->principal_key ?? NULL),
-        'human_key' => $this->mixedString($row->human_key ?? NULL),
-        'tenant' => $this->mixedString($row->tenant ?? NULL),
+        'principal_key' => McpStoredValue::string($row->principal_key ?? NULL),
+        'human_key' => McpStoredValue::string($row->human_key ?? NULL),
+        'tenant' => McpStoredValue::string($row->tenant ?? NULL),
       ]);
       if ($itemId !== FALSE) {
         $this->database->update('mcp_sentinel_webhook_delivery')
-          ->condition('id', $this->mixedInt($row->id ?? NULL))
+          ->condition('id', McpStoredValue::int($row->id ?? NULL))
           ->fields(['item_id' => $itemId])
           ->execute();
         $count++;
@@ -287,7 +293,7 @@ final class McpWebhookQueueManager {
    */
   public function reclaimStaleClaims(int $claimTtl = 3600): int {
     $now = $this->time->getRequestTime();
-    $reclaimed = $this->mixedInt($this->database->update('mcp_sentinel_webhook_delivery')
+    $reclaimed = McpStoredValue::int($this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('status', 'in_progress')
       ->condition('last_attempt', $now - $claimTtl, '<')
       ->fields(['status' => 'pending'])
@@ -309,14 +315,14 @@ final class McpWebhookQueueManager {
    *   Number of rows deleted.
    */
   public function pruneOldDeliveries(): int {
-    $days = $this->mixedInt($this->configFactory
+    $days = McpStoredValue::int($this->configFactory
       ->get('mcp_sentinel.settings')
       ->get('webhook_delivery_retention_days'));
     if ($days <= 0) {
       return 0;
     }
     $cutoff = $this->time->getRequestTime() - ($days * 86400);
-    return $this->mixedInt($this->database->delete('mcp_sentinel_webhook_delivery')
+    return McpStoredValue::int($this->database->delete('mcp_sentinel_webhook_delivery')
       ->condition('created', $cutoff, '<')
       ->condition('status', self::STATUS_HELD, '<>')
       ->execute());
@@ -338,7 +344,7 @@ final class McpWebhookQueueManager {
    *   TRUE if the row was found and re-enqueued, FALSE otherwise.
    */
   public function replayDelivery(int $deliveryId): bool {
-    $row = $this->stringKeyedRow(
+    $row = McpStoredValue::stringKeyedRow(
       $this->database->select('mcp_sentinel_webhook_delivery', 'd')
         ->fields('d')
         ->condition('d.id', $deliveryId)
@@ -348,14 +354,14 @@ final class McpWebhookQueueManager {
     if ($row === NULL) {
       return FALSE;
     }
-    if (in_array($this->rowString($row, 'status'), [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+    if (in_array(McpStoredValue::rowString($row, 'status'), [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
       return FALSE;
     }
-    $endpoint = $this->findEndpoint($this->rowString($row, 'endpoint_id'));
+    $endpoint = $this->findEndpoint(McpStoredValue::rowString($row, 'endpoint_id'));
     if ($endpoint === NULL) {
       $this->logger->warning(
         'Cannot replay delivery @id: endpoint @ep no longer configured.',
-        ['@id' => $deliveryId, '@ep' => $this->rowString($row, 'endpoint_id')],
+        ['@id' => $deliveryId, '@ep' => McpStoredValue::rowString($row, 'endpoint_id')],
       );
       return FALSE;
     }
@@ -363,7 +369,7 @@ final class McpWebhookQueueManager {
     // Use the stored payload for byte-identical replay. Legacy rows that
     // predate payload storage have an empty column; warn and fall back to
     // a minimal envelope so the row can still be re-queued.
-    $payloadJson = $this->rowString($row, 'payload');
+    $payloadJson = McpStoredValue::rowString($row, 'payload');
     if ($payloadJson === '') {
       $this->logger->warning(
         'Replay of delivery @id: no stored payload (legacy row); sending minimal envelope.',
@@ -387,11 +393,11 @@ final class McpWebhookQueueManager {
     $itemId = $queue->createItem([
       'delivery_id' => $deliveryId,
       'endpoint'    => $endpoint,
-      'event_name'  => $this->rowString($row, 'event_name'),
+      'event_name'  => McpStoredValue::rowString($row, 'event_name'),
       'payload'     => $payloadJson,
-      'principal_key' => $this->rowString($row, 'principal_key'),
-      'human_key' => $this->rowString($row, 'human_key'),
-      'tenant' => $this->rowString($row, 'tenant'),
+      'principal_key' => McpStoredValue::rowString($row, 'principal_key'),
+      'human_key' => McpStoredValue::rowString($row, 'human_key'),
+      'tenant' => McpStoredValue::rowString($row, 'tenant'),
     ]);
     if ($itemId !== FALSE) {
       $this->database->update('mcp_sentinel_webhook_delivery')
@@ -448,19 +454,19 @@ final class McpWebhookQueueManager {
         'actor' => McpOperatorIdentity::system()->storageId(),
         'reason_code' => self::REASON_OVERSIZED_KEY,
         'reason' => 'Webhook keys exceed column length.',
-        'endpoint_id' => substr($this->mixedString($endpoint['id'] ?? ''), 0, 64),
+        'endpoint_id' => substr(McpStoredValue::string($endpoint['id'] ?? ''), 0, 64),
         'event' => substr($eventName, 0, 128),
         'batch_id' => '',
-        'correlation_id' => substr($this->mixedString($endpoint['id'] ?? ''), 0, 64),
+        'correlation_id' => substr(McpStoredValue::string($endpoint['id'] ?? ''), 0, 64),
         'item_ids' => '',
         'timestamp' => (string) $now,
       ], TRUE);
       return;
     }
-    $rowId = $this->mixedInt($this->database
+    $rowId = McpStoredValue::int($this->database
       ->insert('mcp_sentinel_webhook_delivery')
       ->fields([
-        'endpoint_id'  => substr($this->mixedString($endpoint['id'] ?? ''), 0, 64),
+        'endpoint_id'  => substr(McpStoredValue::string($endpoint['id'] ?? ''), 0, 64),
         'event_name'   => substr($eventName, 0, 128),
         'payload_hash' => hash('sha256', $payloadJson),
         'payload'      => $storedPayload,
@@ -507,10 +513,10 @@ final class McpWebhookQueueManager {
    */
   private function buildLegacyFallbackPayload(array $row, array $endpoint): string {
     $payload = [
-      'event'       => $this->rowString($row, 'event_name'),
+      'event'       => McpStoredValue::rowString($row, 'event_name'),
       'replay'      => TRUE,
-      'delivery_id' => $this->rowInt($row, 'id'),
-      'endpoint'    => $this->mixedString($endpoint['id'] ?? ''),
+      'delivery_id' => McpStoredValue::rowInt($row, 'id'),
+      'endpoint'    => McpStoredValue::string($endpoint['id'] ?? ''),
       'timestamp'   => $this->time->getRequestTime(),
     ];
     try {
@@ -535,11 +541,11 @@ final class McpWebhookQueueManager {
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');
     foreach ($endpoints as $endpoint) {
-      $typed = $this->stringKeyedRow($endpoint);
+      $typed = McpStoredValue::stringKeyedRow($endpoint);
       if ($typed === NULL) {
         continue;
       }
-      if ($this->mixedString($typed['id'] ?? '') === $endpointId) {
+      if (McpStoredValue::string($typed['id'] ?? '') === $endpointId) {
         return $typed;
       }
     }
@@ -556,7 +562,7 @@ final class McpWebhookQueueManager {
    *   TRUE if the host is an obvious internal/loopback literal.
    */
   private function isFastBlockedHost(string $url): bool {
-    $host = strtolower($this->mixedString(parse_url($url, PHP_URL_HOST)));
+    $host = strtolower(McpStoredValue::string(parse_url($url, PHP_URL_HOST)));
     $host = trim($host, '[]');
     if (in_array($host, ['localhost', '::1', '0.0.0.0'], TRUE)) {
       return TRUE;
@@ -608,7 +614,7 @@ final class McpWebhookQueueManager {
           continue;
         }
         foreach ($statement->fetchCol() as $id) {
-          $ids[] = $this->mixedInt($id);
+          $ids[] = McpStoredValue::int($id);
         }
       }
       $ids = array_values(array_unique($ids));
@@ -677,7 +683,7 @@ final class McpWebhookQueueManager {
     }
     $rows = [];
     while ($fetched = $statement->fetchAssoc()) {
-      $row = $this->stringKeyedRow($fetched);
+      $row = McpStoredValue::stringKeyedRow($fetched);
       if ($row !== NULL) {
         $rows[] = $row;
       }
@@ -745,6 +751,24 @@ final class McpWebhookQueueManager {
   }
 
   /**
+   * PHPUnit-only hook after holdFromStatus updates and before re-select.
+   *
+   * @param \Closure|null $callback
+   *   Deletes or mutates the just-held row.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function afterHoldUpdateForTest(?\Closure $callback): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Webhook-hold test seams can be set only under PHPUnit.',
+      );
+    }
+    $this->afterHoldUpdateForTest = $callback;
+  }
+
+  /**
    * PHPUnit-only injection that disables one hold invariant.
    *
    * @param string $flag
@@ -790,7 +814,7 @@ final class McpWebhookQueueManager {
     }
     $ids = [];
     foreach ($deliveryIds as $id) {
-      $id = $this->mixedInt($id);
+      $id = McpStoredValue::int($id);
       if ($id > 0) {
         $ids[] = $id;
       }
@@ -815,11 +839,11 @@ final class McpWebhookQueueManager {
       $rows = [];
       if ($statement !== NULL) {
         while ($fetched = $statement->fetchAssoc()) {
-          $row = $this->stringKeyedRow($fetched);
+          $row = McpStoredValue::stringKeyedRow($fetched);
           if ($row === NULL) {
             continue;
           }
-          $id = $this->rowInt($row, 'id');
+          $id = McpStoredValue::rowInt($row, 'id');
           if ($id > 0) {
             $rows[$id] = $row;
           }
@@ -877,18 +901,18 @@ final class McpWebhookQueueManager {
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
     foreach ($changed as $id) {
       $row = $rows[$id];
-      $endpoint = $this->findEndpoint($this->rowString($row, 'endpoint_id'));
+      $endpoint = $this->findEndpoint(McpStoredValue::rowString($row, 'endpoint_id'));
       if ($endpoint === NULL) {
         continue;
       }
       $itemId = $queue->createItem([
         'delivery_id' => $id,
         'endpoint' => $endpoint,
-        'event_name' => $this->rowString($row, 'event_name'),
-        'payload' => $this->rowString($row, 'payload'),
-        'principal_key' => $this->rowString($row, 'principal_key'),
-        'human_key' => $this->rowString($row, 'human_key'),
-        'tenant' => $this->rowString($row, 'tenant'),
+        'event_name' => McpStoredValue::rowString($row, 'event_name'),
+        'payload' => McpStoredValue::rowString($row, 'payload'),
+        'principal_key' => McpStoredValue::rowString($row, 'principal_key'),
+        'human_key' => McpStoredValue::rowString($row, 'human_key'),
+        'tenant' => McpStoredValue::rowString($row, 'tenant'),
       ]);
       if ($itemId !== FALSE) {
         $this->database->update('mcp_sentinel_webhook_delivery')
@@ -908,7 +932,7 @@ final class McpWebhookQueueManager {
     if ($deliveryId <= 0) {
       return;
     }
-    $updated = $this->mixedInt($this->database->update('mcp_sentinel_webhook_delivery')
+    $updated = McpStoredValue::int($this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $deliveryId)
       ->condition('status', $fromStatus)
       ->fields(['status' => self::STATUS_HELD])
@@ -916,7 +940,10 @@ final class McpWebhookQueueManager {
     if ($updated < 1) {
       return;
     }
-    $row = $this->stringKeyedRow(
+    if ($this->afterHoldUpdateForTest !== NULL) {
+      ($this->afterHoldUpdateForTest)($deliveryId);
+    }
+    $row = McpStoredValue::stringKeyedRow(
       $this->database->select('mcp_sentinel_webhook_delivery', 'd')
         ->fields('d')
         ->condition('id', $deliveryId)
@@ -962,83 +989,6 @@ final class McpWebhookQueueManager {
   }
 
   /**
-   * Narrows a fetchAssoc() result to a string-keyed row.
-   *
-   * @param mixed $row
-   *   Statement fetchAssoc() result.
-   *
-   * @return array<string, mixed>|null
-   *   The row, or NULL when the result is missing or not
-   *   string-keyed.
-   */
-  private function stringKeyedRow(mixed $row): ?array {
-    if (!is_array($row)) {
-      return NULL;
-    }
-    $typed = [];
-    foreach ($row as $key => $value) {
-      if (!is_string($key)) {
-        return NULL;
-      }
-      $typed[$key] = $value;
-    }
-    return $typed;
-  }
-
-  /**
-   * String field from a stored row.
-   *
-   * @param array<string, mixed> $row
-   *   Stored row.
-   * @param string $key
-   *   Column name.
-   */
-  private function rowString(array $row, string $key): string {
-    return $this->mixedString($row[$key] ?? '');
-  }
-
-  /**
-   * Integer field from a stored row. Unreadable values are 0.
-   *
-   * @param array<string, mixed> $row
-   *   Stored row.
-   * @param string $key
-   *   Column name.
-   */
-  private function rowInt(array $row, string $key): int {
-    return $this->mixedInt($row[$key] ?? NULL);
-  }
-
-  /**
-   * String from a mixed stored or config value.
-   */
-  private function mixedString(mixed $value): string {
-    if (is_string($value)) {
-      return $value;
-    }
-    if (is_int($value) || is_float($value)) {
-      return (string) $value;
-    }
-    return '';
-  }
-
-  /**
-   * Integer from a mixed stored or config value.
-   */
-  private function mixedInt(mixed $value): int {
-    if (is_int($value)) {
-      return $value;
-    }
-    if (is_string($value) && is_numeric($value)) {
-      return (int) $value;
-    }
-    if (is_float($value)) {
-      return (int) $value;
-    }
-    return 0;
-  }
-
-  /**
    * Holds an in_progress retry and writes one hold audit row.
    *
    * @param int $deliveryId
@@ -1065,7 +1015,7 @@ final class McpWebhookQueueManager {
     if ($deliveryId <= 0) {
       return FALSE;
     }
-    $row = $this->stringKeyedRow(
+    $row = McpStoredValue::stringKeyedRow(
       $this->database->select('mcp_sentinel_webhook_delivery', 'd')
         ->fields('d')
         ->condition('id', $deliveryId)
@@ -1075,7 +1025,7 @@ final class McpWebhookQueueManager {
     if ($row === NULL || !$this->shouldHoldRow($row)) {
       return FALSE;
     }
-    $updated = $this->mixedInt($this->database->update('mcp_sentinel_webhook_delivery')
+    $updated = McpStoredValue::int($this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $deliveryId)
       ->condition('status', 'in_progress')
       ->fields([
@@ -1108,9 +1058,9 @@ final class McpWebhookQueueManager {
    *   Delivery row.
    */
   private function rowIsStopped(array $row): bool {
-    $principalKey = $this->rowString($row, 'principal_key');
-    $humanKey = $this->rowString($row, 'human_key');
-    $tenant = $this->rowString($row, 'tenant');
+    $principalKey = McpStoredValue::rowString($row, 'principal_key');
+    $humanKey = McpStoredValue::rowString($row, 'human_key');
+    $tenant = McpStoredValue::rowString($row, 'tenant');
     if ($this->isOversizedKey($principalKey)
       || $this->isOversizedKey($humanKey)
       || strlen($tenant) >= self::TENANT_MAX_LENGTH) {
@@ -1153,9 +1103,9 @@ final class McpWebhookQueueManager {
    *   TRUE when every stored key is empty.
    */
   private function isKeyless(array $row): bool {
-    return trim($this->rowString($row, 'principal_key')) === ''
-      && trim($this->rowString($row, 'human_key')) === ''
-      && trim($this->rowString($row, 'tenant')) === '';
+    return trim(McpStoredValue::rowString($row, 'principal_key')) === ''
+      && trim(McpStoredValue::rowString($row, 'human_key')) === ''
+      && trim(McpStoredValue::rowString($row, 'tenant')) === '';
   }
 
   /**
@@ -1197,7 +1147,7 @@ final class McpWebhookQueueManager {
     }
     $found = [];
     foreach ($statement->fetchCol() as $id) {
-      $found[] = $this->mixedInt($id);
+      $found[] = McpStoredValue::int($id);
     }
     return $found;
   }
@@ -1248,9 +1198,9 @@ final class McpWebhookQueueManager {
    */
   private function selectorsFromRow(array $row): array {
     $selectors = [];
-    $principalKey = trim($this->rowString($row, 'principal_key'));
-    $humanKey = trim($this->rowString($row, 'human_key'));
-    $tenant = trim($this->rowString($row, 'tenant'));
+    $principalKey = trim(McpStoredValue::rowString($row, 'principal_key'));
+    $humanKey = trim(McpStoredValue::rowString($row, 'human_key'));
+    $tenant = trim(McpStoredValue::rowString($row, 'tenant'));
     if ($principalKey !== '') {
       $selectors[] = new McpKillSelector(
         McpKillSelectorType::PrincipalKey,
@@ -1297,7 +1247,7 @@ final class McpWebhookQueueManager {
       ->range(0, 1)
       ->execute()
       ?->fetchAssoc();
-    return is_array($row) ? $this->mixedString($row['batch_id'] ?? '') : '';
+    return is_array($row) ? McpStoredValue::string($row['batch_id'] ?? '') : '';
   }
 
   /**

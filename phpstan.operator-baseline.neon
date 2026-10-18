@@ -257,21 +257,6 @@ parameters:
       count: 1
       path: src/Service/McpKillSwitch.php
     -
-      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:assocRows\(\) should return list\<array\<string, mixed\>\> but returns list\<non\-empty\-array\>\.$#'
-      identifier: return.type
-      count: 1
-      path: src/Service/McpKillSwitch.php
-    -
-      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:lockSelector\(\) should return array\<string, mixed\>\|null but returns array\|null\.$#'
-      identifier: return.type
-      count: 1
-      path: src/Service/McpKillSwitch.php
-    -
-      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:status\(\) should return array\<string, mixed\>\|null but returns array\|null\.$#'
-      identifier: return.type
-      count: 1
-      path: src/Service/McpKillSwitch.php
-    -
       message: '#^Function mcp_sentinel_jsonapi_entity_filter_access\(\) return type has no value type specified in iterable type array\.$#'
       identifier: missingType.iterableValue
       count: 1

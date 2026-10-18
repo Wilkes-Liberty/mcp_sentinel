@@ -12,21 +12,16 @@ DEV-985 P1 follow-up after 3.3.1 (`b613e44`).
 - Re-killing a selector after lift, un-kill confirm, or TTL
   expiry uses the requested TTL and `block_until`. A dead
   row no longer lengthens the new stop. The kill audit and
-  CLI result report the stored window (`ttl` /
-  `block_until`) and the requested window
+  CLI print the stored window (`ttl` / `block_until`) as
+  the batch-max across selectors, and the requested window
   (`requested_ttl` / `requested_block_until`).
 
 ### Fixed
 - `writeKillRow` inherits `ttl` and `block_until` only from
   rows that are still blocking. Lifted, un-killed, and
-  expired rows do not donate their window.
-
-### Changed
-- **Behaviour change.** Every keyless webhook row (system or
-  anonymous) is held while any stop is active, including
-  rows queued after update 10038. Held rows stay held until
-  the stop is lifted and an operator releases or discards
-  them.
+  expired rows do not donate their window. A time-expired
+  killed row that cron has not swept does not keep
+  `confirmed_by` / `confirmed_at` on the new stop.
 
 ### Upgrade
 - Run `drush updb` (10036 → 10039). Sites already on 3.3.1
@@ -36,7 +31,15 @@ DEV-985 P1 follow-up after 3.3.1 (`b613e44`).
 
 DEV-985 P0 follow-up after #318 (`dc53c71`) and 3.3.0.
 
-### Added
+### Security
+- Drush refusals after Paladin resolution write
+  `operator_command_refused` with that principal. A first
+  `kill` has an empty `batch_id` (no batch yet). Commands
+  that already have a batch, including `kill-extend`, write
+  `batch_id`. An `invalid_ttl` refusal follows the same
+  rule.
+
+### Fixed
 - Escalation claim and `AUDIT_ESCALATE` share one transaction.
   A claim or audit failure rolls the claim back and writes
   `escalate_failed` or `unkill_expire_failed`; `notify_failed`
@@ -45,12 +48,6 @@ DEV-985 P0 follow-up after #318 (`dc53c71`) and 3.3.0.
 - Update 10039 deletes the unused pre-upgrade max-id state
   key. Runtime still holds every keyless row while any stop
   is active (the 10038 body is unchanged).
-- Drush refusals after Paladin resolution write
-  `operator_command_refused` with that principal. A first
-  `kill` has an empty `batch_id` (no batch yet). Commands
-  that already have a batch, including `kill-extend`, write
-  `batch_id`. An `invalid_ttl` refusal follows the same
-  rule.
 
 ## [3.3.0] - 2026-10-18
 
@@ -109,6 +106,11 @@ held side effects (DEV-985: #318, #325).
   freeze is pending. Confirming a freeze refreshes `block_until`
   the same way as extend (`min(now+7d, max(existing, now+ttl))`)
   from the batch-max stored window, not the last locked row.
+- **Behaviour change.** Every keyless webhook row (system or
+  anonymous) is held while any stop is active, including
+  rows queued after update 10038. Held rows stay held until
+  the stop is lifted and an operator releases or discards
+  them.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
