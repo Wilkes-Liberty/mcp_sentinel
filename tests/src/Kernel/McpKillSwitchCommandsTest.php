@@ -225,7 +225,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   }
 
   /**
-   * kill prints the stored window and the requested window.
+   * Kill prints the stored window and the requested window.
    *
    * @covers ::kill
    */
