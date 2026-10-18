@@ -1501,7 +1501,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'status' => $status->value,
         'batch_id' => $batchId,
         'block_until' => $newUntil,
-        'ttl' => max((int) $existing['ttl'], $ttl),
+        'ttl' => max($this->rowInt($existing, 'ttl'), $ttl),
         'reason' => $reason,
         'requested_by' => $operatorId,
         'requested_at' => $now,
@@ -1648,6 +1648,25 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       return (int) $value;
     }
     return NULL;
+  }
+
+  /**
+   * Integer field from a stored row. Unreadable values are 0.
+   *
+   * @param array<string, mixed> $row
+   *   Stored row.
+   * @param string $key
+   *   Column name.
+   */
+  private function rowInt(array $row, string $key): int {
+    $value = $row[$key] ?? NULL;
+    if (is_int($value)) {
+      return $value;
+    }
+    if (is_string($value) && is_numeric($value)) {
+      return (int) $value;
+    }
+    return 0;
   }
 
   /**
