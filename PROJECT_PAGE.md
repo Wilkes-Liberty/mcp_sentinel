@@ -204,7 +204,7 @@ without `mcp_server` installed.
 
 ```bash
 composer require drupal/mcp_sentinel drupal/mcp_server drupal/simple_oauth
-drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge -y
+drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y
 drush mcp-sentinel:setup
 ```
 

@@ -48,10 +48,8 @@ final class McpPolicyProfileForm extends EntityForm {
     /** @var \Drupal\mcp_sentinel\McpPolicyProfileInterface $profile */
     $profile = $this->entity;
 
-    // Attach the admin library (vertical-tabs CSS, preview styles).
     $form['#attached']['library'][] = 'mcp_sentinel/admin';
 
-    // Vertical-tabs container. Children are details elements with #group.
     // Do NOT use #tree on any group — values remain flat so save()/
     // copyFormValuesToEntity() need no path changes.
     $form['tabs'] = [
@@ -59,7 +57,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#default_tab' => 'edit-identity',
     ];
 
-    // --- Identity tab --------------------------------------------------------
     $form['identity'] = [
       '#type' => 'details',
       '#title' => $this->t('Identity'),
@@ -118,7 +115,6 @@ final class McpPolicyProfileForm extends EntityForm {
     // tab so it is visible on initial load without switching tabs.
     $form['identity']['preview'] = $this->buildPolicyPreview($form_state);
 
-    // --- Allowed operations tab ----------------------------------------------
     $form['gates'] = [
       '#type' => 'details',
       '#title' => $this->t('Allowed operations'),
@@ -175,7 +171,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 3,
     ];
 
-    // --- Configuration governance tab ----------------------------------------
     $form['config_governance'] = [
       '#type' => 'details',
       '#title' => $this->t('Configuration governance'),
@@ -243,7 +238,6 @@ final class McpPolicyProfileForm extends EntityForm {
       ],
     ];
 
-    // --- Role assertions tab -------------------------------------------------
     $form['role_assertions'] = [
       '#type' => 'details',
       '#title' => $this->t('Role assertions'),
@@ -272,7 +266,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#default_value' => $profile->get('allow_raw_sql'),
     ];
 
-    // --- Entity scope tab ----------------------------------------------------
     $lines = static fn (array $v): string => implode("\n", $v);
     $form['entity_scope'] = [
       '#type' => 'details',
@@ -294,7 +287,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 3,
     ];
 
-    // --- Redaction tab -------------------------------------------------------
     $form['redaction'] = [
       '#type' => 'details',
       '#title' => $this->t('Redaction'),
@@ -308,7 +300,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 3,
     ];
 
-    // --- Rate limits & quotas tab --------------------------------------------
     $form['limits'] = [
       '#type' => 'details',
       '#title' => $this->t('Rate limits & quotas'),
@@ -339,7 +330,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#type' => 'number',
       '#min' => 0,
       '#title' => $this->t('Max result items (0 = site default)'),
-      // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
       '#description' => $this->t('Maximum items returned per Tool call, JSON:API page request, or GraphQL field result list. Recommended: 500.'),
       '#default_value' => $profile->getResultCountCap(),
       '#ajax' => $preview_ajax,
@@ -348,19 +338,16 @@ final class McpPolicyProfileForm extends EntityForm {
       '#type' => 'number',
       '#min' => 0,
       '#title' => $this->t('Max response size in bytes (0 = site default)'),
-      // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
       '#description' => $this->t('Maximum serialized response size in bytes for governed Tool calls. Responses exceeding this cap are denied. Recommended: 2097152 (2 MB).'),
       '#default_value' => $profile->getResponseSizeCap(),
       '#ajax' => $preview_ajax,
     ];
 
-    // --- Network / IP tab ----------------------------------------------------
     $form['ip_allowlist'] = [
       '#type' => 'details',
       '#title' => $this->t('Network / IP'),
       '#group' => 'tabs',
     ];
-    // phpcs:ignore Drupal.Semantics.FunctionT.NotLiteralString
     $ipDesc = $this->t('Enter one IPv4/IPv6 address or CIDR block per line (e.g. 203.0.113.0/24 or 2001:db8::/32). Leave empty to allow all source IPs (no restriction). IMPORTANT: IP enforcement reads the client IP via Symfony trusted-proxy-aware getClientIp(), which only honors X-Forwarded-For when the connecting proxy is listed in Drupal reverse_proxy_addresses. If your site sits behind a load balancer or CDN you MUST configure reverse_proxy = TRUE and reverse_proxy_addresses in settings.php; otherwise all requests will appear to come from the proxy IP.');
     $form['ip_allowlist']['allowed_ips'] = [
       '#type' => 'textarea',
@@ -370,7 +357,6 @@ final class McpPolicyProfileForm extends EntityForm {
       '#rows' => 5,
     ];
 
-    // --- Egress ceilings tab (d.o #3616540 part 2) ---------------------------
     // The one #tree group on this form: the values must land as one map keyed
     // by surface, and save() writes it explicitly.
     $form['egress'] = [
@@ -582,11 +568,9 @@ final class McpPolicyProfileForm extends EntityForm {
     if ($value === '') {
       return FALSE;
     }
-    // Check plain IP address first.
     if (filter_var($value, FILTER_VALIDATE_IP) !== FALSE) {
       return TRUE;
     }
-    // Check CIDR notation: split on '/' and validate host + prefix length.
     if (str_contains($value, '/')) {
       [$host, $prefix] = explode('/', $value, 2);
       if (filter_var($host, FILTER_VALIDATE_IP) === FALSE) {
@@ -596,7 +580,6 @@ final class McpPolicyProfileForm extends EntityForm {
         return FALSE;
       }
       $prefixInt = (int) $prefix;
-      // IPv4 prefix: 0-32; IPv6 prefix: 0-128.
       if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== FALSE) {
         return $prefixInt >= 0 && $prefixInt <= 32;
       }

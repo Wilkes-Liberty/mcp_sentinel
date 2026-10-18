@@ -164,7 +164,7 @@ class McpSettingsForm extends ConfigFormBase {
         '#title' => $this->t('Quick start for site builders'),
         '#list_type' => 'ol',
         '#items' => [
-          ['#markup' => $this->t('<strong>Install &amp; enable:</strong> <code>composer require drupal/mcp_sentinel</code>, then <code>drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge -y</code> and <code>drush cr</code>.')],
+          ['#markup' => $this->t('<strong>Install &amp; enable:</strong> <code>composer require drupal/mcp_sentinel</code>, then <code>drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y</code> and <code>drush cr</code>.')],
           ['#markup' => $this->t('<strong>Register the Tool plugins</strong> with mcp_server: <code>drush mcp-sentinel:setup</code>.')],
           ['#markup' => $this->t('<strong>Make requests governable:</strong> set the governed roles (<em>MCP Access</em> tab) and the OAuth agent scopes / client IDs (<em>OAuth agent channel</em> tab). Until a request can match the agent channel, the Status report warns that the module is <em>not governing any request</em>.')],
           ['#markup' => $this->t('<strong>Define per-agent policy</strong> at <a href=":profiles">MCP policy profiles</a> (allowed operations, entity scope, redaction, rate limits).', [':profiles' => $profiles_url])],
@@ -372,7 +372,6 @@ class McpSettingsForm extends ConfigFormBase {
       '#states'        => ['visible' => ['[name="dlp_enabled"]' => ['checked' => TRUE]]],
     ];
 
-    // Build the DLP patterns multi-row editor from stored config.
     $stored_patterns = array_values(array_filter(
       (array) ($config->get('dlp_patterns') ?? []),
       'is_array',
@@ -458,9 +457,6 @@ class McpSettingsForm extends ConfigFormBase {
       ],
     ];
 
-    // -----------------------------------------------------------------------
-    // Classification tab (d.o #3616540 part 2).
-    // -----------------------------------------------------------------------
     $form['classification'] = [
       '#type' => 'details',
       '#title' => $this->t('Classification'),
@@ -562,9 +558,6 @@ class McpSettingsForm extends ConfigFormBase {
       ],
     ];
 
-    // -----------------------------------------------------------------------
-    // Anomaly detection tab.
-    // -----------------------------------------------------------------------
     $form['anomaly'] = [
       '#type' => 'details',
       '#title' => $this->t('Anomaly detection'),
@@ -646,8 +639,8 @@ class McpSettingsForm extends ConfigFormBase {
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
     ];
 
-    // Build the anomaly rules multi-row editor from stored config. At least two
-    // rows are shown so an operator can add several rules without round trips.
+    // At least two rows are shown so an operator can add several rules without
+    // round trips.
     $stored_rules = array_values(array_filter(
       (array) ($config->get('anomaly_rules') ?? []),
       'is_array',
@@ -776,7 +769,6 @@ class McpSettingsForm extends ConfigFormBase {
       '#max'           => 3650,
     ];
 
-    // Key options for the per-endpoint signing-secret select.
     /** @var \Drupal\key\KeyInterface[] $keys */
     $keys = $this->entityTypeManager->getStorage('key')->loadMultiple();
     $key_options = ['' => $this->t('- None -')];
@@ -952,7 +944,6 @@ class McpSettingsForm extends ConfigFormBase {
       $label = trim((string) ($row['label'] ?? ''));
       $bundle = trim((string) ($row['bundle'] ?? ''));
       $field = trim((string) ($row['field'] ?? ''));
-      // A fully blank row is skipped.
       if ($type === '' && $label === '' && $bundle === '' && $field === '') {
         continue;
       }
@@ -988,7 +979,6 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
-    // Validate the DLP patterns multi-row editor.
     $dlp_rows = (array) ($form_state->getValue('dlp_patterns_rows') ?? []);
     foreach ($dlp_rows as $i => $row) {
       if (!is_array($row)) {
@@ -996,7 +986,6 @@ class McpSettingsForm extends ConfigFormBase {
       }
       $label = trim((string) ($row['label'] ?? ''));
       $regex = trim((string) ($row['regex'] ?? ''));
-      // A fully blank row is skipped.
       if ($label === '' && $regex === '') {
         continue;
       }
@@ -1037,7 +1026,6 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
-    // Validate the anomaly rules multi-row editor.
     if ($form_state->getValue('anomaly_enabled')) {
       $rule_rows = (array) ($form_state->getValue('anomaly_rules_rows') ?? []);
       $seenRuleIds = [];
@@ -1049,7 +1037,6 @@ class McpSettingsForm extends ConfigFormBase {
         $rOp = trim((string) ($row['operation_pattern'] ?? ''));
         $rWin = (int) ($row['window_seconds'] ?? 0);
         $rThr = (int) ($row['threshold'] ?? 0);
-        // An entirely blank row is skipped.
         if ($rId === '' && $rOp === '') {
           continue;
         }
@@ -1075,13 +1062,11 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
 
-    // Validate the alert email address if provided.
     $alertEmail = trim((string) ($form_state->getValue('anomaly_alert_email') ?? ''));
     if ($alertEmail !== '' && !filter_var($alertEmail, FILTER_VALIDATE_EMAIL)) {
       $form_state->setErrorByName('anomaly_alert_email', $this->t('Alert email address is not a valid email address.'));
     }
 
-    // Validate each configured webhook endpoint.
     $keyStorage = $this->entityTypeManager->getStorage('key');
     $endpoints = (array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []);
     $seen_ids = [];
@@ -1092,7 +1077,6 @@ class McpSettingsForm extends ConfigFormBase {
       }
       $id = trim((string) ($ep['id'] ?? ''));
       $url = trim((string) ($ep['url'] ?? ''));
-      // An entirely blank slot is skipped.
       if ($id === '' && $url === '') {
         continue;
       }
