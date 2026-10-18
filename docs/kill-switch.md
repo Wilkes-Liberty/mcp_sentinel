@@ -440,8 +440,9 @@ key (`iss|sub`), so check it with `--human-key`, not with each agent's key.
 
 ### Confirm that a stop works
 
-1. Run `kill-status`. A mass freeze shows `status: kill_pending` or
-   `killed` and a future `block_until`. Agents in scope are refused
+1. Run `kill-status`. A mass freeze shows `status: kill_pending`
+   (always in force, even when `block_until` is in the past) or
+   `killed` with a future `block_until`. Agents in scope are refused
    in either state.
 2. Open the audit log at `/admin/reports/mcp-sentinel/audit` and filter
    by operation `agent_kill` or `agent_kill_freeze`. Confirmations are
