@@ -45,12 +45,27 @@ final class McpKillSwitchException extends \RuntimeException {
   public const MISSING_OPERATOR = 'missing_operator';
 
   /**
-   * Confirm or kill lacked a Paladin or Drush-assertion identity.
+   * Confirm or kill lacked a Paladin identity.
    */
   public const UNVERIFIED_OPERATOR = 'unverified_operator';
 
   /**
-   * Mixed-channel confirm with no bound operator record.
+   * A Paladin access token was required and none was provided.
+   */
+  public const MISSING_TOKEN = 'missing_token';
+
+  /**
+   * The Paladin access token exceeded the stdin / env size cap.
+   */
+  public const TOKEN_TOO_LARGE = 'token_too_large';
+
+  /**
+   * The --token flag was passed. Pipe stdin or set PALADIN_TOKEN.
+   */
+  public const TOKEN_FLAG_REFUSED = 'token_flag_refused';
+
+  /**
+   * Confirm or unbind with no bound operator record.
    */
   public const UNBOUND_OPERATOR = 'unbound_operator';
 
@@ -116,10 +131,13 @@ final class McpKillSwitchException extends \RuntimeException {
    *   Stable machine reason.
    * @param string $message
    *   Operator-facing text. Must not contain tokens.
+   * @param bool $alreadyAudited
+   *   TRUE when a service already wrote the HMAC refusal row.
    */
   public function __construct(
     public readonly string $reasonCode,
     string $message,
+    public readonly bool $alreadyAudited = FALSE,
   ) {
     parent::__construct($message);
   }

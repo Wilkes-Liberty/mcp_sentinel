@@ -47,13 +47,18 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
 - A stop does not release held webhook deliveries. Release is a
   separate operator action. See [Held webhook deliveries](#held-webhook-deliveries).
 - Token lifetimes are set by your token issuer, not by this module.
+  Pin Paladin operator tokens to 8 hours absolute lifetime and 30
+  minutes idle. The kill-block default is 24 hours with a 7 day
+  maximum.
 
 ## Before you rely on it
 
 1. Run database updates before the site serves traffic:
    `drush updb -y`. Update 10030 creates the registry table. Update
    10034 adds the Drupal uid column on operator bindings. Update
-   10036 adds hold-queue columns and the escalation stamp.
+   10036 adds hold-queue columns and the escalation stamp. Update
+   10037 resets Paladin uids, drops leftover Drush rows, keeps
+   Drush-requested freezes, and requires every operator to re-bind.
    Drain or review the webhook queue before updb: keyless pending
    rows are held when any kill-block or freeze is active.
 2. Until the registry table exists, every governed call is refused.
@@ -101,8 +106,9 @@ Every kill-switch Drush command needs both of these:
 The command introspects the token at Paladin over HTTPS with client
 authentication. The response must be `active`, carry a numeric future
 `exp`, match the issuer and audience pinned in `settings.php`, and
-carry the pinned operator audience or role (for example
-`mcp-sentinel-operator`). A token with an `act` or `actor` claim is
+carry the pinned operator audience on `aud` or a role (for example
+`mcp-sentinel-operator`). `azp` and `client_id` are not
+operator-audience matches. A token with an `act` or `actor` claim is
 refused: agent tokens cannot run the kill switch. If Paladin is
 unreachable, the command refuses.
 
@@ -117,12 +123,12 @@ mapped to the same Drupal uid, cannot confirm. Empty, unmapped, or
 unverified identities are refused. Binding a second identity onto an
 already-bound record is refused.
 
-The OS-user HMAC is off unless `settings.php` sets
-`$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE`. Config
-cannot turn that on. Even then, euid 0 and the web-server user
-(`www-data` / the `mcp_sentinel.web_server_user` pin) are refused.
 The process user and `SUDO_USER` are written to the audit row as
-advisory metadata only. They are not the operator identity.
+advisory metadata only. They are not the operator identity. After
+update 10037 every kill command, including `kill-extend`,
+`kill-lift`, `kill-break-glass`, `webhook-held`, `webhook-release`,
+and `webhook-discard`, refuses every operator until they re-bind.
+Break-glass is refused until that identity is bound again.
 
 The module cannot tell when one person holds two separate accounts at
 the token issuer that map to two Drupal accounts. It treats them as
@@ -152,6 +158,11 @@ drush mcp-sentinel:operator-bind --operator=alice < token.txt
   already bound, `--operator` must match that account.
 - If the issuer cannot be reached, the command fails.
 - Binding a second identity onto an already-bound record is refused.
+- A uid may be bound to only one `iss|sub`.
+- The pinned name claim (default `preferred_username`) must match
+  `--operator`. A mail-type name claim needs
+  `mcp_sentinel.paladin.operator_mail_claim` as well. Name and
+  mail comparisons are case-sensitive.
 - Removing a binding (`drush mcp-sentinel:operator-unbind`) needs two
   distinct operators. Same token and `--operator` rules.
 
@@ -164,9 +175,12 @@ $settings['mcp_sentinel.paladin.audience'] = 'mcp-sentinel-operator-bind';
 $settings['mcp_sentinel.paladin.operator_audience'] = 'mcp-sentinel-operator';
 $settings['mcp_sentinel.paladin.client_id'] = 'mcp-sentinel-introspect';
 $settings['mcp_sentinel.paladin.client_secret'] = 'the-introspection-client-secret';
+$settings['mcp_sentinel.paladin.operator_name_claim'] = 'preferred_username';
+// Optional. When set, email_verified must be true and the mail must match.
+$settings['mcp_sentinel.paladin.operator_mail_claim'] = 'email';
 ```
 
-They are not importable config. Run database updates 10031 to 10034.
+They are not importable config. Run database updates 10031 to 10037.
 
 ## Configuration
 
@@ -444,6 +458,10 @@ Every transition writes an audit row. These rows are written even when
 | `agent_side_effect_hold` | Queued deliveries in scope were held. |
 | `agent_side_effect_release` | An operator released held deliveries. |
 | `agent_side_effect_discard` | An operator discarded held deliveries. |
+| `operator_command_refused` | A Drush command refused before a service audit (missing token, token too large, `--token`). |
+| `operator_binding_uid_reset` | Update 10037 reset a Paladin uid. Metadata has `previous_uid` and `identity_hash`. |
+| `operator_binding_cleared` | Update 10037 deleted a leftover Drush binding row. |
+| `operator_binding_upgrade_pending_kept` | Update 10037 kept a Drush-requested freeze. |
 
 Each row records the operator, the scope, the timestamp, and the
 correlation or batch / item ids. Tokens are never recorded. Each of

@@ -14,6 +14,7 @@ use Drupal\Core\Database\Transaction;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Site\Settings;
+use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Enum\McpKillBlockStatus;
 use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
@@ -40,10 +41,9 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * The confirm window never lifts that freeze; it escalates through
  * the unavailable-confirmer hook. Lifting a mass freeze always
  * takes two operators. Two-person confirm binds Paladin iss|sub
- * and mapped Drupal uids, never the OS user. Mixed-channel confirm
- * requires both identities to resolve to bound records; unbound
- * mixed-channel confirm is refused. Tokens never appear in audit
- * metadata. expireDue() runs from hook_cron, not admit() or save.
+ * and mapped Drupal uids, never the OS user. Tokens never appear
+ * in audit metadata. expireDue() runs from hook_cron, not admit()
+ * or save.
  * Queued webhook deliveries in scope are held on any stop;
  * lifting never releases them.
  */
@@ -190,6 +190,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const WEAKEN_SKIP_BREAK_GLASS_IDENTITY = 'skip_break_glass_identity';
 
   /**
+   * State key for freezes already recorded as kept by update 10037.
+   */
+  public const STATE_UPGRADE_KEPT = 'mcp_sentinel.upgrade_10037_kept';
+
+  /**
    * Test-only weaken flags. Empty in production.
    *
    * @var array<string, true>
@@ -219,11 +224,13 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @param \Drupal\Component\Uuid\UuidInterface $uuid
    *   Batch ids.
    * @param \Drupal\mcp_sentinel\Service\McpOperatorBinding $bindings
-   *   Paladin/Drush operator-record bindings for mixed-channel confirm.
+   *   Paladin-to-Drupal-account bindings for distinct-operator confirm.
    * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
    *   Holds queued webhook deliveries in the stopped scope.
    * @param \Drupal\Core\Site\Settings $settings
    *   Settings.php pin for the break-glass operator.
+   * @param \Drupal\Core\State\StateInterface $state
+   *   Durable marker for freezes already kept by update 10037.
    */
   public function __construct(
     private readonly Connection $connection,
@@ -237,6 +244,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     private readonly McpOperatorBinding $bindings,
     private readonly McpWebhookQueueManager $webhookQueue,
     private readonly Settings $settings,
+    private readonly StateInterface $state,
   ) {
     $this->webhookQueue->setKillSwitch($this);
   }
@@ -339,7 +347,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   public function assertOperatorAccess(AccountInterface $account): void {
-    if ((int) $account->id() === 0) {
+    if ($account->isAnonymous()) {
       throw new McpKillSwitchException(
         McpKillSwitchException::MISSING_OPERATOR,
         'An operator account is required.',
@@ -366,7 +374,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @param string $reason
    *   Operator reason. Must not contain a token.
    * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
-   *   Verified Paladin or Drush-assertion identity. Never a Drupal uid.
+   *   Verified Paladin identity. Never a Drupal uid.
    * @param int|null $ttl
    *   Requested lifetime in seconds, or NULL for the default.
    *
@@ -666,7 +674,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @param string $reason
    *   Operator reason.
    * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
-   *   Verified Paladin or Drush-assertion identity.
+   *   Verified Paladin identity.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
@@ -895,6 +903,109 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $changed += $this->escalateUnconfirmedFreezes($now);
     $changed += $this->expirePendingUnkillWindows($now);
     return $changed;
+  }
+
+  /**
+   * Upgrade helper: keep Drush-requested freezes and revert Drush unkills.
+   *
+   * Unconfirmed freezes stay frozen. An audit row is written per
+   * freeze. Pending unkills revert to killed. The unavailable-
+   * confirmer hook is not invoked from this path.
+   *
+   * @return int
+   *   Rows audited or reverted.
+   */
+  public function keepDrushRequestedPendingAndRevertUnkill(): int {
+    if (!$this->tableReady()) {
+      return 0;
+    }
+    $now = $this->time->getRequestTime();
+    $changed = 0;
+    $pending = $this->connection->select(self::TABLE, 'k')
+      ->fields('k')
+      ->condition('status', McpKillBlockStatus::KillPending->value)
+      ->condition('requested_by', 'drush:%', 'LIKE')
+      ->execute();
+    if ($pending !== NULL) {
+      foreach ($this->assocRows($pending) as $row) {
+        $target = $this->rowString($row, 'selector_type')
+          . ':' . $this->rowString($row, 'selector_key');
+        $batchId = $this->rowString($row, 'batch_id');
+        if ($this->upgradePendingAlreadyKept($batchId, $target)) {
+          continue;
+        }
+        $txn = $this->connection->startTransaction();
+        try {
+          $this->auditLogger->logAlways('operator_binding_upgrade_pending_kept', [
+            'actor' => $this->rowString($row, 'requested_by'),
+            'target_selector' => $target,
+            'batch_id' => $batchId,
+            'status' => McpKillBlockStatus::KillPending->value,
+          ]);
+          $this->markUpgradePendingKept($batchId, $target);
+          unset($txn);
+        }
+        catch (\Throwable $e) {
+          if ($txn instanceof Transaction) {
+            $txn->rollBack();
+          }
+          throw $e;
+        }
+        $changed++;
+      }
+    }
+    $unkill = $this->connection->select(self::TABLE, 'k')
+      ->fields('k')
+      ->condition('status', McpKillBlockStatus::UnkillPending->value)
+      ->condition('unkill_requested_by', 'drush:%', 'LIKE')
+      ->execute();
+    if ($unkill !== NULL) {
+      foreach ($this->assocRows($unkill) as $row) {
+        $this->revertExpiredUnkill($row, $now, 'operator_binding_upgrade');
+        $changed++;
+      }
+    }
+    return $changed;
+  }
+
+  /**
+   * Whether this freeze was already recorded as kept by update 10037.
+   *
+   * A retry of update 10037 must not write a second keep audit
+   * or lift the freeze. The marker is durable site state, not
+   * the audit display helper.
+   *
+   * @return bool
+   *   TRUE when this selector was already recorded as kept.
+   */
+  private function upgradePendingAlreadyKept(string $batchId, string $target): bool {
+    if ($batchId === '' || $target === '') {
+      return FALSE;
+    }
+    $kept = $this->state->get(self::STATE_UPGRADE_KEPT, []);
+    return is_array($kept) && isset($kept[$this->upgradeKeptKey($batchId, $target)]);
+  }
+
+  /**
+   * Records that update 10037 already kept this freeze.
+   */
+  private function markUpgradePendingKept(string $batchId, string $target): void {
+    if ($batchId === '' || $target === '') {
+      return;
+    }
+    $kept = $this->state->get(self::STATE_UPGRADE_KEPT, []);
+    if (!is_array($kept)) {
+      $kept = [];
+    }
+    $kept[$this->upgradeKeptKey($batchId, $target)] = TRUE;
+    $this->state->set(self::STATE_UPGRADE_KEPT, $kept);
+  }
+
+  /**
+   * Durable state key for one kept freeze.
+   */
+  private function upgradeKeptKey(string $batchId, string $target): string {
+    return $batchId . "\0" . $target;
   }
 
   /**
@@ -1455,6 +1566,25 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
+   * String column from an associative kill-block row.
+   *
+   * @param array<string, mixed> $row
+   *   Stored row.
+   * @param string $key
+   *   Column name.
+   */
+  private function rowString(array $row, string $key): string {
+    $value = $row[$key] ?? '';
+    if (is_string($value)) {
+      return $value;
+    }
+    if (is_int($value) || is_float($value)) {
+      return (string) $value;
+    }
+    return '';
+  }
+
+  /**
    * Fetches every row as an associative array.
    *
    * @param \Drupal\Core\Database\StatementInterface $statement
@@ -1591,6 +1721,25 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $count = 0;
     foreach ($this->assocRows($statement) as $row) {
       $this->notifyUnavailableConfirmer($row, 'unkill');
+      $this->revertExpiredUnkill($row, $now, 'unkill_confirm_window');
+      $count++;
+    }
+    return $count;
+  }
+
+  /**
+   * Restores killed (still blocking) for an elapsed or discarded un-kill.
+   *
+   * @param array<string, mixed> $row
+   *   Stored unkill_pending row.
+   * @param int $now
+   *   Current request time.
+   * @param string $reason
+   *   Audit reason (unkill_confirm_window or operator_binding_upgrade).
+   */
+  private function revertExpiredUnkill(array $row, int $now, string $reason): void {
+    $txn = $this->connection->startTransaction();
+    try {
       $this->connection->update(self::TABLE)
         ->fields([
           'status' => McpKillBlockStatus::Killed->value,
@@ -1598,21 +1747,25 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           'unkill_confirm_until' => 0,
           'changed' => $now,
         ])
-        ->condition('selector_hash', (string) $row['selector_hash'])
+        ->condition('selector_hash', $this->rowString($row, 'selector_hash'))
         ->execute();
       $this->auditTransition(self::AUDIT_EXPIRE, [
         'actor' => '',
-        'target_selector' => (string) $row['selector_type'] . ':' . (string) $row['selector_key'],
-        'reason' => 'unkill_confirm_window',
-        'ttl' => (string) $row['ttl'],
-        'block_until' => (string) $row['block_until'],
-        'batch_id' => (string) $row['unkill_batch_id'],
+        'target_selector' => $this->rowString($row, 'selector_type')
+          . ':' . $this->rowString($row, 'selector_key'),
+        'reason' => $reason,
+        'ttl' => $this->rowString($row, 'ttl'),
+        'block_until' => $this->rowString($row, 'block_until'),
+        'batch_id' => $this->rowString($row, 'unkill_batch_id'),
         'status' => McpKillBlockStatus::Killed->value,
         'second_confirmer' => '',
       ]);
-      $count++;
+      unset($txn);
     }
-    return $count;
+    catch (\Throwable $e) {
+      $txn->rollBack();
+      throw $e;
+    }
   }
 
   /**
@@ -1842,7 +1995,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Verified Paladin or Drush-assertion identity. Fail closed otherwise.
+   * Verified Paladin identity. Fail closed otherwise.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
@@ -1870,6 +2023,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($this->weakened(self::WEAKEN_SKIP_BREAK_GLASS_IDENTITY)) {
       return;
     }
+    // Drupal Settings::get() is static; the injected instance is the test seam.
+    // @phpstan-ignore staticMethod.dynamicCall
     $configured = trim((string) $this->settings->get(
       'mcp_sentinel.kill_switch.break_glass_operator',
       '',
@@ -1936,8 +2091,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *
    * Impossible outside the PHPUnit process. Used so two-person, TTL,
    * expiry, audit, P0 never-downgrade, mass-pending, mass-freeze,
-   * confirm-timeout, queue-hold, mixed-channel, and uid-identity
-   * tests can fail.
+   * confirm-timeout, queue-hold, and uid-identity tests can fail.
    *
    * @param string $flag
    *   One of the WEAKEN_* constants.

@@ -11,6 +11,7 @@ use Drupal\mcp_sentinel\Drush\Commands\McpKillSwitchCommands;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
+use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
 use Drupal\mcp_sentinel\Service\McpPaladinIntrospection;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -141,6 +142,13 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   private array $commandWeaken = [];
 
   /**
+   * PHPUnit weaken flags reapplied on the identity factory.
+   *
+   * @var list<string>
+   */
+  private array $factoryWeaken = [];
+
+  /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
@@ -159,6 +167,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     $this->bob = $bob;
     $this->viewer = $viewer;
     $this->container->get('current_user')->setAccount(new AnonymousUserSession());
+    (new McpOperatorBindingUidSchema($this->container->get('database')))->ensure();
 
     $this->commands = new McpKillSwitchCommands(
       $this->container->get('mcp_sentinel.kill_switch'),
@@ -168,6 +177,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       $this->container->get('account_switcher'),
       $this->container->get('entity_type.manager'),
       $this->container->get('uuid'),
+      $this->container->get('mcp_sentinel.audit_logger'),
     );
     $this->wireIo();
   }
@@ -181,13 +191,13 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   public function testAnonymousWithoutTokenFailsForKillAndStatus(): void {
     $kill = $this->commands->kill($this->killOptions());
     $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $kill);
-    $this->assertStringContainsString(McpKillSwitchException::UNVERIFIED_OPERATOR, $this->logText());
+    $this->assertStringContainsString(McpKillSwitchException::MISSING_TOKEN, $this->logText());
     $this->assertSame(0, (int) $this->container->get('current_user')->id());
 
     $this->clearLog();
     $status = $this->commands->status($this->statusOptions());
     $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $status);
-    $this->assertStringContainsString(McpKillSwitchException::UNVERIFIED_OPERATOR, $this->logText());
+    $this->assertStringContainsString(McpKillSwitchException::MISSING_TOKEN, $this->logText());
     $this->assertSame(0, (int) $this->container->get('current_user')->id());
   }
 
@@ -219,7 +229,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
    * @covers ::kill
    */
   public function testMappedAccountWithoutPermissionIsDenied(): void {
-    $this->bindings()->bindToAccount($this->paladinA(), (int) $this->viewer->id());
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->viewer->id());
     $this->queueActiveTokens(['operator-a']);
     $code = $this->withToken(self::TOKEN, function (): int {
       return $this->commands->kill($this->killOptions([
@@ -411,6 +421,90 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   }
 
   /**
+   * Operator-bind refuses a token whose name claim does not match.
+   *
+   * @covers ::bindOperator
+   */
+  public function testBindOperatorClaimMismatchIsRefused(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeJson([
+        'preferred_username' => 'other-name',
+      ])),
+    ]);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertStringContainsString(McpKillSwitchException::OPERATOR_MISMATCH, $this->logText());
+  }
+
+  /**
+   * Operator-bind refuses a second iss|sub on the same uid.
+   *
+   * @covers ::bindOperator
+   */
+  public function testBindOperatorUidConflictIsRefused(): void {
+    $this->bindAlice();
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeJson([
+        'sub' => 'operator-other',
+        'preferred_username' => 'alice',
+      ])),
+    ]);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertStringContainsString(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $this->logText());
+  }
+
+  /**
+   * Operator-bind and unbind refuse an empty token.
+   *
+   * @covers ::bindOperator
+   * @covers ::unbindOperator
+   */
+  public function testBindAndUnbindRequireToken(): void {
+    $bind = $this->commands->bindOperator([
+      'operator' => 'alice',
+      'token' => '',
+    ]);
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $bind);
+    $this->assertStringContainsString(McpKillSwitchException::MISSING_TOKEN, $this->logText());
+    $this->clearLog();
+    $unbind = $this->commands->unbindOperator([
+      'operator' => 'alice',
+      'token' => '',
+      'confirm-batch' => NULL,
+    ]);
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $unbind);
+    $this->assertStringContainsString(McpKillSwitchException::MISSING_TOKEN, $this->logText());
+  }
+
+  /**
+   * Operator-bind succeeds when the name claim matches --operator.
+   *
+   * @covers ::bindOperator
+   */
+  public function testBindOperatorSucceedsWithMatchingClaim(): void {
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $code, $this->logText());
+    $this->assertSame((int) $this->alice->id(), $this->bindings()->uidFor($this->paladinA()));
+  }
+
+  /**
    * The --token flag is refused and the token never appears in output.
    *
    * @covers ::kill
@@ -424,10 +518,239 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       'token' => self::TOKEN,
     ]));
     $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
-    $this->assertStringContainsString(McpKillSwitchException::UNVERIFIED_OPERATOR, $this->logText());
+    $this->assertStringContainsString(McpKillSwitchException::TOKEN_FLAG_REFUSED, $this->logText());
     $this->assertStringContainsString('Do not pass --token', $this->logText());
     $combined = $this->logText() . $this->output->fetch() . $this->allAuditJson();
     $this->assertStringNotContainsString(self::TOKEN, $combined);
+  }
+
+  /**
+   * Bind reads the token from stdin once.
+   *
+   * @covers ::bindOperator
+   */
+  public function testBindOperatorReadsTokenFromStdinOnce(): void {
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withoutEnvToken(function (): int {
+      $stream = fopen('php://temp', 'r+');
+      $this->assertIsResource($stream);
+      fwrite($stream, self::TOKEN . "\n");
+      rewind($stream);
+      $this->commands->setStdinForTest($stream);
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $code, $this->logText());
+    $this->assertSame((int) $this->alice->id(), $this->bindings()->uidFor($this->paladinA()));
+  }
+
+  /**
+   * A kill refusal writes exactly one operator_command_refused row.
+   *
+   * @covers ::kill
+   */
+  public function testKillRefusalWritesCommandAudit(): void {
+    $dirty = "alice\x01" . str_repeat('x', 80);
+    $code = $this->commands->kill($this->killOptions([
+      'operator' => $dirty,
+      'principal-key' => [self::ISS . '|subject-a|agent-a'],
+      'reason' => 'compromise',
+    ]));
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::MISSING_TOKEN, $meta['reason_code']);
+    $this->assertSame('alice' . str_repeat('x', 59), $meta['operator']);
+    $this->assertArrayNotHasKey('token', $meta);
+    $this->assertStringNotContainsString(self::TOKEN, $this->allAuditJson());
+  }
+
+  /**
+   * Guard bypass: a kill refusal writes no command audit when weakened.
+   *
+   * @covers ::weakenForTest
+   */
+  public function testKillRefusalSkipsCommandAuditWhenWeakened(): void {
+    $this->commands->weakenForTest(McpKillSwitchCommands::WEAKEN_SKIP_COMMAND_REFUSAL_AUDIT);
+    $code = $this->commands->kill($this->killOptions([
+      'operator' => 'alice',
+      'principal-key' => [self::ISS . '|subject-a|agent-a'],
+      'reason' => 'compromise',
+    ]));
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(0, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+  }
+
+  /**
+   * A bind refusal writes operator_bind_refused and not a command row.
+   *
+   * @covers ::bindOperator
+   */
+  public function testBindRefusalWritesExactlyOneAuditRow(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeJson([
+        'preferred_username' => 'other-name',
+      ])),
+    ]);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpOperatorBinding::AUDIT_BIND_REFUSED));
+    $this->assertSame(0, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $meta['reason_code']);
+    $this->assertArrayNotHasKey('token', $meta);
+  }
+
+  /**
+   * An oversized PALADIN_TOKEN is token_too_large.
+   *
+   * @covers ::bindOperator
+   */
+  public function testTokenTooLargeFromEnvIsRefused(): void {
+    $huge = str_repeat('a', McpKillSwitchCommands::TOKEN_MAX_BYTES + 1);
+    $code = $this->withToken($huge, function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertStringContainsString(McpKillSwitchException::TOKEN_TOO_LARGE, $this->logText());
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::TOKEN_TOO_LARGE, $meta['reason_code']);
+    $this->assertArrayNotHasKey('token', $meta);
+  }
+
+  /**
+   * An oversized stdin line with a trailing newline is token_too_large.
+   *
+   * @covers ::bindOperator
+   */
+  public function testTokenTooLargeFromStdinWithNewlineIsRefused(): void {
+    $huge = str_repeat('b', McpKillSwitchCommands::TOKEN_MAX_BYTES + 1);
+    $this->withoutEnvToken(function () use ($huge): void {
+      $stream = fopen('php://temp', 'r+');
+      $this->assertIsResource($stream);
+      fwrite($stream, $huge . "\n");
+      rewind($stream);
+      $this->commands->setStdinForTest($stream);
+    });
+    $code = $this->withoutEnvToken(function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertStringContainsString(McpKillSwitchException::TOKEN_TOO_LARGE, $this->logText());
+  }
+
+  /**
+   * An oversized stdin line without a trailing newline is token_too_large.
+   *
+   * @covers ::bindOperator
+   */
+  public function testTokenTooLargeFromStdinWithoutNewlineIsRefused(): void {
+    $huge = str_repeat('c', McpKillSwitchCommands::TOKEN_MAX_BYTES + 1);
+    $this->withoutEnvToken(function () use ($huge): void {
+      $stream = fopen('php://temp', 'r+');
+      $this->assertIsResource($stream);
+      fwrite($stream, $huge);
+      rewind($stream);
+      $this->commands->setStdinForTest($stream);
+    });
+    $code = $this->withoutEnvToken(function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertStringContainsString(McpKillSwitchException::TOKEN_TOO_LARGE, $this->logText());
+  }
+
+  /**
+   * Guard bypass: an oversized token binds when the size check is off.
+   *
+   * @covers ::weakenForTest
+   */
+  public function testTokenTooLargeBindsWhenSizeCheckIsWeakened(): void {
+    $this->commandWeaken = [McpKillSwitchCommands::WEAKEN_SKIP_TOKEN_SIZE];
+    $this->queueActiveTokens(['operator-a']);
+    $huge = str_repeat('d', McpKillSwitchCommands::TOKEN_MAX_BYTES + 1);
+    $code = $this->withToken($huge, function (): int {
+      return $this->commands->bindOperator([
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $code, $this->logText());
+    $this->assertSame((int) $this->alice->id(), $this->bindings()->uidFor($this->paladinA()));
+  }
+
+  /**
+   * Guard bypass: a viewer can kill when the permission check is off.
+   *
+   * @covers ::weakenForTest
+   */
+  public function testMappedAccountWithoutPermissionSucceedsWhenPermissionCheckIsWeakened(): void {
+    $this->commandWeaken = [McpKillSwitchCommands::WEAKEN_SKIP_PERMISSION];
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->viewer->id());
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'viewer',
+        'principal-key' => [self::ISS . '|subject-a|agent-a'],
+        'reason' => 'compromise',
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $code, $this->logText());
+  }
+
+  /**
+   * Guard bypass: the switched operator stays currentUser.
+   *
+   * @covers ::weakenForTest
+   */
+  public function testCurrentUserStaysSwitchedWhenSwitchBackIsWeakened(): void {
+    $this->commandWeaken = [McpKillSwitchCommands::WEAKEN_SKIP_SWITCH_BACK];
+    $this->bindAlice();
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->status($this->statusOptions([
+        'operator' => 'alice',
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $code, $this->logText());
+    $this->assertSame((int) $this->alice->id(), (int) $this->container->get('current_user')->id());
+  }
+
+  /**
+   * Guard bypass: kill without a token succeeds when the factory skip is on.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory::weakenForTest
+   */
+  public function testKillSucceedsWithoutTokenWhenFactoryTokenCheckIsWeakened(): void {
+    $this->factoryWeaken = [McpOperatorIdentityFactory::WEAKEN_SKIP_TOKEN];
+    $this->rebuildPaladinServices();
+    $this->bindings()->bindIdentityForTest(
+      McpOperatorIdentity::paladin('https://idp.example/realms/agents|weakened-skip-token'),
+      (int) $this->alice->id(),
+    );
+    $code = $this->commands->kill($this->killOptions([
+      'operator' => 'alice',
+      'principal-key' => [self::ISS . '|subject-a|agent-a'],
+      'reason' => 'compromise',
+    ]));
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $code, $this->logText());
   }
 
   /**
@@ -542,14 +865,14 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
    * Binds operator-a to alice.
    */
   private function bindAlice(): void {
-    $this->bindings()->bindToAccount($this->paladinA(), (int) $this->alice->id());
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->alice->id());
   }
 
   /**
    * Binds operator-b to bob.
    */
   private function bindBob(): void {
-    $this->bindings()->bindToAccount($this->paladinB(), (int) $this->bob->id());
+    $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->bob->id());
   }
 
   /**
@@ -608,12 +931,10 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     foreach ($this->introspectionWeaken as $flag) {
       $introspection->weakenForTest($flag);
     }
-    $factory = new McpOperatorIdentityFactory(
-      $this->principalContextHolder(),
-      $this->container->get('private_key'),
-      $this->container->get('settings'),
-      $introspection,
-    );
+    $factory = new McpOperatorIdentityFactory($introspection);
+    foreach ($this->factoryWeaken as $flag) {
+      $factory->weakenForTest($flag);
+    }
     $binding = new McpOperatorBinding(
       $this->container->get('database'),
       $this->container->get('uuid'),
@@ -622,6 +943,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       $this->container->get('config.factory'),
       $introspection,
       $factory,
+      $this->container->get('settings'),
     );
     $this->container->set('mcp_sentinel.paladin_introspection', $introspection);
     $this->container->set('mcp_sentinel.operator_identity', $factory);
@@ -634,6 +956,7 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       $this->container->get('account_switcher'),
       $this->container->get('entity_type.manager'),
       $this->container->get('uuid'),
+      $this->container->get('mcp_sentinel.audit_logger'),
     );
     foreach ($this->commandWeaken as $flag) {
       $this->commands->weakenForTest($flag);
@@ -648,11 +971,14 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
    *   Claim overrides.
    */
   private function activeJson(array $override = []): string {
+    $sub = is_string($override['sub'] ?? NULL) ? $override['sub'] : 'operator-a';
+    $name = $sub === 'operator-b' ? $this->bob->getAccountName() : $this->alice->getAccountName();
     $payload = $override + [
       'active' => TRUE,
       'iss' => self::ISS,
       'sub' => 'operator-a',
       'aud' => [self::AUDIENCE, self::OPERATOR_AUDIENCE],
+      'preferred_username' => $name,
       'exp' => $this->container->get('datetime.time')->getRequestTime() + 3600,
     ];
     return json_encode($payload, JSON_THROW_ON_ERROR);
@@ -735,6 +1061,63 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       return '';
     }
     return (string) $row['metadata'];
+  }
+
+  /**
+   * Runs a callback with PALADIN_TOKEN unset.
+   *
+   * @param callable(): mixed $callback
+   *   Work that must not see PALADIN_TOKEN.
+   *
+   * @return mixed
+   *   Callback result.
+   */
+  private function withoutEnvToken(callable $callback): mixed {
+    $previous = getenv('PALADIN_TOKEN');
+    putenv('PALADIN_TOKEN');
+    try {
+      return $callback();
+    }
+    finally {
+      if ($previous === FALSE) {
+        putenv('PALADIN_TOKEN');
+      }
+      else {
+        putenv('PALADIN_TOKEN=' . $previous);
+      }
+    }
+  }
+
+  /**
+   * Number of HMAC rows for an operation.
+   */
+  private function auditCount(string $operation): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', $operation)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+  }
+
+  /**
+   * Latest metadata for an HMAC operation.
+   *
+   * @return array<string, mixed>
+   *   Decoded metadata.
+   */
+  private function lastAuditMetadata(string $operation): array {
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', $operation)
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    return $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
   }
 
   /**

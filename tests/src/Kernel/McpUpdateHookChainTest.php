@@ -7,6 +7,9 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpKillSwitch;
+use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
+use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
@@ -67,6 +70,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     'encrypt',
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_kill_hook_probe',
   ];
 
   /**
@@ -1068,6 +1072,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
 
     $again = mcp_sentinel_update_10034();
     $this->assertStringContainsString('already present', $again);
+    $this->assertFalse((new McpOperatorBindingUidSchema($this->container->get('database')))->exists());
   }
 
   /**
@@ -1110,7 +1115,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
         'selector_key' => 'upgrade',
         'status' => 'kill_pending',
         'batch_id' => 'upgrade-batch',
-        'block_until' => 9999999999,
+        'block_until' => 2147483647,
         'ttl' => 86400,
         'reason' => 'upgrade',
         'requested_by' => 'paladin:upgrade',
@@ -1140,6 +1145,267 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $again = mcp_sentinel_update_10036();
     $this->assertStringContainsString('already present', $again);
     $this->assertStringContainsString('Drain or review the webhook queue before updb', $again);
+  }
+
+  /**
+   * Update 10036 then 10037 from a real pre-10036 schema.
+   */
+  public function testUpdate10036Then10037RunsInOrder(): void {
+    $connection = $this->container->get('database');
+    $this->dropPre10036Columns();
+    $this->container->get('keyvalue')->get('system.schema')->set('mcp_sentinel', 10035);
+    $this->assertSame(10035, (int) $this->container->get('keyvalue')->get('system.schema')->get('mcp_sentinel'));
+    $this->assertFalse($this->container->get('database')->schema()
+      ->fieldExists('mcp_sentinel_kill_block', 'escalated_at'));
+    (new McpOperatorBindingUidSchema($connection))->drop();
+
+    $connection->insert('mcp_sentinel_operator_binding')
+      ->fields([
+        'identity_hash' => hash('sha256', "paladin\0order-a"),
+        'identity_kind' => McpOperatorIdentity::KIND_PALADIN,
+        'identity_id' => 'https://idp.example/realms/agents|order-a',
+        'operator_id' => '00000000-0000-4000-8000-000000000061',
+        'uid' => 9,
+        'unbind_batch_id' => '',
+        'unbind_requested_by' => '',
+        'unbind_requested_at' => 0,
+        'unbind_confirm_until' => 0,
+      ])
+      ->execute();
+    $connection->insert('mcp_sentinel_kill_block')
+      ->fields([
+        'selector_hash' => hash('sha256', 'human_key:order-pending'),
+        'selector_type' => 'human_key',
+        'selector_key' => 'https://idp.example/realms/agents|order-pending',
+        'status' => 'kill_pending',
+        'batch_id' => '00000000-0000-4000-8000-000000000062',
+        'requested_by' => 'drush:' . str_repeat('b', 64),
+        'requested_at' => 1,
+        'confirm_until' => 999999999,
+        'block_until' => 2147483647,
+        'ttl' => 86400,
+        'reason' => 'upgrade',
+        'changed' => 1,
+      ])
+      ->execute();
+
+    $from10036 = mcp_sentinel_update_10036();
+    $this->assertStringContainsString('escalated_at', $from10036);
+    $this->assertTrue($this->container->get('database')->schema()
+      ->fieldExists('mcp_sentinel_kill_block', 'escalated_at'));
+
+    $from10037 = mcp_sentinel_update_10037();
+    $this->assertStringContainsString('Reset 1 operator binding uid(s)', $from10037);
+    $uid = $connection->select('mcp_sentinel_operator_binding', 'b')
+      ->fields('b', ['uid'])
+      ->condition('identity_id', 'https://idp.example/realms/agents|order-a')
+      ->execute()
+      ->fetchField();
+    $this->assertSame('0', (string) $uid);
+    $kept = $connection->select('mcp_sentinel_kill_block', 'k')
+      ->fields('k', ['status'])
+      ->condition('batch_id', '00000000-0000-4000-8000-000000000062')
+      ->execute()
+      ->fetchField();
+    $this->assertSame('kill_pending', $kept);
+    $this->assertTrue((new McpOperatorBindingUidSchema($connection))->exists());
+  }
+
+  /**
+   * Update 10037 resets unproven uids, clears Drush rows, and keeps freezes.
+   */
+  public function testUpdate10037ResetsUidsAndKeepsFreezes(): void {
+    $schema = $this->container->get('database')->schema();
+    $connection = $this->container->get('database');
+    $this->assertTrue($schema->tableExists('mcp_sentinel_operator_binding'));
+    if (!$schema->fieldExists('mcp_sentinel_operator_binding', 'uid')) {
+      mcp_sentinel_update_10034();
+    }
+    (new McpOperatorBindingUidSchema($connection))->drop();
+
+    $connection->insert('mcp_sentinel_operator_binding')
+      ->fields([
+        'identity_hash' => hash('sha256', "paladin\0dup-a"),
+        'identity_kind' => McpOperatorIdentity::KIND_PALADIN,
+        'identity_id' => 'https://idp.example/realms/agents|dup-a',
+        'operator_id' => '00000000-0000-4000-8000-000000000041',
+        'uid' => 7,
+        'unbind_batch_id' => '',
+        'unbind_requested_by' => '',
+        'unbind_requested_at' => 0,
+        'unbind_confirm_until' => 0,
+      ])
+      ->execute();
+    $connection->insert('mcp_sentinel_operator_binding')
+      ->fields([
+        'identity_hash' => hash('sha256', "paladin\0dup-b"),
+        'identity_kind' => McpOperatorIdentity::KIND_PALADIN,
+        'identity_id' => 'https://idp.example/realms/agents|dup-b',
+        'operator_id' => '00000000-0000-4000-8000-000000000042',
+        'uid' => 7,
+        'unbind_batch_id' => '',
+        'unbind_requested_by' => '',
+        'unbind_requested_at' => 0,
+        'unbind_confirm_until' => 0,
+      ])
+      ->execute();
+    $connection->insert('mcp_sentinel_operator_binding')
+      ->fields([
+        'identity_hash' => hash('sha256', "paladin\0hole"),
+        'identity_kind' => McpOperatorIdentity::KIND_PALADIN,
+        'identity_id' => 'https://idp.example/realms/agents|hole',
+        'operator_id' => '00000000-0000-4000-8000-000000000043',
+        'uid' => 11,
+        'unbind_batch_id' => '',
+        'unbind_requested_by' => '',
+        'unbind_requested_at' => 0,
+        'unbind_confirm_until' => 0,
+      ])
+      ->execute();
+    $connection->insert('mcp_sentinel_operator_binding')
+      ->fields([
+        'identity_hash' => hash('sha256', "drush\0legacy"),
+        'identity_kind' => McpOperatorIdentity::KIND_DRUSH,
+        'identity_id' => str_repeat('a', 64),
+        'operator_id' => '00000000-0000-4000-8000-000000000044',
+        'uid' => 3,
+        'unbind_batch_id' => '',
+        'unbind_requested_by' => '',
+        'unbind_requested_at' => 0,
+        'unbind_confirm_until' => 0,
+      ])
+      ->execute();
+    $connection->insert('mcp_sentinel_kill_block')
+      ->fields([
+        'selector_hash' => hash('sha256', 'human_key:drush-pending'),
+        'selector_type' => 'human_key',
+        'selector_key' => 'https://idp.example/realms/agents|drush-pending',
+        'status' => 'kill_pending',
+        'batch_id' => '00000000-0000-4000-8000-000000000045',
+        'requested_by' => 'drush:' . str_repeat('a', 64),
+        'requested_at' => 1,
+        'confirm_until' => 999999999,
+        'block_until' => 2147483647,
+        'ttl' => 86400,
+        'reason' => 'upgrade',
+        'changed' => 1,
+      ])
+      ->execute();
+    $connection->insert('mcp_sentinel_kill_block')
+      ->fields([
+        'selector_hash' => hash('sha256', 'human_key:drush-unkill'),
+        'selector_type' => 'human_key',
+        'selector_key' => 'https://idp.example/realms/agents|drush-unkill',
+        'status' => 'unkill_pending',
+        'batch_id' => '00000000-0000-4000-8000-000000000046',
+        'requested_by' => 'paladin:https://idp.example/realms/agents|other',
+        'unkill_batch_id' => '00000000-0000-4000-8000-000000000047',
+        'unkill_requested_by' => 'drush:' . str_repeat('a', 64),
+        'unkill_confirm_until' => 999999999,
+        'block_until' => 2147483647,
+        'ttl' => 86400,
+        'reason' => 'restore',
+        'changed' => 1,
+      ])
+      ->execute();
+
+    $GLOBALS['mcp_sentinel_kill_hook_probe'] = [];
+    $message = mcp_sentinel_update_10037();
+    $this->assertStringContainsString('Reset 3 operator binding uid(s)', $message);
+    $this->assertStringContainsString('Drush', $message);
+    $this->assertTrue((new McpOperatorBindingUidSchema($connection))->exists());
+
+    $uids = $connection->select('mcp_sentinel_operator_binding', 'b')
+      ->fields('b', ['uid'])
+      ->condition('identity_kind', McpOperatorIdentity::KIND_PALADIN)
+      ->execute()
+      ->fetchCol();
+    $this->assertSame(['0', '0', '0'], array_values(array_map('strval', $uids)));
+    $remainingDrush = (int) $connection->select('mcp_sentinel_operator_binding', 'b')
+      ->condition('identity_kind', McpOperatorIdentity::KIND_DRUSH)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $remainingDrush);
+    $kept = $connection->select('mcp_sentinel_kill_block', 'k')
+      ->fields('k', ['status'])
+      ->condition('batch_id', '00000000-0000-4000-8000-000000000045')
+      ->execute()
+      ->fetchField();
+    $this->assertSame('kill_pending', $kept);
+    $this->assertSame([], $GLOBALS['mcp_sentinel_kill_hook_probe'] ?? []);
+    $escalated = $connection->select('mcp_sentinel_kill_block', 'k')
+      ->fields('k', ['escalated_at'])
+      ->condition('batch_id', '00000000-0000-4000-8000-000000000045')
+      ->execute()
+      ->fetchField();
+    $this->assertSame('0', (string) $escalated);
+    $reverted = $connection->select('mcp_sentinel_kill_block', 'k')
+      ->fields('k', ['status'])
+      ->condition('selector_hash', hash('sha256', 'human_key:drush-unkill'))
+      ->execute()
+      ->fetchField();
+    $this->assertSame('killed', $reverted);
+
+    $resetCount = (int) $connection->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'operator_binding_uid_reset')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(3, $resetCount);
+    $clearedCount = (int) $connection->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'operator_binding_cleared')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $clearedCount);
+    $keptCount = (int) $connection->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'operator_binding_upgrade_pending_kept')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $keptCount);
+    $expireRows = $connection->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', McpKillSwitch::AUDIT_EXPIRE)
+      ->execute()
+      ->fetchCol();
+    $this->assertCount(1, $expireRows);
+    $expireMeta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $expireRows[0]);
+    $this->assertSame('operator_binding_upgrade', $expireMeta['reason']);
+
+    $again = mcp_sentinel_update_10037();
+    $this->assertStringContainsString('already applied', $again);
+    $keptAgain = (int) $connection->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'operator_binding_upgrade_pending_kept')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $keptAgain);
+    $this->assertSame([], $GLOBALS['mcp_sentinel_kill_hook_probe'] ?? []);
+  }
+
+  /**
+   * Drops hold-queue and escalation columns so 10036 can run for real.
+   */
+  private function dropPre10036Columns(): void {
+    $schema = $this->container->get('database')->schema();
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    if ($schema->tableExists($delivery)) {
+      foreach (['principal_key', 'human_key', 'tenant', 'released'] as $field) {
+        if ($schema->indexExists($delivery, $field)) {
+          $schema->dropIndex($delivery, $field);
+        }
+        if ($schema->fieldExists($delivery, $field)) {
+          $schema->dropField($delivery, $field);
+        }
+      }
+    }
+    $kill = 'mcp_sentinel_kill_block';
+    if ($schema->tableExists($kill) && $schema->fieldExists($kill, 'escalated_at')) {
+      $schema->dropField($kill, 'escalated_at');
+    }
   }
 
   /**

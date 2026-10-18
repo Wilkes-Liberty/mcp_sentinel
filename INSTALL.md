@@ -238,26 +238,54 @@ account first with `mcp-sentinel:operator-bind`. The introspection
 response must be `active` with a numeric future `exp`, `iss` must
 match the pinned issuer, `aud` / `azp` / `client_id` must match the
 pinned audience, and `aud` or a role claim must match
-`operator_audience`. A token with an `act` or `actor` claim is
-refused. A 3xx from Paladin is refused; the token is never sent to
-a hop. Paladin down fails closed.
+`operator_audience`. `azp` and `client_id` are not operator-audience
+matches. A token with an `act` or `actor` claim is refused. A 3xx
+from Paladin is refused; the token is never sent to a hop. Paladin
+down fails closed.
 
-The OS-user HMAC is off unless you set this in `settings.php` (never
-in config):
+Pin Paladin operator tokens to 8 hours absolute lifetime and 30
+minutes idle at the issuer. This module does not enforce those
+issuer lifetimes. The kill-block default is 24 hours; the maximum
+is 7 days.
+
+Optional bind claim pins (defaults shown):
 
 ```php
-$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE;
-$settings['mcp_sentinel.web_server_user'] = 'www-data';
+$settings['mcp_sentinel.paladin.operator_name_claim'] = 'preferred_username';
+$settings['mcp_sentinel.paladin.operator_mail_claim'] = 'email';
 ```
 
-Even with that flag, euid 0 and the web-server user are refused.
+A mail-type name claim (`email` / `mail`) is refused unless the
+mail claim is also pinned. When a mail claim is pinned, the token
+must carry `email_verified === true` and that mail must match the
+Drupal account.
+
 Run database updates: 10034 adds the Drupal uid column on
 `mcp_sentinel_operator_binding`. 10036 adds hold-queue columns
 and the escalation stamp. Drain or review the webhook queue
 before updb: keyless pending rows are held when any kill-block
-or freeze is active. 10032 and 10033 delete dead
-`paladin_introspection_*` keys if an earlier update wrote them
-into importable config.
+or freeze is active. 10037 resets Paladin uids so every operator
+must re-bind with a matching token, drops leftover Drush binding
+rows, keeps Drush-requested freezes, and reverts Drush-requested
+unkills. Every kill command, including break-glass, refuses every
+operator until they re-bind. 10037 also adds a generated
+`uid_nonzero` column plus a unique index on MySQL/MariaDB (a
+partial unique index on SQLite and PostgreSQL). Settings
+`mcp_sentinel.allow_drush_os_assertion` and
+`mcp_sentinel.web_server_user` are ignored.
+
+To restore a uid, read `previous_uid` and `identity_hash` from
+the `operator_binding_uid_reset` HMAC row (audit UI or
+`McpAuditLogger::decodeMetadata()` on `audit_chain_log.metadata`),
+then `UPDATE {mcp_sentinel_operator_binding} SET uid = :previous_uid
+WHERE identity_hash = :identity_hash`. A restore re-trusts a
+binding that never passed the Paladin claim check. The unique
+index refuses a restore that collides with another uid > 0 row.
+Rolling the module code back without a matching down hook leaves
+the unique index and, on MySQL, `uid_nonzero`. 10032 and 10033
+delete dead `paladin_introspection_*` keys if an earlier update
+wrote them into importable config. 10038 is reserved for a
+DEV-985 follow-up.
 
 ## Updating
 

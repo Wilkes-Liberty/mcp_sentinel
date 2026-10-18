@@ -10,6 +10,7 @@ use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
@@ -31,25 +32,64 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * Every command requires a Paladin access token (PALADIN_TOKEN or
  * stdin, never --token) and --operator=<Drupal account name>. The
  * token is introspected at Paladin: active, future exp, pinned iss
- * and aud, pinned operator audience or role, and no act or actor
- * claim. Identity is paladin:iss|sub from that response. The token
+ * and aud, pinned operator audience on aud or a role (not azp or
+ * client_id), and no act or actor claim. Identity is
+ * paladin:iss|sub from that response. The token
  * is mapped to a Drupal account through operator binding.
  * --operator must be that account. The command then switches to
  * that account for the permission check and switches back in
  * finally. Anonymous stays refused. Paladin down fails closed.
  * The two-person rule compares iss|sub and mapped Drupal uids, not
- * the OS user. The OS-user HMAC is off unless settings.php enables
- * it. Bind maps the token to --operator. Binding a second identity
- * onto an already-bound record is refused.
+ * the OS user. Bind requires a matching token claim and one uid to
+ * one iss|sub. Every command needs a Paladin token, including
+ * kill-extend, kill-lift, kill-break-glass, webhook-held,
+ * webhook-release, and webhook-discard.
  */
 final class McpKillSwitchCommands extends DrushCommands {
 
   use AutowireTrait;
 
   /**
+   * HMAC audit operation for a refused operator command.
+   */
+  public const AUDIT_COMMAND_REFUSED = 'operator_command_refused';
+
+  /**
+   * Maximum Paladin token length from PALADIN_TOKEN or one stdin line.
+   */
+  public const TOKEN_MAX_BYTES = 8192;
+
+  /**
    * PHPUnit-only: skip --operator matching the mapped account.
    */
   public const WEAKEN_SKIP_OPERATOR_MATCH = 'skip_operator_match';
+
+  /**
+   * PHPUnit-only: leave the switched operator as currentUser.
+   */
+  public const WEAKEN_SKIP_SWITCH_BACK = 'skip_switch_back';
+
+  /**
+   * PHPUnit-only: skip the operator_command_refused audit row.
+   */
+  public const WEAKEN_SKIP_COMMAND_REFUSAL_AUDIT = 'skip_command_refusal_audit';
+
+  /**
+   * PHPUnit-only: skip the administer-agent-kill-switch check.
+   */
+  public const WEAKEN_SKIP_PERMISSION = 'skip_permission';
+
+  /**
+   * PHPUnit-only: skip the stdin / env token size cap.
+   */
+  public const WEAKEN_SKIP_TOKEN_SIZE = 'skip_token_size';
+
+  /**
+   * PHPUnit-only stdin stream. NULL reads STDIN.
+   *
+   * @var resource|null
+   */
+  private $stdinForTest = NULL;
 
   /**
    * Test-only weaken flags. Empty in production.
@@ -75,6 +115,8 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   User storage for --operator and mapped uids.
    * @param \Drupal\Component\Uuid\UuidInterface $uuid
    *   Correlation ids for release and discard.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   HMAC audit chain writer.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
@@ -91,12 +133,17 @@ final class McpKillSwitchCommands extends DrushCommands {
     private readonly EntityTypeManagerInterface $entityTypeManager,
     #[Autowire(service: 'uuid')]
     private readonly UuidInterface $uuid,
+    #[Autowire(service: 'mcp_sentinel.audit_logger')]
+    private readonly McpAuditLogger $auditLogger,
   ) {
     parent::__construct();
   }
 
   /**
    * Kill one principal, every agent of this person, a tenant, or a mass set.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill', aliases: ['mcps:kill'])]
   #[CLI\Option(name: 'principal-key', description: 'iss|sub|actor. Repeat for a mass kill.')]
@@ -120,13 +167,11 @@ final class McpKillSwitchCommands extends DrushCommands {
     ],
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
-      $ttlRaw = $options['ttl'] ?? '';
-      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
       $result = $this->killSwitch->kill(
         $this->selectorsFromOptions($options),
-        (string) $options['reason'],
+        $this->optionString($options, 'reason'),
         $identity,
-        $ttl,
+        $this->optionTtl($options),
       );
       $this->printResult($result);
       return self::EXIT_SUCCESS;
@@ -135,6 +180,11 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Second operator confirms a mass freeze (keeps it).
+   *
+   * @param string $batch
+   *   Batch id printed by mcp-sentinel:kill.
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-confirm', aliases: ['mcps:kill-confirm'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
@@ -157,6 +207,11 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Second operator extends a mass freeze (7-day cap).
+   *
+   * @param string $batch
+   *   Batch id printed by mcp-sentinel:kill.
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-extend', aliases: ['mcps:kill-extend'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
@@ -173,9 +228,11 @@ final class McpKillSwitchCommands extends DrushCommands {
     ],
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch, $options): int {
-      $ttlRaw = $options['ttl'] ?? '';
-      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
-      $result = $this->killSwitch->extend($batch, $identity, $ttl);
+      $result = $this->killSwitch->extend(
+        $batch,
+        $identity,
+        $this->optionTtl($options),
+      );
       $this->printResult($result);
       return self::EXIT_SUCCESS;
     });
@@ -183,6 +240,11 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Second operator lifts an unconfirmed mass freeze.
+   *
+   * @param string $batch
+   *   Batch id printed by mcp-sentinel:kill.
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-lift', aliases: ['mcps:kill-lift'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
@@ -206,6 +268,11 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Break-glass keep, extend, or lift when the second person is unreachable.
+   *
+   * @param string $batch
+   *   Batch id printed by mcp-sentinel:kill.
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-break-glass', aliases: ['mcps:kill-break-glass'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
@@ -229,13 +296,11 @@ final class McpKillSwitchCommands extends DrushCommands {
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch, $options): int {
       $action = $this->breakGlassAction($options);
-      $ttlRaw = $options['ttl'] ?? '';
-      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
       $result = $this->killSwitch->breakGlass(
         $batch,
         $action,
         $identity,
-        $ttl,
+        $this->optionTtl($options),
       );
       $this->printResult($result);
       $this->output()->writeln('break_glass: ' . $action->value);
@@ -245,6 +310,9 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * List held webhook deliveries.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-held', aliases: ['mcps:webhook-held'])]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
@@ -265,12 +333,12 @@ final class McpKillSwitchCommands extends DrushCommands {
       $table = [];
       foreach ($rows as $row) {
         $table[] = [
-          (string) $row['id'],
-          (string) ($row['endpoint_id'] ?? ''),
-          (string) ($row['event_name'] ?? ''),
-          (string) ($row['principal_key'] ?? ''),
-          (string) ($row['human_key'] ?? ''),
-          (string) ($row['tenant'] ?? ''),
+          $this->displayString($row['id'] ?? ''),
+          $this->displayString($row['endpoint_id'] ?? ''),
+          $this->displayString($row['event_name'] ?? ''),
+          $this->displayString($row['principal_key'] ?? ''),
+          $this->displayString($row['human_key'] ?? ''),
+          $this->displayString($row['tenant'] ?? ''),
         ];
       }
       $this->io()->table(
@@ -283,6 +351,9 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Release held webhook deliveries so they deliver as originally queued.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-release', aliases: ['mcps:webhook-release'])]
   #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
@@ -308,6 +379,9 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Discard held webhook deliveries. They are never delivered.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-discard', aliases: ['mcps:webhook-discard'])]
   #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
@@ -333,6 +407,9 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Request an un-kill. Always needs a distinct second operator.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:unkill', aliases: ['mcps:unkill'])]
   #[CLI\Option(name: 'principal-key', description: 'iss|sub|actor.')]
@@ -356,7 +433,7 @@ final class McpKillSwitchCommands extends DrushCommands {
     ],
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
-      $confirmBatch = trim((string) ($options['confirm-batch'] ?? ''));
+      $confirmBatch = trim($this->optionString($options, 'confirm-batch'));
       if ($confirmBatch !== '') {
         $result = $this->killSwitch->confirmUnkill($confirmBatch, $identity);
         $this->printResult($result);
@@ -364,7 +441,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       }
       $result = $this->killSwitch->requestUnkill(
         $this->selectorsFromOptions($options),
-        (string) $options['reason'],
+        $this->optionString($options, 'reason'),
         $identity,
       );
       $this->printResult($result);
@@ -382,6 +459,9 @@ final class McpKillSwitchCommands extends DrushCommands {
    * is refused. --operator is the Drupal account this token maps
    * to. If the token is already bound, --operator must match that
    * account.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:operator-bind', aliases: ['mcps:operator-bind'])]
   #[CLI\Option(name: 'operator', description: 'Drupal account name to bind this Paladin token to.')]
@@ -394,26 +474,21 @@ final class McpKillSwitchCommands extends DrushCommands {
       'token' => '',
     ],
   ): int {
-    return $this->runAsNamedOperator($options, function (McpOperatorIdentity $identity, UserInterface $account): int {
-      $mappedUid = $this->operatorBindings->uidFor($identity);
-      if ($mappedUid > 0 && $mappedUid !== (int) $account->id()
-        && !$this->weakened(self::WEAKEN_SKIP_OPERATOR_MATCH)) {
-        throw new McpKillSwitchException(
-          McpKillSwitchException::OPERATOR_MISMATCH,
-          '--operator must be the Drupal account bound to this Paladin token.',
-        );
-      }
-      $operatorId = $this->operatorBindings->bindToAccount(
-        $identity,
-        (int) $account->id(),
-      );
-      $this->output()->writeln('operator_id: ' . $operatorId);
-      return self::EXIT_SUCCESS;
+    return $this->bindWithPaladinToken($options, function (string $token) use ($options): int {
+      $account = $this->accountFromOperatorOption($options);
+      return $this->switchToAccountAndRun($account, function () use ($token, $account): int {
+        $operatorId = $this->operatorBindings->bindFromToken($token, $account);
+        $this->output()->writeln('operator_id: ' . $operatorId);
+        return self::EXIT_SUCCESS;
+      });
     });
   }
 
   /**
    * Unbind an operator record. Two distinct Paladin operators required.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:operator-unbind', aliases: ['mcps:operator-unbind'])]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
@@ -429,7 +504,7 @@ final class McpKillSwitchCommands extends DrushCommands {
     ],
   ): int {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
-      $confirmBatch = trim((string) ($options['confirm-batch'] ?? ''));
+      $confirmBatch = trim($this->optionString($options, 'confirm-batch'));
       if ($confirmBatch !== '') {
         $this->operatorBindings->confirmUnbind($confirmBatch, $identity);
         $this->output()->writeln('status: unbound');
@@ -447,6 +522,9 @@ final class McpKillSwitchCommands extends DrushCommands {
 
   /**
    * Show kill-block status for a selector.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-status', aliases: ['mcps:kill-status'])]
   #[CLI\Option(name: 'principal-key', description: 'iss|sub|actor.')]
@@ -467,7 +545,7 @@ final class McpKillSwitchCommands extends DrushCommands {
     return $this->runAsBoundOperator($options, function () use ($options): int {
       $selectors = $this->selectorsFromOptions($options);
       if (count($selectors) !== 1) {
-        $this->logger()->error('kill-status requires exactly one selector.');
+        $this->logError('kill-status requires exactly one selector.');
         return self::EXIT_FAILURE;
       }
       $row = $this->killSwitch->status($selectors[0]);
@@ -476,15 +554,15 @@ final class McpKillSwitchCommands extends DrushCommands {
         return self::EXIT_SUCCESS;
       }
       foreach ([
-        'status' => (string) $row['status'],
-        'selector_type' => (string) $row['selector_type'],
-        'selector_key' => (string) $row['selector_key'],
-        'block_until' => (string) $row['block_until'],
-        'ttl' => (string) $row['ttl'],
-        'batch_id' => (string) $row['batch_id'],
-        'requested_by' => (string) $row['requested_by'],
-        'confirmed_by' => (string) $row['confirmed_by'],
-        'unkill_batch_id' => (string) $row['unkill_batch_id'],
+        'status' => $this->displayString($row['status'] ?? ''),
+        'selector_type' => $this->displayString($row['selector_type'] ?? ''),
+        'selector_key' => $this->displayString($row['selector_key'] ?? ''),
+        'block_until' => $this->displayString($row['block_until'] ?? ''),
+        'ttl' => $this->displayString($row['ttl'] ?? ''),
+        'batch_id' => $this->displayString($row['batch_id'] ?? ''),
+        'requested_by' => $this->displayString($row['requested_by'] ?? ''),
+        'confirmed_by' => $this->displayString($row['confirmed_by'] ?? ''),
+        'unkill_batch_id' => $this->displayString($row['unkill_batch_id'] ?? ''),
       ] as $field => $value) {
         $this->output()->writeln($field . ': ' . $value);
       }
@@ -554,7 +632,7 @@ final class McpKillSwitchCommands extends DrushCommands {
     }
     $out = [];
     foreach ($value as $item) {
-      $item = trim((string) $item);
+      $item = trim($this->displayString($item));
       if ($item !== '') {
         $out[] = $item;
       }
@@ -586,7 +664,9 @@ final class McpKillSwitchCommands extends DrushCommands {
    * Paladin access token from PALADIN_TOKEN or stdin. Never logged.
    *
    * --token is refused: it lands in shell history and in ps. An empty
-   * value is passed through so bind and unbind can audit the refusal.
+   * value is returned so the caller can refuse missing_token. Bind
+   * reads this once and passes the string through; it does not read
+   * stdin again.
    *
    * @param array<string, mixed> $options
    *   Command options.
@@ -595,24 +675,92 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Access token, or empty when neither source provided one.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When --token is passed.
+   *   When --token is passed or the token exceeds TOKEN_MAX_BYTES.
    */
   private function paladinToken(array $options): string {
-    if (trim((string) ($options['token'] ?? '')) !== '') {
+    if (trim($this->optionString($options, 'token')) !== '') {
       throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        McpKillSwitchException::TOKEN_FLAG_REFUSED,
         'Do not pass --token. Pipe the token on stdin or set PALADIN_TOKEN.',
       );
     }
     $fromEnv = getenv('PALADIN_TOKEN');
     if (is_string($fromEnv) && trim($fromEnv) !== '') {
-      return trim($fromEnv);
+      $token = trim($fromEnv);
+      $this->assertTokenSize($token);
+      return $token;
     }
-    if (!defined('STDIN') || (function_exists('posix_isatty') && posix_isatty(STDIN))) {
+    $stream = $this->stdinStream();
+    if ($stream === NULL) {
       return '';
     }
-    $fromStdin = stream_get_contents(STDIN);
-    return is_string($fromStdin) ? trim($fromStdin) : '';
+    $line = fgets($stream, self::TOKEN_MAX_BYTES + 2);
+    if ($line === FALSE) {
+      return '';
+    }
+    $ended = str_ends_with($line, "\n") || str_ends_with($line, "\r");
+    if (!$ended && strlen($line) > self::TOKEN_MAX_BYTES) {
+      $this->assertTokenSize($line);
+    }
+    $token = trim($line);
+    $this->assertTokenSize($token);
+    return $token;
+  }
+
+  /**
+   * Refuses a token larger than TOKEN_MAX_BYTES.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function assertTokenSize(string $token): void {
+    if ($this->weakened(self::WEAKEN_SKIP_TOKEN_SIZE)) {
+      return;
+    }
+    if (strlen($token) > self::TOKEN_MAX_BYTES) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::TOKEN_TOO_LARGE,
+        'The Paladin access token is too large.',
+      );
+    }
+  }
+
+  /**
+   * Stdin stream: PHPUnit override, or STDIN when it is not a TTY.
+   *
+   * @return resource|null
+   *   Readable stream, or NULL when stdin is a TTY or unavailable.
+   */
+  private function stdinStream(): mixed {
+    if (is_resource($this->stdinForTest)) {
+      return $this->stdinForTest;
+    }
+    if (!defined('STDIN') || (function_exists('posix_isatty') && posix_isatty(STDIN))) {
+      return NULL;
+    }
+    return STDIN;
+  }
+
+  /**
+   * PHPUnit-only stdin replacement so bind can be tested without PALADIN_TOKEN.
+   *
+   * @param resource $stream
+   *   Readable stream containing one token line.
+   *
+   * @internal
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function setStdinForTest(mixed $stream): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'setStdinForTest exists only under PHPUnit.',
+      );
+    }
+    if (!is_resource($stream)) {
+      throw new \InvalidArgumentException('setStdinForTest requires a stream resource.');
+    }
+    $this->stdinForTest = $stream;
   }
 
   /**
@@ -624,46 +772,57 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Work to run as the mapped operator.
    */
   private function runAsBoundOperator(array $options, callable $callback): int {
-    return $this->withOperatorSwitch($options, function (McpOperatorIdentity $identity) use ($options, $callback): int {
+    return $this->runWithPaladinToken($options, function (McpOperatorIdentity $identity) use ($options, $callback): int {
       $account = $this->mappedAccount($identity);
       $this->assertOperatorOption($options, $account);
-      return $this->switchAndRun($account, $identity, $callback);
-    });
-  }
-
-  /**
-   * Token plus --operator account name. Used by bind before a mapping exists.
-   *
-   * @param array<string, mixed> $options
-   *   Command options.
-   * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity, \Drupal\user\UserInterface): int $callback
-   *   Work to run as the named operator.
-   */
-  private function runAsNamedOperator(array $options, callable $callback): int {
-    return $this->withOperatorSwitch($options, function (McpOperatorIdentity $identity) use ($options, $callback): int {
-      $account = $this->accountFromOperatorOption($options);
-      return $this->switchAndRun($account, $identity, static function (McpOperatorIdentity $bound) use ($callback, $account): int {
-        return $callback($bound, $account);
+      return $this->switchToAccountAndRun($account, static function () use ($callback, $identity): int {
+        return $callback($identity);
       });
     });
   }
 
   /**
-   * Reads and verifies the token, then runs the callback.
+   * Reads the token once, forms a Paladin identity, then runs the callback.
    *
    * @param array<string, mixed> $options
    *   Command options.
    * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
    *   Work after the token is verified.
    */
-  private function withOperatorSwitch(array $options, callable $callback): int {
+  private function runWithPaladinToken(array $options, callable $callback): int {
     try {
       $token = $this->paladinToken($options);
-      $identity = $this->operatorIdentities->forDrushCommand($token);
-      return $callback($identity);
+      return $callback($this->operatorIdentities->fromPaladinToken($token));
     }
     catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logger()->error($e->reasonCode . ': ' . $e->getMessage());
+      $this->logError($e->reasonCode . ': ' . $e->getMessage());
+      $this->auditCommandRefusal($e, $options);
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
+   * Reads the token once and passes the string to bind. Does not switch.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param callable(string): int $callback
+   *   Bind work. Receives the token; must not read stdin again.
+   */
+  private function bindWithPaladinToken(array $options, callable $callback): int {
+    try {
+      $token = $this->paladinToken($options);
+      if ($token === '') {
+        throw new McpKillSwitchException(
+          McpKillSwitchException::MISSING_TOKEN,
+          'A Paladin access token is required.',
+        );
+      }
+      return $callback($token);
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logError($e->reasonCode . ': ' . $e->getMessage());
+      $this->auditCommandRefusal($e, $options);
       return self::EXIT_FAILURE;
     }
   }
@@ -673,20 +832,58 @@ final class McpKillSwitchCommands extends DrushCommands {
    *
    * @param \Drupal\user\UserInterface $account
    *   Drupal account bound to the Paladin token.
-   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $identity
-   *   Verified Paladin operator identity.
-   * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
+   * @param callable(): int $callback
    *   Work to run as $account.
    */
-  private function switchAndRun(UserInterface $account, McpOperatorIdentity $identity, callable $callback): int {
+  private function switchToAccountAndRun(UserInterface $account, callable $callback): int {
     $this->accountSwitcher->switchTo($account);
     try {
-      $this->killSwitch->assertOperatorAccess($account);
-      return $callback($identity);
+      if (!$this->weakened(self::WEAKEN_SKIP_PERMISSION)) {
+        $this->killSwitch->assertOperatorAccess($account);
+      }
+      return $callback();
     }
     finally {
-      $this->accountSwitcher->switchBack();
+      if (!$this->weakened(self::WEAKEN_SKIP_SWITCH_BACK)) {
+        $this->accountSwitcher->switchBack();
+      }
     }
+  }
+
+  /**
+   * HMAC audit for a refused command. Never includes the token.
+   *
+   * @param \Drupal\mcp_sentinel\Exception\McpKillSwitchException|\Drupal\mcp_sentinel\Exception\McpPrincipalKeyException $e
+   *   Refusal already thrown by token, bind, or identity checks.
+   * @param array<string, mixed> $options
+   *   Command options.
+   */
+  private function auditCommandRefusal(McpKillSwitchException|McpPrincipalKeyException $e, array $options): void {
+    if ($this->weakened(self::WEAKEN_SKIP_COMMAND_REFUSAL_AUDIT)) {
+      return;
+    }
+    if ($e instanceof McpKillSwitchException && $e->alreadyAudited) {
+      return;
+    }
+    $meta = $this->operatorIdentities->advisoryProcessMetadata();
+    $this->auditLogger->logAlways(self::AUDIT_COMMAND_REFUSED, [
+      'reason_code' => $e->reasonCode,
+      'operator' => $this->auditOperatorName($this->optionString($options, 'operator')),
+      'os_user' => $meta['os_user'] ?? '',
+    ]);
+  }
+
+  /**
+   * Caps and strips control characters from --operator for audit rows.
+   */
+  private function auditOperatorName(string $name): string {
+    $clean = preg_replace('/[\x00-\x1F\x7F]/', '', $name);
+    $clean = is_string($clean) ? $clean : '';
+    $clean = trim($clean);
+    if (strlen($clean) > 64) {
+      return mb_strcut($clean, 0, 64);
+    }
+    return $clean;
   }
 
   /**
@@ -721,7 +918,7 @@ final class McpKillSwitchCommands extends DrushCommands {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function accountFromOperatorOption(array $options): UserInterface {
-    $name = trim((string) ($options['operator'] ?? ''));
+    $name = trim($this->optionString($options, 'operator'));
     if ($name === '') {
       throw new McpKillSwitchException(
         McpKillSwitchException::OPERATOR_MISMATCH,
@@ -755,7 +952,7 @@ final class McpKillSwitchCommands extends DrushCommands {
     if ($this->weakened(self::WEAKEN_SKIP_OPERATOR_MATCH)) {
       return;
     }
-    $name = trim((string) ($options['operator'] ?? ''));
+    $name = trim($this->optionString($options, 'operator'));
     $expected = $account->getAccountName();
     if ($name === '' || strlen($name) !== strlen($expected) || !hash_equals($expected, $name)) {
       throw new McpKillSwitchException(
@@ -773,6 +970,76 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
+   * Logs an operator-facing error when Drush attached a logger.
+   */
+  private function logError(string $message): void {
+    $this->logger()?->error($message);
+  }
+
+  /**
+   * String option, or empty when unset or not a string.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param string $key
+   *   Option name.
+   */
+  private function optionString(array $options, string $key): string {
+    $value = $options[$key] ?? '';
+    return is_string($value) ? $value : '';
+  }
+
+  /**
+   * Optional TTL in seconds, or NULL when the option is empty.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   */
+  private function optionTtl(array $options): ?int {
+    $value = $options['ttl'] ?? '';
+    if ($value === '') {
+      return NULL;
+    }
+    if (is_int($value)) {
+      return $value;
+    }
+    if (is_string($value) && is_numeric($value)) {
+      return (int) $value;
+    }
+    return NULL;
+  }
+
+  /**
+   * Whether a Drush boolean option is on.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param string $key
+   *   Option name.
+   */
+  private function optionFlag(array $options, string $key): bool {
+    $value = $options[$key] ?? FALSE;
+    if ($value === FALSE || $value === ''
+      || $value === 0 || $value === '0' || $value === []) {
+      return FALSE;
+    }
+    return TRUE;
+  }
+
+  /**
+   * Display string for a mixed table cell or status field.
+   */
+  private function displayString(mixed $value): string {
+    if (is_string($value)) {
+      return $value;
+    }
+    if (is_int($value) || is_float($value)) {
+      return (string) $value;
+    }
+    return '';
+  }
+
+  /**
    * Break-glass action from mutually exclusive flags.
    *
    * @param array<string, mixed> $options
@@ -781,9 +1048,9 @@ final class McpKillSwitchCommands extends DrushCommands {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function breakGlassAction(array $options): McpKillBreakGlassAction {
-    $keep = !empty($options['keep']);
-    $extend = !empty($options['extend']);
-    $lift = !empty($options['lift']);
+    $keep = $this->optionFlag($options, 'keep');
+    $extend = $this->optionFlag($options, 'extend');
+    $lift = $this->optionFlag($options, 'lift');
     $chosen = (int) $keep + (int) $extend + (int) $lift;
     if ($chosen !== 1) {
       throw new McpKillSwitchException(

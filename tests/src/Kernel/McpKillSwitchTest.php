@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Core\Config\ConfigException;
+use Drupal\Core\Database\IntegrityConstraintViolationException;
 use Drupal\Core\Entity\EntityStorageException;
 use Drupal\Core\Site\Settings;
+use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Enum\McpKillBlockStatus;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
@@ -88,6 +90,13 @@ final class McpKillSwitchTest extends KernelTestBase {
   private array $bindingWeaken = [];
 
   /**
+   * Settings.php snapshot from setUp. Restored by isolateOperatorSettings().
+   *
+   * @var array<string, mixed>
+   */
+  private array $settingsSnapshot = [];
+
+  /**
    * {@inheritdoc}
    */
   protected static $modules = [
@@ -141,6 +150,8 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->operatorA = (string) $first->id();
     $this->operatorB = (string) $second->id();
     $this->assertNotSame($this->operatorA, $this->operatorB);
+    $this->settingsSnapshot = Settings::getAll();
+    (new McpOperatorBindingUidSchema($this->container->get('database')))->ensure();
     foreach ($this->introspectionWeaken as $flag) {
       $this->container->get('mcp_sentinel.paladin_introspection')->weakenForTest($flag);
     }
@@ -605,98 +616,69 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * A Drush assertion ignores Drupal uid: one shell is one operator.
+   * Without a token, fromPaladinToken() is missing_token.
    */
-  public function testDrushAssertionIgnoresDrupalUid(): void {
-    $this->pinPaladinSettings([
-      McpOperatorIdentityFactory::SETTING_ALLOW_OS_ASSERTION => TRUE,
-    ]);
-    $this->rebuildPaladinServices();
+  public function testFromPaladinTokenWithoutTokenIsMissingToken(): void {
+    $this->isolateOperatorSettings();
     $factory = $this->container->get('mcp_sentinel.operator_identity');
-    $factory->setProcessIdentityForTest(1001, 'alice');
-    $firstAccount = User::load((int) $this->operatorA);
-    $secondAccount = User::load((int) $this->operatorB);
-    $this->assertInstanceOf(User::class, $firstAccount);
-    $this->assertInstanceOf(User::class, $secondAccount);
-    $this->container->get('current_user')->setAccount($firstAccount);
-    $previousUser = getenv('USER');
-    putenv('USER=operator-one');
-    $asA = $factory->fromDrushAssertion();
-    $this->container->get('current_user')->setAccount($secondAccount);
-    putenv('USER=operator-two');
-    $asB = $factory->fromDrushAssertion();
-    if ($previousUser === FALSE) {
-      putenv('USER');
-    }
-    else {
-      putenv('USER=' . $previousUser);
-    }
-    $this->assertTrue($asA->equals($asB));
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-shell');
-    $kill = $this->killSwitch()->kill([$human], 'shell', $asA);
     try {
-      $this->killSwitch()->confirm($kill->batchId, $asB);
-      $this->fail('The same shell must not confirm by switching Drupal accounts.');
+      $factory->fromPaladinToken('');
+      $this->fail('A Paladin token is required.');
     }
     catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
+      $this->assertSame(McpKillSwitchException::MISSING_TOKEN, $e->reasonCode);
     }
   }
 
   /**
-   * Without a token, forDrushCommand() is UNVERIFIED on default settings.
+   * Guard bypass: fromPaladinToken() forms an identity when skip_token is on.
    */
-  public function testForDrushCommandWithoutTokenIsUnverified(): void {
+  public function testFromPaladinTokenWithoutTokenSucceedsWhenWeakened(): void {
+    $this->isolateOperatorSettings();
     $factory = $this->container->get('mcp_sentinel.operator_identity');
-    try {
-      $factory->forDrushCommand('');
-      $this->fail('Default settings must not form a Drush OS identity.');
-    }
-    catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
-    }
-  }
-
-  /**
-   * Effective uid 0 is refused even when the OS-assertion flag is on.
-   */
-  public function testOsAssertionRefusesEuidZero(): void {
-    $this->pinPaladinSettings([
-      McpOperatorIdentityFactory::SETTING_ALLOW_OS_ASSERTION => TRUE,
-    ]);
-    $this->rebuildPaladinServices();
-    $factory = $this->container->get('mcp_sentinel.operator_identity');
-    $factory->setProcessIdentityForTest(0, 'root');
-    try {
-      $factory->fromDrushAssertion();
-      $this->fail('euid 0 must not be an operator identity.');
-    }
-    catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
-    }
-  }
-
-  /**
-   * Guard bypass: euid 0 binds when the root check is off.
-   */
-  public function testOsAssertionAcceptsEuidZeroWhenWeakened(): void {
-    $this->pinPaladinSettings([
-      McpOperatorIdentityFactory::SETTING_ALLOW_OS_ASSERTION => TRUE,
-    ]);
-    $this->rebuildPaladinServices();
-    $factory = $this->container->get('mcp_sentinel.operator_identity');
-    $factory->weakenForTest(McpOperatorIdentityFactory::WEAKEN_SKIP_EUID_ZERO);
-    $factory->setProcessIdentityForTest(0, 'alice');
-    $identity = $factory->fromDrushAssertion();
+    $factory->weakenForTest(McpOperatorIdentityFactory::WEAKEN_SKIP_TOKEN);
+    $identity = $factory->fromPaladinToken('');
     $this->assertTrue($identity->isVerified());
+    $this->assertSame('https://idp.example/realms/agents|weakened-skip-token', $identity->id);
   }
 
   /**
-   * Two Paladin identities mapped to one Drupal uid cannot confirm.
+   * A uid may be bound to only one Paladin iss|sub.
    */
-  public function testTwoIssSubMappedToOneDrupalUidAreSameOperator(): void {
-    $this->bindings()->bindToAccount($this->paladinA(), (int) $this->operatorA);
-    $this->bindings()->bindToAccount($this->paladinB(), (int) $this->operatorA);
+  public function testBindToAccountSecondIdentityOnSameUidConflicts(): void {
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
+    try {
+      $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->operatorA);
+      $this->fail('A second iss|sub must not bind to the same Drupal uid.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $audit['reason_code']);
+  }
+
+  /**
+   * Guard bypass: two identities on one uid confirm when uid checks are off.
+   */
+  public function testSameMappedUidConfirmsWhenUidCheckIsWeakened(): void {
+    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_UID_UNIQUE);
+    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_UID_MATCH);
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
+    $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->operatorA);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-weak-uid');
+    $kill = $this->killSwitch()->kill([$human], 'weak-uid', $this->paladinA());
+    $done = $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
+  }
+
+  /**
+   * Two identities forced onto one uid cannot confirm.
+   */
+  public function testSameMappedUidCannotConfirm(): void {
+    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_UID_UNIQUE);
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
+    $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->operatorA);
     $human = McpKillSelector::humanKey(self::ISS . '|subject-same-uid');
     $kill = $this->killSwitch()->kill([$human], 'same-uid', $this->paladinA());
     try {
@@ -709,75 +691,14 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * Guard bypass: the same mapped uid confirms when the uid check is off.
-   */
-  public function testSameMappedUidConfirmsWhenUidCheckIsWeakened(): void {
-    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_UID_MATCH);
-    $this->bindings()->bindToAccount($this->paladinA(), (int) $this->operatorA);
-    $this->bindings()->bindToAccount($this->paladinB(), (int) $this->operatorA);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-weak-uid');
-    $kill = $this->killSwitch()->kill([$human], 'weak-uid', $this->paladinA());
-    $done = $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
-    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
-  }
-
-  /**
-   * Mixed-channel confirm without a binding is refused.
-   */
-  public function testUnboundMixedChannelConfirmIsRefused(): void {
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-unbound');
-    $kill = $this->killSwitch()->kill([$human], 'unbound', $this->paladinA());
-    try {
-      $this->killSwitch()->confirm($kill->batchId, $this->drushFingerprint('shell-a'));
-      $this->fail('Mixed-channel confirm without a binding must be refused.');
-    }
-    catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::UNBOUND_OPERATOR, $e->reasonCode);
-    }
-    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
-  }
-
-  /**
-   * The same bound person cannot confirm on the other channel.
-   */
-  public function testBoundSamePersonCannotConfirmAcrossChannels(): void {
-    $paladin = $this->paladinA();
-    $drush = $this->drushFingerprint('shell-a');
-    $this->bindings()->bind($paladin, $drush);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-same-bound');
-    $kill = $this->killSwitch()->kill([$human], 'cross', $paladin);
-    try {
-      $this->killSwitch()->confirm($kill->batchId, $drush);
-      $this->fail('The same bound operator must not confirm on the other channel.');
-    }
-    catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $e->reasonCode);
-    }
-    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
-  }
-
-  /**
-   * Distinct bound people can confirm across Paladin and Drush.
-   */
-  public function testBoundDistinctPeopleCanConfirmAcrossChannels(): void {
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
-    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-cross-bound');
-    $kill = $this->killSwitch()->kill([$human], 'cross', $this->paladinA());
-    $done = $this->killSwitch()->confirm($kill->batchId, $this->drushFingerprint('shell-b'));
-    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
-    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
-  }
-
-  /**
-   * Identities already bound to different records cannot be merged.
+   * Identities already bound to different uids cannot share one uid.
    */
   public function testBindingConflictWhenIdentitiesBelongToDifferentRecords(): void {
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
-    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
+    $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->operatorB);
     try {
-      $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-b'));
-      $this->fail('Identities bound to different records must conflict.');
+      $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorB);
+      $this->fail('An identity already bound to another uid must conflict.');
     }
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $e->reasonCode);
@@ -785,58 +706,145 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * Two Drush OS accounts do not need a Paladin binding.
+   * The unique uid index rejects a second row with the same uid > 0.
    */
-  public function testSameKindDrushConfirmDoesNotRequireBinding(): void {
-    $first = $this->drushFingerprint('shell-a');
-    $second = $this->drushFingerprint('shell-b');
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-two-shells');
-    $kill = $this->killSwitch()->kill([$human], 'shells', $first);
-    $done = $this->killSwitch()->confirm($kill->batchId, $second);
-    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
-    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+  public function testUidUniqueIndexRejectsDuplicate(): void {
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
+    $this->assertTrue((new McpOperatorBindingUidSchema($this->container->get('database')))->exists());
+    try {
+      $this->container->get('database')->insert(McpOperatorBinding::TABLE)
+        ->fields([
+          'identity_hash' => hash('sha256', 'paladin' . "\0" . $this->paladinB()->id),
+          'identity_kind' => 'paladin',
+          'identity_id' => $this->paladinB()->id,
+          'operator_id' => '00000000-0000-4000-8000-000000000099',
+          'uid' => (int) $this->operatorA,
+          'unbind_batch_id' => '',
+          'unbind_requested_by' => '',
+          'unbind_requested_at' => 0,
+          'unbind_confirm_until' => 0,
+        ])
+        ->execute();
+      $this->fail('The unique uid index must reject a second row for the same uid.');
+    }
+    catch (\Exception $e) {
+      $this->assertTrue(
+        $e instanceof IntegrityConstraintViolationException
+        || str_contains($e->getMessage(), 'UNIQUE')
+        || str_contains($e->getMessage(), 'unique'),
+        $e->getMessage(),
+      );
+    }
   }
 
   /**
-   * Mixed-channel un-kill confirm without a binding is refused.
+   * Bind succeeds when the optional mail claim matches a verified email.
    */
-  public function testUnboundMixedChannelUnkillConfirmIsRefused(): void {
-    $selector = $this->principalSelector('subject-unbound-u', 'agent-unbound-u');
-    $this->killSwitch()->kill([$selector], 'kill', $this->paladinA());
-    $pending = $this->killSwitch()->requestUnkill(
-      [$selector],
-      'restore',
-      $this->paladinA(),
-    );
+  public function testBindFromTokenMailMatch(): void {
+    $account = $this->operatorUser((int) $this->operatorA);
+    $account->setEmail('alice@example.test');
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'email' => 'alice@example.test',
+        'email_verified' => TRUE,
+      ])),
+    ], [
+      McpOperatorBinding::SETTING_MAIL_CLAIM => 'email',
+    ]);
+    $operatorId = $this->bindToken('any-token', $account);
+    $this->assertNotSame('', $operatorId);
+  }
+
+  /**
+   * Bind refuses when the optional mail claim does not match.
+   */
+  public function testBindFromTokenMailMismatch(): void {
+    $account = $this->operatorUser((int) $this->operatorA);
+    $account->setEmail('alice@example.test');
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'email' => 'other@example.test',
+        'email_verified' => TRUE,
+      ])),
+    ], [
+      McpOperatorBinding::SETTING_MAIL_CLAIM => 'email',
+    ]);
     try {
-      $this->killSwitch()->confirmUnkill(
-        $pending->batchId,
-        $this->drushFingerprint('shell-b'),
-      );
-      $this->fail('Mixed-channel un-kill confirm without a binding must be refused.');
+      $this->bindToken('any-token', $account);
+      $this->fail('A token whose mail claim does not match must not bind.');
     }
     catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::UNBOUND_OPERATOR, $e->reasonCode);
+      $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $e->reasonCode);
     }
-    $this->assertTrue($this->killSwitch()->isKilled($selector->key));
   }
 
   /**
-   * Guard bypass: mixed-channel and squat checks are skipped when weakened.
-   *
-   * This is the red mutation for unbound, same-person, and squat tests.
+   * Bind refuses when the mail claim is set and email_verified is not true.
    */
-  public function testMixedChannelChecksFailWhenWeakened(): void {
-    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_MIXED_CHANNEL);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-weak-mix');
-    $kill = $this->killSwitch()->kill([$human], 'unbound', $this->paladinA());
-    $done = $this->killSwitch()->confirm($kill->batchId, $this->drushFingerprint('shell-a'));
-    $this->assertSame(McpKillBlockStatus::Killed, $done->status);
+  public function testBindFromTokenMailUnverified(): void {
+    $account = $this->operatorUser((int) $this->operatorA);
+    $account->setEmail('alice@example.test');
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'email' => 'alice@example.test',
+        'email_verified' => FALSE,
+      ])),
+    ], [
+      McpOperatorBinding::SETTING_MAIL_CLAIM => 'email',
+    ]);
+    try {
+      $this->bindToken('any-token', $account);
+      $this->fail('An unverified mail claim must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $e->reasonCode);
+    }
+  }
 
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
-    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
-    $merged = $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-b'));
-    $this->assertNotSame('', $merged);
+  /**
+   * Bind refuses when email_verified is missing and a mail claim is pinned.
+   */
+  public function testBindFromTokenMailVerifiedKeyMissing(): void {
+    $account = $this->operatorUser((int) $this->operatorA);
+    $account->setEmail('alice@example.test');
+    $payload = json_decode($this->activeIntrospectionJson([
+      'email' => 'alice@example.test',
+    ]), TRUE);
+    $this->assertIsArray($payload);
+    unset($payload['email_verified']);
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_THROW_ON_ERROR)),
+    ], [
+      McpOperatorBinding::SETTING_MAIL_CLAIM => 'email',
+    ]);
+    try {
+      $this->bindToken('any-token', $account);
+      $this->fail('A missing email_verified claim must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $e->reasonCode);
+    }
+  }
+
+  /**
+   * A mail-type name claim is refused unless a mail claim is also pinned.
+   */
+  public function testBindFromTokenMailTypeNameClaimRequiresMailPin(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'email' => 'alice@example.test',
+        'email_verified' => TRUE,
+      ])),
+    ], [
+      McpOperatorBinding::SETTING_NAME_CLAIM => 'email',
+    ]);
+    try {
+      $this->bindToken('any-token');
+      $this->fail('A mail-type name claim without a mail pin must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $e->reasonCode);
+    }
   }
 
   /**
@@ -846,7 +854,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->stubPaladinIntrospection([
       new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson()),
     ]);
-    $operatorId = $this->bindings()->bindFromToken('not-a-human-key', (int) $this->operatorA);
+    $operatorId = $this->bindToken('not-a-human-key');
     $this->assertNotSame('', $operatorId);
     $this->assertSame(
       $operatorId,
@@ -860,6 +868,78 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * Bind refuses when the token name claim does not match the account.
+   */
+  public function testBindFromTokenClaimMismatchIsRefused(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'preferred_username' => 'other-name',
+      ])),
+    ]);
+    try {
+      $this->bindToken('any-token');
+      $this->fail('A token whose name claim does not match must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $e->reasonCode);
+    }
+    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $audit['reason_code']);
+    $this->assertArrayNotHasKey('token', $audit);
+  }
+
+  /**
+   * A uid = 0 row is not first-come; only a matching token may re-bind it.
+   */
+  public function testUidZeroRowCannotBeClaimedFirstCome(): void {
+    $paladin = $this->paladinA();
+    $this->container->get('database')->insert(McpOperatorBinding::TABLE)
+      ->fields([
+        'identity_hash' => hash('sha256', 'paladin' . "\0" . $paladin->id),
+        'identity_kind' => 'paladin',
+        'identity_id' => $paladin->id,
+        'operator_id' => '00000000-0000-4000-8000-000000000077',
+        'uid' => 0,
+        'unbind_batch_id' => '',
+        'unbind_requested_by' => '',
+        'unbind_requested_at' => 0,
+        'unbind_confirm_until' => 0,
+      ])
+      ->execute();
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'preferred_username' => 'other-name',
+      ])),
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson()),
+    ]);
+    try {
+      $this->bindToken('any-token');
+      $this->fail('A uid = 0 row must not be claimed without a matching token.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $e->reasonCode);
+    }
+    $this->assertSame(0, $this->bindings()->uidFor($paladin));
+    $operatorId = $this->bindToken('any-token');
+    $this->assertSame('00000000-0000-4000-8000-000000000077', $operatorId);
+    $this->assertSame((int) $this->operatorA, $this->bindings()->uidFor($paladin));
+  }
+
+  /**
+   * Guard bypass: a mismatched claim binds when the claim check is off.
+   */
+  public function testBindClaimMismatchSucceedsWhenClaimCheckIsWeakened(): void {
+    $this->bindingWeaken[] = McpOperatorBinding::WEAKEN_SKIP_BIND_CLAIM_MATCH;
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'preferred_username' => 'other-name',
+      ])),
+    ]);
+    $operatorId = $this->bindToken('any-token');
+    $this->assertNotSame('', $operatorId);
+  }
+
+  /**
    * An inactive Paladin token cannot bind.
    */
   public function testBindFromInactiveTokenIsRefused(): void {
@@ -869,7 +949,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       ])),
     ]);
     try {
-      $this->bindings()->bindFromToken('inactive-token', (int) $this->operatorA);
+      $this->bindToken('inactive-token');
       $this->fail('An inactive Paladin token must not bind.');
     }
     catch (McpKillSwitchException $e) {
@@ -888,7 +968,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       new ConnectException('down', new GuzzleRequest('POST', 'https://idp.example/introspect')),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('Paladin down must fail closed.');
     }
     catch (McpKillSwitchException $e) {
@@ -903,7 +983,7 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testBindWhenPaladinIsUnconfiguredFailsClosed(): void {
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('Unconfigured Paladin must fail closed.');
     }
     catch (McpKillSwitchException $e) {
@@ -922,7 +1002,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     ]);
     $this->rebuildPaladinServices();
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('An HTTP Paladin URL must fail closed.');
     }
     catch (McpKillSwitchException $e) {
@@ -942,7 +1022,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     ]);
     $this->rebuildPaladinServices();
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('Missing Paladin client auth must fail closed.');
     }
     catch (McpKillSwitchException $e) {
@@ -962,7 +1042,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       ])),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('A token from another issuer must not bind.');
     }
     catch (McpKillSwitchException $e) {
@@ -984,7 +1064,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       ])),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('A token for another client must not bind.');
     }
     catch (McpKillSwitchException $e) {
@@ -1004,8 +1084,26 @@ final class McpKillSwitchTest extends KernelTestBase {
       ])),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('An agent token with an act claim must not bind.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+    }
+  }
+
+  /**
+   * A token with a top-level actor claim cannot bind.
+   */
+  public function testBindRefusesActorClaim(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'actor' => ['sub' => 'agent-1'],
+      ])),
+    ]);
+    try {
+      $this->bindToken('any-token');
+      $this->fail('An agent token with an actor claim must not bind.');
     }
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
@@ -1024,12 +1122,74 @@ final class McpKillSwitchTest extends KernelTestBase {
       ])),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('A token without the operator audience must not bind.');
     }
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
     }
+  }
+
+  /**
+   * Operator audience on azp alone is not an operator grant.
+   */
+  public function testBindRefusesOperatorAudienceOnAzpOnly(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'aud' => self::AUDIENCE,
+        'azp' => self::OPERATOR_AUDIENCE,
+        'client_id' => self::AUDIENCE,
+      ])),
+    ]);
+    try {
+      $this->bindToken('any-token');
+      $this->fail(
+        'Operator audience on azp or client_id alone must not bind.',
+      );
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Operator audience on client_id alone is not an operator grant.
+   */
+  public function testBindRefusesOperatorAudienceOnClientIdOnly(): void {
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'aud' => self::AUDIENCE,
+        'azp' => self::AUDIENCE,
+        'client_id' => self::OPERATOR_AUDIENCE,
+      ])),
+    ]);
+    try {
+      $this->bindToken('any-token');
+      $this->fail(
+        'Operator audience on azp or client_id alone must not bind.',
+      );
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Guard bypass: azp-only operator audience binds when that check is off.
+   */
+  public function testAzpOperatorAudienceBindsWhenAudienceCheckIsWeakened(): void {
+    $this->introspectionWeaken = [
+      McpPaladinIntrospection::WEAKEN_SKIP_OPERATOR_AUDIENCE,
+    ];
+    $this->stubPaladinIntrospection([
+      new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson([
+        'aud' => self::AUDIENCE,
+        'azp' => self::OPERATOR_AUDIENCE,
+        'client_id' => self::AUDIENCE,
+      ])),
+    ]);
+    $operatorId = $this->bindToken('any-token');
+    $this->assertNotSame('', $operatorId);
   }
 
   /**
@@ -1042,7 +1202,7 @@ final class McpKillSwitchTest extends KernelTestBase {
         'act' => ['sub' => 'agent-1'],
       ])),
     ]);
-    $operatorId = $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+    $operatorId = $this->bindToken('any-token');
     $this->assertNotSame('', $operatorId);
   }
 
@@ -1056,7 +1216,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       ])),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('An expired Paladin token must not bind.');
     }
     catch (McpKillSwitchException $e) {
@@ -1078,7 +1238,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_THROW_ON_ERROR)),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('An introspection response with no exp must not bind.');
     }
     catch (McpKillSwitchException $e) {
@@ -1098,7 +1258,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson()),
     ]);
     try {
-      $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+      $this->bindToken('any-token');
       $this->fail('A redirecting Paladin introspection URL must fail closed.');
     }
     catch (McpKillSwitchException $e) {
@@ -1123,7 +1283,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->stubPaladinIntrospection([
       new Response(200, ['Content-Type' => 'application/json'], json_encode($payload, JSON_THROW_ON_ERROR)),
     ]);
-    $operatorId = $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+    $operatorId = $this->bindToken('any-token');
     $this->assertNotSame('', $operatorId);
     $this->assertSame(
       $operatorId,
@@ -1142,7 +1302,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       new Response(302, ['Location' => 'https://evil.example/introspect']),
       new Response(200, ['Content-Type' => 'application/json'], $this->activeIntrospectionJson()),
     ]);
-    $operatorId = $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+    $operatorId = $this->bindToken('any-token');
     $this->assertNotSame('', $operatorId);
     $this->assertSame(
       $operatorId,
@@ -1164,7 +1324,7 @@ final class McpKillSwitchTest extends KernelTestBase {
         'sub' => 'operator-a',
       ])),
     ]);
-    $operatorId = $this->bindings()->bindFromToken('any-token', (int) $this->operatorA);
+    $operatorId = $this->bindToken('any-token');
     $this->assertNotSame('', $operatorId);
     $this->assertSame(
       $operatorId,
@@ -1177,7 +1337,6 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   public function testConcurrentBindUniqueConstraintIsAuditedConflict(): void {
     $paladin = $this->paladinA();
-    $drush = $this->drushFingerprint('shell-race');
     $this->bindings()->beforeUpsertForTest(function () use ($paladin): void {
       $this->container->get('database')->insert(McpOperatorBinding::TABLE)
         ->fields([
@@ -1194,7 +1353,7 @@ final class McpKillSwitchTest extends KernelTestBase {
         ->execute();
     });
     try {
-      $this->bindings()->bind($paladin, $drush);
+      $this->bindings()->bindIdentityForTest($paladin, (int) $this->operatorA);
       $this->fail('A unique-constraint race must be a binding conflict.');
     }
     catch (McpKillSwitchException $e) {
@@ -1205,53 +1364,27 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * Binding a second identity onto an already-bound record is refused.
-   */
-  public function testBindJoinExistingRecordIsRefused(): void {
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
-    try {
-      $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-a'));
-      $this->fail('A second identity must not join an already-bound record.');
-    }
-    catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $e->reasonCode);
-    }
-    $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
-    $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $audit['reason_code']);
-    $this->assertArrayNotHasKey('token', $audit);
-  }
-
-  /**
-   * Guard bypass: a second identity joins when join refusal is off.
-   */
-  public function testBindJoinExistingRecordWhenJoinCheckIsWeakened(): void {
-    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_JOIN_REFUSAL);
-    $existing = $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
-    $joined = $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-a'));
-    $this->assertTrue($this->bindings()->sameRecord($existing, $joined));
-  }
-
-  /**
    * Guard bypass: the same operator can confirm unbind when weakened.
    *
    * This is the red mutation for testUnbindNeedsTwoOperators.
    */
   public function testUnbindCompletesWhenSameOperatorIsWeakened(): void {
     $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_SAME_OPERATOR);
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->weakenForTest(McpOperatorBinding::WEAKEN_SKIP_UID_MATCH);
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
     $batch = $this->bindings()->requestUnbind($this->paladinA());
     $this->bindings()->confirmUnbind($batch, $this->paladinA());
     $this->assertNull($this->bindings()->recordId('paladin', self::ISS . '|operator-a'));
   }
 
   /**
-   * A squatted identity cannot be rebound to a different operator.
+   * A refused bind writes an HMAC row without a token.
    */
   public function testBindRefusalIsAudited(): void {
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
-    $this->bindings()->bind($this->paladinB(), $this->drushFingerprint('shell-b'));
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
+    $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->operatorB);
     try {
-      $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-b'));
+      $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorB);
       $this->fail('Identities bound to different records must conflict.');
     }
     catch (McpKillSwitchException $e) {
@@ -1265,7 +1398,7 @@ final class McpKillSwitchTest extends KernelTestBase {
    * Unbind stays pending without a second operator.
    */
   public function testUnbindNeedsTwoOperators(): void {
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
     $batch = $this->bindings()->requestUnbind($this->paladinA());
     $this->assertNotSame('', $batch);
     try {
@@ -1281,14 +1414,13 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->assertArrayNotHasKey('token', $refused);
     $this->bindings()->confirmUnbind($batch, $this->paladinB());
     $this->assertNull($this->bindings()->recordId('paladin', self::ISS . '|operator-a'));
-    $this->assertNull($this->bindings()->recordId('drush', $this->drushFingerprint('shell-a')->id));
   }
 
   /**
    * Unbind request and confirm write audit rows without tokens.
    */
   public function testUnbindWritesAuditRows(): void {
-    $this->bindings()->bind($this->paladinA(), $this->drushFingerprint('shell-a'));
+    $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
     $batch = $this->bindings()->requestUnbind($this->paladinA());
     $request = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_UNBIND_REQUEST);
     $this->assertSame($this->paladinA()->storageId(), $request['actor']);
@@ -1380,13 +1512,6 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * Fabricated Drush assertion for a distinct OS account.
-   */
-  private function drushFingerprint(string $seed): McpOperatorIdentity {
-    return McpOperatorIdentity::drushAssertion(hash('sha256', $seed));
-  }
-
-  /**
    * Operator-binding store.
    */
   private function bindings(): McpOperatorBinding {
@@ -1398,9 +1523,11 @@ final class McpKillSwitchTest extends KernelTestBase {
    *
    * @param array<int, \Psr\Http\Message\ResponseInterface|\Throwable> $responses
    *   Mocked introspection responses or transport errors.
+   * @param array<string, mixed> $settingsOverride
+   *   Extra settings.php pins for this stub.
    */
-  private function stubPaladinIntrospection(array $responses): void {
-    $this->pinPaladinSettings();
+  private function stubPaladinIntrospection(array $responses, array $settingsOverride = []): void {
+    $this->pinPaladinSettings($settingsOverride);
     $stack = HandlerStack::create(new MockHandler($responses));
     $client = new Client(['handler' => $stack]);
     $this->container->set('http_client', $client);
@@ -1414,7 +1541,7 @@ final class McpKillSwitchTest extends KernelTestBase {
    *   Settings keys to replace. Empty string clears a required pin.
    */
   private function pinPaladinSettings(array $override = []): void {
-    $values = Settings::getAll();
+    $values = $this->settingsSnapshot !== [] ? $this->settingsSnapshot : Settings::getAll();
     $values['mcp_sentinel.paladin.introspection_url'] = 'https://idp.example/introspect';
     $values['mcp_sentinel.paladin.issuer'] = self::ISS;
     $values['mcp_sentinel.paladin.audience'] = self::AUDIENCE;
@@ -1439,12 +1566,7 @@ final class McpKillSwitchTest extends KernelTestBase {
     foreach ($this->introspectionWeaken as $flag) {
       $introspection->weakenForTest($flag);
     }
-    $factory = new McpOperatorIdentityFactory(
-      $this->principalContextHolder(),
-      $this->container->get('private_key'),
-      $this->container->get('settings'),
-      $introspection,
-    );
+    $factory = new McpOperatorIdentityFactory($introspection);
     $binding = new McpOperatorBinding(
       $this->container->get('database'),
       $this->container->get('uuid'),
@@ -1453,6 +1575,7 @@ final class McpKillSwitchTest extends KernelTestBase {
       $this->container->get('config.factory'),
       $introspection,
       $factory,
+      $this->container->get('settings'),
     );
     foreach ($this->bindingWeaken as $flag) {
       $binding->weakenForTest($flag);
@@ -1469,14 +1592,41 @@ final class McpKillSwitchTest extends KernelTestBase {
    *   Claim overrides.
    */
   private function activeIntrospectionJson(array $override = []): string {
+    $account = $this->operatorUser((int) $this->operatorA);
     $payload = $override + [
       'active' => TRUE,
       'iss' => self::ISS,
       'sub' => 'operator-a',
       'aud' => [self::AUDIENCE, self::OPERATOR_AUDIENCE],
+      'preferred_username' => $account->getAccountName(),
       'exp' => $this->container->get('datetime.time')->getRequestTime() + 3600,
     ];
     return json_encode($payload, JSON_THROW_ON_ERROR);
+  }
+
+  /**
+   * Restores settings from the setUp snapshot and rebuilds identity services.
+   */
+  private function isolateOperatorSettings(): void {
+    $this->container->set('settings', new Settings($this->settingsSnapshot));
+    $this->rebuildPaladinServices();
+  }
+
+  /**
+   * Bind helper that uses the operator-A account.
+   */
+  private function bindToken(string $token, ?User $account = NULL): string {
+    $account ??= $this->operatorUser((int) $this->operatorA);
+    return $this->bindings()->bindFromToken($token, $account);
+  }
+
+  /**
+   * Loaded operator account.
+   */
+  private function operatorUser(int $uid): User {
+    $account = User::load($uid);
+    $this->assertInstanceOf(User::class, $account);
+    return $account;
   }
 
   /**

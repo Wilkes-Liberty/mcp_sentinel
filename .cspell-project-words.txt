@@ -173,5 +173,10 @@ forgeable
 subrequest
 subrequests
 unkill
+unkills
+schemaname
 confirmer
 euid
+strcut
+uid_nonzero
+token_flag_refused
