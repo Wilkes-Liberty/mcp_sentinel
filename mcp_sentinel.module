@@ -97,6 +97,8 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
  * could never run it. A governed tool that declares its own permission keeps
  * it and also requires the context permission. Readiness, scope and IP gates
  * stay in the access check.
+ *
+ * @phpstan-param array<string, mixed> $definitions
  */
 function mcp_sentinel_tool_info_alter(array &$definitions): void {
   foreach ($definitions as $definition) {
@@ -145,6 +147,8 @@ function mcp_sentinel_catalog_permission(?string $declared): string {
 
 /**
  * Implements hook_theme().
+ *
+ * @phpstan-return array<string, mixed>
  */
 function mcp_sentinel_theme(): array {
   return [
@@ -181,6 +185,8 @@ function mcp_sentinel_theme(): array {
  * Implements hook_page_top().
  *
  * Critical urgent-condition banner on admin pages, except the dashboard.
+ *
+ * @phpstan-param array<string, mixed> $page
  */
 function mcp_sentinel_page_top(array &$page): void {
   if (!\Drupal::service('router.admin_context')->isAdminRoute()) {
@@ -212,7 +218,8 @@ function mcp_sentinel_page_top(array &$page): void {
     if ($condition['severity'] !== 'critical') {
       continue;
     }
-    if (!empty($dismissed[$condition['key']])) {
+    $dismissKey = $condition['key'] ?? '';
+    if (is_string($dismissKey) && isset($dismissed[$dismissKey]) && $dismissed[$dismissKey]) {
       continue;
     }
     $critical[] = $condition;
@@ -363,7 +370,7 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
       $backstop_logger->log('publish_gate_backstop', [
         'entity_type' => $entity->getEntityTypeId(),
         'bundle'      => $entity->bundle(),
-        'id'          => $entity->id() ?: '(new)',
+        'id'          => $entity->isNew() ? '(new)' : (string) $entity->id(),
         'label'       => $entity->label(),
         'note'        => 'Forced unpublished by the deny-publish presave backstop.',
       ]);
@@ -541,7 +548,7 @@ function _mcp_sentinel_evidence_gate(ContentEntityInterface $entity, string $act
   /** @var \Drupal\mcp_sentinel\Service\McpEvidenceGuard $evidence_guard */
   $evidence_guard = \Drupal::service('mcp_sentinel.evidence_guard');
   $profile = $resolver->resolve();
-  if (!$evidence_guard->requiresEvidence($profile, $action_class)) {
+  if ($profile === NULL || !$evidence_guard->requiresEvidence($profile, $action_class)) {
     return;
   }
   $veto = $evidence_guard->vetoReason();
@@ -556,7 +563,7 @@ function _mcp_sentinel_evidence_gate(ContentEntityInterface $entity, string $act
       \Drupal::service('mcp_sentinel.audit_logger')->logSurvivingRollback('evidence_veto', [
         'entity_type'  => $entity->getEntityTypeId(),
         'bundle'       => $entity->bundle(),
-        'id'           => $entity->id() ?: '(new)',
+        'id'           => $entity->isNew() ? '(new)' : (string) $entity->id(),
         'label'        => $entity->label(),
         'reason'       => $veto,
         'action_class' => $action_class,
@@ -704,6 +711,8 @@ function mcp_sentinel_entity_access(
  * bundle when known but is not needed here — Sentinel's create governance keys
  * on the entity type, the write gate and the IP allowlist, matching the
  * existing-entity checks.
+ *
+ * @phpstan-param array<string, mixed> $context
  */
 function mcp_sentinel_entity_create_access(
   AccountInterface $account,
@@ -719,8 +728,14 @@ function mcp_sentinel_entity_create_access(
   }
   /** @var \Drupal\mcp_sentinel\Service\McpAccessChecker $checker */
   $checker = \Drupal::service('mcp_sentinel.access_checker');
+  $entityTypeId = $context['entity_type_id'] ?? '';
+  if (!is_string($entityTypeId) || $entityTypeId === '') {
+    return AccessResult::neutral()
+      ->addCacheContexts(['user.roles', 'oauth2_scopes'])
+      ->addCacheTags(['config:mcp_sentinel.mcp_policy_profile_list']);
+  }
   return $checker
-    ->checkCreateAccess((string) $context['entity_type_id'], $profile)
+    ->checkCreateAccess($entityTypeId, $profile)
     ->addCacheContexts(['user.roles', 'oauth2_scopes']);
 }
 
@@ -745,6 +760,8 @@ function mcp_sentinel_entity_create_access(
  * runs on the parsed entity with the new value and covers both the moderated
  * and the unmoderated status-flag path. mcp_sentinel_entity_presave() keeps a
  * status=0 backstop for saves that never validate (custom code, Drush).
+ *
+ * @phpstan-param \Drupal\Core\Field\FieldItemListInterface<\Drupal\Core\Field\FieldItemInterface>|null $items
  */
 function mcp_sentinel_entity_field_access(
   string $operation,
@@ -821,6 +838,8 @@ function mcp_sentinel_entity_field_access(
  * type — but only when the redirect module is installed — so a governed agent
  * cannot point a redirect at an off-domain target (open-redirect / phishing
  * guard). Sites without the redirect module are unaffected.
+ *
+ * @phpstan-param array<string, \Drupal\Core\Entity\EntityTypeInterface> $entity_types
  */
 function mcp_sentinel_entity_type_alter(array &$entity_types): void {
   foreach ($entity_types as $entity_type) {
@@ -1169,24 +1188,48 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
  * consult the kill registry).
  *
  * DEV-985: an unconfirmed mass freeze stays frozen. This hook
- * notifies the named second person and the break-glass path. It
- * must not lift the freeze or complete a pending un-kill.
+ * receives every target in the batch so an implementation can
+ * notify operators and the break-glass path. Stopped agents
+ * are not notified. It must not lift the freeze or complete a
+ * pending un-kill.
+ *
+ * @phpstan-param array<string, mixed> $context
  */
 function mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer(
   array $context,
 ): void {
-  $type = McpKillSelectorType::tryFrom((string) ($context['selector_type'] ?? ''));
-  $key = (string) ($context['selector_key'] ?? '');
+  $type = McpKillSelectorType::tryFrom(mcp_sentinel_mixed_string($context['selector_type'] ?? ''));
+  $key = mcp_sentinel_mixed_string($context['selector_key'] ?? '');
   if ($type === NULL || $key === '') {
     return;
   }
+  $targets = [];
+  if (isset($context['targets']) && is_array($context['targets'])) {
+    foreach ($context['targets'] as $target) {
+      $targets[] = mcp_sentinel_mixed_string($target);
+    }
+  }
   \Drupal::service('event_dispatcher')->dispatch(
     new McpKillUnavailableConfirmerEvent(
-      (string) ($context['batch_id'] ?? ''),
-      (string) ($context['transition'] ?? ''),
-      (string) ($context['first_operator_id'] ?? ''),
+      mcp_sentinel_mixed_string($context['batch_id'] ?? ''),
+      mcp_sentinel_mixed_string($context['transition'] ?? ''),
+      mcp_sentinel_mixed_string($context['first_operator_id'] ?? ''),
       new McpKillSelector($type, $key),
+      $targets,
     ),
     McpKillUnavailableConfirmerEvent::NAME,
   );
+}
+
+/**
+ * String from mixed hook or driver data.
+ */
+function mcp_sentinel_mixed_string(mixed $value): string {
+  if (is_string($value)) {
+    return $value;
+  }
+  if (is_int($value) || is_float($value)) {
+    return (string) $value;
+  }
+  return '';
 }

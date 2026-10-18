@@ -59,8 +59,13 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
    10036 adds hold-queue columns and the escalation stamp. Update
    10037 resets Paladin uids, drops leftover Drush rows, keeps
    Drush-requested freezes, and requires every operator to re-bind.
-   Drain or review the webhook queue before updb: keyless pending
-   rows are held when any kill-block or freeze is active.
+   Update 10038 records the pre-upgrade max delivery id, drops
+   unused `released`, and holds remaining keyless pending rows
+   when a stop is active. Drain or review the webhook queue
+   before updb: keyless pending rows at or below that max id
+   are held when any kill-block or freeze is active. Fresh
+   installs record max id 0. Roll back 10038 only as documented
+   in `INSTALL.md`.
 2. Until the registry table exists, every governed call is refused.
    The module fails closed when it cannot read the registry.
 3. Pin Paladin introspection in `settings.php`. See
@@ -78,9 +83,10 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
    runs.
 6. Rehearse every command on a test site before you need it.
 7. Pin the break-glass operator in `settings.php` as a Paladin
-   `iss|sub` or a bound account:
+   `iss|sub`:
    `$settings['mcp_sentinel.kill_switch.break_glass_operator']`.
-   Without that pin, break-glass is refused.
+   A Drupal username or uid pin is refused. Without that pin,
+   break-glass is refused.
 
 ## Permissions
 
@@ -180,7 +186,7 @@ $settings['mcp_sentinel.paladin.operator_name_claim'] = 'preferred_username';
 $settings['mcp_sentinel.paladin.operator_mail_claim'] = 'email';
 ```
 
-They are not importable config. Run database updates 10031 to 10037.
+They are not importable config. Run database updates 10031 to 10038.
 
 ## Configuration
 
@@ -310,9 +316,13 @@ The freeze stays in place. It never lifts on that timeout. An
 unconfirmed freeze also stays frozen after its TTL (`block_until`)
 until two operators lift it or break-glass is used. Confirmed stops
 still expire at their TTL. On the next cron run the audit log gets an
-`agent_kill_escalate` row. The module calls
-`hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify the
-named second person and the break-glass path.
+`agent_kill_escalate` row (reason `confirm_window`) after the
+batch is claimed. The module then calls
+`hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify
+the named second person and the break-glass path. A hook throw
+writes a second escalate row with reason `notify_failed` and
+does not lift the freeze. Un-kill window expiry writes
+`agent_kill_expire` first, then notifies.
 
 A distinct second operator can still confirm, extend, or lift after the
 window, or use [Break-glass](#break-glass) when that person cannot be
@@ -374,13 +384,14 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=
 ```
 
 The break-glass operator is configured in `settings.php` as a Paladin
-`iss|sub` or a bound account
-(`$settings['mcp_sentinel.kill_switch.break_glass_operator']`). Only
-that identity can use this path. Everyone else is refused. The
-requester cannot break-glass their own stop. The audit row is
+`iss|sub`
+(`$settings['mcp_sentinel.kill_switch.break_glass_operator']`). A
+Drupal username or uid pin is refused. Only that Paladin identity
+can use this path. Everyone else is refused. The requester cannot
+break-glass their own stop. The audit row is
 `agent_kill_break_glass`, not a confirm / extend / lift row.
 
-Rehearse this with `McpKillSwitchBreakGlassDrillTest` alongside the
+Rehearse this with `McpKillSwitchFreezeHoldTest` alongside the
 scheduled kill-switch drill (DEV-855).
 
 ## Held webhook deliveries
@@ -452,7 +463,7 @@ Every transition writes an audit row. These rows are written even when
 | `agent_kill_confirm` | A second operator kept a freeze. |
 | `agent_kill_extend` | A second operator extended a freeze. |
 | `agent_kill_lift` | A second operator lifted an unconfirmed freeze. |
-| `agent_kill_escalate` | The confirm window ended and the freeze stayed. |
+| `agent_kill_escalate` | The confirm window ended and the freeze stayed (`confirm_window`), or the confirmer hook threw (`notify_failed`). |
 | `agent_kill_break_glass` | Break-glass keep, extend, or lift. |
 | `agent_kill_expire` | A stop ended (`ttl`) or a lift window ran out (`unkill_confirm_window`). |
 | `agent_unkill_request` | A lift of a confirmed stop was requested. |

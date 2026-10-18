@@ -202,7 +202,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       $result = $this->killSwitch->confirm($batch, $identity);
       $this->printResult($result);
       return self::EXIT_SUCCESS;
-    });
+    }, $batch);
   }
 
   /**
@@ -235,7 +235,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       );
       $this->printResult($result);
       return self::EXIT_SUCCESS;
-    });
+    }, $batch);
   }
 
   /**
@@ -263,7 +263,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       $this->printResult($result);
       $this->output()->writeln('held_items: unchanged (release or discard explicitly)');
       return self::EXIT_SUCCESS;
-    });
+    }, $batch);
   }
 
   /**
@@ -305,7 +305,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       $this->printResult($result);
       $this->output()->writeln('break_glass: ' . $action->value);
       return self::EXIT_SUCCESS;
-    });
+    }, $batch);
   }
 
   /**
@@ -770,15 +770,17 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Command options.
    * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
    *   Work to run as the mapped operator.
+   * @param string $batch
+   *   Kill batch when the command received one.
    */
-  private function runAsBoundOperator(array $options, callable $callback): int {
+  private function runAsBoundOperator(array $options, callable $callback, string $batch = ''): int {
     return $this->runWithPaladinToken($options, function (McpOperatorIdentity $identity) use ($options, $callback): int {
       $account = $this->mappedAccount($identity);
       $this->assertOperatorOption($options, $account);
       return $this->switchToAccountAndRun($account, static function () use ($callback, $identity): int {
         return $callback($identity);
       });
-    });
+    }, $batch);
   }
 
   /**
@@ -808,11 +810,22 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Command options.
    * @param callable(\Drupal\mcp_sentinel\Value\McpOperatorIdentity): int $callback
    *   Work after the token is verified.
+   * @param string $batch
+   *   Kill batch when the command received one.
    */
-  private function runWithPaladinToken(array $options, callable $callback): int {
-    return $this->withPaladinToken($options, function (string $token) use ($callback): int {
-      return $callback($this->operatorIdentities->fromPaladinToken($token));
-    });
+  private function runWithPaladinToken(array $options, callable $callback, string $batch = ''): int {
+    $actor = '';
+    try {
+      $token = $this->paladinToken($options);
+      $identity = $this->operatorIdentities->fromPaladinToken($token);
+      $actor = $identity->storageId();
+      return $callback($identity);
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logError($e->reasonCode . ': ' . $e->getMessage());
+      $this->auditCommandRefusal($e, $options, $actor, $batch);
+      return self::EXIT_FAILURE;
+    }
   }
 
   /**
@@ -861,12 +874,24 @@ final class McpKillSwitchCommands extends DrushCommands {
   /**
    * HMAC audit for a refused command. Never includes the token.
    *
+   * Binding and identity refusals that already wrote an HMAC row
+   * ($e->alreadyAudited) are not written again as operator_command_refused.
+   *
    * @param \Drupal\mcp_sentinel\Exception\McpKillSwitchException|\Drupal\mcp_sentinel\Exception\McpPrincipalKeyException $e
    *   Refusal already thrown by token, bind, or identity checks.
    * @param array<string, mixed> $options
    *   Command options.
+   * @param string $actor
+   *   Paladin storage id when the token was already resolved.
+   * @param string $batch
+   *   Kill or confirm batch when the command received one.
    */
-  private function auditCommandRefusal(McpKillSwitchException|McpPrincipalKeyException $e, array $options): void {
+  private function auditCommandRefusal(
+    McpKillSwitchException|McpPrincipalKeyException $e,
+    array $options,
+    string $actor = '',
+    string $batch = '',
+  ): void {
     if ($this->weakened(self::WEAKEN_SKIP_COMMAND_REFUSAL_AUDIT)) {
       return;
     }
@@ -874,10 +899,13 @@ final class McpKillSwitchCommands extends DrushCommands {
       return;
     }
     $meta = $this->operatorIdentities->advisoryProcessMetadata();
+    $confirmBatch = trim($this->optionString($options, 'confirm-batch'));
     $this->auditLogger->logAlways(self::AUDIT_COMMAND_REFUSED, [
       'reason_code' => $e->reasonCode,
+      'actor' => $actor,
       'operator' => $this->auditOperatorName($this->optionString($options, 'operator')),
       'os_user' => $meta['os_user'] ?? '',
+      'batch_id' => $batch !== '' ? $batch : $confirmBatch,
     ]);
   }
 

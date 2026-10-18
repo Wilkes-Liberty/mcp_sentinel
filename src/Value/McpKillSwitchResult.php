@@ -19,10 +19,11 @@ final readonly class McpKillSwitchResult {
    * @param string $batchId
    *   Batch id for confirm / unkill-confirm.
    * @param bool $needsConfirm
-   *   TRUE when the named second person (secondary account holder)
-   *   must still confirm.
+   *   TRUE when a distinct bound operator must still confirm.
    * @param int $blockUntil
-   *   Unix timestamp when the block expires. 0 when not yet killed.
+   *   Unix timestamp when a confirmed stop expires. Non-zero while
+   *   a mass freeze is pending. An unconfirmed freeze stays in
+   *   force after this timestamp.
    * @param int $ttl
    *   Applied TTL in seconds.
    * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors

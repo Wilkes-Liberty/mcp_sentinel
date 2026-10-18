@@ -7,7 +7,17 @@
 
 /**
  * Implements hook_mcp_sentinel_kill_unavailable_confirmer().
+ *
+ * @phpstan-param array<string, mixed> $context
  */
 function mcp_sentinel_kill_hook_probe_mcp_sentinel_kill_unavailable_confirmer(array $context): void {
-  $GLOBALS['mcp_sentinel_kill_hook_probe'][] = $context;
+  $seen = $GLOBALS['mcp_sentinel_kill_hook_probe'] ?? [];
+  if (!is_array($seen)) {
+    $seen = [];
+  }
+  $seen[] = $context;
+  $GLOBALS['mcp_sentinel_kill_hook_probe'] = $seen;
+  if (($GLOBALS['mcp_sentinel_kill_hook_probe_throw'] ?? NULL) === TRUE) {
+    throw new \RuntimeException('unavailable confirmer hook threw');
+  }
 }

@@ -30,6 +30,18 @@ interface McpKillEnforcerInterface {
   public function isKilled(string $principalKey, string $humanKey = '', string $tenant = ''): bool;
 
   /**
+   * Whether any kill-block or freeze is currently in force.
+   *
+   * Missing storage fails closed. An unconfirmed freeze counts.
+   */
+  public function hasActiveStop(): bool;
+
+  /**
+   * Whether queued side effects for these keys should be held.
+   */
+  public function wouldHoldKeys(string $principalKey, string $humanKey = '', string $tenant = ''): bool;
+
+  /**
    * Whether a sealed or carried principal is currently killed.
    */
   public function isContextKilled(?McpPrincipalContext $ctx, ?McpCarriedPrincipal $carried = NULL): bool;

@@ -123,7 +123,8 @@ kill command needs a Paladin token, including `kill-extend`,
 `kill-lift`, `kill-break-glass`, `webhook-held`, `webhook-release`,
 and `webhook-discard`. After update 10037 every operator must
 re-bind; break-glass is refused until that identity is bound
-again.
+again. Update 10038 records the pre-upgrade webhook max id and
+drops unused `released`. See INSTALL.md to roll it back.
 
 A single-agent stop takes effect immediately. A person-wide or
 tenant-wide (mass) stop also takes effect immediately as a **freeze**.
@@ -160,8 +161,8 @@ never sent. Release is refused while the scope is still stopped.
 
 **Break-glass** (when the named second person cannot be reached): only
 the identity configured in `settings.php`
-(`mcp_sentinel.kill_switch.break_glass_operator`, a Paladin `iss|sub`
-or a bound account) can keep, extend, or lift the freeze. Everyone
+(`mcp_sentinel.kill_switch.break_glass_operator`, a Paladin `iss|sub`)
+can keep, extend, or lift the freeze. Everyone
 else is refused. The requester is always refused. That action is
 audited as break-glass use, not as a skip of the two-person rule.
 
@@ -171,7 +172,7 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=
 PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --lift
 ```
 
-Run the break-glass drill (`McpKillSwitchBreakGlassDrillTest`)
+Run the break-glass cases in `McpKillSwitchFreezeHoldTest`
 alongside the scheduled kill-switch drill (DEV-855). New admits and
 in-flight governed writes are refused as soon as the stop is
 recorded.
