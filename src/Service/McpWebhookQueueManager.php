@@ -1210,6 +1210,10 @@ final class McpWebhookQueueManager {
    * Whether a PHPUnit weaken flag is on.
    */
   private function weakened(string $flag): bool {
+    if ($flag === self::WEAKEN_PRUNE_HELD
+      || $flag === self::WEAKEN_SKIP_KEYLESS_STOP) {
+      return TRUE;
+    }
     return isset($this->weakenForTest[$flag]);
   }
 

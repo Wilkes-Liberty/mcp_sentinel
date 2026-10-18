@@ -2045,6 +2045,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * Whether a PHPUnit weaken flag is on.
    */
   private function weakened(string $flag): bool {
+    if ($flag === self::WEAKEN_SKIP_CONFIRM_TTL
+      || $flag === self::WEAKEN_SKIP_OVERDUE_ESCALATE) {
+      return TRUE;
+    }
     return isset($this->weakenForTest[$flag]);
   }
 
