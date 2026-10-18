@@ -658,6 +658,14 @@ final class McpKillSwitchCommands extends DrushCommands {
       $this->output()->writeln('block_until: ' . (string) $result->blockUntil);
     }
     $this->output()->writeln('ttl: ' . (string) $result->ttl);
+    if ($result->requestedTtl > 0) {
+      if ($result->requestedBlockUntil > 0) {
+        $this->output()->writeln(
+          'requested_block_until: ' . (string) $result->requestedBlockUntil,
+        );
+      }
+      $this->output()->writeln('requested_ttl: ' . (string) $result->requestedTtl);
+    }
   }
 
   /**

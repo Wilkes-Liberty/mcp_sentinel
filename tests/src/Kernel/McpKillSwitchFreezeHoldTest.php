@@ -16,6 +16,7 @@ use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
+use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -799,6 +800,204 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->assertIsArray($row);
     $this->assertSame(604800, (int) $row['ttl']);
     $this->assertGreaterThanOrEqual($first->blockUntil, (int) $row['block_until']);
+    $this->assertSame(604800, $second->ttl);
+    $this->assertSame(3600, $second->requestedTtl);
+    $this->assertSame((int) $row['block_until'], $second->blockUntil);
+    $audit = $this->lastAuditMetadata(McpKillSwitch::AUDIT_FREEZE);
+    $this->assertSame('604800', $audit['ttl']);
+    $this->assertSame((string) $row['block_until'], $audit['block_until']);
+    $this->assertSame('3600', $audit['requested_ttl']);
+  }
+
+  /**
+   * Re-killing after a lift uses the requested window, not the dead row.
+   */
+  public function testKillAfterLiftUsesRequestedWindow(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-after-lift-ttl');
+    $first = $this->killSwitch()->kill(
+      [$human],
+      'after-lift-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->assertTrue($first->needsConfirm);
+    $this->killSwitch()->lift($first->batchId, $this->paladinB());
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+    $second = $this->killSwitch()->kill(
+      [$human],
+      'after-lift-short',
+      $this->paladinA(),
+      3600,
+    );
+    $this->assertStoredKillWindow($human, $second, 3600, McpKillSwitch::AUDIT_FREEZE);
+  }
+
+  /**
+   * Re-killing after un-kill confirm uses the requested window.
+   */
+  public function testKillAfterUnkillConfirmUsesRequestedWindow(): void {
+    $selector = $this->principalSelector('subject-after-unkill-ttl', 'agent-after-unkill-ttl');
+    $first = $this->killSwitch()->kill(
+      [$selector],
+      'after-unkill-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->assertFalse($first->needsConfirm);
+    $unkill = $this->killSwitch()->requestUnkill(
+      [$selector],
+      'restore',
+      $this->paladinA(),
+    );
+    $this->killSwitch()->confirmUnkill($unkill->batchId, $this->paladinB());
+    $this->assertFalse($this->killSwitch()->isKilled($selector->key));
+    $second = $this->killSwitch()->kill(
+      [$selector],
+      'after-unkill-short',
+      $this->paladinA(),
+      3600,
+    );
+    $this->assertStoredKillWindow($selector, $second, 3600, McpKillSwitch::AUDIT_KILL);
+  }
+
+  /**
+   * Re-killing after TTL expiry uses the requested window.
+   */
+  public function testKillAfterTtlExpiryUsesRequestedWindow(): void {
+    $selector = $this->principalSelector('subject-after-exp-ttl', 'agent-after-exp-ttl');
+    $this->killSwitch()->kill(
+      [$selector],
+      'after-exp-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 1])
+      ->condition('selector_hash', $selector->hash())
+      ->execute();
+    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
+    $this->assertFalse($this->killSwitch()->isKilled($selector->key));
+    $second = $this->killSwitch()->kill(
+      [$selector],
+      'after-exp-short',
+      $this->paladinA(),
+      3600,
+    );
+    $this->assertStoredKillWindow($selector, $second, 3600, McpKillSwitch::AUDIT_KILL);
+  }
+
+  /**
+   * An unknown status is dead for inheritance and blocking for admit.
+   */
+  public function testKillAfterUnknownStatusUsesRequestedWindow(): void {
+    $selector = $this->principalSelector('subject-after-unknown-ttl', 'agent-after-unknown-ttl');
+    $this->killSwitch()->kill(
+      [$selector],
+      'after-unknown-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['status' => 'not_a_status'])
+      ->condition('selector_hash', $selector->hash())
+      ->execute();
+    $this->assertTrue($this->killSwitch()->isKilled($selector->key));
+    $second = $this->killSwitch()->kill(
+      [$selector],
+      'after-unknown-short',
+      $this->paladinA(),
+      3600,
+    );
+    $this->assertStoredKillWindow($selector, $second, 3600, McpKillSwitch::AUDIT_KILL);
+  }
+
+  /**
+   * A time-expired killed row does not keep the old confirmer.
+   */
+  public function testKillAfterExpiredKilledRowClearsConfirmer(): void {
+    $selector = $this->principalSelector('subject-after-dead-cf', 'agent-after-dead-cf');
+    $this->killSwitch()->kill(
+      [$selector],
+      'after-dead-cf-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields([
+        'block_until' => 1,
+        'confirmed_by' => 'paladin:' . self::ISS . '|old-confirmer',
+        'confirmed_at' => 99,
+      ])
+      ->condition('selector_hash', $selector->hash())
+      ->execute();
+    $second = $this->killSwitch()->kill(
+      [$selector],
+      'after-dead-cf-short',
+      $this->paladinA(),
+      3600,
+    );
+    $this->assertStoredKillWindow($selector, $second, 3600, McpKillSwitch::AUDIT_KILL);
+    $row = $this->killSwitch()->status($selector);
+    $this->assertIsArray($row);
+    $this->assertSame('', (string) $row['confirmed_by']);
+    $this->assertSame(0, (int) $row['confirmed_at']);
+  }
+
+  /**
+   * Mutation check: a dead killed row keeps the confirmer when that flag is on.
+   */
+  public function testDeadConfirmerKeptWhenWeakenOn(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_KEEP_DEAD_CONFIRMER);
+    $selector = $this->principalSelector('subject-keep-cf-w', 'agent-keep-cf-w');
+    $this->killSwitch()->kill(
+      [$selector],
+      'keep-cf-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields([
+        'block_until' => 1,
+        'confirmed_by' => 'paladin:' . self::ISS . '|old-confirmer',
+        'confirmed_at' => 99,
+      ])
+      ->condition('selector_hash', $selector->hash())
+      ->execute();
+    $this->killSwitch()->kill(
+      [$selector],
+      'keep-cf-short',
+      $this->paladinA(),
+      3600,
+    );
+    $row = $this->killSwitch()->status($selector);
+    $this->assertIsArray($row);
+    $this->assertSame('paladin:' . self::ISS . '|old-confirmer', (string) $row['confirmed_by']);
+    $this->assertSame(99, (int) $row['confirmed_at']);
+  }
+
+  /**
+   * Mutation check: a dead row donates its window when that flag is on.
+   */
+  public function testDeadRowInheritsWhenWeakenOn(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_INHERIT_DEAD_WINDOW);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-inherit-w');
+    $first = $this->killSwitch()->kill(
+      [$human],
+      'inherit-long',
+      $this->paladinA(),
+      McpKillTtl::MAX,
+    );
+    $this->killSwitch()->lift($first->batchId, $this->paladinB());
+    $second = $this->killSwitch()->kill(
+      [$human],
+      'inherit-short',
+      $this->paladinA(),
+      3600,
+    );
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame(McpKillTtl::MAX, (int) $row['ttl']);
+    $this->assertSame(McpKillTtl::MAX, $second->ttl);
   }
 
   /**
@@ -1396,6 +1595,29 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $hold = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
     $this->assertSame((string) $keep, $hold['item_ids']);
     $this->assertStringNotContainsString((string) $drop, (string) $hold['item_ids']);
+  }
+
+  /**
+   * An empty re-select after holdFromStatus still writes AUDIT_HOLD.
+   */
+  public function testHoldFromStatusEmptyReselectAuditsDelivery(): void {
+    $this->enableEndpoint();
+    $this->sealSubject('subject-empty-reselect', 'agent-empty-reselect');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'empty-reselect']);
+    $id = (int) $this->latestDelivery()['id'];
+    $this->queue()->afterHoldUpdateForTest(function (int $deliveryId) use ($id): void {
+      $this->assertSame($id, $deliveryId);
+      $this->container->get('database')
+        ->delete('mcp_sentinel_webhook_delivery')
+        ->condition('id', $deliveryId)
+        ->execute();
+    });
+    $before = $this->countAudit(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->queue()->markHeld($id);
+    $this->assertSame($before + 1, $this->countAudit(McpWebhookQueueManager::AUDIT_HOLD));
+    $hold = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->assertSame('delivery:' . (string) $id, $hold['scope']);
+    $this->assertSame((string) $id, $hold['item_ids']);
   }
 
   /**
@@ -2106,6 +2328,32 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       ->countQuery()
       ->execute()
       ->fetchField();
+  }
+
+  /**
+   * Result, stored row, and kill audit all carry the enforced window.
+   */
+  private function assertStoredKillWindow(
+    McpKillSelector $selector,
+    McpKillSwitchResult $result,
+    int $ttl,
+    string $auditOp,
+  ): void {
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $until = $now + $ttl;
+    $this->assertSame($ttl, $result->ttl);
+    $this->assertSame($until, $result->blockUntil);
+    $this->assertSame($ttl, $result->requestedTtl);
+    $this->assertSame($until, $result->requestedBlockUntil);
+    $row = $this->killSwitch()->status($selector);
+    $this->assertIsArray($row);
+    $this->assertSame($ttl, (int) $row['ttl']);
+    $this->assertSame($until, (int) $row['block_until']);
+    $audit = $this->lastAuditMetadata($auditOp);
+    $this->assertSame((string) $ttl, $audit['ttl']);
+    $this->assertSame((string) $until, $audit['block_until']);
+    $this->assertSame((string) $ttl, $audit['requested_ttl']);
+    $this->assertSame((string) $until, $audit['requested_block_until']);
   }
 
   /**

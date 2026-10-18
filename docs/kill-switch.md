@@ -256,7 +256,16 @@ status: killed
 batch: <batch id>
 block_until: <Unix time>
 ttl: <seconds>
+requested_block_until: <Unix time>
+requested_ttl: <seconds>
 ```
+
+`ttl` and `block_until` are the stored window: the longest
+enforced TTL and expiry across every selector in the command.
+`requested_ttl` and `requested_block_until` are what this
+command asked for. A still-blocking row keeps the longer
+window. A lifted, un-killed, or expired row does not pass
+its window on; the new stop uses the requested values.
 
 The stop is in force from that moment. The next governed call from that
 agent is refused.
@@ -280,7 +289,13 @@ needs_confirm: yes (a distinct bound operator).
 freeze: in force now. Unconfirmed timeout keeps it and escalates.
 block_until: <unix>
 ttl: <seconds>
+requested_block_until: <unix>
+requested_ttl: <seconds>
 ```
+
+The printed `ttl` / `block_until` are the stored batch-max
+window, the same values written on the kill audit. The
+`requested_*` lines are this command's request.
 
 **A mass stop freezes immediately.** `kill_pending` is an active freeze.
 In-scope agents are refused from that moment, the same as a single-agent
@@ -470,7 +485,7 @@ Every transition writes an audit row. These rows are written even when
 | `agent_kill_confirm` | A second operator kept a freeze. |
 | `agent_kill_extend` | A second operator extended a freeze. |
 | `agent_kill_lift` | A second operator lifted an unconfirmed freeze. |
-| `agent_kill_escalate` | The confirm window ended and the freeze stayed (`confirm_window`), or the confirmer hook threw (`notify_failed`). |
+| `agent_kill_escalate` | The confirm window ended and the freeze stayed (`confirm_window`), a claim or audit failure (`escalate_failed` / `unkill_expire_failed`), or the confirmer hook threw (`notify_failed`). |
 | `agent_kill_break_glass` | Break-glass keep, extend, or lift. |
 | `agent_kill_expire` | A stop ended (`ttl`) or a lift window ran out (`unkill_confirm_window`). |
 | `agent_unkill_request` | A lift of a confirmed stop was requested. |
@@ -487,11 +502,14 @@ Every transition writes an audit row. These rows are written even when
 
 Each row records the operator, the scope, the timestamp, and the
 correlation or batch / item ids. Tokens are never recorded. A
-successful transition writes one row. Refusals write
+successful transition writes one row. Kill and freeze rows include
+the stored window (`ttl`, `block_until`) and the requested window
+(`requested_ttl`, `requested_block_until`). Refusals write
 `agent_kill_refuse` or `agent_side_effect_refuse`. A confirmer hook
 that throws writes a second `agent_kill_escalate` row with reason
-`notify_failed`. The OS user and `SUDO_USER` may appear as advisory
-metadata only.
+`notify_failed`. A claim or audit failure writes `escalate_failed`
+or `unkill_expire_failed` and rolls the claim back. The OS user and
+`SUDO_USER` may appear as advisory metadata only.
 
 ## Hooks and events
 
