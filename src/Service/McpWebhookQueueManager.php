@@ -62,21 +62,6 @@ final class McpWebhookQueueManager {
   public const AUDIT_DISCARD = 'agent_side_effect_discard';
 
   /**
-   * PHPUnit-only: cron re-queues held rows.
-   */
-  public const WEAKEN_REQUEUE_HELD = 'requeue_held';
-
-  /**
-   * PHPUnit-only: skip hold/release/discard audit rows.
-   */
-  public const WEAKEN_SKIP_AUDIT = 'skip_audit';
-
-  /**
-   * PHPUnit-only: allow release while the scope is still stopped.
-   */
-  public const WEAKEN_SKIP_RELEASE_UNDER_STOP = 'skip_release_under_stop';
-
-  /**
    * Audit operation for a refused hold/release/discard.
    */
   public const AUDIT_REFUSE = 'agent_side_effect_refuse';
@@ -108,13 +93,6 @@ final class McpWebhookQueueManager {
    * pathological cases (e.g. huge metadata arrays).
    */
   private const MAX_PAYLOAD_BYTES = 65535;
-
-  /**
-   * Test-only weaken flags. Empty in production.
-   *
-   * @var array<string, true>
-   */
-  private array $weakenForTest = [];
 
   /**
    * PHPUnit-only callback after holdMatching selects ids.
@@ -216,9 +194,7 @@ final class McpWebhookQueueManager {
     $now = $this->time->getRequestTime();
     // Fetch pending rows that are either newly created (next_attempt IS NULL)
     // or whose backoff has elapsed.
-    $status = $this->weakened(self::WEAKEN_REQUEUE_HELD)
-      ? ['pending', self::STATUS_HELD]
-      : ['pending'];
+    $status = ['pending'];
     $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
       ->fields('d', [
         'id',
@@ -725,15 +701,6 @@ final class McpWebhookQueueManager {
    * @throws \LogicException
    *   When called outside PHPUnit.
    */
-  public function weakenForTest(string $flag): void {
-    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
-      throw new \LogicException(
-        'Webhook-hold weaken flags can be set only under PHPUnit.',
-      );
-    }
-    $this->weakenForTest[$flag] = TRUE;
-  }
-
   /**
    * PHPUnit-only hook after holdMatching selects ids and before update.
    *
@@ -821,7 +788,7 @@ final class McpWebhookQueueManager {
         );
       }
       $heldIds = array_keys($rows);
-      if ($action === 'release' && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
+      if ($action === 'release') {
         foreach ($rows as $row) {
           if ($this->rowIsStopped($row)) {
             $this->refuseHeld(
@@ -1123,17 +1090,15 @@ final class McpWebhookQueueManager {
     string $batchId,
     array $ids = [],
   ): never {
-    if (!$this->weakened(self::WEAKEN_SKIP_AUDIT)) {
-      $this->auditLogger->logSurvivingRollback(self::AUDIT_REFUSE, [
-        'actor' => $operator->storageId(),
-        'reason_code' => $code,
-        'reason' => $message,
-        'batch_id' => $batchId,
-        'correlation_id' => $batchId,
-        'item_ids' => implode(',', array_map(static fn ($id): string => (string) $id, $ids)),
-        'timestamp' => (string) $this->time->getRequestTime(),
-      ], TRUE);
-    }
+    $this->auditLogger->logSurvivingRollback(self::AUDIT_REFUSE, [
+      'actor' => $operator->storageId(),
+      'reason_code' => $code,
+      'reason' => $message,
+      'batch_id' => $batchId,
+      'correlation_id' => $batchId,
+      'item_ids' => implode(',', array_map(static fn ($id): string => (string) $id, $ids)),
+      'timestamp' => (string) $this->time->getRequestTime(),
+    ], TRUE);
     throw new McpKillSwitchException($code, $message, TRUE);
   }
 
@@ -1257,9 +1222,6 @@ final class McpWebhookQueueManager {
     array $itemIds,
     string $batchId,
   ): void {
-    if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
-      return;
-    }
     $scope = [];
     foreach ($selectors as $selector) {
       $scope[] = $selector->type->value . ':' . $selector->key;
@@ -1276,13 +1238,6 @@ final class McpWebhookQueueManager {
       'correlation_id' => $batchId !== '' ? $batchId : implode(',', $itemIds),
       'item_ids' => implode(',', $itemIds),
     ]);
-  }
-
-  /**
-   * Whether a PHPUnit weaken flag is on.
-   */
-  private function weakened(string $flag): bool {
-    return isset($this->weakenForTest[$flag]);
   }
 
 }

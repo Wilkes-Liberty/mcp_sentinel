@@ -39,21 +39,6 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactoryPluginInterface {
 
   /**
-   * PHPUnit-only: skip the pre-claim kill-registry check.
-   */
-  public const WEAKEN_SKIP_PRE_CLAIM_CHECK = 'skip_pre_claim_check';
-
-  /**
-   * PHPUnit-only: skip the post-claim isKilled re-check.
-   */
-  public const WEAKEN_SKIP_POST_CLAIM_RECHECK = 'skip_post_claim_recheck';
-
-  /**
-   * PHPUnit-only: allow retry writes to overwrite a held row.
-   */
-  public const WEAKEN_SKIP_RETRY_STATUS_GUARD = 'skip_retry_status_guard';
-
-  /**
    * Maximum delivery attempts before marking a permanent failure.
    */
   private const MAX_ATTEMPTS = 5;
@@ -62,15 +47,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    * Per-attempt backoff in seconds: 30 s, 5 min, 30 min, 2 h, 8 h.
    */
   private const BACKOFF = [30, 300, 1800, 7200, 28800];
-
-  /**
-   * Test-only weaken flags. Empty in production.
-   *
-   * Protected so DependencySerializationTrait can restore them.
-   *
-   * @var array<string, true>
-   */
-  protected array $weakenForTest = [];
 
   /**
    * PHPUnit-only callback between the pre-claim check and the claim.
@@ -341,8 +317,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $checkRow['principal_key'] = $this->rowOrItemKey($row, $fromItem, 'principal_key');
     $checkRow['human_key'] = $this->rowOrItemKey($row, $fromItem, 'human_key');
     $checkRow['tenant'] = $this->rowOrItemKey($row, $fromItem, 'tenant');
-    if (!$this->weakened(self::WEAKEN_SKIP_PRE_CLAIM_CHECK)
-      && $this->webhookQueue->shouldHoldRow($checkRow)) {
+    if ($this->webhookQueue->shouldHoldRow($checkRow)) {
       $this->webhookQueue->markHeld($deliveryId);
       return;
     }
@@ -448,8 +423,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    if (!$this->weakened(self::WEAKEN_SKIP_POST_CLAIM_RECHECK)
-      && $this->webhookQueue->shouldHoldRow($checkRow)) {
+    if ($this->webhookQueue->shouldHoldRow($checkRow)) {
       $this->webhookQueue->holdClaimed($deliveryId);
       return;
     }
@@ -565,15 +539,12 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $backoff = self::backoffSeconds($attempts);
     $now = $this->time->getRequestTime();
     $nextAttempt = $now + $backoff;
-    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)
-      && $this->webhookQueue->holdAfterAttempt($id, $attempts, $code, $body, $nextAttempt)) {
+    if ($this->webhookQueue->holdAfterAttempt($id, $attempts, $code, $body, $nextAttempt)) {
       return;
     }
     $query = $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $id);
-    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
-      $query->condition('status', 'in_progress');
-    }
+    $query->condition('status', 'in_progress');
     $query->fields([
       'status'             => 'pending',
       'attempts'           => $attempts,
@@ -603,9 +574,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   private function updateRow(int $id, string $status, ?int $code, ?string $body, int $attempts, bool $requireInProgress = FALSE): void {
     $query = $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $id);
-    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
-      $query->condition('status', $requireInProgress ? 'in_progress' : 'pending');
-    }
+    $query->condition('status', $requireInProgress ? 'in_progress' : 'pending');
     $query->fields([
       'status'             => $status,
       'attempts'           => $attempts,
@@ -767,24 +736,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   public function afterClaimForTest(\Closure $callback): void {
     $this->assertPhpunitSeam();
     $this->afterClaimForTest = $callback;
-  }
-
-  /**
-   * PHPUnit-only injection that disables one worker invariant.
-   *
-   * @throws \LogicException
-   *   When called outside PHPUnit.
-   */
-  public function weakenForTest(string $flag): void {
-    $this->assertPhpunitSeam();
-    $this->weakenForTest[$flag] = TRUE;
-  }
-
-  /**
-   * Whether a PHPUnit weaken flag is on.
-   */
-  private function weakened(string $flag): bool {
-    return isset($this->weakenForTest[$flag]);
   }
 
   /**

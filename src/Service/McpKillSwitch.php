@@ -121,91 +121,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const DENY_REASON = 'principal_killed';
 
   /**
-   * PHPUnit-only: allow writeKillRow to replace killed with kill_pending.
-   */
-  public const WEAKEN_DOWNGRADE_KILLED = 'downgrade_killed';
-
-  /**
-   * PHPUnit-only: skip the distinct-operator check.
-   */
-  public const WEAKEN_SKIP_DISTINCT_OPERATOR = 'skip_distinct_operator';
-
-  /**
-   * PHPUnit-only: treat every kill as single-principal (apply immediately).
-   */
-  public const WEAKEN_SKIP_MASS_PENDING = 'skip_mass_pending';
-
-  /**
-   * PHPUnit-only: mass freeze does not refuse (3.2.0 pending).
-   */
-  public const WEAKEN_SKIP_MASS_FREEZE = 'skip_mass_freeze';
-
-  /**
-   * PHPUnit-only: drop an unconfirmed freeze when the window elapses.
-   */
-  public const WEAKEN_LIFT_ON_CONFIRM_TIMEOUT = 'lift_on_confirm_timeout';
-
-  /**
-   * PHPUnit-only: do not hold queued side effects on a stop.
-   */
-  public const WEAKEN_SKIP_QUEUE_HOLD = 'skip_queue_hold';
-
-  /**
-   * PHPUnit-only: lifting a freeze also releases held deliveries.
-   */
-  public const WEAKEN_AUTO_RELEASE_ON_LIFT = 'auto_release_on_lift';
-
-  /**
-   * PHPUnit-only: treat killed rows as blocking after block_until.
-   */
-  public const WEAKEN_IGNORE_BLOCK_UNTIL = 'ignore_block_until';
-
-  /**
-   * PHPUnit-only: accept a TTL above 7 d.
-   */
-  public const WEAKEN_SKIP_TTL_CAP = 'skip_ttl_cap';
-
-  /**
-   * PHPUnit-only: skip kill-switch audit rows.
-   */
-  public const WEAKEN_SKIP_AUDIT = 'skip_audit';
-
-  /**
-   * PHPUnit-only: treat Drupal uid strings as operator identities.
-   */
-  public const WEAKEN_TRUST_UID = 'trust_uid';
-
-  /**
-   * PHPUnit-only: allow extend to shorten block_until.
-   */
-  public const WEAKEN_SKIP_EXTEND_MAX = 'skip_extend_max';
-
-  /**
-   * PHPUnit-only: expire unconfirmed freezes at block_until.
-   */
-  public const WEAKEN_EXPIRE_UNCONFIRMED = 'expire_unconfirmed';
-
-  /**
-   * PHPUnit-only: skip unavailable-confirmer hook and event.
-   */
-  public const WEAKEN_SKIP_ESCALATION = 'skip_escalation';
-
-  /**
-   * PHPUnit-only: accept any distinct operator as break-glass.
-   */
-  public const WEAKEN_SKIP_BREAK_GLASS_IDENTITY = 'skip_break_glass_identity';
-
-  /**
    * State key for freezes already recorded as kept by update 10037.
    */
   public const STATE_UPGRADE_KEPT = 'mcp_sentinel.upgrade_10037_kept';
-
-  /**
-   * Test-only weaken flags. Empty in production.
-   *
-   * @var array<string, true>
-   */
-  private array $weakenForTest = [];
 
   /**
    * Constructs the registry.
@@ -280,21 +198,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       if ($status === NULL) {
         return TRUE;
       }
-      if ($status === McpKillBlockStatus::KillPending
-        && $this->weakened(self::WEAKEN_SKIP_MASS_FREEZE)) {
-        continue;
-      }
-      if ($status === McpKillBlockStatus::KillPending
-        && $this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)
-        && (int) $row['block_until'] <= $now) {
-        continue;
-      }
-      if ($status->isBlocking((int) $row['block_until'], $now)) {
+      $blockUntil = $this->rowBlockUntil($row);
+      if ($blockUntil === NULL) {
         return TRUE;
       }
-      if ($this->weakened(self::WEAKEN_IGNORE_BLOCK_UNTIL)
-        && ($status === McpKillBlockStatus::Killed
-          || $status === McpKillBlockStatus::UnkillPending)) {
+      if ($status->isBlocking($blockUntil, $now)) {
         return TRUE;
       }
     }
@@ -427,9 +335,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           $anyPending = TRUE;
         }
       }
-      if (!$this->weakened(self::WEAKEN_SKIP_QUEUE_HOLD)) {
-        $this->webhookQueue->holdMatching($selectors, $operator, $batchId);
-      }
+      $this->webhookQueue->holdMatching($selectors, $operator, $batchId);
       unset($txn);
     }
     catch (\Throwable $e) {
@@ -670,8 +576,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       if ($status === NULL) {
         continue;
       }
-      if ($status === McpKillBlockStatus::KillPending
-        && !$this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
+      if ($status === McpKillBlockStatus::KillPending) {
         $active[] = $row;
         continue;
       }
@@ -1156,8 +1061,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       if ($status === NULL) {
         return TRUE;
       }
-      if ($status === McpKillBlockStatus::KillPending
-        && !$this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
+      if ($status === McpKillBlockStatus::KillPending) {
         return TRUE;
       }
       $blockUntil = $this->rowBlockUntil($row);
@@ -1183,7 +1087,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * Whether a stop should hold queued side effects.
    */
   private function shouldHoldSideEffects(): bool {
-    return !$this->weakened(self::WEAKEN_SKIP_QUEUE_HOLD);
+    return TRUE;
   }
 
   /**
@@ -1269,9 +1173,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $reason = (string) $row['reason'];
         $existingUntil = max($existingUntil, (int) $row['block_until']);
       }
-      $blockUntil = $this->weakened(self::WEAKEN_SKIP_EXTEND_MAX)
-        ? $requestedUntil
-        : min($cap, max($existingUntil, $requestedUntil));
+      $blockUntil = min($cap, max($existingUntil, $requestedUntil));
       $this->connection->update(self::TABLE)
         ->fields([
           'block_until' => $blockUntil,
@@ -1379,25 +1281,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     }
 
     $this->clearUpgradePendingKeptForBatch($batchId);
-
-    if ($this->weakened(self::WEAKEN_AUTO_RELEASE_ON_LIFT)) {
-      $heldIds = [];
-      foreach ($this->webhookQueue->listHeld() as $held) {
-        foreach ($selectors as $selector) {
-          $value = match ($selector->type) {
-            McpKillSelectorType::PrincipalKey => (string) ($held['principal_key'] ?? ''),
-            McpKillSelectorType::HumanKey => (string) ($held['human_key'] ?? ''),
-            McpKillSelectorType::Tenant => (string) ($held['tenant'] ?? ''),
-          };
-          if ($value === $selector->key) {
-            $heldIds[] = (int) $held['id'];
-          }
-        }
-      }
-      if ($heldIds !== []) {
-        $this->webhookQueue->releaseHeld($heldIds, $operator, $batchId);
-      }
-    }
 
     $this->auditTransition($breakGlass ? self::AUDIT_BREAK_GLASS : self::AUDIT_LIFT, [
       'actor' => $operatorId,
@@ -1527,9 +1410,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Unique selectors.
    */
   private function isMass(array $selectors): bool {
-    if ($this->weakened(self::WEAKEN_SKIP_MASS_PENDING)) {
-      return FALSE;
-    }
     if (count($selectors) > 1) {
       return TRUE;
     }
@@ -1571,8 +1451,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       $newBlocking = $status->isBlocking($blockUntil, $now);
       $confirmedBlocking = $existingStatus === McpKillBlockStatus::Killed
         || $existingStatus === McpKillBlockStatus::UnkillPending;
-      if ($confirmedBlocking && $status === McpKillBlockStatus::KillPending
-        && !$this->weakened(self::WEAKEN_DOWNGRADE_KILLED)) {
+      if ($confirmedBlocking && $status === McpKillBlockStatus::KillPending) {
         $this->connection->update(self::TABLE)
           ->fields([
             'status' => McpKillBlockStatus::Killed->value,
@@ -1591,8 +1470,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           ->execute();
         return McpKillBlockStatus::Killed;
       }
-      if ($existingBlocking && !$newBlocking
-        && !$this->weakened(self::WEAKEN_DOWNGRADE_KILLED)) {
+      if ($existingBlocking && !$newBlocking) {
         $this->connection->update(self::TABLE)
           ->fields([
             'status' => McpKillBlockStatus::Killed->value,
@@ -1811,9 +1689,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       McpKillBlockStatus::Killed->value,
       McpKillBlockStatus::UnkillPending->value,
     ];
-    if ($this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
-      $statuses[] = McpKillBlockStatus::KillPending->value;
-    }
     $statement = $this->connection->select(self::TABLE, 'k')
       ->fields('k')
       ->condition('status', $statuses, 'IN')
@@ -1882,15 +1757,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     int $now,
   ): int {
     $first = $rows[0];
-    if ($this->weakened(self::WEAKEN_LIFT_ON_CONFIRM_TIMEOUT)) {
-      $this->notifyUnavailableConfirmerGuarded($rows, 'kill', $batchId);
-      $lifted = 0;
-      foreach ($rows as $row) {
-        $this->markExpired($row, 'confirm_window', $now);
-        $lifted++;
-      }
-      return $lifted;
-    }
     $claimed = (int) $this->connection->update(self::TABLE)
       ->fields([
         'escalated_at' => $now,
@@ -2078,7 +1944,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Kill or unkill.
    */
   private function notifyUnavailableConfirmer(array $rows, string $transition): void {
-    if ($this->weakened(self::WEAKEN_SKIP_ESCALATION) || $rows === []) {
+    if ($rows === []) {
       return;
     }
     $row = $rows[0];
@@ -2189,9 +2055,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Actor, selector, reason, TTL, confirmer.
    */
   private function auditTransition(string $operation, array $metadata): void {
-    if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
-      return;
-    }
     $this->auditLogger->logAlways(
       $operation,
       $metadata + $this->bindings->advisoryProcessMetadata(),
@@ -2291,16 +2154,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function resolveTtl(?int $requested): int {
-    if ($this->weakened(self::WEAKEN_SKIP_TTL_CAP)) {
-      $ttl = $requested ?? McpKillTtl::DEFAULT;
-      if ($ttl <= 0) {
-        throw new McpKillSwitchException(
-          McpKillSwitchException::INVALID_TTL,
-          'Kill-block TTL must be a positive number of seconds.',
-        );
-      }
-      return $ttl;
-    }
     return McpKillTtl::resolve($requested, $this->defaultTtl(), $this->maxTtl());
   }
 
@@ -2366,11 +2219,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($operator->isVerified()) {
       return;
     }
-    if ($this->weakened(self::WEAKEN_TRUST_UID)
-      && $operator->kind === McpOperatorIdentity::KIND_UID
-      && $operator->id !== '' && $operator->id !== '0') {
-      return;
-    }
     throw new McpKillSwitchException(
       McpKillSwitchException::UNVERIFIED_OPERATOR,
       'A verified operator identity is required.',
@@ -2383,9 +2231,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function assertBreakGlassIdentity(McpOperatorIdentity $operator): void {
-    if ($this->weakened(self::WEAKEN_SKIP_BREAK_GLASS_IDENTITY)) {
-      return;
-    }
     // Drupal Settings::get() is static; the injected instance is the test seam.
     // @phpstan-ignore staticMethod.dynamicCall
     $configured = trim((string) $this->settings->get(
@@ -2437,9 +2282,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     string $second,
     string $batchId = '',
   ): void {
-    if ($this->weakened(self::WEAKEN_SKIP_DISTINCT_OPERATOR)) {
-      return;
-    }
     try {
       $this->bindings->assertDistinctOperators($first, $second);
     }
@@ -2468,46 +2310,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     string $actor = '',
     string $batchId = '',
   ): never {
-    if (!$this->weakened(self::WEAKEN_SKIP_AUDIT)) {
-      $this->auditLogger->logSurvivingRollback(self::AUDIT_REFUSE, [
-        'actor' => $actor,
-        'reason_code' => $code,
-        'reason' => $message,
-        'batch_id' => $batchId,
-        'correlation_id' => $batchId,
-        'timestamp' => (string) $this->time->getRequestTime(),
-      ] + $this->bindings->advisoryProcessMetadata(), TRUE);
-    }
+    $this->auditLogger->logSurvivingRollback(self::AUDIT_REFUSE, [
+      'actor' => $actor,
+      'reason_code' => $code,
+      'reason' => $message,
+      'batch_id' => $batchId,
+      'correlation_id' => $batchId,
+      'timestamp' => (string) $this->time->getRequestTime(),
+    ] + $this->bindings->advisoryProcessMetadata(), TRUE);
     throw new McpKillSwitchException($code, $message, TRUE);
-  }
-
-  /**
-   * PHPUnit-only injection that disables one kill-switch invariant.
-   *
-   * Impossible outside the PHPUnit process. Used so two-person, TTL,
-   * expiry, audit, P0 never-downgrade, mass-pending, mass-freeze,
-   * confirm-timeout, queue-hold, and uid-identity tests can fail.
-   *
-   * @param string $flag
-   *   One of the WEAKEN_* constants.
-   *
-   * @throws \LogicException
-   *   When called outside PHPUnit.
-   */
-  public function weakenForTest(string $flag): void {
-    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
-      throw new \LogicException(
-        'Kill-switch weaken flags can be set only under PHPUnit.',
-      );
-    }
-    $this->weakenForTest[$flag] = TRUE;
-  }
-
-  /**
-   * Whether a PHPUnit weaken flag is on.
-   */
-  private function weakened(string $flag): bool {
-    return isset($this->weakenForTest[$flag]);
   }
 
   /**

@@ -34,8 +34,8 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Freeze-first mass stop and held side effects (DEV-985).
  *
- * Mutation checks (test…WhenWeakened) turn one guard off and assert
- * the old fail-open path. They are not operator acceptance tests.
+ * Deny evidence for these guards is recorded on a scratch branch, not
+ * by production mutation switches.
  *
  * @group mcp_sentinel
  *
@@ -117,20 +117,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: a person-wide stop does not refuse when freeze is off.
    */
-  public function testPersonWideStopDoesNotRefuseWhenFreezeWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_FREEZE);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-person-w');
-    $this->killSwitch()->kill([$human], 'person-wide', $this->paladinA());
-    $this->sealSubject('subject-person-w', 'agent-a');
-    $this->assertSame(
-      'subject-person-w',
-      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
-    );
-  }
-
-  /**
-   * A tenant-wide stop refuses every in-scope agent before confirm.
-   */
   public function testTenantWideStopRefusesImmediately(): void {
     $tenant = McpKillSelector::tenant('tenant-a');
     $result = $this->killSwitch()->kill([$tenant], 'tenant-wide', $this->paladinA());
@@ -143,23 +129,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: a tenant-wide stop does not refuse when freeze is off.
-   */
-  public function testTenantWideStopDoesNotRefuseWhenFreezeWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_FREEZE);
-    $this->killSwitch()->kill(
-      [McpKillSelector::tenant('tenant-a')],
-      'tenant-wide',
-      $this->paladinA(),
-    );
-    $this->sealSubject('subject-tenant-w', 'agent-a');
-    $this->assertSame(
-      'subject-tenant-w',
-      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
-    );
-  }
-
-  /**
-   * An unconfirmed window expiry keeps the freeze and fires escalation.
    */
   public function testUnconfirmedFreezeStaysAndEscalates(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-esc');
@@ -184,23 +153,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: the window expiry lifts the freeze when that flag is on.
-   */
-  public function testUnconfirmedFreezeLiftsWhenTimeoutWeakenOn(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_LIFT_ON_CONFIRM_TIMEOUT);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-esc-w');
-    $result = $this->killSwitch()->kill([$human], 'escalate', $this->paladinA());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['confirm_until' => 1])
-      ->condition('batch_id', $result->batchId)
-      ->execute();
-    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
-  }
-
-  /**
-   * A second operator confirms, extends (7d cap), and lifts.
-   *
-   * Self-confirm is refused.
    */
   public function testSecondOperatorConfirmExtendLift(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-cel');
@@ -282,32 +234,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: the requester can lift when distinct-operator is off.
-   */
-  public function testRequesterLiftsWhenDistinctOperatorWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_DISTINCT_OPERATOR);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-lift-w');
-    $kill = $this->killSwitch()->kill([$human], 'lift', $this->paladinA());
-    $this->killSwitch()->lift($kill->batchId, $this->paladinA());
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
-  }
-
-  /**
-   * Mutation check: an extend above 7 days is accepted when the cap is off.
-   */
-  public function testExtendAboveSevenDaysWhenTtlCapWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_TTL_CAP);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-ttl-w');
-    $kill = $this->killSwitch()->kill([$human], 'ttl', $this->paladinA());
-    $extended = $this->killSwitch()->extend(
-      $kill->batchId,
-      $this->paladinB(),
-      McpKillTtl::MAX + 1,
-    );
-    $this->assertSame(McpKillTtl::MAX + 1, $extended->ttl);
-  }
-
-  /**
-   * Break-glass keep, extend, and lift each write one break-glass audit row.
    */
   public function testBreakGlassKeepExtendLift(): void {
     $keep = $this->killSwitch()->kill(
@@ -394,27 +320,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: in-scope deliveries still send when hold is off.
-   */
-  public function testQueuedDeliveriesSendWhenHoldWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_QUEUE_HOLD);
-    $this->enableEndpoint();
-    $this->sealSubject('subject-hold-w', 'agent-hold-w');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'in']);
-    $this->killSwitch()->kill(
-      [$this->principalSelector('subject-hold-w', 'agent-hold-w')],
-      'hold-off',
-      $this->paladinA(),
-    );
-    $row = $this->latestDelivery();
-    $this->assertSame('pending', $row['status']);
-    $history = [];
-    $this->worker($history)->processItem($this->queueItem((int) $row['id'], $row));
-    $this->assertSame('sent', $this->loadDelivery((int) $row['id'])['status']);
-    $this->assertCount(1, $history);
-  }
-
-  /**
-   * Release delivers the original id, payload, and body signature.
    */
   public function testReleaseDeliversUnchangedAndDiscardNeverDelivers(): void {
     $this->createSigningKey();
@@ -506,48 +411,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: lift releases held items when that flag is on.
    */
-  public function testLiftReleasesHeldWhenAutoReleaseWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_AUTO_RELEASE_ON_LIFT);
-    $this->enableEndpoint();
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-autorelease');
-    $this->sealSubject('subject-autorelease', 'agent-a');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'auto']);
-    $row = $this->latestDelivery();
-    $kill = $this->killSwitch()->kill([$human], 'hold', $this->paladinA());
-    $this->killSwitch()->lift($kill->batchId, $this->paladinB());
-    $this->assertSame('pending', $this->loadDelivery((int) $row['id'])['status']);
-  }
-
-  /**
-   * Mutation check: cron re-queues held rows when that flag is on.
-   */
-  public function testCronRequeuesHeldWhenWeakenOn(): void {
-    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_REQUEUE_HELD);
-    $this->enableEndpoint();
-    $id = (int) $this->container->get('database')
-      ->insert('mcp_sentinel_webhook_delivery')
-      ->fields([
-        'endpoint_id' => 'ep1',
-        'event_name' => 'mcp.entity.presave',
-        'payload_hash' => hash('sha256', '{}'),
-        'payload' => '{}',
-        'status' => McpWebhookQueueManager::STATUS_HELD,
-        'attempts' => 0,
-        'created' => 1,
-        'next_attempt' => 1,
-        'principal_key' => '',
-        'human_key' => '',
-        'tenant' => '',
-      ])->execute();
-    $this->assertSame(1, $this->queue()->requeueDuePendingRows());
-    $this->assertNotNull(
-      $this->loadDelivery($id)['item_id'],
-    );
-  }
-
-  /**
-   * Release under an active stop is refused.
-   */
   public function testReleaseUnderActiveStopIsRefused(): void {
     $this->enableEndpoint();
     $this->sealSubject('subject-rel-stop', 'agent-rel-stop');
@@ -584,25 +447,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: release under an active stop succeeds when that flag is on.
    */
-  public function testReleaseUnderActiveStopWhenWeakened(): void {
-    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_RELEASE_UNDER_STOP);
-    $this->enableEndpoint();
-    $this->sealSubject('subject-rel-w', 'agent-rel-w');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'held']);
-    $in = $this->latestDelivery();
-    $this->killSwitch()->kill(
-      [$this->principalSelector('subject-rel-w', 'agent-rel-w')],
-      'hold',
-      $this->paladinA(),
-    );
-    $released = $this->queue()->releaseHeld([(int) $in['id']], $this->paladinB());
-    $this->assertSame([(int) $in['id']], $released);
-    $this->assertSame('pending', $this->loadDelivery((int) $in['id'])['status']);
-  }
-
-  /**
-   * Worker registry check holds the row before claim.
-   */
   public function testWorkerHoldsBeforeClaimWithoutSending(): void {
     $this->enableEndpoint();
     $this->sealSubject('subject-pre', 'agent-pre');
@@ -628,33 +472,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: skipping the pre-claim check claims the row first.
    */
-  public function testWorkerClaimsWhenPreClaimCheckWeakened(): void {
-    $this->enableEndpoint();
-    $this->sealSubject('subject-pre-w', 'agent-pre-w');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'pre']);
-    $row = $this->latestDelivery();
-    $this->killSwitch()->kill(
-      [$this->principalSelector('subject-pre-w', 'agent-pre-w')],
-      'hold',
-      $this->paladinA(),
-    );
-    $this->container->get('database')->update('mcp_sentinel_webhook_delivery')
-      ->fields(['status' => 'pending', 'last_attempt' => NULL])
-      ->condition('id', (int) $row['id'])
-      ->execute();
-    $history = [];
-    $worker = $this->worker($history);
-    $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_PRE_CLAIM_CHECK);
-    $worker->processItem($this->queueItem((int) $row['id'], $row));
-    $held = $this->loadDelivery((int) $row['id']);
-    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $held['status']);
-    $this->assertNotNull($held['last_attempt']);
-    $this->assertCount(0, $history);
-  }
-
-  /**
-   * A kill between check and claim is caught by the post-claim re-check.
-   */
   public function testPostClaimRecheckHoldsAfterKillRace(): void {
     $this->enableEndpoint();
     $this->sealSubject('subject-race', 'agent-race');
@@ -674,25 +491,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: skipping the post-claim re-check delivers the race.
-   */
-  public function testPostClaimRecheckWhenWeakened(): void {
-    $this->enableEndpoint();
-    $this->sealSubject('subject-race-w', 'agent-race-w');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'race']);
-    $row = $this->latestDelivery();
-    $history = [];
-    $worker = $this->worker($history);
-    $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_POST_CLAIM_RECHECK);
-    $worker->killBetweenCheckAndClaimForTest(function (): void {
-      $this->insertActiveKill($this->principalSelector('subject-race-w', 'agent-race-w'));
-    });
-    $worker->processItem($this->queueItem((int) $row['id'], $row));
-    $this->assertSame('sent', $this->loadDelivery((int) $row['id'])['status']);
-    $this->assertCount(1, $history);
-  }
-
-  /**
-   * A 500 after claim+kill keeps the row held; lift does not deliver it.
    */
   public function testRetryAfterClaimAndKillStaysHeld(): void {
     $this->enableEndpoint();
@@ -741,28 +539,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: a 500 retry overwrites held when the status guard is off.
    */
-  public function testRetryOverwritesHeldWhenStatusGuardWeakened(): void {
-    $this->enableEndpoint();
-    $this->sealSubject('subject-500-w', 'agent-500-w');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'retry']);
-    $row = $this->latestDelivery();
-    $history = [];
-    $worker = $this->worker500($history);
-    $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_RETRY_STATUS_GUARD);
-    $worker->afterClaimForTest(function (): void {
-      $this->killSwitch()->kill(
-        [$this->principalSelector('subject-500-w', 'agent-500-w')],
-        'during-post',
-        $this->paladinA(),
-      );
-    });
-    $worker->processItem($this->queueItem((int) $row['id'], $row));
-    $this->assertSame('pending', $this->loadDelivery((int) $row['id'])['status']);
-  }
-
-  /**
-   * An item enqueued after the kill is held by the worker with one audit row.
-   */
   public function testWorkerHoldAfterKillWritesOneAudit(): void {
     $this->enableEndpoint();
     $selector = $this->principalSelector('subject-after', 'agent-after');
@@ -789,29 +565,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: worker hold writes no audit when that flag is on.
    */
-  public function testWorkerHoldAuditWhenWeakened(): void {
-    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_AUDIT);
-    $this->enableEndpoint();
-    $this->killSwitch()->kill(
-      [$this->principalSelector('subject-after-w', 'agent-after-w')],
-      'after',
-      $this->paladinA(),
-    );
-    $this->sealSubject('subject-after-w', 'agent-after-w');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'after']);
-    $row = $this->latestDelivery();
-    $history = [];
-    $this->worker($history)->processItem($this->queueItem((int) $row['id'], $row));
-    $this->assertSame(
-      McpWebhookQueueManager::STATUS_HELD,
-      $this->loadDelivery((int) $row['id'])['status'],
-    );
-    $this->assertSame(0, $this->countAudit(McpWebhookQueueManager::AUDIT_HOLD));
-  }
-
-  /**
-   * Extending with a shorter TTL leaves a long freeze unchanged.
-   */
   public function testExtendDoesNotShortenLongFreeze(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-ext-max');
     $kill = $this->killSwitch()->kill([$human], 'long', $this->paladinA(), McpKillTtl::MAX);
@@ -823,18 +576,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: extend shortens when max() is off.
-   */
-  public function testExtendShortensWhenMaxWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_EXTEND_MAX);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-ext-w');
-    $kill = $this->killSwitch()->kill([$human], 'long', $this->paladinA(), McpKillTtl::MAX);
-    $before = (int) $this->killSwitch()->status($human)['block_until'];
-    $extended = $this->killSwitch()->extend($kill->batchId, $this->paladinB(), 1);
-    $this->assertLessThan($before, $extended->blockUntil);
-  }
-
-  /**
-   * An unconfirmed freeze does not expire at block_until.
    */
   public function testUnconfirmedFreezeDoesNotExpireAtTtl(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-stays');
@@ -856,21 +597,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: unconfirmed freezes expire at TTL when that flag is on.
-   */
-  public function testUnconfirmedFreezeExpiresWhenWeakenOn(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_EXPIRE_UNCONFIRMED);
-    $human = McpKillSelector::humanKey(self::ISS . '|subject-exp-w');
-    $kill = $this->killSwitch()->kill([$human], 'expire', $this->paladinA());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['block_until' => 1])
-      ->condition('batch_id', $kill->batchId)
-      ->execute();
-    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
-  }
-
-  /**
-   * Un-kill on a kill_pending row is refused and points at kill-lift.
    */
   public function testUnkillOnPendingFreezeIsRefused(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-use-lift');
@@ -947,30 +673,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * Mutation check: skipping notify leaves hook and event silent.
    */
-  public function testEscalationSkippedWhenWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_ESCALATION);
-    $GLOBALS['mcp_sentinel_kill_hook_probe'] = [];
-    $events = [];
-    $this->container->get('event_dispatcher')->addListener(
-      McpKillUnavailableConfirmerEvent::NAME,
-      function (McpKillUnavailableConfirmerEvent $event) use (&$events): void {
-        $events[] = $event;
-      },
-    );
-    $human = McpKillSelector::humanKey(self::ISS . '|esc-skip');
-    $kill = $this->killSwitch()->kill([$human], 'escalate', $this->paladinA());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['confirm_until' => 1])
-      ->condition('batch_id', $kill->batchId)
-      ->execute();
-    $this->killSwitch()->expireDue();
-    $this->assertCount(0, $GLOBALS['mcp_sentinel_kill_hook_probe']);
-    $this->assertCount(0, $events);
-  }
-
-  /**
-   * Break-glass refuses the requester and any unpinned identity.
-   */
   public function testBreakGlassRefusesRequesterAndUnpinnedIdentity(): void {
     $requesterKill = $this->killSwitch()->kill(
       [McpKillSelector::humanKey(self::ISS . '|bg-req')],
@@ -1009,260 +711,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Mutation check: any distinct operator can break-glass when the pin is off.
-   */
-  public function testBreakGlassIdentityWhenWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_BREAK_GLASS_IDENTITY);
-    $kill = $this->killSwitch()->kill(
-      [McpKillSelector::humanKey(self::ISS . '|bg-w')],
-      'bg-w',
-      $this->paladinA(),
-    );
-    $this->killSwitch()->breakGlass(
-      $kill->batchId,
-      McpKillBreakGlassAction::Keep,
-      $this->paladinB(),
-    );
-    $this->assertSame(
-      McpKillBlockStatus::Killed->value,
-      $this->killSwitch()->status(McpKillSelector::humanKey(self::ISS . '|bg-w'))['status'],
-    );
-  }
-
-  /**
-   * Holds in-scope items and delivers the out-of-scope control row.
-   */
-  private function assertHoldForSelector(
-    McpKillSelector $selector,
-    string $sub,
-    string $azp,
-  ): void {
-    $this->enableEndpoint();
-    $this->sealSubject($sub, $azp);
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'in-scope']);
-    $in = $this->latestDelivery();
-    $this->assertNotSame('', $in['principal_key']);
-    $this->principalContextHolder()->resetForTest();
-    $this->sealSubject('other-out', 'agent-out', 'tenant-out');
-    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'out-scope']);
-    $out = $this->latestDelivery();
-    $this->assertNotSame($in['id'], $out['id']);
-
-    $this->killSwitch()->kill([$selector], 'hold', $this->paladinA());
-    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $this->loadDelivery((int) $in['id'])['status']);
-    $this->assertSame('pending', $this->loadDelivery((int) $out['id'])['status']);
-
-    $history = [];
-    $worker = $this->worker($history);
-    $worker->processItem($this->queueItem((int) $in['id'], $in));
-    $worker->processItem($this->queueItem((int) $out['id'], $out));
-    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $this->loadDelivery((int) $in['id'])['status']);
-    $this->assertSame('sent', $this->loadDelivery((int) $out['id'])['status']);
-    $this->assertCount(1, $history);
-  }
-
-  /**
-   * Configures one HTTPS endpoint.
-   */
-  private function enableEndpoint(string $secretKey = ''): void {
-    $this->config('mcp_sentinel.settings')
-      ->set('webhook_endpoints', [
-        [
-          'id' => 'ep1',
-          'label' => 'Test',
-          'url' => 'https://example.com/hook',
-          'secret_key' => $secretKey,
-          'events' => [],
-          'enabled' => TRUE,
-          'allow_internal' => FALSE,
-        ],
-      ])->save();
-  }
-
-  /**
-   * Signing key used for the unchanged-signature assertion.
-   */
-  private function createSigningKey(): void {
-    Key::create([
-      'id' => 'mcp_wh_secret',
-      'label' => 'WH secret',
-      'key_type' => 'authentication',
-      'key_provider' => 'config',
-      'key_provider_settings' => ['key_value' => 'topsecret'],
-    ])->save();
-  }
-
-  /**
-   * Queue item payload for a stored row.
-   *
-   * @param int $id
-   *   Delivery id.
-   * @param array<string, mixed> $row
-   *   Delivery row.
-   *
-   * @return array<string, mixed>
-   *   Worker item.
-   */
-  private function queueItem(int $id, array $row): array {
-    return [
-      'delivery_id' => $id,
-      'endpoint' => [
-        'id' => 'ep1',
-        'url' => 'https://example.com/hook',
-        'secret_key' => (string) ($this->config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['secret_key'] ?? ''),
-      ],
-      'event_name' => (string) $row['event_name'],
-      'payload' => (string) $row['payload'],
-      'principal_key' => (string) ($row['principal_key'] ?? ''),
-      'human_key' => (string) ($row['human_key'] ?? ''),
-      'tenant' => (string) ($row['tenant'] ?? ''),
-    ];
-  }
-
-  /**
-   * Worker with a mocked HTTP client.
-   *
-   * @param array $history
-   *   Captured requests.
-   *
-   * @param-out array|\ArrayAccess<int, array> $history
-   */
-  private function worker(array &$history): McpWebhookWorker {
-    $stack = HandlerStack::create(new MockHandler([new Response(200, [], 'ok')]));
-    $stack->push(Middleware::history($history));
-    $this->container->set('http_client', new Client(['handler' => $stack]));
-    $worker = $this->container->get('plugin.manager.queue_worker')
-      ->createInstance('mcp_sentinel_webhook_delivery');
-    $this->assertInstanceOf(McpWebhookWorker::class, $worker);
-    return $worker;
-  }
-
-  /**
-   * Worker whose first POST returns HTTP 500.
-   *
-   * @param array $history
-   *   Captured requests.
-   *
-   * @param-out array|\ArrayAccess<int, array> $history
-   */
-  private function worker500(array &$history): McpWebhookWorker {
-    $stack = HandlerStack::create(new MockHandler([new Response(500, [], 'err')]));
-    $stack->push(Middleware::history($history));
-    $this->container->set('http_client', new Client(['handler' => $stack]));
-    $worker = $this->container->get('plugin.manager.queue_worker')
-      ->createInstance('mcp_sentinel_webhook_delivery');
-    $this->assertInstanceOf(McpWebhookWorker::class, $worker);
-    return $worker;
-  }
-
-  /**
-   * Most recently inserted delivery row.
-   *
-   * @return array<string, mixed>
-   *   Row.
-   */
-  private function latestDelivery(): array {
-    $row = $this->container->get('database')
-      ->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d')
-      ->orderBy('id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertIsArray($row);
-    return $row;
-  }
-
-  /**
-   * Inserts a webhook delivery row.
-   *
-   * @param array<string, mixed> $overrides
-   *   Column overrides.
-   *
-   * @return int
-   *   New row id.
-   */
-  private function insertDelivery(array $overrides = []): int {
-    return (int) $this->container->get('database')
-      ->insert('mcp_sentinel_webhook_delivery')
-      ->fields($overrides + [
-        'endpoint_id' => 'ep1',
-        'event_name' => 'mcp.entity.presave',
-        'payload_hash' => hash('sha256', '{}'),
-        'payload' => '{}',
-        'status' => 'pending',
-        'attempts' => 0,
-        'created' => 1,
-        'principal_key' => 'p',
-        'human_key' => 'h',
-        'tenant' => 't',
-      ])->execute();
-  }
-
-  /**
-   * Loads a delivery row.
-   *
-   * @return array<string, mixed>
-   *   Row.
-   */
-  private function loadDelivery(int $id): array {
-    $row = $this->container->get('database')
-      ->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d')
-      ->condition('id', $id)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertIsArray($row);
-    return $row;
-  }
-
-  /**
-   * Seals a Paladin-shaped principal on the current request.
-   */
-  private function sealSubject(string $sub, string $azp, string $tenant = 'tenant-a'): void {
-    $request = Request::create('/mcp', 'POST');
-    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
-      'iss' => self::ISS,
-      'sub' => $sub,
-      'azp' => $azp,
-      'tenant' => $tenant,
-    ]);
-    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
-    $holder = $this->principalContextHolder();
-    $holder->resetForTest();
-    $stack = $this->container->get('request_stack');
-    $current = $stack->getCurrentRequest();
-    if ($current !== NULL && $current->hasSession()) {
-      $request->setSession($current->getSession());
-    }
-    $stack->push($request);
-    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
-      ->fromRequest($request);
-    $holder->seal($ctx, $request);
-  }
-
-  /**
-   * Writes a blocking kill-block without holding the queue (claim-race seam).
-   */
-  private function insertActiveKill(McpKillSelector $selector): void {
-    $now = $this->container->get('datetime.time')->getRequestTime();
-    $this->container->get('database')->insert(McpKillSwitch::TABLE)
-      ->fields([
-        'selector_hash' => $selector->hash(),
-        'selector_type' => $selector->type->value,
-        'selector_key' => $selector->key,
-        'status' => McpKillBlockStatus::Killed->value,
-        'batch_id' => 'race-batch',
-        'block_until' => $now + McpKillTtl::DEFAULT,
-        'ttl' => McpKillTtl::DEFAULT,
-        'reason' => 'race',
-        'requested_by' => $this->paladinA()->storageId(),
-        'requested_at' => $now,
-        'changed' => $now,
-      ])->execute();
-  }
-
-  /**
-   * Confirming an overdue freeze refreshes block_until so it stays in force.
    */
   public function testConfirmRefreshesElapsedBlockUntil(): void {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-confirm-ttl');
@@ -1421,19 +869,18 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
     }
     $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_TRUST_UID);
     try {
       $this->killSwitch()->breakGlass(
         $kill->batchId,
         McpKillBreakGlassAction::Keep,
         McpOperatorIdentity::fromDrupalUid('2'),
       );
-      $this->fail('A Drupal uid must not match the Paladin break-glass pin.');
+      $this->fail('A Drupal uid must not be a verified kill-switch operator.');
     }
     catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
+      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
     }
-    $this->assertSame(2, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
     $this->setSetting('mcp_sentinel.kill_switch.break_glass_operator', '');
     try {
       $this->killSwitch()->breakGlass(
@@ -1446,7 +893,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
     }
-    $this->assertSame(3, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->assertSame(2, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
     $alice = $this->createUser([McpKillSwitch::PERMISSION], 'alice');
     $this->assertInstanceOf(User::class, $alice);
     $this->container->get('mcp_sentinel.operator_binding')
@@ -1463,7 +910,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
     }
-    $this->assertSame(4, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->assertSame(3, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
     $this->setSetting(
       'mcp_sentinel.kill_switch.break_glass_operator',
       self::ISS . '|breakglass-op',
@@ -1800,6 +1247,236 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->assertSame(2, $this->countAudit(McpKillSwitch::AUDIT_ESCALATE));
     $this->assertCount(1, $GLOBALS['mcp_sentinel_kill_hook_probe']);
     unset($GLOBALS['mcp_sentinel_kill_hook_probe_throw']);
+  }
+
+  private function assertHoldForSelector(
+    McpKillSelector $selector,
+    string $sub,
+    string $azp,
+  ): void {
+    $this->enableEndpoint();
+    $this->sealSubject($sub, $azp);
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'in-scope']);
+    $in = $this->latestDelivery();
+    $this->assertNotSame('', $in['principal_key']);
+    $this->principalContextHolder()->resetForTest();
+    $this->sealSubject('other-out', 'agent-out', 'tenant-out');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'out-scope']);
+    $out = $this->latestDelivery();
+    $this->assertNotSame($in['id'], $out['id']);
+
+    $this->killSwitch()->kill([$selector], 'hold', $this->paladinA());
+    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $this->loadDelivery((int) $in['id'])['status']);
+    $this->assertSame('pending', $this->loadDelivery((int) $out['id'])['status']);
+
+    $history = [];
+    $worker = $this->worker($history);
+    $worker->processItem($this->queueItem((int) $in['id'], $in));
+    $worker->processItem($this->queueItem((int) $out['id'], $out));
+    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $this->loadDelivery((int) $in['id'])['status']);
+    $this->assertSame('sent', $this->loadDelivery((int) $out['id'])['status']);
+    $this->assertCount(1, $history);
+  }
+
+  /**
+   * Configures one HTTPS endpoint.
+   */
+  private function enableEndpoint(string $secretKey = ''): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'ep1',
+          'label' => 'Test',
+          'url' => 'https://example.com/hook',
+          'secret_key' => $secretKey,
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])->save();
+  }
+
+  /**
+   * Signing key used for the unchanged-signature assertion.
+   */
+  private function createSigningKey(): void {
+    Key::create([
+      'id' => 'mcp_wh_secret',
+      'label' => 'WH secret',
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => 'topsecret'],
+    ])->save();
+  }
+
+  /**
+   * Queue item payload for a stored row.
+   *
+   * @param int $id
+   *   Delivery id.
+   * @param array<string, mixed> $row
+   *   Delivery row.
+   *
+   * @return array<string, mixed>
+   *   Worker item.
+   */
+  private function queueItem(int $id, array $row): array {
+    return [
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => (string) ($this->config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['secret_key'] ?? ''),
+      ],
+      'event_name' => (string) $row['event_name'],
+      'payload' => (string) $row['payload'],
+      'principal_key' => (string) ($row['principal_key'] ?? ''),
+      'human_key' => (string) ($row['human_key'] ?? ''),
+      'tenant' => (string) ($row['tenant'] ?? ''),
+    ];
+  }
+
+  /**
+   * Worker with a mocked HTTP client.
+   *
+   * @param array $history
+   *   Captured requests.
+   *
+   * @param-out array|\ArrayAccess<int, array> $history
+   */
+  private function worker(array &$history): McpWebhookWorker {
+    $stack = HandlerStack::create(new MockHandler([new Response(200, [], 'ok')]));
+    $stack->push(Middleware::history($history));
+    $this->container->set('http_client', new Client(['handler' => $stack]));
+    $worker = $this->container->get('plugin.manager.queue_worker')
+      ->createInstance('mcp_sentinel_webhook_delivery');
+    $this->assertInstanceOf(McpWebhookWorker::class, $worker);
+    return $worker;
+  }
+
+  /**
+   * Worker whose first POST returns HTTP 500.
+   *
+   * @param array $history
+   *   Captured requests.
+   *
+   * @param-out array|\ArrayAccess<int, array> $history
+   */
+  private function worker500(array &$history): McpWebhookWorker {
+    $stack = HandlerStack::create(new MockHandler([new Response(500, [], 'err')]));
+    $stack->push(Middleware::history($history));
+    $this->container->set('http_client', new Client(['handler' => $stack]));
+    $worker = $this->container->get('plugin.manager.queue_worker')
+      ->createInstance('mcp_sentinel_webhook_delivery');
+    $this->assertInstanceOf(McpWebhookWorker::class, $worker);
+    return $worker;
+  }
+
+  /**
+   * Most recently inserted delivery row.
+   *
+   * @return array<string, mixed>
+   *   Row.
+   */
+  private function latestDelivery(): array {
+    $row = $this->container->get('database')
+      ->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')
+      ->orderBy('id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    return $row;
+  }
+
+  /**
+   * Inserts a webhook delivery row.
+   *
+   * @param array<string, mixed> $overrides
+   *   Column overrides.
+   *
+   * @return int
+   *   New row id.
+   */
+  private function insertDelivery(array $overrides = []): int {
+    return (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields($overrides + [
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => 'pending',
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => 'p',
+        'human_key' => 'h',
+        'tenant' => 't',
+      ])->execute();
+  }
+
+  /**
+   * Loads a delivery row.
+   *
+   * @return array<string, mixed>
+   *   Row.
+   */
+  private function loadDelivery(int $id): array {
+    $row = $this->container->get('database')
+      ->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')
+      ->condition('id', $id)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    return $row;
+  }
+
+  /**
+   * Seals a Paladin-shaped principal on the current request.
+   */
+  private function sealSubject(string $sub, string $azp, string $tenant = 'tenant-a'): void {
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => self::ISS,
+      'sub' => $sub,
+      'azp' => $azp,
+      'tenant' => $tenant,
+    ]);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
+  }
+
+  /**
+   * Writes a blocking kill-block without holding the queue (claim-race seam).
+   */
+  private function insertActiveKill(McpKillSelector $selector): void {
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $this->container->get('database')->insert(McpKillSwitch::TABLE)
+      ->fields([
+        'selector_hash' => $selector->hash(),
+        'selector_type' => $selector->type->value,
+        'selector_key' => $selector->key,
+        'status' => McpKillBlockStatus::Killed->value,
+        'batch_id' => 'race-batch',
+        'block_until' => $now + McpKillTtl::DEFAULT,
+        'ttl' => McpKillTtl::DEFAULT,
+        'reason' => 'race',
+        'requested_by' => $this->paladinA()->storageId(),
+        'requested_at' => $now,
+        'changed' => $now,
+      ])->execute();
   }
 
   /**
