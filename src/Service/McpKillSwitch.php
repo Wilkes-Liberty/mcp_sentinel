@@ -539,6 +539,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       throw $e;
     }
 
+    $this->clearUpgradePendingKeptForBatch($batchId);
+
     $this->auditConfirmOrBreakGlass(
       $breakGlass,
       McpKillBreakGlassAction::Keep,
@@ -965,6 +967,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $changed++;
       }
     }
+    $this->pruneUpgradePendingKept();
     return $changed;
   }
 
@@ -1006,6 +1009,105 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    */
   private function upgradeKeptKey(string $batchId, string $target): string {
     return $batchId . "\0" . $target;
+  }
+
+  /**
+   * Drops kept markers for a batch after confirm or lift.
+   */
+  private function clearUpgradePendingKeptForBatch(string $batchId): void {
+    if ($batchId === '') {
+      return;
+    }
+    $kept = $this->state->get(self::STATE_UPGRADE_KEPT, []);
+    if (!is_array($kept) || $kept === []) {
+      return;
+    }
+    $prefix = $batchId . "\0";
+    $changed = FALSE;
+    foreach (array_keys($kept) as $key) {
+      if (!is_string($key)) {
+        continue;
+      }
+      if (str_starts_with($key, $prefix)) {
+        unset($kept[$key]);
+        $changed = TRUE;
+      }
+    }
+    if (!$changed) {
+      return;
+    }
+    $this->storeUpgradePendingKept($kept);
+  }
+
+  /**
+   * Deletes kept markers whose batch is no longer kill_pending.
+   */
+  private function pruneUpgradePendingKept(): void {
+    $kept = $this->state->get(self::STATE_UPGRADE_KEPT, []);
+    if (!is_array($kept)) {
+      return;
+    }
+    if ($kept === []) {
+      $this->state->delete(self::STATE_UPGRADE_KEPT);
+      return;
+    }
+    $pending = $this->pendingUpgradeKeptBatchIds();
+    $pruned = [];
+    foreach (array_keys($kept) as $key) {
+      if (!is_string($key)) {
+        continue;
+      }
+      $pos = strpos($key, "\0");
+      if ($pos === FALSE) {
+        continue;
+      }
+      $batchId = substr($key, 0, $pos);
+      if (isset($pending[$batchId])) {
+        $pruned[$key] = TRUE;
+      }
+    }
+    $this->storeUpgradePendingKept($pruned);
+  }
+
+  /**
+   * Kill-pending batch ids that still need a kept marker.
+   *
+   * @return array<string, true>
+   *   Batch id keys that are still kill_pending.
+   */
+  private function pendingUpgradeKeptBatchIds(): array {
+    if (!$this->tableReady()) {
+      return [];
+    }
+    $statement = $this->connection->select(self::TABLE, 'k')
+      ->fields('k', ['batch_id'])
+      ->condition('status', McpKillBlockStatus::KillPending->value)
+      ->execute();
+    if ($statement === NULL) {
+      return [];
+    }
+    $pending = [];
+    foreach ($this->assocRows($statement) as $row) {
+      $batchId = $this->rowString($row, 'batch_id');
+      if ($batchId !== '') {
+        $pending[$batchId] = TRUE;
+      }
+    }
+    return $pending;
+  }
+
+  /**
+   * Writes or deletes the kept-marker state array.
+   *
+   * @param array<mixed, mixed> $kept
+   *   Remaining markers.
+   */
+  private function storeUpgradePendingKept(array $kept): void {
+    if ($kept === []) {
+      $this->state->delete(self::STATE_UPGRADE_KEPT);
+      return;
+    }
+    $this->state->set(self::STATE_UPGRADE_KEPT, $kept);
   }
 
   /**
@@ -1200,6 +1302,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       }
       throw $e;
     }
+
+    $this->clearUpgradePendingKeptForBatch($batchId);
 
     if ($this->weakened(self::WEAKEN_AUTO_RELEASE_ON_LIFT)) {
       $heldIds = [];

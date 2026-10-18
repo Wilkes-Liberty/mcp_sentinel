@@ -243,10 +243,8 @@ matches. A token with an `act` or `actor` claim is refused. A 3xx
 from Paladin is refused; the token is never sent to a hop. Paladin
 down fails closed.
 
-Pin Paladin operator tokens to 8 hours absolute lifetime and 30
-minutes idle at the issuer. This module does not enforce those
-issuer lifetimes. The kill-block default is 24 hours; the maximum
-is 7 days.
+The kill-block default is 24 hours; the maximum is 7 days.
+Token lifetimes are set at the issuer; see docs/kill-switch.md.
 
 Optional bind claim pins (defaults shown):
 

@@ -645,7 +645,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   /**
    * A uid may be bound to only one Paladin iss|sub.
    */
-  public function testBindToAccountSecondIdentityOnSameUidConflicts(): void {
+  public function testBindSecondIdentityOnSameUidConflicts(): void {
     $this->bindings()->bindIdentityForTest($this->paladinA(), (int) $this->operatorA);
     try {
       $this->bindings()->bindIdentityForTest($this->paladinB(), (int) $this->operatorA);

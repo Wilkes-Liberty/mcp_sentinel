@@ -1,93 +1,264 @@
 # Baseline for untouched 1.x code in McpKillSwitch.php and
-# mcp_sentinel.install. Regenerated under PHPStan max +
-# phpstan-strict-rules. New DEV-986 code must not add entries.
-# Counts are identifier+path from Tests 39093627657 after excluding
-# DEV-986 Commands, keep/revert, and 10037 helpers. The two extra
-# argument.type hits are fetchAll(PDO::FETCH_ASSOC) on the 10037
-# helpers (same portable ignore as phpstan.operator.neon).
+# mcp_sentinel.install. Generated under PHPStan max +
+# phpstan-strict-rules with messages so identifier buckets
+# cannot absorb new DEV-986 errors. The two 10037
+# fetchAll(PDO::FETCH_ASSOC) hits are covered by the
+# path-scoped ignore in phpstan.operator.neon, not here.
+# New DEV-986 code must not add entries.
 parameters:
   ignoreErrors:
     -
+      message: '#^Parameter \#1 \$array of function array_diff expects an array of values castable to string, array\<mixed, mixed\> given\.$#'
       identifier: argument.type
-      path: mcp_sentinel.install
-      count: 21
-    -
-      identifier: arrayUnpacking.nonIterable
-      path: mcp_sentinel.install
       count: 1
-    -
-      identifier: binaryOp.invalid
       path: mcp_sentinel.install
+    -
+      message: '#^Parameter \#1 \$array of function array_unique expects an array of values castable to string, array\<mixed\> given\.$#'
+      identifier: argument.type
       count: 1
-    -
-      identifier: booleanNot.exprNotBoolean
       path: mcp_sentinel.install
-      count: 5
     -
-      identifier: booleanOr.rightNotBoolean
-      path: mcp_sentinel.install
+      message: '#^Parameter \#1 \$key of static method Drupal\\mcp_sentinel\\Service\\McpFloodKey\:\:normalize\(\) expects string, mixed given\.$#'
+      identifier: argument.type
       count: 1
-    -
-      identifier: cast.int
       path: mcp_sentinel.install
-      count: 9
     -
-      identifier: cast.string
-      path: mcp_sentinel.install
-      count: 6
-    -
-      identifier: empty.notAllowed
-      path: mcp_sentinel.install
-      count: 3
-    -
-      identifier: encapsedStringPart.nonString
-      path: mcp_sentinel.install
-      count: 3
-    -
-      identifier: foreach.nonIterable
-      path: mcp_sentinel.install
+      message: '#^Parameter \#2 \$array of function array_key_exists expects array, mixed given\.$#'
+      identifier: argument.type
       count: 1
-    -
-      identifier: if.condNotBoolean
       path: mcp_sentinel.install
-      count: 1
     -
-      identifier: method.nonObject
-      path: mcp_sentinel.install
-      count: 5
-    -
-      identifier: missingType.iterableValue
-      path: mcp_sentinel.install
+      message: '#^Parameter \#2 \$table of method Drupal\\Core\\Database\\Schema\:\:createTable\(\) expects array, mixed given\.$#'
+      identifier: argument.type
       count: 4
-    -
-      identifier: offsetAccess.nonOffsetAccessible
       path: mcp_sentinel.install
-      count: 11
     -
-      identifier: postInc.type
-      path: mcp_sentinel.install
+      message: '#^Parameter \#2 \$value of method Drupal\\Core\\Database\\Query\\ConditionInterface\:\:condition\(\) expects array\|Drupal\\Core\\Database\\Query\\SelectInterface\|int\|string\|null, mixed given\.$#'
+      identifier: argument.type
       count: 1
-    -
-      identifier: property.nonObject
       path: mcp_sentinel.install
-      count: 6
     -
-      identifier: variable.implicitArray
-      path: mcp_sentinel.install
-      count: 1
-    -
-      identifier: cast.int
-      path: src/Service/McpKillSwitch.php
-      count: 25
-    -
-      identifier: cast.string
-      path: src/Service/McpKillSwitch.php
-      count: 50
-    -
-      identifier: missingType.iterableValue
-      path: src/Service/McpKillSwitch.php
+      message: '#^Parameter \#2 \$value of method Drupal\\Core\\Database\\Query\\Update\:\:condition\(\) expects array\|Drupal\\Core\\Database\\Query\\SelectInterface\|int\|string\|null, mixed given\.$#'
+      identifier: argument.type
       count: 2
+      path: mcp_sentinel.install
     -
-      identifier: return.type
-      path: src/Service/McpKillSwitch.php
+      message: '#^Parameter \#3 \$spec of method Drupal\\Core\\Database\\Schema\:\:addField\(\) expects array, mixed given\.$#'
+      identifier: argument.type
+      count: 5
+      path: mcp_sentinel.install
+    -
+      message: '#^Parameter \#4 \$spec of method Drupal\\Core\\Database\\Schema\:\:addIndex\(\) expects array, mixed given\.$#'
+      identifier: argument.type
       count: 3
+      path: mcp_sentinel.install
+    -
+      message: '#^Only iterables can be unpacked, mixed given\.$#'
+      identifier: arrayUnpacking.nonIterable
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Binary operation "/" between mixed and mixed results in an error\.$#'
+      identifier: binaryOp.invalid
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Only booleans are allowed in a negated boolean, Drupal\\key\\Entity\\Key\|null given\.$#'
+      identifier: booleanNot.exprNotBoolean
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Only booleans are allowed in a negated boolean, Drupal\\mcp_sentinel\\Entity\\McpPolicyProfile\|null given\.$#'
+      identifier: booleanNot.exprNotBoolean
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Only booleans are allowed in a negated boolean, Drupal\\user\\Entity\\Role\|null given\.$#'
+      identifier: booleanNot.exprNotBoolean
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Only booleans are allowed in a negated boolean, mixed given\.$#'
+      identifier: booleanNot.exprNotBoolean
+      count: 2
+      path: mcp_sentinel.install
+    -
+      message: '#^Only booleans are allowed in \|\|, mixed given on the right side\.$#'
+      identifier: booleanOr.rightNotBoolean
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot cast mixed to int\.$#'
+      identifier: cast.int
+      count: 9
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot cast mixed to string\.$#'
+      identifier: cast.string
+      count: 6
+      path: mcp_sentinel.install
+    -
+      message: '#^Construct empty\(\) is not allowed\. Use more strict comparison\.$#'
+      identifier: empty.notAllowed
+      count: 3
+      path: mcp_sentinel.install
+    -
+      message: '#^Part \$sandbox\[''migrated''\] \(mixed\) of encapsed string cannot be cast to string\.$#'
+      identifier: encapsedStringPart.nonString
+      count: 2
+      path: mcp_sentinel.install
+    -
+      message: '#^Part \$sandbox\[''total''\] \(mixed\) of encapsed string cannot be cast to string\.$#'
+      identifier: encapsedStringPart.nonString
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Argument of an invalid type Drupal\\Core\\Database\\StatementInterface\|null supplied for foreach, only iterables are supported\.$#'
+      identifier: foreach.nonIterable
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Only booleans are allowed in an if condition, Drupal\\user\\Entity\\Role\|null given\.$#'
+      identifier: if.condNotBoolean
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot call method fetchAll\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
+      identifier: method.nonObject
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot call method fetchAssoc\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
+      identifier: method.nonObject
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot call method fetchCol\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
+      identifier: method.nonObject
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot call method fetchField\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
+      identifier: method.nonObject
+      count: 2
+      path: mcp_sentinel.install
+    -
+      message: '#^Function mcp_sentinel_requirements\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Function mcp_sentinel_schema\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Function mcp_sentinel_update_10016\(\) has parameter \$sandbox with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Function mcp_sentinel_update_10023\(\) has parameter \$sandbox with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''escalated_at'' on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''fields'' on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 4
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''human_key''\|''principal_key''\|''tenant'' on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''latest'' on array\|false\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''n'' on array\|false\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''released'' on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''uid'' on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access offset ''unbind_batch_id''\|''unbind_confirm_until''\|''unbind_requested_at''\|''unbind_requested_by'' on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot use \+\+ on mixed\.$#'
+      identifier: postInc.type
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access property \$event on mixed\.$#'
+      identifier: property.nonObject
+      count: 3
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access property \$fid on mixed\.$#'
+      identifier: property.nonObject
+      count: 2
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot access property \$value on Drupal\\mcp_sentinel\\Enum\\McpGovernanceReadinessReason\|null\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Implicit array creation is not allowed \- variable \$schema does not exist\.$#'
+      identifier: variable.implicitArray
+      count: 1
+      path: mcp_sentinel.install
+    -
+      message: '#^Cannot cast mixed to int\.$#'
+      identifier: cast.int
+      count: 25
+      path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Cannot cast mixed to string\.$#'
+      identifier: cast.string
+      count: 50
+      path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:assocRows\(\) has parameter \$statement with no value type specified in iterable type Drupal\\Core\\Database\\StatementInterface\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:uniqueSelectors\(\) has parameter \$selectors with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:assocRows\(\) should return list\<array\<string, mixed\>\> but returns list\<non\-empty\-array\>\.$#'
+      identifier: return.type
+      count: 1
+      path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:lockSelector\(\) should return array\<string, mixed\>\|null but returns array\|null\.$#'
+      identifier: return.type
+      count: 1
+      path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:status\(\) should return array\<string, mixed\>\|null but returns array\|null\.$#'
+      identifier: return.type
+      count: 1
+      path: src/Service/McpKillSwitch.php

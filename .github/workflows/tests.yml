@@ -1196,7 +1196,7 @@ jobs:
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
-            --filter 'testUidUniqueIndexRejectsDuplicate|testBindToAccountSecondIdentityOnSameUidConflicts' \
+            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts' \
             || status=1
           exit "${status}"
 
@@ -1298,7 +1298,7 @@ jobs:
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
-            --filter 'testUidUniqueIndexRejectsDuplicate|testBindToAccountSecondIdentityOnSameUidConflicts' \
+            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts' \
             || status=1
           exit "${status}"
 

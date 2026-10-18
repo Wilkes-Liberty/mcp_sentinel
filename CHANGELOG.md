@@ -34,7 +34,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `previous_uid` for restore. A restore re-trusts a binding
   that never passed the claim check. See INSTALL.md for the
   pinned Paladin keys, including
-  `mcp_sentinel.paladin.operator_audience`.
+  `mcp_sentinel.paladin.operator_audience`. Operator audience
+  is `aud` or a role, not `azp` or `client_id`. A site whose
+  operator audience was only on `azp` or `client_id` is
+  refused after upgrade. A token with an `act` or `actor`
+  claim is refused.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
