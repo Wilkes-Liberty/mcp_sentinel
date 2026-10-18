@@ -10,4 +10,7 @@
  */
 function mcp_sentinel_kill_hook_probe_mcp_sentinel_kill_unavailable_confirmer(array $context): void {
   $GLOBALS['mcp_sentinel_kill_hook_probe'][] = $context;
+  if (!empty($GLOBALS['mcp_sentinel_kill_hook_probe_throw'])) {
+    throw new \RuntimeException('unavailable confirmer hook threw');
+  }
 }

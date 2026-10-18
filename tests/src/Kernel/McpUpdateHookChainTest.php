@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Core\Utility\UpdateException;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
@@ -85,6 +87,10 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     ]);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
+    // hook_install() renders a settings-page link via Url::fromRoute(),
+    // which resolves path aliases. Install that schema so the lookup
+    // has its table when tests invoke the hook directly.
+    $this->installEntitySchema('path_alias');
     $this->installConfig(['mcp_sentinel']);
 
     // Load the .install file so all update hook functions are available.
@@ -1148,7 +1154,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
-   * Update 10036 then 10037 from a real pre-10036 schema.
+   * Update 10036 then 10037 then 10038 from a real pre-10036 schema.
    */
   public function testUpdate10036Then10037RunsInOrder(): void {
     $connection = $this->container->get('database');
@@ -1209,6 +1215,12 @@ final class McpUpdateHookChainTest extends KernelTestBase {
       ->fetchField();
     $this->assertSame('kill_pending', $kept);
     $this->assertTrue((new McpOperatorBindingUidSchema($connection))->exists());
+
+    $from10038 = mcp_sentinel_update_10038();
+    $this->assertStringContainsString('pre-upgrade max delivery id', $from10038);
+    $this->assertNotNull($this->container->get('state')->get(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+    ));
   }
 
   /**
@@ -1439,6 +1451,234 @@ final class McpUpdateHookChainTest extends KernelTestBase {
       ],
       'primary key' => ['id'],
     ]);
+  }
+
+  /**
+   * Update 10038 records the max id, drops released, and audits a keyless hold.
+   */
+  public function testUpdate10038RecordsMaxIdAndDropsReleased(): void {
+    $schema = $this->container->get('database')->schema();
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    $kill = 'mcp_sentinel_kill_block';
+    $this->container->get('state')->delete(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+    );
+    if (!$schema->fieldExists($delivery, 'released')) {
+      $schema->addField(
+        $delivery,
+        'released',
+        mcp_sentinel_schema()[$delivery]['fields']['released'],
+      );
+    }
+    $this->container->get('database')->delete($delivery)->execute();
+    $this->container->get('database')->delete($kill)->execute();
+    $id = (int) $this->container->get('database')
+      ->insert($delivery)
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => 'pending',
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+    $this->container->get('database')->insert($kill)
+      ->fields([
+        'selector_hash' => hash('sha256', 'upgrade-hold-38'),
+        'selector_type' => 'tenant',
+        'selector_key' => 'upgrade-38',
+        'status' => 'kill_pending',
+        'batch_id' => 'upgrade-batch-38',
+        'block_until' => 2147483647,
+        'ttl' => 86400,
+        'reason' => 'upgrade',
+        'requested_by' => 'paladin:upgrade',
+        'requested_at' => 1,
+        'changed' => 1,
+      ])->execute();
+
+    $beforeHolds = $this->countAuditOperation('agent_side_effect_hold');
+    $message = mcp_sentinel_update_10038();
+    $this->assertStringContainsString('Dropped unused', $message);
+    $this->assertStringContainsString(
+      'Recorded pre-upgrade max delivery id ' . $id,
+      $message,
+    );
+    $this->assertStringContainsString(
+      '0 keyless pending webhook row(s) remain',
+      $message,
+    );
+    $this->assertFalse($schema->fieldExists($delivery, 'released'));
+    $this->assertTrue($schema->indexExists($delivery, 'principal_key'));
+    $this->assertTrue($schema->indexExists($delivery, 'human_key'));
+    $held = $this->container->get('database')
+      ->select($delivery, 'd')
+      ->fields('d', ['status'])
+      ->condition('id', $id)
+      ->execute()
+      ->fetchField();
+    $this->assertSame('held', $held);
+    $this->assertStringContainsString('Held ', $message);
+    $this->assertSame(
+      $id,
+      (int) $this->container->get('state')->get(
+        McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      ),
+    );
+    $this->assertSame(
+      $beforeHolds + 1,
+      $this->countAuditOperation('agent_side_effect_hold'),
+    );
+
+    $again = mcp_sentinel_update_10038();
+    $this->assertStringContainsString(
+      'Pre-upgrade max delivery id already recorded.',
+      $again,
+    );
+    $this->assertStringContainsString(
+      '0 keyless pending webhook row(s) remain',
+      $again,
+    );
+    $this->assertSame(
+      $beforeHolds + 1,
+      $this->countAuditOperation('agent_side_effect_hold'),
+    );
+  }
+
+  /**
+   * Update 10038 leaves keyless rows pending when no stop is active.
+   */
+  public function testUpdate10038LeavesKeylessPendingWhenNoStop(): void {
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    $this->container->get('database')->delete('mcp_sentinel_kill_block')->execute();
+    $id = (int) $this->container->get('database')
+      ->insert($delivery)
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => 'pending',
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+
+    $beforeHolds = $this->countAuditOperation('agent_side_effect_hold');
+    $message = mcp_sentinel_update_10038();
+    $this->assertStringContainsString(
+      '1 keyless pending webhook row(s) remain',
+      $message,
+    );
+    $this->assertStringContainsString(
+      'Recorded pre-upgrade max delivery id',
+      $message,
+    );
+    $status = $this->container->get('database')
+      ->select($delivery, 'd')
+      ->fields('d', ['status'])
+      ->condition('id', $id)
+      ->execute()
+      ->fetchField();
+    $this->assertSame('pending', $status);
+    $this->assertSame(
+      $beforeHolds,
+      $this->countAuditOperation('agent_side_effect_hold'),
+    );
+    $this->assertSame(
+      $id,
+      (int) $this->container->get('state')->get(
+        McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      ),
+    );
+  }
+
+  /**
+   * Update 10038 fails closed when the audit logger is missing.
+   */
+  public function testUpdate10038FailsWithoutAuditLogger(): void {
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    $kill = 'mcp_sentinel_kill_block';
+    $this->container->get('database')->delete($delivery)->execute();
+    $this->container->get('database')->delete($kill)->execute();
+    $this->container->get('database')
+      ->insert($delivery)
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => 'pending',
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+    $this->container->get('database')->insert($kill)
+      ->fields([
+        'selector_hash' => hash('sha256', 'upgrade-hold-logger'),
+        'selector_type' => 'tenant',
+        'selector_key' => 'upgrade-logger',
+        'status' => 'kill_pending',
+        'batch_id' => 'upgrade-batch-logger',
+        'block_until' => 2147483647,
+        'ttl' => 86400,
+        'reason' => 'upgrade',
+        'requested_by' => 'paladin:upgrade',
+        'requested_at' => 1,
+        'changed' => 1,
+      ])->execute();
+    $this->container->set('mcp_sentinel.audit_logger', new \stdClass());
+    try {
+      mcp_sentinel_hold_keyless_pending_audited();
+      $this->fail('A missing audit logger must fail the keyless hold.');
+    }
+    catch (UpdateException $e) {
+      $this->assertStringContainsString('audit_logger', $e->getMessage());
+    }
+  }
+
+  /**
+   * Hook install drops released so a fresh install does not keep it.
+   */
+  public function testFreshInstallDropsReleased(): void {
+    $schema = $this->container->get('database')->schema();
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    if (!$schema->fieldExists($delivery, 'released')) {
+      $schema->addField(
+        $delivery,
+        'released',
+        mcp_sentinel_schema()[$delivery]['fields']['released'],
+      );
+    }
+    $this->assertTrue($schema->fieldExists($delivery, 'released'));
+    $state = $this->container->get('state');
+    $state->delete(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID);
+    mcp_sentinel_install();
+    $this->assertFalse($schema->fieldExists($delivery, 'released'));
+    $this->assertSame(
+      0,
+      $state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID),
+    );
+  }
+
+  /**
+   * Number of audit_chain_log rows for an operation.
+   */
+  private function countAuditOperation(string $operation): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', $operation)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
   }
 
 }

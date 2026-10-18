@@ -462,6 +462,10 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     });
     $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
     $this->assertStringContainsString(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $this->logText());
+    $this->assertSame(1, $this->auditCount(McpOperatorBinding::AUDIT_BIND_REFUSED));
+    $this->assertSame(0, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $refuse = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $refuse['reason_code']);
   }
 
   /**

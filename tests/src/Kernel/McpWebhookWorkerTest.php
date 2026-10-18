@@ -297,7 +297,6 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       $time,
       $this->container->get('logger.channel.mcp_sentinel'),
       new McpPrincipalContextJob($holder),
-      $this->container->get('mcp_sentinel.kill_switch'),
       $this->container->get('mcp_sentinel.webhook_queue_manager'),
     );
     try {

@@ -5,8 +5,10 @@
  * Install, update, and uninstall functions for MCP Sentinel.
  */
 
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\Core\Utility\UpdateException;
 use Drupal\Core\Url;
@@ -69,7 +71,8 @@ function mcp_sentinel_schema(): array {
         'not null' => TRUE,
         'default' => '',
       ],
-      // Operator release: the worker must not re-hold this row.
+      // Kept only because update 10036 reads this spec. hook_install
+      // and update 10038 drop the column.
       'released'           => [
         'type' => 'int',
         'unsigned' => TRUE,
@@ -367,11 +370,26 @@ function mcp_sentinel_schema(): array {
 /**
  * Implements hook_install().
  *
- * Seeds the 'mcp_api' role with the minimum read permissions an agent account
- * needs, so a fresh install has a ready-to-assign governed identity. The role
- * is only created when absent, keeping reinstall idempotent.
+ * Drops the unused webhook `released` column that hook_schema still
+ * declares so update 10036 can add it on upgrades. Records the
+ * pre-upgrade max delivery id as 0 so a new site has no pre-upgrade
+ * keyless rows (update 10038 never runs on a fresh install). Seeds
+ * the 'mcp_api' role with the minimum read permissions an agent
+ * account needs, so a fresh install has a ready-to-assign governed
+ * identity. The role is only created when absent, keeping reinstall
+ * idempotent.
  */
 function mcp_sentinel_install(): void {
+  $schema = \Drupal::database()->schema();
+  $delivery = 'mcp_sentinel_webhook_delivery';
+  if ($schema->tableExists($delivery)
+    && $schema->fieldExists($delivery, 'released')) {
+    $schema->dropField($delivery, 'released');
+  }
+  $state = \Drupal::state();
+  if ($state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID) === NULL) {
+    $state->set(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID, 0);
+  }
   if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
     Role::create(['id' => 'mcp_api', 'label' => 'MCP API', 'weight' => 10])->save();
     user_role_grant_permissions('mcp_api', [
@@ -1889,8 +1907,8 @@ function mcp_sentinel_update_10036(): string {
 /**
  * Reset Paladin uids, drop leftover Drush rows, keep freezes (DEV-986).
  *
- * Sites that already ran 10036 still need this. 10038 is reserved
- * for a DEV-985 follow-up.
+ * Sites that already ran 10036 still need this. Update 10038
+ * records the pre-upgrade max delivery id and drops released.
  *
  * Every kill command refuses every operator until they re-bind
  * with a matching Paladin token. Break-glass is refused until
@@ -1942,6 +1960,137 @@ function mcp_sentinel_update_10037(): string {
     return 'Operator-binding uid uniqueness and Paladin re-bind already applied.';
   }
   return implode(' ', $messages);
+}
+
+/**
+ * Record pre-upgrade max id, drop unused released, hold remaining (DEV-985).
+ *
+ * 10036 already added hold-queue columns. This hook records the highest
+ * delivery id so keyless rows at or below it stay stopped while any
+ * stop is active, drops the unused released column, and holds
+ * remaining keyless pending rows only when the audit logger is
+ * available. It does not rebuild key indexes: Drupal's MySQL driver
+ * already shortens them, and a 191-char prefix becomes an unusable
+ * substr() index on PostgreSQL.
+ */
+function mcp_sentinel_update_10038(): string {
+  $schema = \Drupal::database()->schema();
+  $database = \Drupal::database();
+  $messages = [];
+  $delivery = 'mcp_sentinel_webhook_delivery';
+  if ($schema->tableExists($delivery)) {
+    if ($schema->fieldExists($delivery, 'released')) {
+      $schema->dropField($delivery, 'released');
+      $messages[] = 'Dropped unused ' . $delivery . '.released.';
+    }
+    $existingMax = \Drupal::state()->get(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+    );
+    if ($existingMax === NULL) {
+      $maxId = (int) $database->select($delivery, 'd')
+        ->orderBy('id', 'DESC')
+        ->range(0, 1)
+        ->fields('d', ['id'])
+        ->execute()
+        ->fetchField();
+      \Drupal::state()->set(
+        McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+        $maxId,
+      );
+      $messages[] = 'Recorded pre-upgrade max delivery id ' . $maxId . '.';
+    }
+    else {
+      $messages[] = 'Pre-upgrade max delivery id already recorded.';
+    }
+  }
+  else {
+    $messages[] = 'mcp_sentinel_webhook_delivery is missing; run update 10007.';
+  }
+
+  $held = mcp_sentinel_hold_keyless_pending_audited();
+  if ($held > 0) {
+    $messages[] = 'Held ' . $held . ' keyless pending webhook row(s) because a kill-block or freeze is active.';
+  }
+  $keylessPending = 0;
+  if ($schema->tableExists($delivery)
+    && $schema->fieldExists($delivery, 'principal_key')) {
+    $keylessPending = (int) $database->select($delivery, 'd')
+      ->condition('status', 'pending')
+      ->condition('principal_key', '')
+      ->condition('human_key', '')
+      ->condition('tenant', '')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+  }
+  $messages[] = $keylessPending . ' keyless pending webhook row(s) remain.';
+  return implode(' ', $messages);
+}
+
+/**
+ * Holds remaining keyless pending rows and fails if they cannot be audited.
+ *
+ * Update 10038 uses this path so a missing audit logger fails the
+ * update instead of holding rows without a record. The active-stop
+ * and keyless selects repeat the 10036 helper on purpose: that
+ * helper cannot change.
+ *
+ * @return int
+ *   Number of rows held.
+ */
+function mcp_sentinel_hold_keyless_pending_audited(): int {
+  $database = \Drupal::database();
+  $delivery = 'mcp_sentinel_webhook_delivery';
+  $kill = 'mcp_sentinel_kill_block';
+  if (!$database->schema()->tableExists($delivery)
+    || !$database->schema()->fieldExists($delivery, 'principal_key')
+    || !$database->schema()->tableExists($kill)) {
+    return 0;
+  }
+  $active = (int) $database->select($kill, 'k')
+    ->condition('status', ['killed', 'kill_pending', 'unkill_pending'], 'IN')
+    ->countQuery()
+    ->execute()
+    ->fetchField();
+  if ($active < 1) {
+    return 0;
+  }
+  $ids = $database->select($delivery, 'd')
+    ->fields('d', ['id'])
+    ->condition('status', 'pending')
+    ->condition('principal_key', '')
+    ->condition('human_key', '')
+    ->condition('tenant', '')
+    ->execute()
+    ->fetchCol();
+  if ($ids !== [] && !mcp_sentinel_resolved_audit_logger() instanceof McpAuditLogger) {
+    throw new UpdateException(
+      'mcp_sentinel.audit_logger is required before holding keyless deliveries.',
+    );
+  }
+  return mcp_sentinel_hold_keyless_pending_on_upgrade();
+}
+
+/**
+ * Audit logger when the service is present and resolvable.
+ *
+ * Returns mixed so a missing or replaced service is a real check.
+ * An instanceof on the typed \\Drupal::service() return is
+ * tautological at PHPStan max.
+ *
+ * @return mixed
+ *   The logger service, or NULL when missing or unresolvable.
+ */
+function mcp_sentinel_resolved_audit_logger(): mixed {
+  if (!\Drupal::hasService('mcp_sentinel.audit_logger')) {
+    return NULL;
+  }
+  try {
+    return \Drupal::service('mcp_sentinel.audit_logger');
+  }
+  catch (\Throwable) {
+    return NULL;
+  }
 }
 
 /**

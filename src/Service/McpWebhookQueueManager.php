@@ -7,7 +7,9 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Database\Transaction;
 use Drupal\Core\Queue\QueueFactory;
+use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -76,6 +78,31 @@ final class McpWebhookQueueManager {
   public const WEAKEN_SKIP_RELEASE_UNDER_STOP = 'skip_release_under_stop';
 
   /**
+   * Audit operation for a refused hold/release/discard.
+   */
+  public const AUDIT_REFUSE = 'agent_side_effect_refuse';
+
+  /**
+   * Refusal reason when enqueue keys meet or exceed the column length.
+   */
+  public const REASON_OVERSIZED_KEY = 'oversized_key';
+
+  /**
+   * State key for the highest delivery id present before update 10038.
+   */
+  public const STATE_PRE_UPGRADE_MAX_ID = 'mcp_sentinel.webhook_pre_upgrade_max_id';
+
+  /**
+   * Maximum stored principal or human key length (utf8mb4 index safe).
+   */
+  public const KEY_MAX_LENGTH = 770;
+
+  /**
+   * Maximum stored tenant length.
+   */
+  public const TENANT_MAX_LENGTH = 128;
+
+  /**
    * Maximum bytes stored in the payload column (safety cap for large payloads).
    *
    * Entity-event payloads are typically small; this bound guards against
@@ -91,9 +118,9 @@ final class McpWebhookQueueManager {
   private array $weakenForTest = [];
 
   /**
-   * Kill registry used to refuse release under an active stop.
+   * PHPUnit-only callback after holdMatching selects ids.
    */
-  private ?McpKillSwitch $killSwitch = NULL;
+  private ?\Closure $afterHoldSelectForTest = NULL;
 
   /**
    * Constructs a new McpWebhookQueueManager.
@@ -112,6 +139,10 @@ final class McpWebhookQueueManager {
    *   Sealed or carried principal keys stored on each delivery row.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   HMAC audit chain writer.
+   * @param \Closure $killEnforcer
+   *   Lazy kill registry (avoids a construct-time cycle).
+   * @param \Drupal\Core\State\StateInterface $state
+   *   Pre-upgrade max delivery id.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -121,6 +152,8 @@ final class McpWebhookQueueManager {
     private readonly LoggerInterface $logger,
     private readonly McpPrincipalContextHolder $holder,
     private readonly McpAuditLogger $auditLogger,
+    private readonly \Closure $killEnforcer,
+    private readonly StateInterface $state,
   ) {}
 
   /**
@@ -128,7 +161,7 @@ final class McpWebhookQueueManager {
    *
    * @param string $eventName
    *   The MCP event identifier.
-   * @param array $payload
+   * @param array<string, mixed> $payload
    *   The event payload (will be JSON-encoded for delivery).
    */
   public function enqueueForEvent(string $eventName, array $payload): void {
@@ -136,7 +169,11 @@ final class McpWebhookQueueManager {
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');
     foreach ($endpoints as $endpoint) {
-      if (empty($endpoint['enabled'])) {
+      if (!is_array($endpoint)) {
+        continue;
+      }
+      $enabled = $endpoint['enabled'] ?? FALSE;
+      if ($enabled !== TRUE && $enabled !== 1) {
         continue;
       }
       $events = (array) ($endpoint['events'] ?? []);
@@ -284,6 +321,7 @@ final class McpWebhookQueueManager {
     $cutoff = $this->time->getRequestTime() - ($days * 86400);
     return (int) $this->database->delete('mcp_sentinel_webhook_delivery')
       ->condition('created', $cutoff, '<')
+      ->condition('status', self::STATUS_HELD, '<>')
       ->execute();
   }
 
@@ -372,11 +410,11 @@ final class McpWebhookQueueManager {
    * MAX_PAYLOAD_BYTES) so that replay sends the exact original body rather than
    * a synthetic envelope.
    *
-   * @param array $endpoint
+   * @param array<string, mixed> $endpoint
    *   The endpoint configuration map.
    * @param string $eventName
    *   The MCP event identifier.
-   * @param array $payload
+   * @param array<string, mixed> $payload
    *   The event payload.
    */
   private function enqueueEndpoint(
@@ -400,6 +438,26 @@ final class McpWebhookQueueManager {
 
     $now = $this->time->getRequestTime();
     [$principalKey, $humanKey, $tenant] = $this->currentPrincipalKeys();
+    if (strlen($principalKey) >= self::KEY_MAX_LENGTH
+      || strlen($humanKey) >= self::KEY_MAX_LENGTH
+      || strlen($tenant) >= self::TENANT_MAX_LENGTH) {
+      $this->logger->error(
+        'Webhook endpoint @id skipped: principal keys exceed column length.',
+        ['@id' => $endpoint['id'] ?? ''],
+      );
+      $this->auditLogger->logSurvivingRollback(self::AUDIT_REFUSE, [
+        'actor' => McpOperatorIdentity::system()->storageId(),
+        'reason_code' => self::REASON_OVERSIZED_KEY,
+        'reason' => 'Webhook keys exceed column length.',
+        'endpoint_id' => substr((string) ($endpoint['id'] ?? ''), 0, 64),
+        'event' => substr($eventName, 0, 128),
+        'batch_id' => '',
+        'correlation_id' => substr((string) ($endpoint['id'] ?? ''), 0, 64),
+        'item_ids' => '',
+        'timestamp' => (string) $now,
+      ], TRUE);
+      return;
+    }
     $rowId = (int) $this->database
       ->insert('mcp_sentinel_webhook_delivery')
       ->fields([
@@ -410,9 +468,9 @@ final class McpWebhookQueueManager {
         'status'       => 'pending',
         'attempts'     => 0,
         'created'      => $now,
-        'principal_key' => substr($principalKey, 0, 770),
-        'human_key' => substr($humanKey, 0, 770),
-        'tenant' => substr($tenant, 0, 128),
+        'principal_key' => $principalKey,
+        'human_key' => $humanKey,
+        'tenant' => $tenant,
       ])->execute();
 
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
@@ -440,9 +498,9 @@ final class McpWebhookQueueManager {
    * replayed, this fallback envelope is sent instead of the original body.
    * Receivers should verify the HMAC over this exact string.
    *
-   * @param array $row
+   * @param array<string, mixed> $row
    *   The delivery log row.
-   * @param array $endpoint
+   * @param array<string, mixed> $endpoint
    *   The resolved endpoint configuration.
    *
    * @return string
@@ -470,7 +528,7 @@ final class McpWebhookQueueManager {
    * @param string $endpointId
    *   The endpoint machine ID.
    *
-   * @return array|null
+   * @return array<string, mixed>|null
    *   The endpoint configuration map, or NULL if not found.
    */
   private function findEndpoint(string $endpointId): ?array {
@@ -478,6 +536,9 @@ final class McpWebhookQueueManager {
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');
     foreach ($endpoints as $endpoint) {
+      if (!is_array($endpoint)) {
+        continue;
+      }
       if ((string) ($endpoint['id'] ?? '') === $endpointId) {
         return $endpoint;
       }
@@ -509,13 +570,6 @@ final class McpWebhookQueueManager {
   }
 
   /**
-   * Injects the kill registry after construction (avoids a service cycle).
-   */
-  public function setKillSwitch(McpKillSwitch $killSwitch): void {
-    $this->killSwitch = $killSwitch;
-  }
-
-  /**
    * Holds pending deliveries that match the kill scope.
    *
    * In-flight (in_progress) POSTs are not recalled. Writes exactly
@@ -535,39 +589,55 @@ final class McpWebhookQueueManager {
     if (!$this->database->schema()->tableExists('mcp_sentinel_webhook_delivery')) {
       return [];
     }
-    $ids = [];
-    foreach ($selectors as $selector) {
-      $column = match ($selector->type) {
-        McpKillSelectorType::PrincipalKey => 'principal_key',
-        McpKillSelectorType::HumanKey => 'human_key',
-        McpKillSelectorType::Tenant => 'tenant',
-      };
-      $statement = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-        ->fields('d', ['id'])
-        ->condition($column, $selector->key)
+    $txn = $this->database->startTransaction();
+    try {
+      $ids = [];
+      foreach ($selectors as $selector) {
+        $column = match ($selector->type) {
+          McpKillSelectorType::PrincipalKey => 'principal_key',
+          McpKillSelectorType::HumanKey => 'human_key',
+          McpKillSelectorType::Tenant => 'tenant',
+        };
+        $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+          ->fields('d', ['id'])
+          ->condition($column, $selector->key)
+          ->condition('status', 'pending');
+        $query->forUpdate();
+        $statement = $query->execute();
+        if ($statement === NULL) {
+          continue;
+        }
+        foreach ($statement->fetchCol() as $id) {
+          $ids[] = (int) $id;
+        }
+      }
+      $ids = array_values(array_unique($ids));
+      if ($ids === []) {
+        unset($txn);
+        return [];
+      }
+      if ($this->afterHoldSelectForTest !== NULL) {
+        ($this->afterHoldSelectForTest)($ids);
+      }
+      $this->database->update('mcp_sentinel_webhook_delivery')
+        ->fields(['status' => self::STATUS_HELD])
+        ->condition('id', $ids, 'IN')
         ->condition('status', 'pending')
         ->execute();
-      if ($statement === NULL) {
-        continue;
-      }
-      foreach ($statement->fetchCol() as $id) {
-        $ids[] = (int) $id;
-      }
+      $held = $this->idsInStatus($ids, self::STATUS_HELD);
+      unset($txn);
     }
-    $ids = array_values(array_unique($ids));
-    if ($ids === []) {
+    catch (\Throwable $e) {
+      if ($txn instanceof Transaction) {
+        $txn->rollBack();
+      }
+      throw $e;
+    }
+    if ($held === []) {
       return [];
     }
-    $this->database->update('mcp_sentinel_webhook_delivery')
-      ->fields([
-        'status' => self::STATUS_HELD,
-        'released' => 0,
-      ])
-      ->condition('id', $ids, 'IN')
-      ->condition('status', 'pending')
-      ->execute();
-    $this->auditSideEffect(self::AUDIT_HOLD, $operator, $selectors, $ids, $batchId);
-    return $ids;
+    $this->auditSideEffect(self::AUDIT_HOLD, $operator, $selectors, $held, $batchId);
+    return $held;
   }
 
   /**
@@ -669,6 +739,24 @@ final class McpWebhookQueueManager {
   }
 
   /**
+   * PHPUnit-only hook after holdMatching selects ids and before update.
+   *
+   * @param \Closure|null $callback
+   *   Mutates or discards selected rows to simulate a concurrent writer.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function afterHoldSelectForTest(?\Closure $callback): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Webhook-hold test seams can be set only under PHPUnit.',
+      );
+    }
+    $this->afterHoldSelectForTest = $callback;
+  }
+
+  /**
    * Releases or discards held rows and writes one audit entry.
    *
    * @param list<int> $deliveryIds
@@ -687,9 +775,11 @@ final class McpWebhookQueueManager {
    */
   private function finishHeld(array $deliveryIds, McpOperatorIdentity $operator, string $action, string $batchId = ''): array {
     if (!$operator->isVerified()) {
-      throw new McpKillSwitchException(
+      $this->refuseHeld(
         McpKillSwitchException::UNVERIFIED_OPERATOR,
         'A verified operator identity is required.',
+        $operator,
+        $batchId,
       );
     }
     $ids = [];
@@ -701,66 +791,82 @@ final class McpWebhookQueueManager {
     }
     $ids = array_values(array_unique($ids));
     if ($ids === []) {
-      throw new McpKillSwitchException(
+      $this->refuseHeld(
         McpKillSwitchException::NOT_HELD,
         'A held delivery id is required.',
+        $operator,
+        $batchId,
       );
     }
-    $statement = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d')
-      ->condition('id', $ids, 'IN')
-      ->condition('status', self::STATUS_HELD)
-      ->execute();
-    $rows = [];
-    if ($statement !== NULL) {
-      while ($row = $statement->fetchAssoc()) {
-        $id = (int) ($row['id'] ?? 0);
-        if ($id > 0) {
-          $rows[$id] = $row;
+    $txn = $this->database->startTransaction();
+    try {
+      $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d')
+        ->condition('id', $ids, 'IN')
+        ->condition('status', self::STATUS_HELD);
+      $query->forUpdate();
+      $statement = $query->execute();
+      $rows = [];
+      if ($statement !== NULL) {
+        while ($row = $statement->fetchAssoc()) {
+          $id = (int) ($row['id'] ?? 0);
+          if ($id > 0) {
+            $rows[$id] = $row;
+          }
         }
       }
-    }
-    if ($rows === []) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::NOT_HELD,
-        'No held delivery matches those ids.',
-      );
-    }
-    $heldIds = array_keys($rows);
-    if ($action === 'release' && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
-      foreach ($rows as $row) {
-        if ($this->rowIsStopped($row)) {
-          throw new McpKillSwitchException(
-            McpKillSwitchException::SCOPE_STOPPED,
-            'Release is refused while the delivery scope is still stopped. Lift or unkill first.',
-          );
+      if ($rows === []) {
+        $this->refuseHeld(
+          McpKillSwitchException::NOT_HELD,
+          'No held delivery matches those ids.',
+          $operator,
+          $batchId,
+          $ids,
+        );
+      }
+      $heldIds = array_keys($rows);
+      if ($action === 'release' && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
+        foreach ($rows as $row) {
+          if ($this->rowIsStopped($row)) {
+            $this->refuseHeld(
+              McpKillSwitchException::SCOPE_STOPPED,
+              'Release is refused while the delivery scope is still stopped. Lift or unkill first.',
+              $operator,
+              $batchId,
+              $heldIds,
+            );
+          }
         }
       }
-    }
-    if ($action === 'discard') {
+      $toStatus = $action === 'discard' ? self::STATUS_DISCARDED : 'pending';
+      $fields = ['status' => $toStatus];
+      if ($action !== 'discard') {
+        $fields['next_attempt'] = NULL;
+      }
       $this->database->update('mcp_sentinel_webhook_delivery')
-        ->fields(['status' => self::STATUS_DISCARDED])
+        ->fields($fields)
         ->condition('id', $heldIds, 'IN')
         ->condition('status', self::STATUS_HELD)
         ->execute();
-      $this->auditSideEffect(self::AUDIT_DISCARD, $operator, [], $heldIds, $batchId);
-      return $heldIds;
+      $changed = $this->idsInStatus($heldIds, $toStatus);
+      unset($txn);
     }
-    $this->database->update('mcp_sentinel_webhook_delivery')
-      ->fields([
-        'status' => 'pending',
-        'next_attempt' => NULL,
-        'released' => 1,
-      ])
-      ->condition('id', $heldIds, 'IN')
-      ->condition('status', self::STATUS_HELD)
-      ->execute();
-    $queue = $this->queueFactory->get(self::QUEUE_NAME);
-    foreach ($heldIds as $id) {
-      $row = $rows[$id] ?? $rows[(string) $id] ?? NULL;
-      if (!is_array($row)) {
-        continue;
+    catch (\Throwable $e) {
+      if ($txn instanceof Transaction) {
+        $txn->rollBack();
       }
+      throw $e;
+    }
+    if ($changed === []) {
+      return [];
+    }
+    if ($action === 'discard') {
+      $this->auditSideEffect(self::AUDIT_DISCARD, $operator, [], $changed, $batchId);
+      return $changed;
+    }
+    $queue = $this->queueFactory->get(self::QUEUE_NAME);
+    foreach ($changed as $id) {
+      $row = $rows[$id];
       $endpoint = $this->findEndpoint((string) $row['endpoint_id']);
       if ($endpoint === NULL) {
         continue;
@@ -781,8 +887,8 @@ final class McpWebhookQueueManager {
           ->execute();
       }
     }
-    $this->auditSideEffect(self::AUDIT_RELEASE, $operator, [], $heldIds, $batchId);
-    return $heldIds;
+    $this->auditSideEffect(self::AUDIT_RELEASE, $operator, [], $changed, $batchId);
+    return $changed;
   }
 
   /**
@@ -820,6 +926,84 @@ final class McpWebhookQueueManager {
   }
 
   /**
+   * Whether a delivery row must stay held under the current kill registry.
+   *
+   * Used by the worker at pre-claim, post-claim, and retry. Pre-upgrade
+   * keyless rows and keys at or above the column length are treated as
+   * stopped whenever any stop is active.
+   *
+   * @param array<string, mixed> $row
+   *   Delivery row (id and key columns).
+   *
+   * @return bool
+   *   TRUE when the worker must hold the row.
+   */
+  public function shouldHoldRow(array $row): bool {
+    return $this->rowIsStopped($row);
+  }
+
+  /**
+   * Holds an in_progress retry and writes one hold audit row.
+   *
+   * @param int $deliveryId
+   *   Delivery row id.
+   * @param int $attempts
+   *   Attempt count to store.
+   * @param int|null $code
+   *   Last HTTP status, if any.
+   * @param string|null $body
+   *   Last response or error body.
+   * @param int $nextAttempt
+   *   Unix time of the next retry.
+   *
+   * @return bool
+   *   TRUE when the row was held.
+   */
+  public function holdAfterAttempt(
+    int $deliveryId,
+    int $attempts,
+    ?int $code,
+    ?string $body,
+    int $nextAttempt,
+  ): bool {
+    if ($deliveryId <= 0) {
+      return FALSE;
+    }
+    $row = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')
+      ->condition('id', $deliveryId)
+      ->execute()
+      ?->fetchAssoc();
+    if (!is_array($row) || !$this->shouldHoldRow($row)) {
+      return FALSE;
+    }
+    $updated = (int) $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $deliveryId)
+      ->condition('status', 'in_progress')
+      ->fields([
+        'status' => self::STATUS_HELD,
+        'attempts' => $attempts,
+        'last_attempt' => $this->time->getRequestTime(),
+        'next_attempt' => $nextAttempt,
+        'last_response_code' => $code,
+        'last_response_body' => $body,
+      ])
+      ->execute();
+    if ($updated < 1) {
+      return FALSE;
+    }
+    $selectors = $this->selectorsFromRow($row);
+    $this->auditSideEffect(
+      self::AUDIT_HOLD,
+      McpOperatorIdentity::system(),
+      $selectors,
+      [$deliveryId],
+      $this->matchingKillBatchId($selectors),
+    );
+    return TRUE;
+  }
+
+  /**
    * Whether the delivery's keys are still in a stopped scope.
    *
    * @param array<string, mixed> $row
@@ -829,10 +1013,147 @@ final class McpWebhookQueueManager {
     $principalKey = (string) ($row['principal_key'] ?? '');
     $humanKey = (string) ($row['human_key'] ?? '');
     $tenant = (string) ($row['tenant'] ?? '');
-    if ($this->killSwitch === NULL) {
+    if ($this->isOversizedKey($principalKey)
+      || $this->isOversizedKey($humanKey)
+      || strlen($tenant) >= self::TENANT_MAX_LENGTH) {
+      return $this->enforcer()->hasActiveStop();
+    }
+    if ($this->isPreUpgradeKeyless($row)) {
+      return $this->enforcer()->hasActiveStop();
+    }
+    return $this->enforcer()->wouldHoldKeys($principalKey, $humanKey, $tenant);
+  }
+
+  /**
+   * Whether a stored key meets or exceeds the column length.
+   *
+   * Rows written by the old substr(..., 0, 770) path are exactly
+   * KEY_MAX_LENGTH bytes and must fail closed while any stop is
+   * active.
+   *
+   * @param string $key
+   *   Principal or human key.
+   *
+   * @return bool
+   *   TRUE when the key may have been truncated.
+   */
+  private function isOversizedKey(string $key): bool {
+    return strlen($key) >= self::KEY_MAX_LENGTH;
+  }
+
+  /**
+   * Keyless row that must stay stopped while any stop is active.
+   *
+   * When the 10038 state key is absent (code deployed before
+   * updb), every keyless row is treated as pre-upgrade. Fresh
+   * installs record 0 so no keyless row is pre-upgrade. After a
+   * recorded max of 1 or more, only ids at or below that max with
+   * empty keys are pre-upgrade (rows queued before update 10036).
+   *
+   * @param array<string, mixed> $row
+   *   Delivery row.
+   *
+   * @return bool
+   *   TRUE when this keyless row is in the pre-upgrade set.
+   */
+  private function isPreUpgradeKeyless(array $row): bool {
+    $id = (int) ($row['id'] ?? 0);
+    if ($id < 1) {
+      return FALSE;
+    }
+    $keyless = trim((string) ($row['principal_key'] ?? '')) === ''
+      && trim((string) ($row['human_key'] ?? '')) === ''
+      && trim((string) ($row['tenant'] ?? '')) === '';
+    if (!$keyless) {
+      return FALSE;
+    }
+    $raw = $this->state->get(self::STATE_PRE_UPGRADE_MAX_ID);
+    if ($raw === NULL) {
       return TRUE;
     }
-    return $this->killSwitch->isKilled($principalKey, $humanKey, $tenant);
+    $max = (int) $raw;
+    return $max >= 1 && $id <= $max;
+  }
+
+  /**
+   * Resolves the kill registry through the service closure.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface
+   *   Kill registry.
+   */
+  private function enforcer(): McpKillEnforcerInterface {
+    $enforcer = ($this->killEnforcer)();
+    if (!$enforcer instanceof McpKillEnforcerInterface) {
+      throw new \LogicException('mcp_sentinel.kill_switch must implement McpKillEnforcerInterface.');
+    }
+    return $enforcer;
+  }
+
+  /**
+   * Ids from $ids that currently have $status.
+   *
+   * @param list<int> $ids
+   *   Candidate ids.
+   * @param string $status
+   *   Required status.
+   *
+   * @return list<int>
+   *   Matching ids.
+   */
+  private function idsInStatus(array $ids, string $status): array {
+    if ($ids === []) {
+      return [];
+    }
+    $statement = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d', ['id'])
+      ->condition('id', $ids, 'IN')
+      ->condition('status', $status)
+      ->execute();
+    if ($statement === NULL) {
+      return [];
+    }
+    $found = [];
+    foreach ($statement->fetchCol() as $id) {
+      $found[] = (int) $id;
+    }
+    return $found;
+  }
+
+  /**
+   * Audits a refused hold/release/discard and throws.
+   *
+   * @param string $code
+   *   Stable refusal reason.
+   * @param string $message
+   *   Operator-facing text.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   * @param string $batchId
+   *   Kill batch or correlation id.
+   * @param list<int> $ids
+   *   Candidate ids.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function refuseHeld(
+    string $code,
+    string $message,
+    McpOperatorIdentity $operator,
+    string $batchId,
+    array $ids = [],
+  ): never {
+    if (!$this->weakened(self::WEAKEN_SKIP_AUDIT)) {
+      $this->auditLogger->logSurvivingRollback(self::AUDIT_REFUSE, [
+        'actor' => $operator->storageId(),
+        'reason_code' => $code,
+        'reason' => $message,
+        'batch_id' => $batchId,
+        'correlation_id' => $batchId,
+        'item_ids' => implode(',', array_map(static fn ($id): string => (string) $id, $ids)),
+        'timestamp' => (string) $this->time->getRequestTime(),
+      ], TRUE);
+    }
+    throw new McpKillSwitchException($code, $message, TRUE);
   }
 
   /**
@@ -968,7 +1289,7 @@ final class McpWebhookQueueManager {
     $this->auditLogger->logAlways($operation, [
       'actor' => $operator->storageId(),
       'scope' => implode(',', $scope),
-      'target_selector' => implode(',', $scope),
+      'target_selector' => $scope[0] ?? '',
       'timestamp' => (string) $this->time->getRequestTime(),
       'batch_id' => $batchId,
       'correlation_id' => $batchId !== '' ? $batchId : implode(',', $itemIds),
