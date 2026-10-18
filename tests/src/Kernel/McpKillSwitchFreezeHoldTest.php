@@ -1683,6 +1683,18 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * Mutation check: kill-switch writes no audit when that flag is on.
+   */
+  public function testKillWritesNoAuditWhenSkipAuditWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_AUDIT);
+    $selector = $this->principalSelector('subject-audit-w', 'agent-audit-w');
+    $this->killSwitch()->kill([$selector], 'audit-w', $this->paladinA());
+    $this->assertTrue($this->killSwitch()->isKilled($selector->key));
+    $this->assertSame(0, $this->countAudit(McpKillSwitch::AUDIT_KILL));
+    $this->assertSame(0, $this->countAudit(McpKillSwitch::AUDIT_FREEZE));
+  }
+
+  /**
    * Mutation check: worker hold writes no audit when that flag is on.
    */
   public function testWorkerHoldAuditWhenWeakened(): void {

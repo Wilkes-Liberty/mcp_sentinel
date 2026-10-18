@@ -3,12 +3,15 @@
 # worker, and mcp_sentinel.module. CI requires this file after
 # composer require phpstan/phpstan-strict-rules; extension-installer
 # loads rules.neon, so this file must not include it again.
-# Untouched 1.x code in McpKillSwitch.php, mcp_sentinel.install, and
-# pre-#318 module / queue / worker errors are recorded in
-# phpstan.operator-baseline.neon (install/KillSwitch/module-3 from
-# Tests 39110065729 on bff12db; remaining module, queue manager,
-# and worker messages from Tests 39115568856). New DEV-985 code
-# must not add baseline entries.
+# Untouched 1.x code in McpKillSwitch.php and mcp_sentinel.install
+# is recorded in phpstan.operator-baseline.neon from Tests
+# 39110065729 on bff12db (those files were already in this scan).
+# Module, queue-manager, and worker entries are the errors those
+# files already had when they joined this scan. They are not a
+# 1.x / pre-#318 claim: Tests 39115568856 was this PR, and
+# 39110065729 did not scan the module. shouldHoldRow is typed at
+# the fetchAssoc() call site so that #318 path is not ignored.
+# New DEV-985 code must not add baseline entries.
 includes:
   - phpstan.operator-baseline.neon
 

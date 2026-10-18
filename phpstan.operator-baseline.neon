@@ -1,11 +1,14 @@
-# Baseline for untouched 1.x code in McpKillSwitch.php,
-# mcp_sentinel.install, and pre-#318 mcp_sentinel.module errors.
+# Baseline for untouched 1.x code in McpKillSwitch.php and
+# mcp_sentinel.install, plus errors already present in
+# mcp_sentinel.module, McpWebhookQueueManager, and
+# McpWebhookWorker when those files joined the operator scan.
 # Generated under PHPStan max + phpstan-strict-rules with
 # messages so identifier buckets cannot absorb new DEV-986
-# errors. Install/KillSwitch plus the three original module
-# entries are from Tests 39110065729 (bff12db). Remaining
-# module, queue-manager, and worker messages are the
-# pre-#318 errors enumerated on Tests 39115568856. The two 10037
+# errors. Install/KillSwitch entries are from Tests
+# 39110065729 (bff12db). Module/queue/worker messages are
+# file-local errors that predate this PR's product changes;
+# they are not a claim that Tests 39115568856 was a 1.x run
+# or that 39110065729 scanned the module. The two 10037
 # fetchAll(PDO::FETCH_ASSOC) hits are covered by the
 # path-scoped ignore in phpstan.operator.neon, not here.
 # New DEV-985 / DEV-986 code must not add entries.
@@ -490,9 +493,4 @@ parameters:
       message: '#^Parameter \#1 \$row of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::selectorsFromRow\(\) expects array\<string, mixed\>, array given\.$#'
       identifier: argument.type
       count: 2
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Parameter \#1 \$row of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::shouldHoldRow\(\) expects array\<string, mixed\>, array given\.$#'
-      identifier: argument.type
-      count: 1
       path: src/Service/McpWebhookQueueManager.php

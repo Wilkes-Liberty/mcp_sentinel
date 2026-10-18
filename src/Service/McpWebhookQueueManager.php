@@ -942,6 +942,30 @@ final class McpWebhookQueueManager {
   }
 
   /**
+   * Narrows a fetchAssoc() result to a string-keyed row.
+   *
+   * @param mixed $row
+   *   Statement fetchAssoc() result.
+   *
+   * @return array<string, mixed>|null
+   *   The row, or NULL when the result is missing or not
+   *   string-keyed.
+   */
+  private function stringKeyedRow(mixed $row): ?array {
+    if (!is_array($row)) {
+      return NULL;
+    }
+    $typed = [];
+    foreach ($row as $key => $value) {
+      if (!is_string($key)) {
+        return NULL;
+      }
+      $typed[$key] = $value;
+    }
+    return $typed;
+  }
+
+  /**
    * Holds an in_progress retry and writes one hold audit row.
    *
    * @param int $deliveryId
@@ -968,12 +992,14 @@ final class McpWebhookQueueManager {
     if ($deliveryId <= 0) {
       return FALSE;
     }
-    $row = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d')
-      ->condition('id', $deliveryId)
-      ->execute()
-      ?->fetchAssoc();
-    if (!is_array($row) || !$this->shouldHoldRow($row)) {
+    $row = $this->stringKeyedRow(
+      $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d')
+        ->condition('id', $deliveryId)
+        ->execute()
+        ?->fetchAssoc(),
+    );
+    if ($row === NULL || !$this->shouldHoldRow($row)) {
       return FALSE;
     }
     $updated = (int) $this->database->update('mcp_sentinel_webhook_delivery')

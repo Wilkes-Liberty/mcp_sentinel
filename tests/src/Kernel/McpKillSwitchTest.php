@@ -311,6 +311,21 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * Guard bypass: a mass kill applies immediately when mass-pending is off.
+   *
+   * This is the red mutation for testMassKillStaysPendingWithoutSecondOperator.
+   */
+  public function testMassKillAppliesWhenMassPendingIsWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_PENDING);
+    $one = $this->principalSelector('subject-m1w', 'agent-m1w');
+    $two = $this->principalSelector('subject-m2w', 'agent-m2w');
+    $result = $this->killSwitch()->kill([$one, $two], 'mass', $this->paladinA());
+    $this->assertFalse($result->needsConfirm);
+    $this->assertSame(McpKillBlockStatus::Killed, $result->status);
+    $this->assertTrue($this->killSwitch()->isKilled($one->key));
+  }
+
+  /**
    * A mass kill freezes immediately without a second operator (DEV-985).
    */
   public function testMassKillStaysPendingWithoutSecondOperator(): void {
@@ -588,6 +603,22 @@ final class McpKillSwitchTest extends KernelTestBase {
       $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
     }
     $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Mutation check: a Drupal uid identity applies when that flag is on.
+   */
+  public function testUidOperatorAppliesWhenTrustUidWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_TRUST_UID);
+    $selector = $this->principalSelector('subject-uid-w', 'agent-uid-w');
+    $result = $this->killSwitch()->kill(
+      [$selector],
+      'uid-w',
+      McpOperatorIdentity::fromDrupalUid($this->operatorA),
+    );
+    $this->assertFalse($result->needsConfirm);
+    $this->assertSame(McpKillBlockStatus::Killed, $result->status);
+    $this->assertTrue($this->killSwitch()->isKilled($selector->key));
   }
 
   /**
