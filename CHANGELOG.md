@@ -6,6 +6,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+DEV-985 P1 follow-up after 3.3.1 (`b613e44`).
+
+### Security
+- Re-killing a selector after lift, un-kill confirm, or TTL
+  expiry uses the requested TTL and `block_until`. A dead
+  row no longer lengthens the new stop. The kill audit and
+  CLI result report the stored window (`ttl` /
+  `block_until`) and the requested window
+  (`requested_ttl` / `requested_block_until`).
+
+### Fixed
+- `writeKillRow` inherits `ttl` and `block_until` only from
+  rows that are still blocking. Lifted, un-killed, and
+  expired rows do not donate their window.
+
+### Changed
+- **Behaviour change.** Every keyless webhook row (system or
+  anonymous) is held while any stop is active, including
+  rows queued after update 10038. Held rows stay held until
+  the stop is lifted and an operator releases or discards
+  them.
+
+### Upgrade
+- Run `drush updb` (10036 → 10039). Sites already on 3.3.1
+  have 10039. The 10038 body is unchanged.
+
 ## [3.3.1] - 2026-10-18
 
 DEV-985 P0 follow-up after #318 (`dc53c71`) and 3.3.0.
@@ -27,6 +53,11 @@ DEV-985 P0 follow-up after #318 (`dc53c71`) and 3.3.0.
   rule.
 
 ## [3.3.0] - 2026-10-18
+
+Superseded by 3.3.1: kill-switch refusals after Paladin
+resolution lacked the operator principal and escalation
+failures could be mislabelled; upgrade and run `drush updb`
+(adds 10039).
 
 Paladin-only kill-switch operator identity (DEV-986: #316, #319,
 #324; #320 superseded by #324) and freeze-first mass stops with
@@ -241,7 +272,9 @@ held side effects (DEV-985: #318, #325).
 - Confirming a mixed-window freeze uses the batch-max
   `block_until` and `ttl`, the same way as extend. The last
   locked row no longer shortens the remaining stop. Re-issuing
-  a stop onto an existing selector keeps the longer stored TTL.
+  a stop onto a still-blocking selector keeps the longer
+  stored TTL. Inheritance from lifted, un-killed, or expired
+  rows was incorrect (fixed under [Unreleased]).
 - A claimless request on a Drupal test child served by the PHP
   built-in server is no longer sealed before readiness stamps role
   fallback. That early seal left JSON:API, GraphQL, and context with

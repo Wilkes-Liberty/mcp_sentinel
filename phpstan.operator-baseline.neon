@@ -8,7 +8,9 @@
 # 39110065729 (bff12db). Module/queue/worker messages are
 # file-local errors that predate this PR's product changes;
 # they are not a claim that Tests 39115568856 was a 1.x run
-# or that 39110065729 scanned the module. The two 10037
+# or that 39110065729 scanned the module. QueueManager
+# hold-path reads are typed, so the cast.string / cast.int
+# buckets are not a #318 absorb. The two 10037
 # fetchAll(PDO::FETCH_ASSOC) hits are covered by the
 # path-scoped ignore in phpstan.operator.neon, not here.
 # New DEV-985 / DEV-986 code must not add entries.
@@ -237,12 +239,12 @@ parameters:
     -
       message: '#^Cannot cast mixed to int\.$#'
       identifier: cast.int
-      count: 21
+      count: 16
       path: src/Service/McpKillSwitch.php
     -
       message: '#^Cannot cast mixed to string\.$#'
       identifier: cast.string
-      count: 49
+      count: 47
       path: src/Service/McpKillSwitch.php
     -
       message: '#^Method Drupal\\mcp_sentinel\\Service\\McpKillSwitch\:\:assocRows\(\) has parameter \$statement with no value type specified in iterable type Drupal\\Core\\Database\\StatementInterface\.$#'
@@ -400,16 +402,6 @@ parameters:
       count: 1
       path: src/Service/McpWebhookQueueManager.php
     -
-      message: '#^Cannot cast mixed to string\.$#'
-      identifier: cast.string
-      count: 36
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Parameter \#1 \$endpoint of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::enqueueEndpoint\(\) expects array\<string, mixed\>, array\<mixed\> given\.$#'
-      identifier: argument.type
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
       message: '#^Cannot call method fetchAll\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
       identifier: method.nonObject
       count: 1
@@ -430,11 +422,6 @@ parameters:
       count: 2
       path: src/Service/McpWebhookQueueManager.php
     -
-      message: '#^Cannot cast mixed to int\.$#'
-      identifier: cast.int
-      count: 7
-      path: src/Service/McpWebhookQueueManager.php
-    -
       message: '#^Cannot access property \$event_name on mixed\.$#'
       identifier: property.nonObject
       count: 1
@@ -452,30 +439,5 @@ parameters:
     -
       message: '#^Cannot access property \$tenant on mixed\.$#'
       identifier: property.nonObject
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Casting to int something that''s already int\.$#'
-      identifier: cast.useless
-      count: 2
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Cannot call method fetchAssoc\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
-      identifier: method.nonObject
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Only booleans are allowed in a negated boolean, array\|false given\.$#'
-      identifier: booleanNot.exprNotBoolean
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Parameter \#1 \$row of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::buildLegacyFallbackPayload\(\) expects array\<string, mixed\>, array given\.$#'
-      identifier: argument.type
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::findEndpoint\(\) should return array\<string, mixed\>\|null but returns array\<mixed\>\.$#'
-      identifier: return.type
       count: 1
       path: src/Service/McpWebhookQueueManager.php

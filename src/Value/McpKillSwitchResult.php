@@ -25,7 +25,7 @@ final readonly class McpKillSwitchResult {
    *   a mass freeze is pending. An unconfirmed freeze stays in
    *   force after this timestamp.
    * @param int $ttl
-   *   Applied TTL in seconds.
+   *   Stored TTL in seconds (the enforced window).
    * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
    *   Targets in this batch.
    */

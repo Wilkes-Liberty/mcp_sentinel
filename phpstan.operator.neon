@@ -9,8 +9,9 @@
 # Module, queue-manager, and worker entries are the errors those
 # files already had when they joined this scan. They are not a
 # 1.x / pre-#318 claim: Tests 39115568856 was this PR, and
-# 39110065729 did not scan the module. shouldHoldRow is typed at
-# the fetchAssoc() call site so that #318 path is not ignored.
+# 39110065729 did not scan the module. Hold-path reads go
+# through stringKeyedRow / rowString / mixedString so the
+# QueueManager cast.string bucket is not a #318 absorb.
 # New DEV-985 code must not add baseline entries.
 includes:
   - phpstan.operator-baseline.neon
