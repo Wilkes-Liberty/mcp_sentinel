@@ -575,6 +575,38 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
   }
 
   /**
+   * A non-integer --ttl on kill-extend is refused.
+   *
+   * @covers ::extendKill
+   * @covers ::optionTtl
+   */
+  public function testExtendKillRefusesMalformedTtl(): void {
+    $this->bindAlice();
+    $this->bindBob();
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-extend-ttl');
+    $pending = $this->container->get('mcp_sentinel.kill_switch')->kill(
+      [$human],
+      'mass',
+      $this->paladinA(),
+    );
+    $this->queueActiveTokens(['operator-b']);
+    $code = $this->withToken(self::TOKEN, function () use ($pending): int {
+      return $this->commands->extendKill($pending->batchId, [
+        'operator' => 'bob',
+        'ttl' => '7d',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::INVALID_TTL, $meta['reason_code']);
+    $row = $this->container->get('mcp_sentinel.kill_switch')->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame('kill_pending', $row['status']);
+  }
+
+  /**
    * A kill refusal writes exactly one operator_command_refused row.
    *
    * @covers ::kill

@@ -11,6 +11,7 @@ use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Enum\McpKillBlockStatus;
+use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
@@ -656,6 +657,114 @@ final class McpKillSwitchTest extends KernelTestBase {
     }
     $audit = $this->lastAuditMetadata(McpOperatorBinding::AUDIT_BIND_REFUSED);
     $this->assertSame(McpKillSwitchException::OPERATOR_BINDING_CONFLICT, $audit['reason_code']);
+  }
+
+  /**
+   * Confirm deletes the 10037 kept marker for that batch.
+   */
+  public function testConfirmClearsUpgradeKeptMarker(): void {
+    $batchId = '00000000-0000-4000-8000-000000000081';
+    $human = self::ISS . '|kept-confirm';
+    $this->insertDrushPendingFreeze($batchId, $human);
+    $this->assertSame(1, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
+    $this->assertArrayHasKey($this->upgradeKeptKey($batchId, $human), $this->upgradeKeptMarkers());
+
+    $this->killSwitch()->confirm($batchId, $this->paladinB());
+    $this->assertSame([], $this->upgradeKeptMarkers());
+    $this->assertFalse($this->container->get('state')->get(McpKillSwitch::STATE_UPGRADE_KEPT, FALSE));
+  }
+
+  /**
+   * Lift deletes the 10037 kept marker for that batch.
+   */
+  public function testLiftClearsUpgradeKeptMarker(): void {
+    $batchId = '00000000-0000-4000-8000-000000000082';
+    $human = self::ISS . '|kept-lift';
+    $this->insertDrushPendingFreeze($batchId, $human);
+    $this->assertSame(1, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
+    $this->assertArrayHasKey($this->upgradeKeptKey($batchId, $human), $this->upgradeKeptMarkers());
+
+    $this->killSwitch()->lift($batchId, $this->paladinB());
+    $this->assertSame([], $this->upgradeKeptMarkers());
+    $this->assertFalse($this->container->get('state')->get(McpKillSwitch::STATE_UPGRADE_KEPT, FALSE));
+  }
+
+  /**
+   * Break-glass lift deletes the 10037 kept marker for that batch.
+   */
+  public function testBreakGlassLiftClearsUpgradeKeptMarker(): void {
+    $batchId = '00000000-0000-4000-8000-000000000083';
+    $human = self::ISS . '|kept-break-glass';
+    $this->insertDrushPendingFreeze($batchId, $human);
+    $this->assertSame(1, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
+    $this->assertArrayHasKey($this->upgradeKeptKey($batchId, $human), $this->upgradeKeptMarkers());
+
+    $this->setSetting(
+      'mcp_sentinel.kill_switch.break_glass_operator',
+      self::ISS . '|operator-b',
+    );
+    $this->killSwitch()->breakGlass(
+      $batchId,
+      McpKillBreakGlassAction::Lift,
+      $this->paladinB(),
+    );
+    $this->assertSame([], $this->upgradeKeptMarkers());
+    $this->assertFalse($this->container->get('state')->get(McpKillSwitch::STATE_UPGRADE_KEPT, FALSE));
+  }
+
+  /**
+   * A 10037 re-run prunes stale markers and does not re-audit a still-pending keep.
+   */
+  public function testUpdate10037RerunPrunesStaleKeptMarker(): void {
+    $pendingBatch = '00000000-0000-4000-8000-000000000084';
+    $staleBatch = '00000000-0000-4000-8000-000000000085';
+    $pendingHuman = self::ISS . '|kept-pending';
+    $staleHuman = self::ISS . '|kept-stale';
+    $this->insertDrushPendingFreeze($pendingBatch, $pendingHuman);
+    $this->insertDrushPendingFreeze($staleBatch, $staleHuman);
+    $this->assertSame(2, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
+    $this->assertSame(2, $this->upgradeKeptAuditCount());
+    $this->assertArrayHasKey(
+      $this->upgradeKeptKey($pendingBatch, $pendingHuman),
+      $this->upgradeKeptMarkers(),
+    );
+    $this->assertArrayHasKey(
+      $this->upgradeKeptKey($staleBatch, $staleHuman),
+      $this->upgradeKeptMarkers(),
+    );
+
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['status' => McpKillBlockStatus::Expired->value])
+      ->condition('batch_id', $staleBatch)
+      ->execute();
+
+    $this->assertSame(0, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
+    $kept = $this->upgradeKeptMarkers();
+    $this->assertArrayHasKey($this->upgradeKeptKey($pendingBatch, $pendingHuman), $kept);
+    $this->assertArrayNotHasKey($this->upgradeKeptKey($staleBatch, $staleHuman), $kept);
+    $this->assertSame(2, $this->upgradeKeptAuditCount());
+  }
+
+  /**
+   * TTL expiry of a kept freeze deletes its 10037 marker.
+   */
+  public function testExpireDueClearsUpgradeKeptMarker(): void {
+    $batchId = '00000000-0000-4000-8000-000000000086';
+    $human = self::ISS . '|kept-expire';
+    $this->insertDrushPendingFreeze($batchId, $human);
+    $this->assertSame(1, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
+    $this->assertArrayHasKey($this->upgradeKeptKey($batchId, $human), $this->upgradeKeptMarkers());
+
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields([
+        'block_until' => 1,
+        'confirm_until' => 999999999,
+      ])
+      ->condition('batch_id', $batchId)
+      ->execute();
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_EXPIRE_UNCONFIRMED);
+    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
+    $this->assertSame([], $this->upgradeKeptMarkers());
   }
 
   /**
@@ -1502,6 +1611,59 @@ final class McpKillSwitchTest extends KernelTestBase {
    */
   private function principalSelector(string $sub, string $azp): McpKillSelector {
     return McpKillSelector::principalKey(self::ISS . '|' . $sub . '|' . $azp);
+  }
+
+  /**
+   * Inserts a Drush-requested unconfirmed freeze for update 10037 keep.
+   */
+  private function insertDrushPendingFreeze(string $batchId, string $humanKey): void {
+    $this->container->get('database')->insert(McpKillSwitch::TABLE)
+      ->fields([
+        'selector_hash' => hash('sha256', 'human_key:' . $humanKey),
+        'selector_type' => 'human_key',
+        'selector_key' => $humanKey,
+        'status' => McpKillBlockStatus::KillPending->value,
+        'batch_id' => $batchId,
+        'requested_by' => 'drush:' . str_repeat('a', 64),
+        'requested_at' => 1,
+        'confirm_until' => 999999999,
+        'block_until' => 2147483647,
+        'ttl' => 86400,
+        'reason' => 'upgrade',
+        'changed' => 1,
+      ])
+      ->execute();
+  }
+
+  /**
+   * Durable 10037 kept-marker map.
+   *
+   * @return array<string, mixed>
+   *   Marker keys still stored in site state.
+   */
+  private function upgradeKeptMarkers(): array {
+    $kept = $this->container->get('state')->get(McpKillSwitch::STATE_UPGRADE_KEPT, []);
+    $this->assertIsArray($kept);
+    return $kept;
+  }
+
+  /**
+   * State key used by update 10037 for one kept freeze.
+   */
+  private function upgradeKeptKey(string $batchId, string $humanKey): string {
+    return $batchId . "\0" . 'human_key:' . $humanKey;
+  }
+
+  /**
+   * Audit rows written when 10037 keeps a Drush freeze.
+   */
+  private function upgradeKeptAuditCount(): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'operator_binding_upgrade_pending_kept')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
   }
 
   /**

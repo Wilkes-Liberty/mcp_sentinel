@@ -1084,7 +1084,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       ->condition('status', McpKillBlockStatus::KillPending->value)
       ->execute();
     if ($statement === NULL) {
-      return [];
+      throw new McpKillSwitchException(
+        McpKillSwitchException::TABLE_MISSING,
+        'Kill-block select returned no statement.',
+      );
     }
     $pending = [];
     foreach ($this->assocRows($statement) as $row) {
@@ -1890,6 +1893,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       ])
       ->condition('selector_hash', (string) $row['selector_hash'])
       ->execute();
+    $this->clearUpgradePendingKeptForBatch((string) ($row['batch_id'] ?? ''));
     $this->auditTransition(self::AUDIT_EXPIRE, [
       'actor' => '',
       'target_selector' => (string) $row['selector_type'] . ':' . (string) $row['selector_key'],

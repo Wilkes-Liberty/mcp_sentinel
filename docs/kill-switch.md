@@ -202,6 +202,8 @@ either TTL setting is above 7 days, every stop fails with
 `Kill-block TTL cannot exceed 7 days.`
 
 A requested `--ttl` above the maximum is also an error.
+A non-integer, zero, or negative `--ttl` is refused with
+`invalid_ttl`.
 
 ## The two-operator rule
 

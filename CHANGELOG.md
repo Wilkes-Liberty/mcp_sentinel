@@ -39,6 +39,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   operator audience was only on `azp` or `client_id` is
   refused after upgrade. A token with an `act` or `actor`
   claim is refused.
+  `--ttl` on `kill`, `kill-extend` and
+  `kill-break-glass --extend` must be a positive
+  integer number of seconds. A non-integer, zero,
+  or negative value is refused with `invalid_ttl`
+  and writes `operator_command_refused`.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
