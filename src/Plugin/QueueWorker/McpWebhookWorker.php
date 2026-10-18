@@ -14,6 +14,7 @@ use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
+use Drupal\mcp_sentinel\Value\McpStoredValue;
 use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -66,17 +67,32 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   /**
    * Test-only weaken flags. Empty in production.
    *
+   * Stays non-private: DependencySerializationTrait cannot
+   * serialize private properties on this plugin.
+   *
    * @var array<string, true>
+   *
+   * @internal
    */
   protected array $weakenForTest = [];
 
   /**
    * PHPUnit-only callback between the pre-claim check and the claim.
+   *
+   * Stays non-private: DependencySerializationTrait cannot
+   * serialize private properties on this plugin.
+   *
+   * @internal
    */
   protected ?\Closure $betweenCheckAndClaimForTest = NULL;
 
   /**
    * PHPUnit-only callback after the post-claim re-check, before POST.
+   *
+   * Stays non-private: DependencySerializationTrait cannot
+   * serialize private properties on this plugin.
+   *
+   * @internal
    */
   protected ?\Closure $afterClaimForTest = NULL;
 
@@ -295,9 +311,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $tenant = '';
     if (is_array($data)) {
       $item = $this->stringKeyed($data);
-      $principalKey = trim($this->mixedString($item['principal_key'] ?? ''));
-      $humanKey = trim($this->mixedString($item['human_key'] ?? ''));
-      $tenant = trim($this->mixedString($item['tenant'] ?? ''));
+      $principalKey = trim(McpStoredValue::string($item['principal_key'] ?? ''));
+      $humanKey = trim(McpStoredValue::string($item['human_key'] ?? ''));
+      $tenant = trim(McpStoredValue::string($item['tenant'] ?? ''));
     }
     if ($principalKey !== '' || $humanKey !== '' || $tenant !== '') {
       return $this->principalJob->beginCarrying($principalKey, $humanKey, $tenant);
@@ -313,12 +329,12 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    */
   private function processClaimedItem(mixed $data): void {
     $item = $this->stringKeyed(is_array($data) ? $data : []);
-    $deliveryId = $this->mixedInt($item['delivery_id'] ?? 0);
+    $deliveryId = McpStoredValue::int($item['delivery_id'] ?? 0);
     $row = $this->loadRow($deliveryId);
     if ($row === NULL) {
       return;
     }
-    $status = $this->mixedString($row['status'] ?? '');
+    $status = McpStoredValue::string($row['status'] ?? '');
     if (in_array($status, [
       'sent',
       'failed',
@@ -348,7 +364,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       ($this->betweenCheckAndClaimForTest)();
     }
 
-    $attempts = $this->mixedInt($row['attempts'] ?? 0);
+    $attempts = McpStoredValue::int($row['attempts'] ?? 0);
     if ($attempts >= self::MAX_ATTEMPTS) {
       $this->updateRow($deliveryId, 'failed', NULL, 'Max attempts reached.', $attempts);
       return;
@@ -357,14 +373,14 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // A row whose next_attempt has not yet arrived is not-yet-due; return
     // without re-queuing. The hook_cron scan re-enqueues when due so there is
     // no busy-loop from RequeueException.
-    $next = $row['next_attempt'] !== NULL ? $this->mixedInt($row['next_attempt']) : 0;
+    $next = $row['next_attempt'] !== NULL ? McpStoredValue::int($row['next_attempt']) : 0;
     if ($next > $this->time->getRequestTime()) {
       return;
     }
 
     $endpointRaw = $item['endpoint'] ?? [];
     $endpoint = is_array($endpointRaw) ? $this->stringKeyed($endpointRaw) : [];
-    $url = $this->mixedString($endpoint['url'] ?? '');
+    $url = McpStoredValue::string($endpoint['url'] ?? '');
 
     // Fix 1: Enforce HTTPS at the worker (sender) level, not just at enqueue.
     // A row can be replayed or directly inserted after an operator edits an
@@ -398,7 +414,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // FALSE means unresolvable hostname — let the HTTP layer fail it normally.
     $curlResolvePin = [];
     if ($resolvedIp !== FALSE) {
-      $host = trim($this->mixedString(parse_url($url, PHP_URL_HOST)), '[]');
+      $host = trim(McpStoredValue::string(parse_url($url, PHP_URL_HOST)), '[]');
       $portRaw = parse_url($url, PHP_URL_PORT);
       $port = is_int($portRaw) && $portRaw > 0 ? $portRaw : 443;
       // Pin the validated IP to the host:port so libcurl skips a second DNS
@@ -416,7 +432,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // configured security control — a month of production deliveries once
     // went out unsigned exactly this way. Terminal, like the SSRF and
     // redirect classes: retrying cannot fix configuration.
-    $keyId = $this->mixedString($endpoint['secret_key'] ?? '');
+    $keyId = McpStoredValue::string($endpoint['secret_key'] ?? '');
     $secret = $this->resolveSecret($endpoint);
     if ($keyId !== '' && $secret === '') {
       $this->updateRow($deliveryId, 'failed_key', NULL,
@@ -427,7 +443,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
         [
           '@id' => $deliveryId,
           '@key' => $keyId,
-          '@endpoint' => $this->mixedString($endpoint['id'] ?? ''),
+          '@endpoint' => McpStoredValue::string($endpoint['id'] ?? ''),
         ],
       );
       return;
@@ -464,9 +480,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
 
     // Fix 4: Use the stored payload for byte-identical delivery and replay.
     // Fall back to the queue-item payload if the column is empty (legacy rows).
-    $storedPayload = $this->mixedString($row['payload'] ?? '');
+    $storedPayload = McpStoredValue::string($row['payload'] ?? '');
     if ($storedPayload === '') {
-      $storedPayload = $this->mixedString($item['payload'] ?? '');
+      $storedPayload = McpStoredValue::string($item['payload'] ?? '');
       if ($storedPayload === '') {
         $this->logger->warning(
           'Webhook delivery @id has no stored payload; sending empty body.',
@@ -706,7 +722,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       // may itself be a hostname pointing to an internal address).
       return FALSE;
     }
-    $host = strtolower($this->mixedString(parse_url($url, PHP_URL_HOST)));
+    $host = strtolower(McpStoredValue::string(parse_url($url, PHP_URL_HOST)));
     $host = trim($host, '[]');
     if ($host === '') {
       return NULL;
@@ -770,7 +786,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The signing secret, or an empty string when none is configured.
    */
   private function resolveSecret(array $endpoint): string {
-    $keyId = $this->mixedString($endpoint['secret_key'] ?? '');
+    $keyId = McpStoredValue::string($endpoint['secret_key'] ?? '');
     if ($keyId === '') {
       return '';
     }
@@ -778,7 +794,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     if ($key === NULL) {
       return '';
     }
-    return $this->mixedString($key->getKeyValue());
+    return McpStoredValue::string($key->getKeyValue());
   }
 
   /**
@@ -795,8 +811,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   Stored value, or the item value when the stored value is empty.
    */
   private function rowOrItemKey(array $row, array $fromItem, string $key): string {
-    $fromRow = trim($this->mixedString($row[$key] ?? ''));
-    return $fromRow !== '' ? $fromRow : trim($this->mixedString($fromItem[$key] ?? ''));
+    $fromRow = trim(McpStoredValue::string($row[$key] ?? ''));
+    return $fromRow !== '' ? $fromRow : trim(McpStoredValue::string($fromItem[$key] ?? ''));
   }
 
   /**
@@ -816,47 +832,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       }
     }
     return $out;
-  }
-
-  /**
-   * String from a mixed stored or item value.
-   *
-   * @param mixed $value
-   *   Stored or item value.
-   *
-   * @return string
-   *   The value as a string, or empty when it is not scalar.
-   */
-  private function mixedString(mixed $value): string {
-    if (is_string($value)) {
-      return $value;
-    }
-    if (is_int($value) || is_float($value)) {
-      return (string) $value;
-    }
-    return '';
-  }
-
-  /**
-   * Int from a mixed stored or item value.
-   *
-   * @param mixed $value
-   *   Stored or item value.
-   *
-   * @return int
-   *   The value as an int, or 0 when it is not numeric.
-   */
-  private function mixedInt(mixed $value): int {
-    if (is_int($value)) {
-      return $value;
-    }
-    if (is_float($value)) {
-      return (int) $value;
-    }
-    if (is_string($value) && is_numeric($value)) {
-      return (int) $value;
-    }
-    return 0;
   }
 
   /**

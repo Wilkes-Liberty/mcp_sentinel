@@ -290,7 +290,13 @@ case-sensitive. One person holding two Paladin accounts cannot be
 detected. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
-`kill_pending`. `kill_pending` is an active freeze. Audit operations
+`kill_pending`. `kill_pending` is an active freeze. Re-killing a
+still-blocking selector keeps the longer stored `ttl` and
+`block_until`. A lifted, un-killed, or expired row does not pass
+its window on; the new stop uses the requested values. `kill`
+prints and audits the stored window as the batch-max across
+selectors, and audits `requested_ttl` / `requested_block_until`
+for the values this command asked for. Audit operations
 `agent_kill`, `agent_kill_freeze`, `agent_kill_confirm`,
 `agent_kill_extend`, `agent_kill_lift`, `agent_kill_escalate`,
 `agent_kill_break_glass`, `agent_unkill_request`, `agent_unkill`,
@@ -302,7 +308,9 @@ cannot be configured upward. A killed row is never downgraded to
 `logSurvivingRollback()` and never include tokens. A successful
 transition writes one row. Refusals write a refuse row. A confirmer
 hook that throws writes a second `agent_kill_escalate` row
-(`notify_failed`).
+(`notify_failed`). A claim or audit failure writes
+`escalate_failed` or `unkill_expire_failed` and rolls the
+claim back.
 Callers of `admit()` never see a distinct killed or overlay signal
 (same code, message, and exception shape); the deny row holds the
 reason. Queue keys carried for the kill check are written as

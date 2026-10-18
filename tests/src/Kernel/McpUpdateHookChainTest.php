@@ -1601,6 +1601,9 @@ final class McpUpdateHookChainTest extends KernelTestBase {
 
   /**
    * Update 10038 fails closed when the audit logger is missing.
+   *
+   * Calls mcp_sentinel_update_10038() itself so a missing
+   * logger is the hook body, not a test wrapper.
    */
   public function testUpdate10038FailsWithoutAuditLogger(): void {
     $delivery = 'mcp_sentinel_webhook_delivery';

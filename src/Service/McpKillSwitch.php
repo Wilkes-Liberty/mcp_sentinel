@@ -26,6 +26,7 @@ use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
+use Drupal\mcp_sentinel\Value\McpStoredValue;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Psr\Log\LoggerInterface;
 
@@ -191,6 +192,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const WEAKEN_SKIP_BREAK_GLASS_IDENTITY = 'skip_break_glass_identity';
 
   /**
+   * PHPUnit-only: inherit ttl and block_until from a dead row.
+   */
+  public const WEAKEN_INHERIT_DEAD_WINDOW = 'inherit_dead_window';
+
+  /**
+   * PHPUnit-only: keep confirmed_by from a time-expired killed row.
+   */
+  public const WEAKEN_KEEP_DEAD_CONFIRMER = 'keep_dead_confirmer';
+
+  /**
    * Test-only weaken flags. Empty in production.
    *
    * @var array<string, true>
@@ -276,11 +287,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       return TRUE;
     }
     while ($raw = $statement->fetchAssoc()) {
-      $row = $this->assocRow($raw);
+      $row = McpStoredValue::stringKeyedRow($raw);
       if ($row === NULL) {
         return TRUE;
       }
-      $status = McpKillBlockStatus::tryFrom($this->rowString($row, 'status'));
+      $status = McpKillBlockStatus::tryFrom(McpStoredValue::rowString($row, 'status'));
       if ($status === NULL) {
         return TRUE;
       }
@@ -414,9 +425,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
 
     $txn = $this->connection->startTransaction();
     $anyPending = FALSE;
+    $storedTtl = $ttl;
+    $storedUntil = $blockUntil;
     try {
       foreach ($this->sortedSelectors($selectors) as $selector) {
-        $stored = $this->writeKillRow(
+        $written = $this->writeKillRow(
           $selector,
           $status,
           $batchId,
@@ -427,9 +440,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           $now,
           $confirmUntil,
         );
-        if ($stored === McpKillBlockStatus::KillPending) {
+        if ($written['status'] === McpKillBlockStatus::KillPending) {
           $anyPending = TRUE;
         }
+        $storedTtl = max($storedTtl, $written['ttl']);
+        $storedUntil = max($storedUntil, $written['block_until']);
       }
       if (!$this->weakened(self::WEAKEN_SKIP_QUEUE_HOLD)) {
         $this->webhookQueue->holdMatching($selectors, $operator, $batchId);
@@ -454,8 +469,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       'scope' => $this->selectorList($selectors),
       'target_selector' => $this->selectorList($selectors),
       'reason' => $reason,
-      'ttl' => (string) $ttl,
-      'block_until' => (string) $blockUntil,
+      'ttl' => (string) $storedTtl,
+      'block_until' => (string) $storedUntil,
+      'requested_ttl' => (string) $ttl,
+      'requested_block_until' => (string) $blockUntil,
       'batch_id' => $batchId,
       'correlation_id' => $batchId,
       'status' => $resultStatus->value,
@@ -468,9 +485,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       $resultStatus,
       $resultBatch,
       $anyPending,
-      $blockUntil,
-      $ttl,
+      $storedUntil,
+      $storedTtl,
       $selectors,
+      $ttl,
+      $blockUntil,
     );
   }
 
@@ -906,7 +925,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       ->range(0, 1)
       ->execute()
       ?->fetchAssoc();
-    return is_array($row) ? $row : NULL;
+    return McpStoredValue::stringKeyedRow($row);
   }
 
   /**
@@ -957,16 +976,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       ->execute();
     if ($pending !== NULL) {
       foreach ($this->assocRows($pending) as $row) {
-        $target = $this->rowString($row, 'selector_type')
-          . ':' . $this->rowString($row, 'selector_key');
-        $batchId = $this->rowString($row, 'batch_id');
+        $target = McpStoredValue::rowString($row, 'selector_type')
+          . ':' . McpStoredValue::rowString($row, 'selector_key');
+        $batchId = McpStoredValue::rowString($row, 'batch_id');
         if ($this->upgradePendingAlreadyKept($batchId, $target)) {
           continue;
         }
         $txn = $this->connection->startTransaction();
         try {
           $this->auditLogger->logAlways('operator_binding_upgrade_pending_kept', [
-            'actor' => $this->rowString($row, 'requested_by'),
+            'actor' => McpStoredValue::rowString($row, 'requested_by'),
             'target_selector' => $target,
             'batch_id' => $batchId,
             'status' => McpKillBlockStatus::KillPending->value,
@@ -1118,7 +1137,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     }
     $pending = [];
     foreach ($this->assocRows($statement) as $row) {
-      $batchId = $this->rowString($row, 'batch_id');
+      $batchId = McpStoredValue::rowString($row, 'batch_id');
       if ($batchId !== '') {
         $pending[$batchId] = TRUE;
       }
@@ -1392,12 +1411,12 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       foreach ($this->webhookQueue->listHeld() as $held) {
         foreach ($selectors as $selector) {
           $value = match ($selector->type) {
-            McpKillSelectorType::PrincipalKey => $this->rowString($held, 'principal_key'),
-            McpKillSelectorType::HumanKey => $this->rowString($held, 'human_key'),
-            McpKillSelectorType::Tenant => $this->rowString($held, 'tenant'),
+            McpKillSelectorType::PrincipalKey => McpStoredValue::rowString($held, 'principal_key'),
+            McpKillSelectorType::HumanKey => McpStoredValue::rowString($held, 'human_key'),
+            McpKillSelectorType::Tenant => McpStoredValue::rowString($held, 'tenant'),
           };
           if ($value === $selector->key) {
-            $heldIds[] = $this->rowInt($held, 'id');
+            $heldIds[] = McpStoredValue::rowInt($held, 'id');
           }
         }
       }
@@ -1549,10 +1568,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *
    * A blocking row is never replaced by a non-blocking status. A new
    * kill on an in-flight un-kill cancels that un-kill and leaves the
-   * row killed.
+   * row killed. ttl and block_until are taken from the existing row
+   * only while that row is still blocking. An unknown status or an
+   * unreadable block_until is dead for inheritance only: the new
+   * stop uses the requested window. Enforcement still treats both
+   * as blocking (isKilled / hasActiveStop).
    *
-   * @return \Drupal\mcp_sentinel\Enum\McpKillBlockStatus
-   *   Status stored on the row.
+   * @return array
+   *   Keys status, ttl, and block_until as stored on the row.
+   *
+   * @phpstan-return array{status: \Drupal\mcp_sentinel\Enum\McpKillBlockStatus, ttl: int, block_until: int}
    */
   private function writeKillRow(
     McpKillSelector $selector,
@@ -1564,17 +1589,24 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     string $operatorId,
     int $now,
     int $confirmUntil,
-  ): McpKillBlockStatus {
+  ): array {
     $existing = $this->lockSelector($selector);
     if ($existing !== NULL) {
-      $existingStatus = McpKillBlockStatus::tryFrom((string) $existing['status']);
-      $newUntil = max((int) $existing['block_until'], $blockUntil);
+      $existingStatus = McpKillBlockStatus::tryFrom(McpStoredValue::rowString($existing, 'status'));
+      $existingUntil = $this->rowBlockUntil($existing);
+      $existingBlocking = $this->weakened(self::WEAKEN_INHERIT_DEAD_WINDOW)
+        || ($existingStatus !== NULL
+          && $existingStatus->isBlocking($existingUntil ?? 0, $now));
+      $storedUntil = $existingBlocking
+        ? max($existingUntil ?? 0, $blockUntil)
+        : $blockUntil;
+      $storedTtl = $existingBlocking
+        ? max(McpStoredValue::rowInt($existing, 'ttl'), $ttl)
+        : $ttl;
       $cap = $now + McpKillTtl::MAX;
-      if ($newUntil > $cap) {
-        $newUntil = $cap;
+      if ($storedUntil > $cap) {
+        $storedUntil = $cap;
       }
-      $existingBlocking = $existingStatus !== NULL
-        && $existingStatus->isBlocking((int) $existing['block_until'], $now);
       $newBlocking = $status->isBlocking($blockUntil, $now);
       $confirmedBlocking = $existingStatus === McpKillBlockStatus::Killed
         || $existingStatus === McpKillBlockStatus::UnkillPending;
@@ -1582,8 +1614,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $this->connection->update(self::TABLE)
           ->fields([
             'status' => McpKillBlockStatus::Killed->value,
-            'block_until' => $newUntil,
-            'ttl' => max((int) $existing['ttl'], $ttl),
+            'block_until' => $storedUntil,
+            'ttl' => $storedTtl,
             'reason' => $reason,
             'changed' => $now,
             'unkill_batch_id' => '',
@@ -1595,14 +1627,18 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           ])
           ->condition('selector_hash', $selector->hash())
           ->execute();
-        return McpKillBlockStatus::Killed;
+        return [
+          'status' => McpKillBlockStatus::Killed,
+          'ttl' => $storedTtl,
+          'block_until' => $storedUntil,
+        ];
       }
       if ($existingBlocking && !$newBlocking) {
         $this->connection->update(self::TABLE)
           ->fields([
             'status' => McpKillBlockStatus::Killed->value,
-            'block_until' => $newUntil,
-            'ttl' => max((int) $existing['ttl'], $ttl),
+            'block_until' => $storedUntil,
+            'ttl' => $storedTtl,
             'reason' => $reason,
             'changed' => $now,
             'unkill_batch_id' => '',
@@ -1614,13 +1650,17 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           ])
           ->condition('selector_hash', $selector->hash())
           ->execute();
-        return McpKillBlockStatus::Killed;
+        return [
+          'status' => McpKillBlockStatus::Killed,
+          'ttl' => $storedTtl,
+          'block_until' => $storedUntil,
+        ];
       }
       $fields = [
         'status' => $status->value,
         'batch_id' => $batchId,
-        'block_until' => $newUntil,
-        'ttl' => max($this->rowInt($existing, 'ttl'), $ttl),
+        'block_until' => $storedUntil,
+        'ttl' => $storedTtl,
         'reason' => $reason,
         'requested_by' => $operatorId,
         'requested_at' => $now,
@@ -1634,10 +1674,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'unkill_confirmed_at' => 0,
         'escalated_at' => 0,
       ];
-      if ($existingStatus === McpKillBlockStatus::Killed
-        && $status === McpKillBlockStatus::Killed) {
-        $fields['confirmed_by'] = (string) $existing['confirmed_by'];
-        $fields['confirmed_at'] = (int) $existing['confirmed_at'];
+      if ($this->keepExistingConfirmer($existingBlocking, $existingStatus, $status)) {
+        $fields['confirmed_by'] = McpStoredValue::rowString($existing, 'confirmed_by');
+        $fields['confirmed_at'] = McpStoredValue::rowInt($existing, 'confirmed_at');
       }
       else {
         $fields['confirmed_by'] = '';
@@ -1647,7 +1686,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         ->fields($fields)
         ->condition('selector_hash', $selector->hash())
         ->execute();
-      return $status;
+      return [
+        'status' => $status,
+        'ttl' => $storedTtl,
+        'block_until' => $storedUntil,
+      ];
     }
     $this->connection->insert(self::TABLE)
       ->fields([
@@ -1674,7 +1717,38 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'escalated_at' => 0,
       ])
       ->execute();
-    return $status;
+    return [
+      'status' => $status,
+      'ttl' => $ttl,
+      'block_until' => $blockUntil,
+    ];
+  }
+
+  /**
+   * Whether a re-kill keeps the previous confirmer columns.
+   *
+   * A time-expired killed row that cron has not swept is dead
+   * for inheritance and must not carry confirmed_by forward.
+   *
+   * @param bool $existingBlocking
+   *   TRUE when the locked row is still blocking.
+   * @param \Drupal\mcp_sentinel\Enum\McpKillBlockStatus|null $existingStatus
+   *   Parsed status, or NULL when unknown.
+   * @param \Drupal\mcp_sentinel\Enum\McpKillBlockStatus $status
+   *   Status being written.
+   */
+  private function keepExistingConfirmer(
+    bool $existingBlocking,
+    ?McpKillBlockStatus $existingStatus,
+    McpKillBlockStatus $status,
+  ): bool {
+    if ($this->weakened(self::WEAKEN_KEEP_DEAD_CONFIRMER)) {
+      return $existingStatus === McpKillBlockStatus::Killed
+        && $status === McpKillBlockStatus::Killed;
+    }
+    return $existingBlocking
+      && $existingStatus === McpKillBlockStatus::Killed
+      && $status === McpKillBlockStatus::Killed;
   }
 
   /**
@@ -1690,7 +1764,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $query->condition('selector_hash', $selector->hash());
     $query->forUpdate();
     $row = $query->execute()?->fetchAssoc();
-    return is_array($row) ? $row : NULL;
+    return McpStoredValue::stringKeyedRow($row);
   }
 
   /**
@@ -1770,64 +1844,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Integer field from a stored row. Unreadable values are 0.
-   *
-   * @param array<string, mixed> $row
-   *   Stored row.
-   * @param string $key
-   *   Column name.
-   */
-  private function rowInt(array $row, string $key): int {
-    $value = $row[$key] ?? NULL;
-    if (is_int($value)) {
-      return $value;
-    }
-    if (is_string($value) && is_numeric($value)) {
-      return (int) $value;
-    }
-    return 0;
-  }
-
-  /**
-   * String field from a stored row.
-   *
-   * @param array<string, mixed> $row
-   *   Stored row.
-   * @param string $key
-   *   Column name.
-   */
-  private function rowString(array $row, string $key): string {
-    $value = $row[$key] ?? '';
-    if (is_string($value)) {
-      return $value;
-    }
-    if (is_int($value) || is_float($value)) {
-      return (string) $value;
-    }
-    return '';
-  }
-
-  /**
-   * String-keyed row from a fetchAssoc() result.
-   *
-   * @return array<string, mixed>|null
-   *   The row, or NULL when the value is not an array.
-   */
-  private function assocRow(mixed $row): ?array {
-    if (!is_array($row)) {
-      return NULL;
-    }
-    $out = [];
-    foreach ($row as $key => $value) {
-      if (is_string($key)) {
-        $out[$key] = $value;
-      }
-    }
-    return $out;
-  }
-
-  /**
    * Fetches every row as an associative array.
+   *
+   * An unreadable fetchAssoc() result is kept as an empty
+   * status so hasActiveStop / expire treat it as blocking.
    *
    * @param \Drupal\Core\Database\StatementInterface $statement
    *   Query result.
@@ -1838,7 +1858,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   private function assocRows(StatementInterface $statement): array {
     $rows = [];
     while ($row = $statement->fetchAssoc()) {
-      $rows[] = $row;
+      $typed = McpStoredValue::stringKeyedRow($row);
+      $rows[] = $typed ?? ['status' => '', 'block_until' => NULL];
     }
     return $rows;
   }
@@ -2078,20 +2099,20 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           'unkill_confirm_until' => 0,
           'changed' => $now,
         ])
-        ->condition('selector_hash', $this->rowString($row, 'selector_hash'))
+        ->condition('selector_hash', McpStoredValue::rowString($row, 'selector_hash'))
         ->execute();
       $this->auditTransition(self::AUDIT_EXPIRE, [
         'actor' => McpOperatorIdentity::system()->storageId(),
       ] + $this->auditSelectorFields([
         new McpKillSelector(
-          McpKillSelectorType::from($this->rowString($row, 'selector_type')),
-          $this->rowString($row, 'selector_key'),
+          McpKillSelectorType::from(McpStoredValue::rowString($row, 'selector_type')),
+          McpStoredValue::rowString($row, 'selector_key'),
         ),
       ]) + [
         'reason' => $reason,
-        'ttl' => $this->rowString($row, 'ttl'),
-        'block_until' => $this->rowString($row, 'block_until'),
-        'batch_id' => $this->rowString($row, 'unkill_batch_id'),
+        'ttl' => McpStoredValue::rowString($row, 'ttl'),
+        'block_until' => McpStoredValue::rowString($row, 'block_until'),
+        'batch_id' => McpStoredValue::rowString($row, 'unkill_batch_id'),
         'status' => McpKillBlockStatus::Killed->value,
         'second_confirmer' => '',
       ]);
@@ -2121,7 +2142,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       ])
       ->condition('selector_hash', (string) $row['selector_hash'])
       ->execute();
-    $this->clearUpgradePendingKeptForBatch($this->rowString($row, 'batch_id'));
+    $this->clearUpgradePendingKeptForBatch(McpStoredValue::rowString($row, 'batch_id'));
     $this->auditTransition(self::AUDIT_EXPIRE, [
       'actor' => McpOperatorIdentity::system()->storageId(),
     ] + $this->auditSelectorFields([
@@ -2276,8 +2297,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $selectors = [];
     if ($first !== []) {
       $selectors[] = new McpKillSelector(
-        McpKillSelectorType::from($this->rowString($first, 'selector_type')),
-        $this->rowString($first, 'selector_key'),
+        McpKillSelectorType::from(McpStoredValue::rowString($first, 'selector_type')),
+        McpStoredValue::rowString($first, 'selector_key'),
       );
     }
     $this->auditTransition(self::AUDIT_ESCALATE, [
@@ -2287,13 +2308,13 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       'target_selector' => '',
     ]) + [
       'reason' => $reason,
-      'ttl' => $this->rowString($first, 'ttl'),
-      'block_until' => $this->rowString($first, 'block_until'),
+      'ttl' => McpStoredValue::rowString($first, 'ttl'),
+      'block_until' => McpStoredValue::rowString($first, 'block_until'),
       'batch_id' => $batchId,
       'correlation_id' => $batchId,
-      'status' => $this->rowString($first, 'status'),
+      'status' => McpStoredValue::rowString($first, 'status'),
       'second_confirmer' => '',
-      'timestamp' => $this->rowString(
+      'timestamp' => McpStoredValue::rowString(
         ['t' => $this->time->getRequestTime()],
         't',
       ),

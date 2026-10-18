@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
 use Drupal\mcp_sentinel\Service\McpPaladinIntrospection;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
+use Drupal\mcp_sentinel\Value\McpKillTtl;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -221,6 +222,41 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     $this->assertSame(0, (int) $this->container->get('current_user')->id());
     $this->assertStringNotContainsString(self::TOKEN, $this->logText());
     $this->assertStringNotContainsString(self::TOKEN, $this->lastAuditJson());
+  }
+
+  /**
+   * Kill prints the stored window and the requested window.
+   *
+   * @covers ::kill
+   */
+  public function testKillPrintsStoredAndRequestedWindow(): void {
+    $this->bindAlice();
+    $this->queueActiveTokens(['operator-a', 'operator-a']);
+    $key = [self::ISS . '|subject-print-ttl|agent-print-ttl'];
+    $first = $this->withToken(self::TOKEN, function () use ($key): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'alice',
+        'principal-key' => $key,
+        'reason' => 'print-long',
+        'ttl' => (string) McpKillTtl::MAX,
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $first, $this->logText());
+    $this->output->fetch();
+    $second = $this->withToken(self::TOKEN, function () use ($key): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'alice',
+        'principal-key' => $key,
+        'reason' => 'print-short',
+        'ttl' => '3600',
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $second, $this->logText());
+    $out = $this->output->fetch();
+    $this->assertStringContainsString('ttl: ' . (string) McpKillTtl::MAX, $out);
+    $this->assertStringContainsString('requested_ttl: 3600', $out);
+    $this->assertStringContainsString('block_until: ', $out);
+    $this->assertStringContainsString('requested_block_until: ', $out);
   }
 
   /**
