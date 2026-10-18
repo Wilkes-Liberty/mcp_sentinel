@@ -135,7 +135,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   public static function classifyResolvedIps(array $ips): string|false|null {
     $validatedIp = FALSE;
     foreach ($ips as $ip) {
-      $ip = (string) $ip;
       if ($ip === '') {
         continue;
       }
@@ -187,7 +186,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    * client come back unusable at the point of use rather than at the point of
    * the mistake. menu_autopilot 1.0.1 fixed the same defect on a form.
    *
-   * @param array $configuration
+   * @param array<string, mixed> $configuration
    *   The plugin configuration.
    * @param string $plugin_id
    *   The plugin ID.
@@ -225,6 +224,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
 
   /**
    * {@inheritdoc}
+   *
+   * @param array<string, mixed> $configuration
+   *   The plugin configuration.
    */
   public static function create(
     ContainerInterface $container,
@@ -273,9 +275,10 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $humanKey = '';
     $tenant = '';
     if (is_array($data)) {
-      $principalKey = trim((string) ($data['principal_key'] ?? ''));
-      $humanKey = trim((string) ($data['human_key'] ?? ''));
-      $tenant = trim((string) ($data['tenant'] ?? ''));
+      $item = $this->stringKeyed($data);
+      $principalKey = trim($this->mixedString($item['principal_key'] ?? ''));
+      $humanKey = trim($this->mixedString($item['human_key'] ?? ''));
+      $tenant = trim($this->mixedString($item['tenant'] ?? ''));
     }
     if ($principalKey !== '' || $humanKey !== '' || $tenant !== '') {
       return $this->principalJob->beginCarrying($principalKey, $humanKey, $tenant);
@@ -290,12 +293,14 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The queue item payload.
    */
   private function processClaimedItem(mixed $data): void {
-    $deliveryId = (int) ($data['delivery_id'] ?? 0);
+    $item = $this->stringKeyed(is_array($data) ? $data : []);
+    $deliveryId = $this->mixedInt($item['delivery_id'] ?? 0);
     $row = $this->loadRow($deliveryId);
     if ($row === NULL) {
       return;
     }
-    if (in_array($row['status'], [
+    $status = $this->mixedString($row['status'] ?? '');
+    if (in_array($status, [
       'sent',
       'failed',
       'failed_ssrf',
@@ -308,11 +313,11 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
     // in_progress rows were claimed by another worker; skip without re-sending.
-    if ($row['status'] === 'in_progress') {
+    if ($status === 'in_progress') {
       return;
     }
 
-    $fromItem = is_array($data) ? $data : [];
+    $fromItem = $item;
     $checkRow = $this->itemMergedRow($row, $fromItem);
     if ($this->shouldHoldStoredOrItem($row, $checkRow)) {
       $this->webhookQueue->markHeld($deliveryId);
@@ -323,7 +328,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       ($this->betweenCheckAndClaimForTest)();
     }
 
-    $attempts = (int) $row['attempts'];
+    $attempts = $this->mixedInt($row['attempts'] ?? 0);
     if ($attempts >= self::MAX_ATTEMPTS) {
       $this->updateRow($deliveryId, 'failed', NULL, 'Max attempts reached.', $attempts);
       return;
@@ -332,12 +337,14 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // A row whose next_attempt has not yet arrived is not-yet-due; return
     // without re-queuing. The hook_cron scan re-enqueues when due so there is
     // no busy-loop from RequeueException.
-    $next = $row['next_attempt'] !== NULL ? (int) $row['next_attempt'] : 0;
+    $next = $row['next_attempt'] !== NULL ? $this->mixedInt($row['next_attempt']) : 0;
     if ($next > $this->time->getRequestTime()) {
       return;
     }
 
-    $url = (string) ($data['endpoint']['url'] ?? '');
+    $endpointRaw = $item['endpoint'] ?? [];
+    $endpoint = is_array($endpointRaw) ? $this->stringKeyed($endpointRaw) : [];
+    $url = $this->mixedString($endpoint['url'] ?? '');
 
     // Fix 1: Enforce HTTPS at the worker (sender) level, not just at enqueue.
     // A row can be replayed or directly inserted after an operator edits an
@@ -355,7 +362,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // Fix 2: Resolve the host ONCE, validate the IP(s), then pin via
     // CURLOPT_RESOLVE so the TCP connect uses the validated IP, not a
     // subsequent DNS resolution (defeats DNS-rebind TOCTOU).
-    $endpoint = (array) ($data['endpoint'] ?? []);
     $allowInternal = ($endpoint['allow_internal'] ?? FALSE) === TRUE
       || ($endpoint['allow_internal'] ?? NULL) === 1;
     $resolvedIp = $this->validateAndResolveHost($url, $allowInternal);
@@ -372,8 +378,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // FALSE means unresolvable hostname — let the HTTP layer fail it normally.
     $curlResolvePin = [];
     if ($resolvedIp !== FALSE) {
-      $host = trim((string) parse_url($url, PHP_URL_HOST), '[]');
-      $port = (int) (parse_url($url, PHP_URL_PORT) ?: 443);
+      $host = trim($this->mixedString(parse_url($url, PHP_URL_HOST)), '[]');
+      $portRaw = parse_url($url, PHP_URL_PORT);
+      $port = is_int($portRaw) && $portRaw > 0 ? $portRaw : 443;
       // Pin the validated IP to the host:port so libcurl skips a second DNS
       // lookup and connects to the exact address we checked. An IPv6 address
       // (AAAA-resolved) is bracket-wrapped per the CURLOPT_RESOLVE format.
@@ -389,7 +396,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     // configured security control — a month of production deliveries once
     // went out unsigned exactly this way. Terminal, like the SSRF and
     // redirect classes: retrying cannot fix configuration.
-    $keyId = (string) ($endpoint['secret_key'] ?? '');
+    $keyId = $this->mixedString($endpoint['secret_key'] ?? '');
     $secret = $this->resolveSecret($endpoint);
     if ($keyId !== '' && $secret === '') {
       $this->updateRow($deliveryId, 'failed_key', NULL,
@@ -400,7 +407,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
         [
           '@id' => $deliveryId,
           '@key' => $keyId,
-          '@endpoint' => (string) ($endpoint['id'] ?? ''),
+          '@endpoint' => $this->mixedString($endpoint['id'] ?? ''),
         ],
       );
       return;
@@ -436,9 +443,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
 
     // Fix 4: Use the stored payload for byte-identical delivery and replay.
     // Fall back to the queue-item payload if the column is empty (legacy rows).
-    $storedPayload = (string) ($row['payload'] ?? '');
+    $storedPayload = $this->mixedString($row['payload'] ?? '');
     if ($storedPayload === '') {
-      $storedPayload = (string) ($data['payload'] ?? '');
+      $storedPayload = $this->mixedString($item['payload'] ?? '');
       if ($storedPayload === '') {
         $this->logger->warning(
           'Webhook delivery @id has no stored payload; sending empty body.',
@@ -673,7 +680,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       // may itself be a hostname pointing to an internal address).
       return FALSE;
     }
-    $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+    $host = strtolower($this->mixedString(parse_url($url, PHP_URL_HOST)));
     $host = trim($host, '[]');
     if ($host === '') {
       return NULL;
@@ -730,19 +737,22 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   /**
    * Resolves the HMAC signing secret from the endpoint's Key entity.
    *
-   * @param array $endpoint
+   * @param array<string, mixed> $endpoint
    *   The endpoint configuration map.
    *
    * @return string
    *   The signing secret, or an empty string when none is configured.
    */
   private function resolveSecret(array $endpoint): string {
-    $keyId = (string) ($endpoint['secret_key'] ?? '');
+    $keyId = $this->mixedString($endpoint['secret_key'] ?? '');
     if ($keyId === '') {
       return '';
     }
     $key = $this->keyRepository->getKey($keyId);
-    return $key ? (string) $key->getKeyValue() : '';
+    if ($key === NULL) {
+      return '';
+    }
+    return $this->mixedString($key->getKeyValue());
   }
 
   /**
@@ -754,10 +764,73 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   Queue item payload.
    * @param string $key
    *   Column / item key.
+   *
+   * @return string
+   *   Stored value, or the item value when the stored value is empty.
    */
   private function rowOrItemKey(array $row, array $fromItem, string $key): string {
-    $fromRow = trim((string) ($row[$key] ?? ''));
-    return $fromRow !== '' ? $fromRow : trim((string) ($fromItem[$key] ?? ''));
+    $fromRow = trim($this->mixedString($row[$key] ?? ''));
+    return $fromRow !== '' ? $fromRow : trim($this->mixedString($fromItem[$key] ?? ''));
+  }
+
+  /**
+   * String-keyed map from a mixed array.
+   *
+   * @param array<mixed, mixed> $data
+   *   Queue item or endpoint map.
+   *
+   * @return array<string, mixed>
+   *   Values whose keys are strings.
+   */
+  private function stringKeyed(array $data): array {
+    $out = [];
+    foreach ($data as $key => $value) {
+      if (is_string($key)) {
+        $out[$key] = $value;
+      }
+    }
+    return $out;
+  }
+
+  /**
+   * String from a mixed stored or item value.
+   *
+   * @param mixed $value
+   *   Stored or item value.
+   *
+   * @return string
+   *   The value as a string, or empty when it is not scalar.
+   */
+  private function mixedString(mixed $value): string {
+    if (is_string($value)) {
+      return $value;
+    }
+    if (is_int($value) || is_float($value)) {
+      return (string) $value;
+    }
+    return '';
+  }
+
+  /**
+   * Int from a mixed stored or item value.
+   *
+   * @param mixed $value
+   *   Stored or item value.
+   *
+   * @return int
+   *   The value as an int, or 0 when it is not numeric.
+   */
+  private function mixedInt(mixed $value): int {
+    if (is_int($value)) {
+      return $value;
+    }
+    if (is_float($value)) {
+      return (int) $value;
+    }
+    if (is_string($value) && is_numeric($value)) {
+      return (int) $value;
+    }
+    return 0;
   }
 
   /**
