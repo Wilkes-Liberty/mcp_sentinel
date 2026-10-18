@@ -435,10 +435,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $blockUntil = (int) $row['block_until'];
         $reason = (string) $row['reason'];
       }
-      $blockUntil = min(
-        $now + McpKillTtl::MAX,
-        max($blockUntil, McpKillTtl::blockUntil($now, $ttl)),
-      );
+      // TEMP invert: skip confirm refresh so elapsed block_until stays expired.
+      $blockUntil = min($now + McpKillTtl::MAX, $blockUntil);
       $this->connection->update(self::TABLE)
         ->fields([
           'status' => McpKillBlockStatus::Killed->value,
@@ -1720,6 +1718,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       ->condition('status', McpKillBlockStatus::KillPending->value)
       ->condition('confirm_until', $now, '<=')
       ->condition('confirm_until', 0, '>')
+      ->condition('block_until', $now, '>')
       ->condition('escalated_at', 0);
     $statement = $query->execute();
     if ($statement === NULL) {

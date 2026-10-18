@@ -602,8 +602,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   TRUE when either view is still stopped.
    */
   private function shouldHoldStoredOrItem(array $stored, array $merged): bool {
-    return $this->webhookQueue->shouldHoldRow($stored)
-      || $this->webhookQueue->shouldHoldRow($merged);
+    // TEMP invert: ignore stored-row keys so a keyless row can deliver
+    // when the queue item supplies keys.
+    return $this->webhookQueue->shouldHoldRow($merged);
   }
 
   /**

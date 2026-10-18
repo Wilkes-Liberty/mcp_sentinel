@@ -1012,9 +1012,8 @@ final class McpWebhookQueueManager {
    *   TRUE when every stored key is empty.
    */
   private function isKeyless(array $row): bool {
-    return trim((string) ($row['principal_key'] ?? '')) === ''
-      && trim((string) ($row['human_key'] ?? '')) === ''
-      && trim((string) ($row['tenant'] ?? '')) === '';
+    // TEMP invert: treat every row as keyed so keyless stops never hold.
+    return FALSE;
   }
 
   /**
