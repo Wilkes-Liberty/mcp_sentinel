@@ -330,7 +330,8 @@ Break-glass is limited to the identity configured in
 The requester is always refused. Release is refused while the
 scope is still stopped. Escalation notifies once per batch.
 `kill-extend` never shortens a stop. Confirm refreshes
-`block_until`. Run update 10036 so hold-queue columns exist,
+`block_until` from the batch-max stored window. Run update
+10036 so hold-queue columns exist,
 then 10037, then 10038 so the pre-upgrade max delivery id is
 recorded and the unused `released` column is dropped. Every
 keyless row stays stopped while any stop is active, including

@@ -435,8 +435,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
           McpKillSelectorType::from((string) $row['selector_type']),
           (string) $row['selector_key'],
         );
-        $ttl = (int) $row['ttl'];
-        $blockUntil = (int) $row['block_until'];
+        $ttl = max($ttl, (int) $row['ttl']);
+        $blockUntil = max($blockUntil, (int) $row['block_until']);
         $reason = (string) $row['reason'];
       }
       $blockUntil = min(
@@ -1501,7 +1501,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         'status' => $status->value,
         'batch_id' => $batchId,
         'block_until' => $newUntil,
-        'ttl' => $ttl,
+        'ttl' => max((int) $existing['ttl'], $ttl),
         'reason' => $reason,
         'requested_by' => $operatorId,
         'requested_at' => $now,

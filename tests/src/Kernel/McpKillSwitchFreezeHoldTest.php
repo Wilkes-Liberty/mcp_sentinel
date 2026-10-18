@@ -727,6 +727,81 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * Confirm uses the batch-max window, not the last locked row.
+   */
+  public function testConfirmUsesBatchMaxBlockUntil(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-confirm-max');
+    $tenant = McpKillSelector::tenant('tenant-confirm-max');
+    $kill = $this->killSwitch()->kill([$human, $tenant], 'confirm-max', $this->paladinA());
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $hashes = $this->container->get('database')
+      ->select(McpKillSwitch::TABLE, 'k')
+      ->fields('k', ['selector_hash'])
+      ->condition('batch_id', $kill->batchId)
+      ->orderBy('selector_hash')
+      ->execute()
+      ->fetchCol();
+    $this->assertCount(2, $hashes);
+    $longTtl = 86400;
+    $shortTtl = 3600;
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields([
+        'ttl' => $longTtl,
+        'block_until' => $now + $longTtl,
+      ])
+      ->condition('selector_hash', $hashes[0])
+      ->execute();
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields([
+        'ttl' => $shortTtl,
+        'block_until' => $now + $shortTtl,
+      ])
+      ->condition('selector_hash', $hashes[1])
+      ->execute();
+    $confirmed = $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->assertSame(McpKillBlockStatus::Killed, $confirmed->status);
+    $this->assertSame($now + $longTtl, $confirmed->blockUntil);
+    $this->assertSame($longTtl, $confirmed->ttl);
+    foreach ($hashes as $hash) {
+      $row = $this->container->get('database')
+        ->select(McpKillSwitch::TABLE, 'k')
+        ->fields('k', ['block_until'])
+        ->condition('selector_hash', $hash)
+        ->execute()
+        ->fetchAssoc();
+      $this->assertIsArray($row);
+      $this->assertSame($now + $longTtl, (int) $row['block_until']);
+    }
+  }
+
+  /**
+   * Re-issuing a stop onto a pending selector keeps the longer TTL.
+   */
+  public function testReissueKeepsLongerStoredTtl(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-reissue-ttl');
+    $tenantA = McpKillSelector::tenant('tenant-reissue-a');
+    $first = $this->killSwitch()->kill(
+      [$human, $tenantA],
+      'reissue-long',
+      $this->paladinA(),
+      604800,
+    );
+    $this->assertTrue($first->needsConfirm);
+    $tenantB = McpKillSelector::tenant('tenant-reissue-b');
+    $second = $this->killSwitch()->kill(
+      [$human, $tenantB],
+      'reissue-short',
+      $this->paladinA(),
+      3600,
+    );
+    $this->assertTrue($second->needsConfirm);
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame(604800, (int) $row['ttl']);
+    $this->assertGreaterThanOrEqual($first->blockUntil, (int) $row['block_until']);
+  }
+
+  /**
    * An unconfirmed freeze whose TTL has elapsed still escalates.
    */
   public function testOverdueUnconfirmedFreezeStillEscalates(): void {
