@@ -731,7 +731,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * TTL expiry of a kept freeze deletes its 10037 marker.
+   * TTL expiry of a leftover marker on a killed batch deletes it.
    */
   public function testExpireDueClearsUpgradeKeptMarker(): void {
     $batchId = '00000000-0000-4000-8000-000000000086';
@@ -740,11 +740,11 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->assertSame(1, $this->killSwitch()->keepDrushRequestedPendingAndRevertUnkill());
     $this->assertArrayHasKey($this->upgradeKeptKey($batchId, $human), $this->upgradeKeptMarkers());
 
+    // Leftover from a batch confirmed before marker cleanup shipped.
     $this->container->get('database')->update(McpKillSwitch::TABLE)
       ->fields([
         'status' => McpKillBlockStatus::Killed->value,
         'block_until' => 1,
-        'confirm_until' => 999999999,
       ])
       ->condition('batch_id', $batchId)
       ->execute();

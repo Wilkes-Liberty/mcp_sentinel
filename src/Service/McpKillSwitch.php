@@ -841,7 +841,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *
    * Unconfirmed freezes stay frozen. An audit row is written per
    * freeze. Pending unkills revert to killed. The unavailable-
-   * confirmer hook is not invoked from this path.
+   * confirmer hook is not invoked from this path. A leftover
+   * marker on a killed batch is cleared when that freeze
+   * expires. Markers on batches already lifted, expired, or
+   * un-killed stay; un-kill confirm does not clear them.
    *
    * @return int
    *   Rows audited or reverted.
@@ -941,7 +944,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Drops kept markers for a batch after confirm or lift.
+   * Drops kept markers for a batch after confirm, lift, or expiry.
    */
   private function clearUpgradePendingKeptForBatch(string $batchId): void {
     if ($batchId === '') {

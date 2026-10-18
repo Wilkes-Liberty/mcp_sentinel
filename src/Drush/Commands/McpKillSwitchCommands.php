@@ -1020,20 +1020,21 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Optional TTL in seconds, or NULL when the option is empty.
+   * Optional TTL in seconds, or NULL when --ttl is omitted.
    *
-   * Non-empty values that are not an int or integer string are
-   * refused. Zero and negative ints go to McpKillTtl::resolve,
-   * which refuses them (`invalid_ttl`).
+   * A bare `--ttl` (boolean TRUE from Drush), an empty `--ttl=`,
+   * or any value that is not an int or integer string is refused
+   * (`invalid_ttl`). Zero and negative ints go to
+   * McpKillTtl::resolve, which refuses them (`invalid_ttl`).
    *
    * @param array<string, mixed> $options
    *   Command options.
    */
   private function optionTtl(array $options): ?int {
-    $value = $options['ttl'] ?? '';
-    if ($value === '') {
+    if (($options['ttl'] ?? NULL) === NULL) {
       return NULL;
     }
+    $value = $options['ttl'];
     if (is_int($value)) {
       return $value;
     }
