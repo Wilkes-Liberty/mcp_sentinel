@@ -892,6 +892,9 @@ final class McpWebhookQueueManager {
    *
    * @param array<string, mixed> $row
    *   Delivery row (id and key columns).
+   *
+   * @return bool
+   *   TRUE when the worker must hold the row.
    */
   public function shouldHoldRow(array $row): bool {
     return $this->rowIsStopped($row);
@@ -899,6 +902,17 @@ final class McpWebhookQueueManager {
 
   /**
    * Holds an in_progress retry and writes one hold audit row.
+   *
+   * @param int $deliveryId
+   *   Delivery row id.
+   * @param int $attempts
+   *   Attempt count to store.
+   * @param int|null $code
+   *   Last HTTP status, if any.
+   * @param string|null $body
+   *   Last response or error body.
+   * @param int $nextAttempt
+   *   Unix time of the next retry.
    *
    * @return bool
    *   TRUE when the row was held.
@@ -973,6 +987,12 @@ final class McpWebhookQueueManager {
 
   /**
    * Whether a stored key exceeds the utf8mb4-safe column length.
+   *
+   * @param string $key
+   *   Principal or human key.
+   *
+   * @return bool
+   *   TRUE when the key cannot be stored without truncation.
    */
   private function isOversizedKey(string $key): bool {
     return strlen($key) > self::KEY_MAX_LENGTH;
@@ -983,6 +1003,9 @@ final class McpWebhookQueueManager {
    *
    * @param array<string, mixed> $row
    *   Delivery row.
+   *
+   * @return bool
+   *   TRUE when this id was present before update 10036 and has no keys.
    */
   private function isPreUpgradeKeyless(array $row): bool {
     $id = (int) ($row['id'] ?? 0);
@@ -997,6 +1020,9 @@ final class McpWebhookQueueManager {
 
   /**
    * Resolves the kill registry through the service closure.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface
+   *   Kill registry.
    */
   private function enforcer(): McpKillEnforcerInterface {
     $enforcer = ($this->killEnforcer)();
@@ -1011,6 +1037,8 @@ final class McpWebhookQueueManager {
    *
    * @param list<int> $ids
    *   Candidate ids.
+   * @param string $status
+   *   Required status.
    *
    * @return list<int>
    *   Matching ids.
@@ -1037,6 +1065,14 @@ final class McpWebhookQueueManager {
   /**
    * Audits a refused hold/release/discard and throws.
    *
+   * @param string $code
+   *   Stable refusal reason.
+   * @param string $message
+   *   Operator-facing text.
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Acting operator.
+   * @param string $batchId
+   *   Kill batch or correlation id.
    * @param list<int> $ids
    *   Candidate ids.
    *

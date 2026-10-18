@@ -173,5 +173,7 @@ forgeable
 subrequest
 subrequests
 unkill
+unkilled
+keyless
 confirmer
 euid

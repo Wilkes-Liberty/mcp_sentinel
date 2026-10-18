@@ -1956,6 +1956,14 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
 
   /**
    * Whether the operator is the pinned Paladin iss|sub.
+   *
+   * @param \Drupal\mcp_sentinel\Value\McpOperatorIdentity $operator
+   *   Candidate operator.
+   * @param string $configured
+   *   Pin from settings.php.
+   *
+   * @return bool
+   *   TRUE when kind is Paladin and the id matches the pin.
    */
   private function matchesBreakGlassPin(McpOperatorIdentity $operator, string $configured): bool {
     return $operator->kind === McpOperatorIdentity::KIND_PALADIN
@@ -1982,6 +1990,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
 
   /**
    * Writes one HMAC row for a refused operator action.
+   *
+   * @param \Drupal\mcp_sentinel\Exception\McpKillSwitchException $exception
+   *   Refusal.
+   * @param string $actor
+   *   Operator storage id, when known.
+   * @param string $batchId
+   *   Kill batch, when known.
+   * @param list<int> $itemIds
+   *   Delivery ids, when known.
    */
   public function auditOperatorRefusal(
     McpKillSwitchException $exception,
@@ -2006,6 +2023,17 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
 
   /**
    * Refuses an operator action, audits it, and throws.
+   *
+   * @param string $code
+   *   Stable refusal reason.
+   * @param string $message
+   *   Operator-facing text.
+   * @param string $actor
+   *   Operator storage id, when known.
+   * @param string $batchId
+   *   Kill batch, when known.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    */
   private function refuse(
     string $code,

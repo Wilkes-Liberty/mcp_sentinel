@@ -14,7 +14,6 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
-use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
@@ -1341,7 +1340,6 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   public function testOversizedPrincipalKeyIsNotEnqueued(): void {
     $this->enableEndpoint();
     $job = $this->container->get('mcp_sentinel.principal_context_job');
-    $this->assertInstanceOf(McpPrincipalContextJob::class, $job);
     $handle = $job->beginCarrying(
       str_repeat('p', McpWebhookQueueManager::KEY_MAX_LENGTH + 1),
       'h',
