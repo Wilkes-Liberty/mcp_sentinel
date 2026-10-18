@@ -59,8 +59,11 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
    10036 adds hold-queue columns and the escalation stamp. Update
    10037 resets Paladin uids, drops leftover Drush rows, keeps
    Drush-requested freezes, and requires every operator to re-bind.
-   Drain or review the webhook queue before updb: keyless pending
-   rows are held when any kill-block or freeze is active.
+   Update 10038 records the pre-upgrade max delivery id, drops
+   unused `released`, and holds remaining keyless pending rows
+   when a stop is active. Every keyless row stays stopped while
+   any stop is active, including rows queued after 10038. Roll
+   back 10038 only as documented in `INSTALL.md`.
 2. Until the registry table exists, every governed call is refused.
    The module fails closed when it cannot read the registry.
 3. Pin Paladin introspection in `settings.php`. See
@@ -78,9 +81,10 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
    runs.
 6. Rehearse every command on a test site before you need it.
 7. Pin the break-glass operator in `settings.php` as a Paladin
-   `iss|sub` or a bound account:
+   `iss|sub`:
    `$settings['mcp_sentinel.kill_switch.break_glass_operator']`.
-   Without that pin, break-glass is refused.
+   A Drupal username or uid pin is refused. Without that pin,
+   break-glass is refused.
 
 ## Permissions
 
@@ -180,7 +184,7 @@ $settings['mcp_sentinel.paladin.operator_name_claim'] = 'preferred_username';
 $settings['mcp_sentinel.paladin.operator_mail_claim'] = 'email';
 ```
 
-They are not importable config. Run database updates 10031 to 10037.
+They are not importable config. Run database updates 10031 to 10038.
 
 ## Configuration
 
@@ -268,7 +272,7 @@ The command prints:
 ```text
 status: kill_pending
 batch: <batch id>
-needs_confirm: yes (named second person / secondary account holder).
+needs_confirm: yes (a distinct bound operator).
 freeze: in force now. Unconfirmed timeout keeps it and escalates.
 block_until: <unix>
 ttl: <seconds>
@@ -292,8 +296,9 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-lift BATCH_ID --operator=bob
 ```
 
 `kill-confirm` keeps the freeze and records the second operator. The
-agents were already refused. The stop's end time is counted from the
-first operator's request, not from the confirmation.
+agents were already refused. Confirm also refreshes `block_until` to
+`min(now+7d, max(existing, now+ttl))` so an overdue freeze does not
+lift the moment it is confirmed.
 
 `kill-extend` moves the end time later, up to 7 days from now. A
 requested lifetime above 7 days is refused.
@@ -310,9 +315,13 @@ The freeze stays in place. It never lifts on that timeout. An
 unconfirmed freeze also stays frozen after its TTL (`block_until`)
 until two operators lift it or break-glass is used. Confirmed stops
 still expire at their TTL. On the next cron run the audit log gets an
-`agent_kill_escalate` row. The module calls
-`hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify the
-named second person and the break-glass path.
+`agent_kill_escalate` row (reason `confirm_window`) after the
+batch is claimed. The module then calls
+`hook_mcp_sentinel_kill_unavailable_confirmer` so you can notify
+the named second person and the break-glass path. A hook throw
+writes a second escalate row with reason `notify_failed` and
+does not lift the freeze. Un-kill window expiry writes
+`agent_kill_expire` first, then notifies.
 
 A distinct second operator can still confirm, extend, or lift after the
 window, or use [Break-glass](#break-glass) when that person cannot be
@@ -374,13 +383,14 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=
 ```
 
 The break-glass operator is configured in `settings.php` as a Paladin
-`iss|sub` or a bound account
-(`$settings['mcp_sentinel.kill_switch.break_glass_operator']`). Only
-that identity can use this path. Everyone else is refused. The
-requester cannot break-glass their own stop. The audit row is
+`iss|sub`
+(`$settings['mcp_sentinel.kill_switch.break_glass_operator']`). A
+Drupal username or uid pin is refused. Only that Paladin identity
+can use this path. Everyone else is refused. The requester cannot
+break-glass their own stop. The audit row is
 `agent_kill_break_glass`, not a confirm / extend / lift row.
 
-Rehearse this with `McpKillSwitchBreakGlassDrillTest` alongside the
+Rehearse this with `McpKillSwitchFreezeHoldTest` alongside the
 scheduled kill-switch drill (DEV-855).
 
 ## Held webhook deliveries
@@ -419,17 +429,20 @@ Pass exactly one selector. If there is no row, the command prints
 `block_until` is a Unix timestamp. The `requested_by` and `confirmed_by`
 values are operator identity hashes, not names.
 
-The status column is the stored row. Cron writes expiry. A row can still
-say `killed` after its `block_until` has passed. Compare `block_until`
-with the current time to know whether the stop still blocks.
+The status column is the stored row. Cron writes expiry for confirmed
+stops. `kill_pending` is always blocking: do not compare
+`block_until` to decide whether an unconfirmed freeze is in force.
+A `killed` or `unkill_pending` row blocks only while `block_until`
+is in the future.
 
 Check one target at a time. A person-wide stop is stored under the person's
 key (`iss|sub`), so check it with `--human-key`, not with each agent's key.
 
 ### Confirm that a stop works
 
-1. Run `kill-status`. A mass freeze shows `status: kill_pending` or
-   `killed` and a future `block_until`. Agents in scope are refused
+1. Run `kill-status`. A mass freeze shows `status: kill_pending`
+   (always in force, even when `block_until` is in the past) or
+   `killed` with a future `block_until`. Agents in scope are refused
    in either state.
 2. Open the audit log at `/admin/reports/mcp-sentinel/audit` and filter
    by operation `agent_kill` or `agent_kill_freeze`. Confirmations are
@@ -452,7 +465,7 @@ Every transition writes an audit row. These rows are written even when
 | `agent_kill_confirm` | A second operator kept a freeze. |
 | `agent_kill_extend` | A second operator extended a freeze. |
 | `agent_kill_lift` | A second operator lifted an unconfirmed freeze. |
-| `agent_kill_escalate` | The confirm window ended and the freeze stayed. |
+| `agent_kill_escalate` | The confirm window ended and the freeze stayed (`confirm_window`), or the confirmer hook threw (`notify_failed`). |
 | `agent_kill_break_glass` | Break-glass keep, extend, or lift. |
 | `agent_kill_expire` | A stop ended (`ttl`) or a lift window ran out (`unkill_confirm_window`). |
 | `agent_unkill_request` | A lift of a confirmed stop was requested. |
@@ -460,15 +473,20 @@ Every transition writes an audit row. These rows are written even when
 | `agent_side_effect_hold` | Queued deliveries in scope were held. |
 | `agent_side_effect_release` | An operator released held deliveries. |
 | `agent_side_effect_discard` | An operator discarded held deliveries. |
+| `agent_kill_refuse` | An operator action was refused. |
+| `agent_side_effect_refuse` | A hold, release, discard, or oversized enqueue was refused. |
 | `operator_command_refused` | A Drush command refused before a service audit (missing token, token too large, `--token`). |
 | `operator_binding_uid_reset` | Update 10037 reset a Paladin uid. Metadata has `previous_uid` and `identity_hash`. |
 | `operator_binding_cleared` | Update 10037 deleted a leftover Drush binding row. |
 | `operator_binding_upgrade_pending_kept` | Update 10037 kept a Drush-requested freeze. |
 
 Each row records the operator, the scope, the timestamp, and the
-correlation or batch / item ids. Tokens are never recorded. Each of
-those events writes exactly one row. The OS user and `SUDO_USER`
-may appear as advisory metadata only.
+correlation or batch / item ids. Tokens are never recorded. A
+successful transition writes one row. Refusals write
+`agent_kill_refuse` or `agent_side_effect_refuse`. A confirmer hook
+that throws writes a second `agent_kill_escalate` row with reason
+`notify_failed`. The OS user and `SUDO_USER` may appear as advisory
+metadata only.
 
 ## Hooks and events
 
@@ -499,9 +517,12 @@ See `mcp_sentinel.api.php`.
   `settings.php`. The requester is always refused.
 - An in-flight webhook POST cannot be recalled. A retry cannot
   overwrite a held row.
-- Rows queued before update 10036 have empty keys. Drain or review
-  the webhook queue before `drush updb`; keyless pending rows are
-  held when any kill-block or freeze is active.
+- Rows queued before update 10036 have empty keys. The 10038 hook
+  records the pre-upgrade max delivery id and counts remaining
+  keyless pending rows. Every keyless row stays stopped while any
+  stop is active (release, pre-claim, post-claim, and retry),
+  including rows queued after 10038 and rows whose state key is
+  missing.
 - `kill-extend` never shortens a stop. `block_until` is
   `max(existing, now+ttl)`, capped at now + 7 days.
 - The worker re-checks the kill registry after a successful claim.

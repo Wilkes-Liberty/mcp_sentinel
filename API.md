@@ -294,11 +294,14 @@ cannot be configured upward. A killed row is never downgraded to
 `agent_kill_extend`, `agent_kill_lift`, `agent_kill_escalate`,
 `agent_kill_break_glass`, `agent_unkill_request`, `agent_unkill`,
 `agent_side_effect_hold`, `agent_side_effect_release`,
-`agent_side_effect_discard`, `operator_command_refused`,
+`agent_side_effect_discard`, `agent_kill_refuse`,
+`agent_side_effect_refuse`, `operator_command_refused`,
 `operator_binding_uid_reset`, `operator_binding_cleared`, and
-`operator_binding_upgrade_pending_kept` go through `logAlways()` and never
-include tokens. Each of those events writes exactly one row with
-operator, scope, timestamp, and correlation or batch / item ids.
+`operator_binding_upgrade_pending_kept` go through `logAlways()` /
+`logSurvivingRollback()` and never include tokens. A successful
+transition writes one row. Refusals write a refuse row. A confirmer
+hook that throws writes a second `agent_kill_escalate` row
+(`notify_failed`).
 Callers of `admit()` never see a distinct killed or overlay signal
 (same code, message, and exception shape); the deny row holds the
 reason. Queue keys carried for the kill check are written as
@@ -325,10 +328,12 @@ Break-glass is limited to the identity configured in
 `settings.php` (`mcp_sentinel.kill_switch.break_glass_operator`).
 The requester is always refused. Release is refused while the
 scope is still stopped. Escalation notifies once per batch.
-`kill-extend` never shortens a stop. Run update 10036 before
-serving traffic so hold-queue columns exist. Drain or review the
-webhook queue before updb: keyless pending rows are held when any
-kill-block or freeze is active. The Drupal-side kill-block UI
+`kill-extend` never shortens a stop. Confirm refreshes
+`block_until`. Run update 10036 so hold-queue columns exist,
+then 10037, then 10038 so the pre-upgrade max delivery id is
+recorded and the unused `released` column is dropped. Every
+keyless row stays stopped while any stop is active, including
+rows queued after 10038. The Drupal-side kill-block UI
 (DEV-925) reads freeze state through `listActiveBlocks()` and held
 items through `listHeld()`.
 

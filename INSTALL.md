@@ -282,8 +282,22 @@ index refuses a restore that collides with another uid > 0 row.
 Rolling the module code back without a matching down hook leaves
 the unique index and, on MySQL, `uid_nonzero`. 10032 and 10033
 delete dead `paladin_introspection_*` keys if an earlier update
-wrote them into importable config. 10038 is reserved for a
-DEV-985 follow-up.
+wrote them into importable config. 10038 records the pre-upgrade
+max delivery id (only when absent), drops the unused `released`
+column, holds remaining keyless pending rows when any stop is
+active (and fails if the audit logger is missing), and counts
+remaining keyless pending rows. Runtime holds every keyless row
+while any stop is active, including rows queued after 10038.
+Fresh installs drop `released` in `hook_install`.
+
+### Roll back update 10038
+
+Restore the pre-updb backup, or re-add `released` (int unsigned
+not null default 0), `drush state:delete
+mcp_sentinel.webhook_pre_upgrade_max_id`, and set the schema
+version back to 10037. Held rows stay held. Rolling the module
+code back to commit 92e92d6 (the 10036 kill-switch hold
+release) re-enables the keyless fail-open.
 
 ## Updating
 

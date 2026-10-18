@@ -44,6 +44,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   integer number of seconds. A non-integer, zero,
   or negative value is refused with `invalid_ttl`
   and writes `operator_command_refused`.
+- **Behaviour change (DEV-985).** `McpKillBlockStatus::isBlocking()`
+  is now `TRUE` for `kill_pending` regardless of `block_until`.
+  `McpKillSwitchResult::$blockUntil` is non-zero while a mass
+  freeze is pending. Confirming a freeze refreshes `block_until`
+  the same way as extend (`min(now+7d, max(existing, now+ttl))`).
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
@@ -171,8 +176,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Lifting a mass freeze always takes two operators. Break-glass
   keep / extend / lift (`mcp-sentinel:kill-break-glass`) is the
   documented path when the named second person cannot be reached
-  and is covered by `McpKillSwitchBreakGlassDrillTest` (alongside
-  DEV-855). On any stop, queued webhook deliveries in scope are
+  and is limited to a Paladin `iss|sub` pin in settings.php
+  (alongside DEV-855). On any stop, queued webhook deliveries in scope are
   held: principal keys are stored at enqueue, the worker checks the
   kill registry before claim, and `requeueDuePendingRows()` never
   re-queues held rows. Operators release or discard held items
@@ -185,14 +190,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stopped. An unconfirmed freeze never expires at `block_until`;
   it stays frozen until two operators lift it or break-glass is
   used. Confirmed stops still expire at their TTL. Break-glass is
-  limited to the identity configured in `settings.php`. Escalation
-  notifies once per batch. `kill-extend` never shortens a stop.
-  Each freeze, confirm, extend, lift, escalation, break-glass
-  use, hold, release, and discard writes exactly one
-  `logAlways()` row with operator, scope, timestamp, and
-  correlation or item ids. Run update 10036. Drain or review the
-  webhook queue before updb: keyless pending rows are held when
-  any kill-block or freeze is active.
+  limited to the Paladin `iss|sub` configured in `settings.php`.
+  Escalation claims, audits, then notifies once per batch,
+  including when `block_until` has already elapsed. A hook
+  throw writes watchdog plus `agent_kill_escalate` with
+  reason `notify_failed` and does not lift the freeze. Un-kill
+  expiry reverts to killed and writes `agent_kill_expire`
+  before notify; each batch is isolated. Confirm refreshes
+  `block_until` the same way as extend
+  (`min(now+7d, max(existing, now+ttl))`) so an overdue freeze
+  stays in force. Run updates 10036, 10037, then 10038. Every
+  keyless row stays stopped while any stop is active,
+  including rows queued after 10038. Refusals write
+  `agent_kill_refuse` or `agent_side_effect_refuse` exactly
+  once with actor and batch when known. Rollback for 10038 is
+  documented only in INSTALL.md.
 
 ### Fixed
 - A claimless request on a Drupal test child served by the PHP

@@ -311,21 +311,6 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * Guard bypass: a mass kill applies immediately when mass-pending is off.
-   *
-   * This is the red mutation for testMassKillStaysPendingWithoutSecondOperator.
-   */
-  public function testMassKillAppliesWhenMassPendingIsWeakened(): void {
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_PENDING);
-    $one = $this->principalSelector('subject-m1w', 'agent-m1w');
-    $two = $this->principalSelector('subject-m2w', 'agent-m2w');
-    $result = $this->killSwitch()->kill([$one, $two], 'mass', $this->paladinA());
-    $this->assertFalse($result->needsConfirm);
-    $this->assertSame(McpKillBlockStatus::Killed, $result->status);
-    $this->assertTrue($this->killSwitch()->isKilled($one->key));
-  }
-
-  /**
    * A mass kill freezes immediately without a second operator (DEV-985).
    */
   public function testMassKillStaysPendingWithoutSecondOperator(): void {
@@ -757,12 +742,12 @@ final class McpKillSwitchTest extends KernelTestBase {
 
     $this->container->get('database')->update(McpKillSwitch::TABLE)
       ->fields([
+        'status' => McpKillBlockStatus::Killed->value,
         'block_until' => 1,
         'confirm_until' => 999999999,
       ])
       ->condition('batch_id', $batchId)
       ->execute();
-    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_EXPIRE_UNCONFIRMED);
     $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
     $this->assertSame([], $this->upgradeKeptMarkers());
   }

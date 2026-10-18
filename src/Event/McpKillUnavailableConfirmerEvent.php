@@ -13,7 +13,7 @@ use Symfony\Contracts\EventDispatcher\Event;
  * DEV-985: an unconfirmed mass freeze stays frozen and escalates
  * through this event and hook_mcp_sentinel_kill_unavailable_confirmer.
  * There is no fallback that lifts the freeze or grants a pending
- * un-kill. The named second person and the break-glass path are
+ * un-kill. The hook receives every target; stopped agents are not
  * notified. A distinct verified operator can still keep, extend, or
  * lift the freeze.
  */
@@ -36,12 +36,15 @@ final class McpKillUnavailableConfirmerEvent extends Event {
    *   username.
    * @param \Drupal\mcp_sentinel\Value\McpKillSelector $selector
    *   One selector from the expired batch.
+   * @param list<string> $targets
+   *   Every selector in the batch as type:key.
    */
   public function __construct(
     public readonly string $batchId,
     public readonly string $transition,
     public readonly string $firstOperatorId,
     public readonly McpKillSelector $selector,
+    public readonly array $targets = [],
   ) {}
 
 }
