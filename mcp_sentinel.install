@@ -6,6 +6,8 @@
  */
 
 use Drupal\mcp_sentinel\Service\McpFloodKey;
+use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
+use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\Core\Utility\UpdateException;
 use Drupal\Core\Url;
 use Drupal\key\Entity\Key;
@@ -385,6 +387,9 @@ function mcp_sentinel_install(): void {
       ':url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
     ])
   );
+  if (\Drupal::database()->schema()->tableExists('mcp_sentinel_operator_binding')) {
+    McpOperatorBindingUidSchema::fromContainer()->ensure();
+  }
 }
 
 /**
@@ -1879,6 +1884,265 @@ function mcp_sentinel_update_10036(): string {
     return 'DEV-985 hold-queue and escalation columns already present. Drain or review the webhook queue before updb.';
   }
   return implode(' ', $messages);
+}
+
+/**
+ * Reset Paladin uids, drop leftover Drush rows, keep freezes (DEV-986).
+ *
+ * Sites that already ran 10036 still need this. 10038 is reserved
+ * for a DEV-985 follow-up.
+ *
+ * Every kill command refuses every operator until they re-bind
+ * with a matching Paladin token. Break-glass is refused until
+ * that identity is bound again.
+ *
+ * Read previous_uid and identity_hash from the
+ * operator_binding_uid_reset HMAC row (never from live bindings):
+ *
+ * @code
+ * SELECT metadata FROM {audit_chain_log}
+ * WHERE operation = 'operator_binding_uid_reset'
+ * ORDER BY id;
+ * @endcode
+ *
+ * Decode metadata through McpAuditLogger::decodeMetadata() (or
+ * the audit UI). Then:
+ *
+ * @code
+ * UPDATE {mcp_sentinel_operator_binding}
+ * SET uid = :previous_uid
+ * WHERE identity_hash = :identity_hash;
+ * @endcode
+ *
+ * A restore re-trusts a binding that never passed the Paladin
+ * claim check. The unique uid index refuses a restore that
+ * collides with another uid > 0 row. Rolling the module code
+ * back without a matching down hook leaves the unique index
+ * and, on MySQL/MariaDB, the generated uid_nonzero column.
+ */
+function mcp_sentinel_update_10037(): string {
+  $messages = [];
+  $reset = mcp_sentinel_reset_unproven_operator_binding_uids();
+  if ($reset !== '') {
+    $messages[] = $reset;
+  }
+  $cleared = mcp_sentinel_clear_drush_operator_bindings();
+  if ($cleared !== '') {
+    $messages[] = $cleared;
+  }
+  $kept = mcp_sentinel_keep_drush_requested_pending();
+  if ($kept !== '') {
+    $messages[] = $kept;
+  }
+  $index = McpOperatorBindingUidSchema::fromContainer()->ensure();
+  if ($index !== '') {
+    $messages[] = $index;
+  }
+  if ($messages === []) {
+    return 'Operator-binding uid uniqueness and Paladin re-bind already applied.';
+  }
+  return implode(' ', $messages);
+}
+
+/**
+ * String-keyed row from an operator-binding select.
+ *
+ * @param mixed $row
+ *   One fetchAll() element.
+ *
+ * @return array<string, mixed>
+ *   Empty when $row is not an array.
+ */
+function mcp_sentinel_operator_binding_assoc_row(mixed $row): array {
+  if (!is_array($row)) {
+    return [];
+  }
+  $out = [];
+  foreach ($row as $key => $value) {
+    if (is_string($key)) {
+      $out[$key] = $value;
+    }
+  }
+  return $out;
+}
+
+/**
+ * String field from an operator-binding row.
+ *
+ * @param array<string, mixed> $row
+ *   Associative row.
+ * @param string $key
+ *   Column name.
+ */
+function mcp_sentinel_operator_binding_row_string(array $row, string $key): string {
+  $value = $row[$key] ?? '';
+  if (is_string($value)) {
+    return $value;
+  }
+  if (is_int($value) || is_float($value)) {
+    return (string) $value;
+  }
+  return '';
+}
+
+/**
+ * Integer field from an operator-binding row.
+ *
+ * @param array<string, mixed> $row
+ *   Associative row.
+ * @param string $key
+ *   Column name.
+ */
+function mcp_sentinel_operator_binding_row_int(array $row, string $key): int {
+  $value = $row[$key] ?? 0;
+  if (is_int($value)) {
+    return $value;
+  }
+  if (is_string($value) && is_numeric($value)) {
+    return (int) $value;
+  }
+  return 0;
+}
+
+/**
+ * Reset Paladin uid > 0 rows so operators re-bind with claim proof.
+ *
+ * Each row's audit and uid write share one transaction. The
+ * previous uid is stored as previous_uid on operator_binding_uid_reset.
+ *
+ * @return string
+ *   Operator-facing message, or empty when none were present.
+ */
+function mcp_sentinel_reset_unproven_operator_binding_uids(): string {
+  $connection = \Drupal::database();
+  if (!$connection->schema()->tableExists('mcp_sentinel_operator_binding')) {
+    return '';
+  }
+  if (!$connection->schema()->fieldExists('mcp_sentinel_operator_binding', 'uid')) {
+    return '';
+  }
+  $statement = $connection->select('mcp_sentinel_operator_binding', 'b')
+    ->fields('b', ['identity_hash', 'identity_id', 'operator_id', 'uid', 'identity_kind'])
+    ->condition('uid', 0, '>')
+    ->condition('identity_kind', McpOperatorIdentity::KIND_PALADIN)
+    ->execute();
+  if ($statement === NULL) {
+    return '';
+  }
+  $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
+  if ($rows === []) {
+    return '';
+  }
+  $logger = \Drupal::service('mcp_sentinel.audit_logger');
+  $count = 0;
+  foreach ($rows as $raw) {
+    $row = mcp_sentinel_operator_binding_assoc_row($raw);
+    $txn = $connection->startTransaction();
+    try {
+      $hash = mcp_sentinel_operator_binding_row_string($row, 'identity_hash');
+      $logger->logAlways('operator_binding_uid_reset', [
+        'identity_kind' => mcp_sentinel_operator_binding_row_string(
+          $row,
+          'identity_kind',
+        ),
+        'identity_id' => mcp_sentinel_operator_binding_row_string(
+          $row,
+          'identity_id',
+        ),
+        'operator_id' => mcp_sentinel_operator_binding_row_string(
+          $row,
+          'operator_id',
+        ),
+        'previous_uid' => mcp_sentinel_operator_binding_row_int($row, 'uid'),
+        'identity_hash' => $hash,
+      ]);
+      $connection->update('mcp_sentinel_operator_binding')
+        ->fields(['uid' => 0])
+        ->condition('identity_hash', $hash)
+        ->execute();
+      unset($txn);
+    }
+    catch (\Throwable $e) {
+      $txn->rollBack();
+      throw $e;
+    }
+    $count++;
+  }
+  return 'Reset ' . (string) $count . ' operator binding uid(s) to 0.';
+}
+
+/**
+ * Delete leftover Drush-kind binding rows. Each row writes an audit entry.
+ *
+ * @return string
+ *   Operator-facing message, or empty when none were present.
+ */
+function mcp_sentinel_clear_drush_operator_bindings(): string {
+  $connection = \Drupal::database();
+  if (!$connection->schema()->tableExists('mcp_sentinel_operator_binding')) {
+    return '';
+  }
+  $statement = $connection->select('mcp_sentinel_operator_binding', 'b')
+    ->fields('b', ['identity_hash', 'identity_id', 'operator_id', 'uid'])
+    ->condition('identity_kind', McpOperatorIdentity::KIND_DRUSH)
+    ->execute();
+  if ($statement === NULL) {
+    return '';
+  }
+  $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
+  if ($rows === []) {
+    return '';
+  }
+  $logger = \Drupal::service('mcp_sentinel.audit_logger');
+  $count = 0;
+  foreach ($rows as $raw) {
+    $row = mcp_sentinel_operator_binding_assoc_row($raw);
+    $txn = $connection->startTransaction();
+    try {
+      $hash = mcp_sentinel_operator_binding_row_string($row, 'identity_hash');
+      $logger->logAlways('operator_binding_cleared', [
+        'identity_kind' => McpOperatorIdentity::KIND_DRUSH,
+        'identity_id' => mcp_sentinel_operator_binding_row_string(
+          $row,
+          'identity_id',
+        ),
+        'operator_id' => mcp_sentinel_operator_binding_row_string(
+          $row,
+          'operator_id',
+        ),
+        'uid' => mcp_sentinel_operator_binding_row_int($row, 'uid'),
+        'identity_hash' => $hash,
+      ]);
+      $connection->delete('mcp_sentinel_operator_binding')
+        ->condition('identity_hash', $hash)
+        ->execute();
+      unset($txn);
+    }
+    catch (\Throwable $e) {
+      $txn->rollBack();
+      throw $e;
+    }
+    $count++;
+  }
+  return 'Cleared ' . (string) $count . ' Drush operator binding(s).';
+}
+
+/**
+ * Keep Drush-requested freezes and revert Drush-requested unkills.
+ *
+ * Does not lift a freeze. Does not call the unavailable-confirmer hook.
+ *
+ * @return string
+ *   Operator-facing message, or empty when none were pending.
+ */
+function mcp_sentinel_keep_drush_requested_pending(): string {
+  /** @var \Drupal\mcp_sentinel\Service\McpKillSwitch $killSwitch */
+  $killSwitch = \Drupal::service('mcp_sentinel.kill_switch');
+  $count = $killSwitch->keepDrushRequestedPendingAndRevertUnkill();
+  if ($count === 0) {
+    return '';
+  }
+  return 'Kept or reverted ' . (string) $count . ' Drush-requested pending batch(es).';
 }
 
 /**

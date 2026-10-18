@@ -90,11 +90,13 @@ same generic deny as a missing principal.
 The command introspects the token at Paladin over HTTPS with client
 authentication. The response must be `active`, carry a numeric
 future `exp`, match the issuer and audience pinned in
-`settings.php`, and carry the pinned operator audience or role
-(for example `mcp-sentinel-operator`). A token with an `act` or
-`actor` claim is refused: agent tokens cannot run the kill switch.
-If Paladin is unreachable, the command refuses. Identity is
-`paladin:iss|sub` from that response, not the OS user.
+`settings.php`, and carry the pinned operator audience on `aud`
+or a role (for example `mcp-sentinel-operator`). `azp` and
+`client_id` are not operator-audience matches. A token with an
+`act` or `actor` claim is refused: agent tokens cannot run the
+kill switch. If Paladin is unreachable, the command refuses.
+Identity is `paladin:iss|sub` from that response, not the OS
+user.
 
 Bind the token to a Drupal account once:
 
@@ -115,12 +117,13 @@ person holding two Paladin accounts that map to two Drupal accounts
 is two operators: this module cannot detect that they are the same
 person.
 
-The OS-user HMAC is off unless `settings.php` sets
-`$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE`. Config
-cannot turn that on. Even then, euid 0 and the web-server user
-(`www-data` / the `mcp_sentinel.web_server_user` pin) are refused.
 The process user and `SUDO_USER` are written to the audit row as
-advisory metadata only. They are not the operator identity.
+advisory metadata only. They are not the operator identity. Every
+kill command needs a Paladin token, including `kill-extend`,
+`kill-lift`, `kill-break-glass`, `webhook-held`, `webhook-release`,
+and `webhook-discard`. After update 10037 every operator must
+re-bind; break-glass is refused until that identity is bound
+again.
 
 A single-agent stop takes effect immediately. A person-wide or
 tenant-wide (mass) stop also takes effect immediately as a **freeze**.

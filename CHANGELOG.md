@@ -8,17 +8,32 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Breaking
 - Kill-switch Drush commands (`kill`, `kill-confirm`, `unkill`,
-  `kill-status`, `operator-bind`, `operator-unbind`) require a
-  Paladin access token on `PALADIN_TOKEN` or stdin and
+  `kill-status`, `kill-extend`, `kill-lift`, `kill-break-glass`,
+  `webhook-held`, `webhook-release`, `webhook-discard`,
+  `operator-bind`, `operator-unbind`) require a Paladin access
+  token on `PALADIN_TOKEN` or stdin and
   `--operator=<Drupal account name>` (DEV-986). `drush --user` /
-  `--uid` is not an operator identity and is not documented as
-  one. Bind the token to that Drupal account with
-  `mcp-sentinel:operator-bind` before the other commands. The
-  OS-user HMAC is off unless
-  `$settings['mcp_sentinel.allow_drush_os_assertion'] = TRUE` in
-  settings.php; config cannot enable it. Binding a second
-  identity onto an already-bound record is refused. Run update
-  10034. See INSTALL.md for the pinned Paladin keys, including
+  `--uid` is not an operator identity. Bind the token to that
+  Drupal account with `mcp-sentinel:operator-bind` before the
+  other commands. The token name claim (default
+  `preferred_username`) must match `--operator`. A mail-type
+  name claim is refused unless
+  `mcp_sentinel.paladin.operator_mail_claim` is also pinned.
+  A uid may have only one `iss|sub`. Run update 10037 after
+  10036. Every kill command refuses every operator until they
+  re-bind. Break-glass is refused until that identity is bound
+  again. The upgrade keeps Drush-requested freezes and reverts
+  Drush-requested unkills; it does not lift a freeze. Settings
+  `mcp_sentinel.allow_drush_os_assertion` and
+  `mcp_sentinel.web_server_user` are removed and ignored.
+  Update 10037 adds a generated `uid_nonzero` column plus a
+  unique index on MySQL/MariaDB (a partial unique index
+  `WHERE uid > 0` on SQLite and PostgreSQL), writes
+  `operator_binding_uid_reset` / `operator_binding_cleared` /
+  `operator_binding_upgrade_pending_kept`, and stores
+  `previous_uid` for restore. A restore re-trusts a binding
+  that never passed the claim check. See INSTALL.md for the
+  pinned Paladin keys, including
   `mcp_sentinel.paladin.operator_audience`.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
@@ -40,18 +55,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Kill-switch Drush commands fail closed without a verified Paladin
   operator token (DEV-986). Introspection still requires `active`,
   a numeric future `exp`, and the pinned issuer and audience. It
-  now also requires the settings.php-pinned operator audience or
-  role and refuses any token with an `act` or `actor` claim, so
-  agent tokens cannot run the kill switch. Paladin unreachable is
+  now also requires the settings.php-pinned operator audience on
+  `aud` or a role (not `azp` or `client_id`) and refuses any
+  token with an `act` or `actor` claim, so agent tokens cannot
+  run the kill switch. Paladin unreachable is
   a refusal. `--operator` must match the Drupal account bound to
-  that `iss|sub`. The command switches to that account for
-  `administer agent kill switch` and switches back; anonymous
+  that `iss|sub`, and bind requires a matching name claim. When a
+  mail claim is pinned, `email_verified` must be true. A uid may
+  have only one `iss|sub`. The command switches to that account
+  for `administer agent kill switch` and switches back; anonymous
   stays refused. The two-person rule compares `iss|sub` and
   mapped Drupal uids. The OS user and `SUDO_USER` are advisory
   audit metadata only. `--token` stays refused. Tokens never
   appear in audit, log, or command output. Deny tests fail when
   `weakenForTest()` skips the act-claim, operator-audience,
-  operator-match, join, uid-match, or euid-0 checks.
+  operator-match, bind-claim, uid-match, permission, switch-back,
+  command-refusal-audit, or token-size checks, or when the
+  identity factory skips the empty-token check.
 - Deny responses no longer append a `[rule:<id> ...]` explainer suffix
   or name the rule to the caller (DEV-966). Every caller-facing deny
   goes through `McpDenyExplainer::refuse()`. `tools/call` (tool plugin
@@ -115,7 +135,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mcp-sentinel:operator-bind --operator=ACCOUNT` introspects a
   Paladin token over HTTPS with client authentication, requires
   `active`, a numeric future `exp`, and the pinned operator
-  audience or role, and derives `iss|sub` from that response,
+  audience on `aud` or a role (not `azp` or `client_id`), and
+  derives `iss|sub` from that response,
   never from `--human-key` or `--token` (token from
   `PALADIN_TOKEN` or stdin). The introspection URL, issuer,
   audience, operator audience, and client credentials are pinned

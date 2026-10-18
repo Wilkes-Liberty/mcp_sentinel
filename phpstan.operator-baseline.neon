@@ -1,0 +1,93 @@
+# Baseline for untouched 1.x code in McpKillSwitch.php and
+# mcp_sentinel.install. Regenerated under PHPStan max +
+# phpstan-strict-rules. New DEV-986 code must not add entries.
+# Counts are identifier+path from Tests 39093627657 after excluding
+# DEV-986 Commands, keep/revert, and 10037 helpers. The two extra
+# argument.type hits are fetchAll(PDO::FETCH_ASSOC) on the 10037
+# helpers (same portable ignore as phpstan.operator.neon).
+parameters:
+  ignoreErrors:
+    -
+      identifier: argument.type
+      path: mcp_sentinel.install
+      count: 21
+    -
+      identifier: arrayUnpacking.nonIterable
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: binaryOp.invalid
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: booleanNot.exprNotBoolean
+      path: mcp_sentinel.install
+      count: 5
+    -
+      identifier: booleanOr.rightNotBoolean
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: cast.int
+      path: mcp_sentinel.install
+      count: 9
+    -
+      identifier: cast.string
+      path: mcp_sentinel.install
+      count: 6
+    -
+      identifier: empty.notAllowed
+      path: mcp_sentinel.install
+      count: 3
+    -
+      identifier: encapsedStringPart.nonString
+      path: mcp_sentinel.install
+      count: 3
+    -
+      identifier: foreach.nonIterable
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: if.condNotBoolean
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: method.nonObject
+      path: mcp_sentinel.install
+      count: 5
+    -
+      identifier: missingType.iterableValue
+      path: mcp_sentinel.install
+      count: 4
+    -
+      identifier: offsetAccess.nonOffsetAccessible
+      path: mcp_sentinel.install
+      count: 11
+    -
+      identifier: postInc.type
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: property.nonObject
+      path: mcp_sentinel.install
+      count: 6
+    -
+      identifier: variable.implicitArray
+      path: mcp_sentinel.install
+      count: 1
+    -
+      identifier: cast.int
+      path: src/Service/McpKillSwitch.php
+      count: 25
+    -
+      identifier: cast.string
+      path: src/Service/McpKillSwitch.php
+      count: 50
+    -
+      identifier: missingType.iterableValue
+      path: src/Service/McpKillSwitch.php
+      count: 2
+    -
+      identifier: return.type
+      path: src/Service/McpKillSwitch.php
+      count: 3

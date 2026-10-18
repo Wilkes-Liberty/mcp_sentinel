@@ -260,13 +260,12 @@ the stored binding (`mcp_sentinel.operator_binding`). The command
 switches to that Drupal account for `administer agent kill switch`
 and switches back. Anonymous is refused. Confirm without a verified
 identity fails closed. The two-person rule compares `iss|sub` and
-mapped Drupal uids. The OS-user HMAC is off unless settings.php
-sets `mcp_sentinel.allow_drush_os_assertion`; even then euid 0 and
-the web-server user are refused. OS user and `SUDO_USER` are
+mapped Drupal uids. OS user and `SUDO_USER` are
 advisory audit metadata only. Bind introspects a Paladin access
 token (RFC 7662) over HTTPS with client authentication, requires
 `active`, a numeric future `exp`, and the pinned operator audience
-or role, refuses `act` / `actor` claims, and derives `iss|sub`
+on `aud` or a role (not `azp` / `client_id`), refuses `act` /
+`actor` claims, and derives `iss|sub`
 from the introspection, never from `--human-key` or `--token`.
 The introspection URL, issuer, audience, operator audience, and
 client credentials are pinned in `settings.php`, not importable
@@ -275,11 +274,18 @@ a claim mismatch fails closed. Rebind of an identity already bound
 to a different operator is refused, including a unique-constraint
 race. Binding a second identity onto an already-bound record is
 refused. Every bind and every refusal writes an audit row
-(`operator_bind` / `operator_bind_refused`). Unbind
+(`operator_bind` / `operator_bind_refused`). A command refusal
+that the service has not already audited writes
+`operator_command_refused` (reason codes include `missing_token`,
+`token_too_large`, and `token_flag_refused`). Update 10037 writes
+`operator_binding_uid_reset` (`previous_uid`, `identity_hash`),
+`operator_binding_cleared`, and
+`operator_binding_upgrade_pending_kept`. Unbind
 (`mcp-sentinel:operator-unbind`) needs two distinct verified
 operators and writes `operator_unbind_request` / `operator_unbind`
-/ `operator_unbind_refused`. Mixed-channel confirm with no binding
-is refused. One person holding two Paladin accounts cannot be
+/ `operator_unbind_refused`. Bind requires a matching name claim
+and one uid per `iss|sub`. Name and mail comparisons are
+case-sensitive. One person holding two Paladin accounts cannot be
 detected. Confirm windows default to 15 minutes. Kill-block TTL
 defaults to 24 hours. A TTL above 7 days is a validation error and
 cannot be configured upward. A killed row is never downgraded to
@@ -287,8 +293,10 @@ cannot be configured upward. A killed row is never downgraded to
 `agent_kill`, `agent_kill_freeze`, `agent_kill_confirm`,
 `agent_kill_extend`, `agent_kill_lift`, `agent_kill_escalate`,
 `agent_kill_break_glass`, `agent_unkill_request`, `agent_unkill`,
-`agent_side_effect_hold`, `agent_side_effect_release`, and
-`agent_side_effect_discard` go through `logAlways()` and never
+`agent_side_effect_hold`, `agent_side_effect_release`,
+`agent_side_effect_discard`, `operator_command_refused`,
+`operator_binding_uid_reset`, `operator_binding_cleared`, and
+`operator_binding_upgrade_pending_kept` go through `logAlways()` and never
 include tokens. Each of those events writes exactly one row with
 operator, scope, timestamp, and correlation or batch / item ids.
 Callers of `admit()` never see a distinct killed or overlay signal

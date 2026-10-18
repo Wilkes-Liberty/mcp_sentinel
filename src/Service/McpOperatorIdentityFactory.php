@@ -4,56 +4,24 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
-use Drupal\Core\PrivateKey;
-use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
-use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 
 /**
- * Resolves a verified operator identity (DEV-986).
+ * Resolves a verified Paladin operator identity (DEV-986).
  *
- * Drush kill commands take identity from a Paladin token: iss|sub
- * after introspection. The OS-user HMAC is off unless
- * settings.php sets mcp_sentinel.allow_drush_os_assertion. Config
- * cannot turn that path on. Even then, euid 0 and the web-server
- * user are refused. The login name and USER are not inputs.
- * currentUser / --uid is never used. OS user and SUDO_USER are
- * advisory audit metadata only. Fail closed when no verified
- * identity exists.
+ * Drush kill-switch commands take identity from a Paladin token:
+ * iss|sub after introspection. A request-sealed principal is not
+ * a Drush identity. Drupal uid and the OS user are not identity.
+ * OS user and SUDO_USER are advisory audit metadata only. Fail
+ * closed when no token is provided.
  */
 final class McpOperatorIdentityFactory {
 
   /**
-   * Settings.php flag that enables the OS-user HMAC fallback.
+   * PHPUnit-only: form a Paladin identity when no token was provided.
    */
-  public const SETTING_ALLOW_OS_ASSERTION = 'mcp_sentinel.allow_drush_os_assertion';
-
-  /**
-   * Settings.php pin for the web-server account name.
-   */
-  public const SETTING_WEB_SERVER_USER = 'mcp_sentinel.web_server_user';
-
-  /**
-   * PHPUnit-only: allow euid 0 on the OS-assertion path.
-   */
-  public const WEAKEN_SKIP_EUID_ZERO = 'skip_euid_zero';
-
-  /**
-   * PHPUnit-only: allow the web-server user on the OS-assertion path.
-   */
-  public const WEAKEN_SKIP_WEB_SERVER_USER = 'skip_web_server_user';
-
-  /**
-   * Well-known web-server account names. Always refused.
-   */
-  private const WEB_SERVER_USERS = [
-    'www-data',
-    'apache',
-    'nginx',
-    'httpd',
-    'nobody',
-  ];
+  public const WEAKEN_SKIP_TOKEN = 'skip_token';
 
   /**
    * Test-only weaken flags. Empty in production.
@@ -75,28 +43,19 @@ final class McpOperatorIdentityFactory {
   /**
    * Constructs the resolver.
    *
-   * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
-   *   Sealed Paladin principal, when the request has one.
-   * @param \Drupal\Core\PrivateKey $privateKey
-   *   Site key for the Drush assertion HMAC.
-   * @param \Drupal\Core\Site\Settings $settings
-   *   OS-assertion flag and web-server user pin.
    * @param \Drupal\mcp_sentinel\Service\McpPaladinIntrospection $introspection
    *   Paladin token introspection.
    */
   public function __construct(
-    private readonly McpPrincipalContextHolder $holder,
-    private readonly PrivateKey $privateKey,
-    private readonly Settings $settings,
     private readonly McpPaladinIntrospection $introspection,
   ) {}
 
   /**
-   * Identity for a Drush kill-switch command.
+   * Identity from a Paladin access token.
    *
    * A non-empty token is introspected and becomes paladin:iss|sub.
-   * Without a token, the OS HMAC is used only when settings.php
-   * enables it. Drupal uid is not consulted.
+   * Without a token the command is refused. A request-sealed
+   * principal is not a Drush identity. Drupal uid is not consulted.
    *
    * @param string $token
    *   Paladin access token, or empty when none was provided.
@@ -104,78 +63,18 @@ final class McpOperatorIdentityFactory {
    * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
    *   When no verified identity can be formed.
    */
-  public function forDrushCommand(string $token = ''): McpOperatorIdentity {
+  public function fromPaladinToken(string $token = ''): McpOperatorIdentity {
     $token = trim($token);
     if ($token !== '') {
       return $this->introspection->activeIdentity($token);
     }
-    if (!$this->osAssertionEnabled()) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
+    if ($this->weakened(self::WEAKEN_SKIP_TOKEN)) {
+      return McpOperatorIdentity::paladin('https://idp.example/realms/agents|weakened-skip-token');
     }
-    return $this->fromDrushAssertion();
-  }
-
-  /**
-   * Paladin human key from the sealed principal, or NULL.
-   */
-  public function fromVerifiedPrincipal(): ?McpOperatorIdentity {
-    $ctx = $this->holder->get();
-    if ($ctx === NULL) {
-      return NULL;
-    }
-    try {
-      $keys = McpPrincipalKey::fromClaims($ctx->keyClaims());
-      return McpOperatorIdentity::paladin($keys['humanKey']);
-    }
-    catch (McpPrincipalKeyException | McpKillSwitchException) {
-      return NULL;
-    }
-  }
-
-  /**
-   * HMAC of the OS effective uid. Independent of --uid / currentUser.
-   *
-   * Off unless settings.php enables it. euid 0 and the web-server
-   * user are refused. A changed USER variable does not change this.
-   *
-   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When the OS assertion is disabled, the process is root or
-   *   the web-server user, or the site key is missing.
-   */
-  public function fromDrushAssertion(): McpOperatorIdentity {
-    if (!$this->osAssertionEnabled()) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    $euid = $this->effectiveUid();
-    $name = $this->processUserName($euid);
-    if ($euid === 0 && !$this->weakened(self::WEAKEN_SKIP_EUID_ZERO)) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    if ($this->isForbiddenProcessUser($name)
-      && !$this->weakened(self::WEAKEN_SKIP_WEB_SERVER_USER)) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    $secret = $this->privateKey->get();
-    if ($secret === '') {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    $fingerprint = hash_hmac('sha256', 'uid:' . (string) $euid, $secret);
-    return McpOperatorIdentity::drushAssertion($fingerprint);
+    throw new McpKillSwitchException(
+      McpKillSwitchException::MISSING_TOKEN,
+      'A Paladin access token is required.',
+    );
   }
 
   /**
@@ -203,7 +102,7 @@ final class McpOperatorIdentityFactory {
   }
 
   /**
-   * PHPUnit-only process identity for same-euid / distinct-token tests.
+   * PHPUnit-only process identity for advisory audit metadata.
    *
    * @param int $euid
    *   Effective uid to report.
@@ -224,7 +123,7 @@ final class McpOperatorIdentityFactory {
   }
 
   /**
-   * PHPUnit-only injection that disables an OS-assertion refusal.
+   * PHPUnit-only injection that disables a token refusal.
    *
    * @param string $flag
    *   One of the WEAKEN_* constants.
@@ -239,13 +138,6 @@ final class McpOperatorIdentityFactory {
       );
     }
     $this->weakenForTest[$flag] = TRUE;
-  }
-
-  /**
-   * Whether settings.php enabled the OS-user HMAC.
-   */
-  private function osAssertionEnabled(): bool {
-    return $this->settings->get(self::SETTING_ALLOW_OS_ASSERTION) === TRUE;
   }
 
   /**
@@ -287,21 +179,6 @@ final class McpOperatorIdentityFactory {
   private function sudoUser(): string {
     $value = getenv('SUDO_USER');
     return is_string($value) ? $value : '';
-  }
-
-  /**
-   * Root is handled separately. This is the web-server account.
-   */
-  private function isForbiddenProcessUser(string $name): bool {
-    if ($name === '') {
-      return TRUE;
-    }
-    $pinned = $this->settings->get(self::SETTING_WEB_SERVER_USER, 'www-data');
-    $forbidden = self::WEB_SERVER_USERS;
-    if (is_string($pinned) && $pinned !== '') {
-      $forbidden[] = $pinned;
-    }
-    return in_array($name, $forbidden, TRUE);
   }
 
   /**

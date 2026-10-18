@@ -11,11 +11,9 @@ use Drupal\mcp_sentinel\Service\McpPrincipalKey;
  * Verified operator identity for the two-person kill rule (DEV-846).
  *
  * Drupal uid is never this value. Paladin is iss|sub from a verified
- * token or principal. The OS-user HMAC is off unless settings.php
- * enables it; --uid, the login name, and USER cannot change it.
- * Distinct operators compare iss|sub and mapped Drupal uids.
- * Mixed-channel confirm resolves both kinds through bound records;
- * storage ids of different kinds never compare equal.
+ * token. Distinct operators compare iss|sub and mapped Drupal uids.
+ * Leftover Drush-kind rows are not a verified identity. Storage ids
+ * of different kinds never compare equal.
  */
 final readonly class McpOperatorIdentity {
 
@@ -25,12 +23,14 @@ final readonly class McpOperatorIdentity {
   public const KIND_PALADIN = 'paladin';
 
   /**
-   * Drush assertion bound to the OS process, not currentUser.
+   * Leftover Drush assertion fingerprint. Not a verified identity.
    */
   public const KIND_DRUSH = 'drush';
 
   /**
-   * Unverified Drupal uid. Refused unless a PHPUnit weaken flag.
+   * Unverified Drupal uid. PHPUnit-only. Never a production identity.
+   *
+   * @internal
    */
   public const KIND_UID = 'uid';
 
@@ -43,9 +43,9 @@ final readonly class McpOperatorIdentity {
    * Constructs a verified or test-only identity.
    *
    * @param string $kind
-   *   Paladin, drush, or uid.
+   *   Paladin, leftover drush, system, or uid.
    * @param string $id
-   *   Canonical human key, HMAC fingerprint, or Drupal uid.
+   *   Canonical human key, leftover fingerprint, or Drupal uid.
    */
   private function __construct(
     public string $kind,
@@ -63,22 +63,6 @@ final readonly class McpOperatorIdentity {
   }
 
   /**
-   * Drush assertion fingerprint (HMAC hex).
-   *
-   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
-   *   When the fingerprint is missing.
-   */
-  public static function drushAssertion(string $fingerprint): self {
-    if ($fingerprint === '' || preg_match('/^[a-f0-9]{64}$/', $fingerprint) !== 1) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
-    return new self(self::KIND_DRUSH, $fingerprint);
-  }
-
-  /**
    * System actor for worker and update-hook holds.
    */
   public static function system(): self {
@@ -87,6 +71,8 @@ final readonly class McpOperatorIdentity {
 
   /**
    * Drupal uid. PHPUnit-only. Never a production operator identity.
+   *
+   * @internal
    *
    * @throws \LogicException
    *   When called outside PHPUnit.
@@ -119,10 +105,10 @@ final readonly class McpOperatorIdentity {
   }
 
   /**
-   * Whether this identity is bound to Paladin or a Drush assertion.
+   * Whether this identity is a verified Paladin iss|sub.
    */
   public function isVerified(): bool {
-    return $this->kind === self::KIND_PALADIN || $this->kind === self::KIND_DRUSH;
+    return $this->kind === self::KIND_PALADIN;
   }
 
   /**

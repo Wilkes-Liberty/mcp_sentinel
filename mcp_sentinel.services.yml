@@ -224,6 +224,12 @@ services:
       - '@mcp_sentinel.operator_binding'
       - '@mcp_sentinel.webhook_queue_manager'
       - '@settings'
+      - '@state'
+
+  mcp_sentinel.operator_binding_uid_schema:
+    class: Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema
+    arguments:
+      - '@database'
 
   mcp_sentinel.operator_binding:
     class: Drupal\mcp_sentinel\Service\McpOperatorBinding
@@ -235,6 +241,7 @@ services:
       - '@config.factory'
       - '@mcp_sentinel.paladin_introspection'
       - '@mcp_sentinel.operator_identity'
+      - '@settings'
 
   mcp_sentinel.paladin_introspection:
     class: Drupal\mcp_sentinel\Service\McpPaladinIntrospection
@@ -246,9 +253,6 @@ services:
   mcp_sentinel.operator_identity:
     class: Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory
     arguments:
-      - '@mcp_sentinel.principal_context_holder'
-      - '@private_key'
-      - '@settings'
       - '@mcp_sentinel.paladin_introspection'
 
   mcp_sentinel.principal_context_dispatcher:

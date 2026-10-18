@@ -87,10 +87,51 @@ final class McpPaladinIntrospection {
    *   audience.
    */
   public function activeIdentity(string $token): McpOperatorIdentity {
+    return $this->identityFromPayload($this->activePayload($token));
+  }
+
+  /**
+   * Paladin identity from an already-checked introspection payload.
+   *
+   * @param array<string, mixed> $payload
+   *   Active RFC 7662 claims.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   *   When iss or sub is missing or is not a principal-key vector.
+   */
+  public function identityFromPayload(array $payload): McpOperatorIdentity {
+    $iss = $payload['iss'] ?? NULL;
+    $sub = $payload['sub'] ?? NULL;
+    if (!is_string($iss) || !is_string($sub)) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        'A verified operator identity is required.',
+      );
+    }
+    try {
+      return McpOperatorIdentity::paladin($iss . '|' . $sub);
+    }
+    catch (McpPrincipalKeyException) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        'A verified operator identity is required.',
+      );
+    }
+  }
+
+  /**
+   * Active introspection claims. Never logs the token.
+   *
+   * @return array<string, mixed>
+   *   RFC 7662 payload after pinned checks.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  public function activePayload(string $token): array {
     $token = trim($token);
     if ($token === '') {
       throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
+        McpKillSwitchException::MISSING_TOKEN,
         'A Paladin access token is required.',
       );
     }
@@ -196,9 +237,12 @@ final class McpPaladinIntrospection {
           'Paladin is unavailable.',
         );
       }
-      $operatorAudOk = $this->claimMatches($operatorAudience, $payload['aud'] ?? NULL)
-        || $this->claimMatches($operatorAudience, $payload['azp'] ?? NULL)
-        || $this->claimMatches($operatorAudience, $payload['client_id'] ?? NULL);
+      // Operator audience is aud or a role. azp / client_id identify
+      // the client, not the operator grant.
+      $operatorAudOk = $this->claimMatches(
+        $operatorAudience,
+        $payload['aud'] ?? NULL,
+      );
       $roles = $payload['role'] ?? $payload['roles'] ?? NULL;
       if ($roles === NULL && isset($payload['realm_access']) && is_array($payload['realm_access'])) {
         $roles = $payload['realm_access']['roles'] ?? NULL;
@@ -211,15 +255,13 @@ final class McpPaladinIntrospection {
         );
       }
     }
-    try {
-      return McpOperatorIdentity::paladin($iss . '|' . $sub);
+    $typed = [];
+    foreach ($payload as $key => $value) {
+      if (is_string($key)) {
+        $typed[$key] = $value;
+      }
     }
-    catch (McpPrincipalKeyException) {
-      throw new McpKillSwitchException(
-        McpKillSwitchException::UNVERIFIED_OPERATOR,
-        'A verified operator identity is required.',
-      );
-    }
+    return $typed;
   }
 
   /**
@@ -266,6 +308,8 @@ final class McpPaladinIntrospection {
    * Pinned settings.php value, or empty.
    */
   private function setting(string $key): string {
+    // Drupal Settings::get() is static; the injected instance is the test seam.
+    // @phpstan-ignore staticMethod.dynamicCall
     $value = $this->settings->get('mcp_sentinel.paladin.' . $key, '');
     return is_string($value) ? trim($value) : '';
   }
