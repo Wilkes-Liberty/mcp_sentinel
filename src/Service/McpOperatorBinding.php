@@ -775,9 +775,7 @@ final class McpOperatorBinding {
   ): void {
     $this->auditLogger->logAlways($operation, [
       'actor' => $identity->storageId(),
-      'second_confirmer' => $identity->storageId(),
       'operator_id' => $operatorId,
-      'added_to_existing' => FALSE,
     ]);
   }
 

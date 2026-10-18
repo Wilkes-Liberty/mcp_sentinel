@@ -153,8 +153,8 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds. Default 86400, max 604800.')]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --principal-key=iss|sub|actor --reason="compromise"', description: 'Kill one principal immediately.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --human-key=iss|sub --reason="mass revoke"', description: 'Person-wide freeze. In-scope agents are refused immediately; a second operator confirms, extends, or lifts.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --principal-key=\'iss|sub|actor\' --reason="compromise"', description: 'Kill one principal immediately.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --human-key=\'iss|sub\' --reason="mass revoke"', description: 'Person-wide freeze. In-scope agents are refused immediately; a second operator confirms, extends, or lifts.')]
   public function kill(
     array $options = [
       'principal-key' => [],
@@ -419,7 +419,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an un-kill request, to confirm as the named second person (secondary account holder).')]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=alice --principal-key=iss|sub|actor --reason="restored"', description: 'Request an un-kill (pending confirm).')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=alice --principal-key=\'iss|sub|actor\' --reason="restored"', description: 'Request an un-kill (pending confirm).')]
   #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=bob --confirm-batch=BATCH', description: 'Confirm an un-kill as a distinct operator.')]
   public function unkill(
     array $options = [
@@ -532,7 +532,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'tenant', description: 'Tenant selector.')]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-status --operator=alice --principal-key=iss|sub|actor', description: 'Print the kill-block row for one principal.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-status --operator=alice --principal-key=\'iss|sub|actor\'', description: 'Print the kill-block row for one principal.')]
   public function status(
     array $options = [
       'principal-key' => [],
@@ -782,6 +782,26 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
+   * Reads the token once, then runs the callback.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   * @param callable(string): int $callback
+   *   Work that receives the Paladin token string.
+   */
+  private function withPaladinToken(array $options, callable $callback): int {
+    try {
+      $token = $this->paladinToken($options);
+      return $callback($token);
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logError($e->reasonCode . ': ' . $e->getMessage());
+      $this->auditCommandRefusal($e, $options);
+      return self::EXIT_FAILURE;
+    }
+  }
+
+  /**
    * Reads the token once, forms a Paladin identity, then runs the callback.
    *
    * @param array<string, mixed> $options
@@ -790,15 +810,9 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Work after the token is verified.
    */
   private function runWithPaladinToken(array $options, callable $callback): int {
-    try {
-      $token = $this->paladinToken($options);
+    return $this->withPaladinToken($options, function (string $token) use ($callback): int {
       return $callback($this->operatorIdentities->fromPaladinToken($token));
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logError($e->reasonCode . ': ' . $e->getMessage());
-      $this->auditCommandRefusal($e, $options);
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -810,8 +824,7 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Bind work. Receives the token; must not read stdin again.
    */
   private function bindWithPaladinToken(array $options, callable $callback): int {
-    try {
-      $token = $this->paladinToken($options);
+    return $this->withPaladinToken($options, function (string $token) use ($callback): int {
       if ($token === '') {
         throw new McpKillSwitchException(
           McpKillSwitchException::MISSING_TOKEN,
@@ -819,12 +832,7 @@ final class McpKillSwitchCommands extends DrushCommands {
         );
       }
       return $callback($token);
-    }
-    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
-      $this->logError($e->reasonCode . ': ' . $e->getMessage());
-      $this->auditCommandRefusal($e, $options);
-      return self::EXIT_FAILURE;
-    }
+    });
   }
 
   /**
@@ -992,6 +1000,10 @@ final class McpKillSwitchCommands extends DrushCommands {
   /**
    * Optional TTL in seconds, or NULL when the option is empty.
    *
+   * Non-empty values that are not an int or integer string are
+   * refused. Zero and negative ints go to McpKillTtl::resolve,
+   * which refuses them (`invalid_ttl`).
+   *
    * @param array<string, mixed> $options
    *   Command options.
    */
@@ -1003,10 +1015,13 @@ final class McpKillSwitchCommands extends DrushCommands {
     if (is_int($value)) {
       return $value;
     }
-    if (is_string($value) && is_numeric($value)) {
+    if (is_string($value) && preg_match('/^-?\d+$/', $value) === 1) {
       return (int) $value;
     }
-    return NULL;
+    throw new McpKillSwitchException(
+      McpKillSwitchException::INVALID_TTL,
+      'Kill-block TTL must be an integer number of seconds.',
+    );
   }
 
   /**

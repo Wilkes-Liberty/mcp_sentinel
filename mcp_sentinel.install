@@ -2027,7 +2027,9 @@ function mcp_sentinel_reset_unproven_operator_binding_uids(): string {
     ->condition('identity_kind', McpOperatorIdentity::KIND_PALADIN)
     ->execute();
   if ($statement === NULL) {
-    return '';
+    throw new UpdateException(
+      'Operator binding uid reset could not read existing rows.',
+    );
   }
   $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
   if ($rows === []) {
@@ -2087,7 +2089,9 @@ function mcp_sentinel_clear_drush_operator_bindings(): string {
     ->condition('identity_kind', McpOperatorIdentity::KIND_DRUSH)
     ->execute();
   if ($statement === NULL) {
-    return '';
+    throw new UpdateException(
+      'Drush operator binding clear could not read existing rows.',
+    );
   }
   $rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
   if ($rows === []) {
