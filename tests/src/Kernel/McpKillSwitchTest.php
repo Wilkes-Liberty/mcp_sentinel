@@ -713,7 +713,7 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
-   * A 10037 re-run prunes stale markers and does not re-audit a still-pending keep.
+   * A 10037 re-run prunes stale markers without re-auditing a keep.
    */
   public function testUpdate10037RerunPrunesStaleKeptMarker(): void {
     $pendingBatch = '00000000-0000-4000-8000-000000000084';
