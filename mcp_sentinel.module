@@ -1172,7 +1172,7 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
  * notifies the named second person and the break-glass path. It
  * must not lift the freeze or complete a pending un-kill.
  */
-function mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer(
+function mcp_sentinel_kill_unavailable_confirmer(
   array $context,
 ): void {
   $type = McpKillSelectorType::tryFrom((string) ($context['selector_type'] ?? ''));
