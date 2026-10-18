@@ -97,6 +97,9 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
  * could never run it. A governed tool that declares its own permission keeps
  * it and also requires the context permission. Readiness, scope and IP gates
  * stay in the access check.
+ *
+ * @param array<string, mixed> $definitions
+ *   Tool definitions keyed by plugin id.
  */
 function mcp_sentinel_tool_info_alter(array &$definitions): void {
   foreach ($definitions as $definition) {

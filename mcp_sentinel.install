@@ -1988,12 +1988,13 @@ function mcp_sentinel_update_10038(): string {
       McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
     );
     if ($existingMax === NULL) {
-      $maxId = (int) $database->select($delivery, 'd')
-        ->orderBy('id', 'DESC')
-        ->range(0, 1)
-        ->fields('d', ['id'])
-        ->execute()
-        ->fetchField();
+      $maxId = mcp_sentinel_db_int(mcp_sentinel_fetch_field(
+        $database->select($delivery, 'd')
+          ->orderBy('id', 'DESC')
+          ->range(0, 1)
+          ->fields('d', ['id'])
+          ->execute(),
+      ));
       \Drupal::state()->set(
         McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
         $maxId,
@@ -2015,14 +2016,15 @@ function mcp_sentinel_update_10038(): string {
   $keylessPending = 0;
   if ($schema->tableExists($delivery)
     && $schema->fieldExists($delivery, 'principal_key')) {
-    $keylessPending = (int) $database->select($delivery, 'd')
-      ->condition('status', 'pending')
-      ->condition('principal_key', '')
-      ->condition('human_key', '')
-      ->condition('tenant', '')
-      ->countQuery()
-      ->execute()
-      ->fetchField();
+    $keylessPending = mcp_sentinel_db_int(mcp_sentinel_fetch_field(
+      $database->select($delivery, 'd')
+        ->condition('status', 'pending')
+        ->condition('principal_key', '')
+        ->condition('human_key', '')
+        ->condition('tenant', '')
+        ->countQuery()
+        ->execute(),
+    ));
   }
   $messages[] = $keylessPending . ' keyless pending webhook row(s) remain.';
   return implode(' ', $messages);
@@ -2048,28 +2050,69 @@ function mcp_sentinel_hold_keyless_pending_audited(): int {
     || !$database->schema()->tableExists($kill)) {
     return 0;
   }
-  $active = (int) $database->select($kill, 'k')
-    ->condition('status', ['killed', 'kill_pending', 'unkill_pending'], 'IN')
-    ->countQuery()
-    ->execute()
-    ->fetchField();
+  $active = mcp_sentinel_db_int(mcp_sentinel_fetch_field(
+    $database->select($kill, 'k')
+      ->condition('status', ['killed', 'kill_pending', 'unkill_pending'], 'IN')
+      ->countQuery()
+      ->execute(),
+  ));
   if ($active < 1) {
     return 0;
   }
-  $ids = $database->select($delivery, 'd')
-    ->fields('d', ['id'])
-    ->condition('status', 'pending')
-    ->condition('principal_key', '')
-    ->condition('human_key', '')
-    ->condition('tenant', '')
-    ->execute()
-    ->fetchCol();
+  $ids = mcp_sentinel_fetch_col(
+    $database->select($delivery, 'd')
+      ->fields('d', ['id'])
+      ->condition('status', 'pending')
+      ->condition('principal_key', '')
+      ->condition('human_key', '')
+      ->condition('tenant', '')
+      ->execute(),
+  );
   if ($ids !== [] && !mcp_sentinel_resolved_audit_logger() instanceof McpAuditLogger) {
     throw new UpdateException(
       'mcp_sentinel.audit_logger is required before holding keyless deliveries.',
     );
   }
   return mcp_sentinel_hold_keyless_pending_on_upgrade();
+}
+
+/**
+ * Integer from a database field that may be stringified.
+ */
+function mcp_sentinel_db_int(mixed $value): int {
+  if (is_int($value)) {
+    return $value;
+  }
+  if (is_float($value)) {
+    return (int) $value;
+  }
+  if (is_string($value) && is_numeric($value)) {
+    return (int) $value;
+  }
+  return 0;
+}
+
+/**
+ * One field from a statement, or NULL when the statement is missing.
+ */
+function mcp_sentinel_fetch_field(mixed $statement): mixed {
+  if (!$statement instanceof \Drupal\Core\Database\StatementInterface) {
+    return NULL;
+  }
+  return $statement->fetchField();
+}
+
+/**
+ * One column from a statement, or empty when the statement is missing.
+ *
+ * @return list<mixed>
+ */
+function mcp_sentinel_fetch_col(mixed $statement): array {
+  if (!$statement instanceof \Drupal\Core\Database\StatementInterface) {
+    return [];
+  }
+  $col = $statement->fetchCol();
+  return is_array($col) ? $col : [];
 }
 
 /**

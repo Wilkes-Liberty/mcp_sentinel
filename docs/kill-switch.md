@@ -472,15 +472,20 @@ Every transition writes an audit row. These rows are written even when
 | `agent_side_effect_hold` | Queued deliveries in scope were held. |
 | `agent_side_effect_release` | An operator released held deliveries. |
 | `agent_side_effect_discard` | An operator discarded held deliveries. |
+| `agent_kill_refuse` | An operator action was refused. |
+| `agent_side_effect_refuse` | A hold, release, discard, or oversized enqueue was refused. |
 | `operator_command_refused` | A Drush command refused before a service audit (missing token, token too large, `--token`). |
 | `operator_binding_uid_reset` | Update 10037 reset a Paladin uid. Metadata has `previous_uid` and `identity_hash`. |
 | `operator_binding_cleared` | Update 10037 deleted a leftover Drush binding row. |
 | `operator_binding_upgrade_pending_kept` | Update 10037 kept a Drush-requested freeze. |
 
 Each row records the operator, the scope, the timestamp, and the
-correlation or batch / item ids. Tokens are never recorded. Each of
-those events writes exactly one row. The OS user and `SUDO_USER`
-may appear as advisory metadata only.
+correlation or batch / item ids. Tokens are never recorded. A
+successful transition writes one row. Refusals write
+`agent_kill_refuse` or `agent_side_effect_refuse`. A confirmer hook
+that throws writes a second `agent_kill_escalate` row with reason
+`notify_failed`. The OS user and `SUDO_USER` may appear as advisory
+metadata only.
 
 ## Hooks and events
 

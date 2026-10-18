@@ -294,11 +294,14 @@ cannot be configured upward. A killed row is never downgraded to
 `agent_kill_extend`, `agent_kill_lift`, `agent_kill_escalate`,
 `agent_kill_break_glass`, `agent_unkill_request`, `agent_unkill`,
 `agent_side_effect_hold`, `agent_side_effect_release`,
-`agent_side_effect_discard`, `operator_command_refused`,
+`agent_side_effect_discard`, `agent_kill_refuse`,
+`agent_side_effect_refuse`, `operator_command_refused`,
 `operator_binding_uid_reset`, `operator_binding_cleared`, and
-`operator_binding_upgrade_pending_kept` go through `logAlways()` and never
-include tokens. Each of those events writes exactly one row with
-operator, scope, timestamp, and correlation or batch / item ids.
+`operator_binding_upgrade_pending_kept` go through `logAlways()` /
+`logSurvivingRollback()` and never include tokens. A successful
+transition writes one row. Refusals write a refuse row. A confirmer
+hook that throws writes a second `agent_kill_escalate` row
+(`notify_failed`).
 Callers of `admit()` never see a distinct killed or overlay signal
 (same code, message, and exception shape); the deny row holds the
 reason. Queue keys carried for the kill check are written as

@@ -1662,6 +1662,35 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * A keyless row stays stopped under a confirmed (killed) stop.
+   */
+  public function testKeylessRowStaysStoppedUnderKilledStop(): void {
+    $this->enableEndpoint();
+    $id = $this->insertDelivery([
+      'principal_key' => '',
+      'human_key' => '',
+      'tenant' => '',
+    ]);
+    $this->insertActiveKill(McpKillSelector::tenant('other-killed-keyless'));
+    $this->assertTrue(
+      $this->queue()->shouldHoldRow($this->loadDelivery($id)),
+      'A keyless row must stay held while a confirmed stop is active.',
+    );
+    try {
+      $this->queue()->releaseHeld([$id], $this->paladinB());
+      $this->fail('A keyless row must not release while a confirmed stop is active.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::SCOPE_STOPPED, $e->reasonCode);
+    }
+    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_KEYLESS_STOP);
+    $this->assertFalse(
+      $this->queue()->shouldHoldRow($this->loadDelivery($id)),
+      'The killed-stop keyless deny must fail when that guard is off.',
+    );
+  }
+
+  /**
    * A 770-byte stored key is held while any stop is active.
    */
   public function testOversizedStoredKeyIsHeldUnderStop(): void {

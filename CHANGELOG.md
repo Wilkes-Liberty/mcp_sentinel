@@ -201,7 +201,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`min(now+7d, max(existing, now+ttl))`) so an overdue freeze
   stays in force. Run updates 10036, 10037, then 10038. Every
   keyless row stays stopped while any stop is active,
-  including rows queued after 10038. Rollback for 10038 is
+  including rows queued after 10038. Refusals write
+  `agent_kill_refuse` or `agent_side_effect_refuse` exactly
+  once with actor and batch when known. Rollback for 10038 is
   documented only in INSTALL.md.
 
 ### Fixed

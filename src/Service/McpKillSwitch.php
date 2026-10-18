@@ -1172,8 +1172,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         && !$this->weakened(self::WEAKEN_EXPIRE_UNCONFIRMED)) {
         return TRUE;
       }
-      $blockUntil = $row['block_until'] ?? 0;
-      $blockUntil = is_int($blockUntil) ? $blockUntil : 0;
+      $blockUntil = $this->rowBlockUntil($row);
+      if ($blockUntil === NULL) {
+        return TRUE;
+      }
       if ($status->isBlocking($blockUntil, $now)) {
         return TRUE;
       }
@@ -1755,7 +1757,27 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * String column from an associative kill-block row.
+   * Unix timestamp from a kill-block row.
+   *
+   * Drupal 11.3 stringifies integers on every driver. An unreadable
+   * value fails closed.
+   *
+   * @param array<string, mixed> $row
+   *   Stored row.
+   */
+  private function rowBlockUntil(array $row): ?int {
+    $value = $row['block_until'] ?? NULL;
+    if (is_int($value)) {
+      return $value;
+    }
+    if (is_string($value) && is_numeric($value)) {
+      return (int) $value;
+    }
+    return NULL;
+  }
+
+  /**
+   * String field from a stored row.
    *
    * @param array<string, mixed> $row
    *   Stored row.
@@ -2415,6 +2437,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    */
   private function matchesBreakGlassPin(McpOperatorIdentity $operator, string $configured): bool {
     return $operator->kind === McpOperatorIdentity::KIND_PALADIN
+      && $configured !== ''
+      && strlen($configured) === strlen($operator->id)
       && hash_equals($configured, $operator->id);
   }
 
