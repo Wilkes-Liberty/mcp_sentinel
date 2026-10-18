@@ -1742,10 +1742,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     ?McpKillBlockStatus $existingStatus,
     McpKillBlockStatus $status,
   ): bool {
-    if ($this->weakened(self::WEAKEN_KEEP_DEAD_CONFIRMER)) {
-      return $existingStatus === McpKillBlockStatus::Killed
-        && $status === McpKillBlockStatus::Killed;
-    }
+    $existingBlocking = $existingBlocking || $existingStatus !== NULL;
     return $existingBlocking
       && $existingStatus === McpKillBlockStatus::Killed
       && $status === McpKillBlockStatus::Killed;
