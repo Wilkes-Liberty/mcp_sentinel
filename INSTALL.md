@@ -288,7 +288,9 @@ column, holds remaining keyless pending rows when any stop is
 active (and fails if the audit logger is missing), and counts
 remaining keyless pending rows. Runtime holds every keyless row
 while any stop is active, including rows queued after 10038.
-Fresh installs drop `released` in `hook_install`.
+Update 10039 deletes the unused pre-upgrade max-id state key.
+Fresh installs drop `released` in `hook_install` and do not
+write that state key.
 
 ### Roll back update 10038
 
@@ -296,8 +298,11 @@ Restore the pre-updb backup, or re-add `released` (int unsigned
 not null default 0), `drush state:delete
 mcp_sentinel.webhook_pre_upgrade_max_id`, and set the schema
 version back to 10037. Held rows stay held. Rolling the module
-code back to commit 92e92d6 (the 10036 kill-switch hold
-release) re-enables the keyless fail-open.
+code back to commit 16d90cb (1.x immediately before #318,
+including #316 and #319) restores the pre-#318 hold
+surface. That point still delivered keyless rows under a
+stop. Update 10039 deletes the unused
+`mcp_sentinel.webhook_pre_upgrade_max_id` state key.
 
 ## Updating
 

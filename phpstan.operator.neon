@@ -1,11 +1,13 @@
-# Level max plus phpstan-strict-rules on the DEV-986 operator files
-# and the DEV-985 kill-switch types. The project neon stays at
-# level 6 for the webhook worker, queue manager, and .module.
-# CI requires this file after composer require
-# phpstan/phpstan-strict-rules; extension-installer loads
-# rules.neon, so this file must not include it again.
-# Untouched 1.x code in McpKillSwitch.php and mcp_sentinel.install
-# is recorded in phpstan.operator-baseline.neon. New DEV-985 code
+# Level max plus phpstan-strict-rules on the DEV-986 operator files,
+# the DEV-985 kill-switch types, the queue manager, the webhook
+# worker, and mcp_sentinel.module. CI requires this file after
+# composer require phpstan/phpstan-strict-rules; extension-installer
+# loads rules.neon, so this file must not include it again.
+# Untouched 1.x code in McpKillSwitch.php, mcp_sentinel.install, and
+# pre-#318 module / queue / worker errors are recorded in
+# phpstan.operator-baseline.neon (install/KillSwitch/module-3 from
+# Tests 39110065729 on bff12db; remaining module, queue manager,
+# and worker messages from Tests 39115568856). New DEV-985 code
 # must not add baseline entries.
 includes:
   - phpstan.operator-baseline.neon
@@ -25,11 +27,14 @@ parameters:
     - src/Service/McpOperatorBinding.php
     - src/Drush/Commands/McpKillSwitchCommands.php
     - src/Service/McpKillSwitch.php
+    - src/Service/McpWebhookQueueManager.php
     - src/Service/McpKillEnforcerInterface.php
+    - src/Plugin/QueueWorker/McpWebhookWorker.php
     - src/Event/McpKillUnavailableConfirmerEvent.php
     - src/Enum/McpKillBlockStatus.php
     - src/Value/McpKillSwitchResult.php
     - mcp_sentinel.install
+    - mcp_sentinel.module
     - mcp_sentinel.api.php
   ignoreErrors:
     # Portable across Drupal 10.6 (int) and 11 (FetchAs). Same ignore as

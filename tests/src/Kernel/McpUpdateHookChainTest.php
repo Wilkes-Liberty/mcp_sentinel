@@ -1635,14 +1635,27 @@ final class McpUpdateHookChainTest extends KernelTestBase {
         'requested_at' => 1,
         'changed' => 1,
       ])->execute();
+    $id = (int) $this->container->get('database')
+      ->select($delivery, 'd')
+      ->fields('d', ['id'])
+      ->range(0, 1)
+      ->execute()
+      ->fetchField();
     $this->container->set('mcp_sentinel.audit_logger', new \stdClass());
     try {
-      mcp_sentinel_hold_keyless_pending_audited();
+      mcp_sentinel_update_10038();
       $this->fail('A missing audit logger must fail the keyless hold.');
     }
     catch (UpdateException $e) {
       $this->assertStringContainsString('audit_logger', $e->getMessage());
     }
+    $status = $this->container->get('database')
+      ->select($delivery, 'd')
+      ->fields('d', ['status'])
+      ->condition('id', $id)
+      ->execute()
+      ->fetchField();
+    $this->assertSame('pending', (string) $status);
   }
 
   /**
@@ -1663,10 +1676,20 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $state->delete(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID);
     mcp_sentinel_install();
     $this->assertFalse($schema->fieldExists($delivery, 'released'));
-    $this->assertSame(
-      0,
-      $state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID),
-    );
+    $this->assertNull($state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID));
+  }
+
+  /**
+   * Update 10039 deletes the unused pre-upgrade max-id state key.
+   */
+  public function testUpdate10039DeletesPreUpgradeMaxId(): void {
+    $state = $this->container->get('state');
+    $state->set(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID, 42);
+    $message = mcp_sentinel_update_10039();
+    $this->assertStringContainsString('Deleted unused', $message);
+    $this->assertNull($state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID));
+    $again = mcp_sentinel_update_10039();
+    $this->assertStringContainsString('already absent', $again);
   }
 
   /**

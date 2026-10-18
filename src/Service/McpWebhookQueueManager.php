@@ -77,6 +77,21 @@ final class McpWebhookQueueManager {
   public const STATE_PRE_UPGRADE_MAX_ID = 'mcp_sentinel.webhook_pre_upgrade_max_id';
 
   /**
+   * PHPUnit-only: cron re-queues held rows.
+   */
+  public const WEAKEN_REQUEUE_HELD = 'requeue_held';
+
+  /**
+   * PHPUnit-only: skip hold/release/discard audit rows.
+   */
+  public const WEAKEN_SKIP_AUDIT = 'skip_audit';
+
+  /**
+   * PHPUnit-only: allow release while the scope is still stopped.
+   */
+  public const WEAKEN_SKIP_RELEASE_UNDER_STOP = 'skip_release_under_stop';
+
+  /**
    * Maximum stored principal or human key length (utf8mb4 index safe).
    */
   public const KEY_MAX_LENGTH = 770;
@@ -98,6 +113,13 @@ final class McpWebhookQueueManager {
    * PHPUnit-only callback after holdMatching selects ids.
    */
   private ?\Closure $afterHoldSelectForTest = NULL;
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * @var array<string, true>
+   */
+  private array $weakenForTest = [];
 
   /**
    * Constructs a new McpWebhookQueueManager.
@@ -194,7 +216,9 @@ final class McpWebhookQueueManager {
     $now = $this->time->getRequestTime();
     // Fetch pending rows that are either newly created (next_attempt IS NULL)
     // or whose backoff has elapsed.
-    $status = ['pending'];
+    $status = $this->weakened(self::WEAKEN_REQUEUE_HELD)
+      ? ['pending', self::STATUS_HELD]
+      : ['pending'];
     $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
       ->fields('d', [
         'id',
@@ -714,6 +738,24 @@ final class McpWebhookQueueManager {
   }
 
   /**
+   * PHPUnit-only injection that disables one hold invariant.
+   *
+   * @param string $flag
+   *   One of the WEAKEN_* constants.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Webhook-hold weaken flags can be set only under PHPUnit.',
+      );
+    }
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
    * Releases or discards held rows and writes one audit entry.
    *
    * @param list<int> $deliveryIds
@@ -782,7 +824,7 @@ final class McpWebhookQueueManager {
         );
       }
       $heldIds = array_keys($rows);
-      if ($action === 'release') {
+      if ($action === 'release' && !$this->weakened(self::WEAKEN_SKIP_RELEASE_UNDER_STOP)) {
         foreach ($rows as $row) {
           if ($this->rowIsStopped($row)) {
             $this->refuseHeld(
@@ -1216,6 +1258,9 @@ final class McpWebhookQueueManager {
     array $itemIds,
     string $batchId,
   ): void {
+    if ($this->weakened(self::WEAKEN_SKIP_AUDIT)) {
+      return;
+    }
     $scope = [];
     foreach ($selectors as $selector) {
       $scope[] = $selector->type->value . ':' . $selector->key;
@@ -1232,6 +1277,13 @@ final class McpWebhookQueueManager {
       'correlation_id' => $batchId !== '' ? $batchId : implode(',', $itemIds),
       'item_ids' => implode(',', $itemIds),
     ]);
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
   }
 
 }

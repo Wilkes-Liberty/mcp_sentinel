@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Escalation claim and `AUDIT_ESCALATE` share one transaction.
+  A claim or audit failure rolls the claim back and writes
+  `escalate_failed` or `unkill_expire_failed`; `notify_failed`
+  is only for notify errors. Un-kill expiry reverts one batch
+  in one transaction. Update 10039 deletes the unused
+  pre-upgrade max-id state key. Drush refusals after Paladin
+  resolution write `operator_command_refused` with that
+  principal and `batch_id`, including `invalid_ttl`.
+
 ## [3.3.0] - 2026-10-18
 
 Paladin-only kill-switch operator identity (DEV-986: #316, #319,
