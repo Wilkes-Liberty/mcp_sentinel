@@ -479,18 +479,3 @@ parameters:
       identifier: return.type
       count: 1
       path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::listHeld\(\) should return list\<array\<string, mixed\>\> but returns list\<non-empty-array\>\.$#'
-      identifier: return.type
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Parameter \#1 \$row of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::rowIsStopped\(\) expects array\<string, mixed\>, array given\.$#'
-      identifier: argument.type
-      count: 1
-      path: src/Service/McpWebhookQueueManager.php
-    -
-      message: '#^Parameter \#1 \$row of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::selectorsFromRow\(\) expects array\<string, mixed\>, array given\.$#'
-      identifier: argument.type
-      count: 2
-      path: src/Service/McpWebhookQueueManager.php

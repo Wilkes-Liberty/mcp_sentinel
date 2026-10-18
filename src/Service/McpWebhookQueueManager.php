@@ -672,8 +672,11 @@ final class McpWebhookQueueManager {
       return [];
     }
     $rows = [];
-    while ($row = $statement->fetchAssoc()) {
-      $rows[] = $row;
+    while ($fetched = $statement->fetchAssoc()) {
+      $row = $this->stringKeyedRow($fetched);
+      if ($row !== NULL) {
+        $rows[] = $row;
+      }
     }
     return $rows;
   }
@@ -807,7 +810,11 @@ final class McpWebhookQueueManager {
       $statement = $query->execute();
       $rows = [];
       if ($statement !== NULL) {
-        while ($row = $statement->fetchAssoc()) {
+        while ($fetched = $statement->fetchAssoc()) {
+          $row = $this->stringKeyedRow($fetched);
+          if ($row === NULL) {
+            continue;
+          }
           $id = (int) ($row['id'] ?? 0);
           if ($id > 0) {
             $rows[$id] = $row;
@@ -905,12 +912,14 @@ final class McpWebhookQueueManager {
     if ($updated < 1) {
       return;
     }
-    $row = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-      ->fields('d')
-      ->condition('id', $deliveryId)
-      ->execute()
-      ?->fetchAssoc();
-    if (!is_array($row)) {
+    $row = $this->stringKeyedRow(
+      $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d')
+        ->condition('id', $deliveryId)
+        ->execute()
+        ?->fetchAssoc(),
+    );
+    if ($row === NULL) {
       return;
     }
     $selectors = $this->selectorsFromRow($row);
