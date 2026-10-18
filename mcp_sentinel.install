@@ -372,13 +372,12 @@ function mcp_sentinel_schema(): array {
  * Implements hook_install().
  *
  * Drops the unused webhook `released` column that hook_schema still
- * declares so update 10036 can add it on upgrades. Records the
- * pre-upgrade max delivery id as 0 when absent (update 10038 never
- * runs on a fresh install). Runtime still holds every keyless row
- * while any stop is active. Seeds the 'mcp_api' role with the
- * minimum read permissions an agent account needs, so a fresh
- * install has a ready-to-assign governed identity. The role is only
- * created when absent, keeping reinstall idempotent.
+ * declares so update 10036 can add it on upgrades. Does not write
+ * the dead pre-upgrade max-id state key; runtime holds every
+ * keyless row while any stop is active. Seeds the 'mcp_api' role
+ * with the minimum read permissions an agent account needs, so a
+ * fresh install has a ready-to-assign governed identity. The role
+ * is only created when absent, keeping reinstall idempotent.
  */
 function mcp_sentinel_install(): void {
   $schema = \Drupal::database()->schema();
@@ -386,10 +385,6 @@ function mcp_sentinel_install(): void {
   if ($schema->tableExists($delivery)
     && $schema->fieldExists($delivery, 'released')) {
     $schema->dropField($delivery, 'released');
-  }
-  $state = \Drupal::state();
-  if ($state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID) === NULL) {
-    $state->set(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID, 0);
   }
   if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
     Role::create(['id' => 'mcp_api', 'label' => 'MCP API', 'weight' => 10])->save();
@@ -1968,12 +1963,13 @@ function mcp_sentinel_update_10037(): string {
  *
  * 10036 already added hold-queue columns. This hook records the
  * highest delivery id present before the upgrade, drops the unused
- * released column, and holds remaining keyless pending rows only
- * when the audit logger is available. Runtime treats every keyless
- * row as stopped while any stop is active, including ids above
- * that recorded max. It does not rebuild key indexes: Drupal's
- * MySQL driver already shortens them, and a 191-char prefix
- * becomes an unusable substr() index on PostgreSQL.
+ * released column, and holds remaining keyless pending rows. The
+ * update fails when the audit logger is missing and keyless rows
+ * would be held. Runtime treats every keyless row as stopped while
+ * any stop is active, including ids above that recorded max. It
+ * does not rebuild key indexes: Drupal's MySQL driver already
+ * shortens them, and a 191-char prefix becomes an unusable
+ * substr() index on PostgreSQL.
  */
 function mcp_sentinel_update_10038(): string {
   $schema = \Drupal::database()->schema();
@@ -2029,6 +2025,24 @@ function mcp_sentinel_update_10038(): string {
   }
   $messages[] = $keylessPending . ' keyless pending webhook row(s) remain.';
   return implode(' ', $messages);
+}
+
+/**
+ * Deletes the unused pre-upgrade max-id state key (DEV-985).
+ *
+ * Update 10038 still writes mcp_sentinel.webhook_pre_upgrade_max_id.
+ * Runtime no longer reads it: every keyless row is held while any
+ * stop is active. This hook removes the dead key. Fresh installs
+ * never write it.
+ */
+function mcp_sentinel_update_10039(): string {
+  $key = McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID;
+  $state = \Drupal::state();
+  if ($state->get($key) === NULL) {
+    return 'Pre-upgrade max delivery id state key was already absent.';
+  }
+  $state->delete($key);
+  return 'Deleted unused pre-upgrade max delivery id state key.';
 }
 
 /**

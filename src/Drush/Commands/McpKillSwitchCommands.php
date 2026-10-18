@@ -817,9 +817,18 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Kill batch when the command received one.
    */
   private function runWithPaladinToken(array $options, callable $callback, string $batch = ''): int {
-    return $this->withPaladinToken($options, function (string $token) use ($callback): int {
-      return $callback($this->operatorIdentities->fromPaladinToken($token));
-    }, $batch);
+    $actor = '';
+    try {
+      $token = $this->paladinToken($options);
+      $identity = $this->operatorIdentities->fromPaladinToken($token);
+      $actor = $identity->storageId();
+      return $callback($identity);
+    }
+    catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      $this->logError($e->reasonCode . ': ' . $e->getMessage());
+      $this->auditCommandRefusal($e, $options, $actor, $batch);
+      return self::EXIT_FAILURE;
+    }
   }
 
   /**

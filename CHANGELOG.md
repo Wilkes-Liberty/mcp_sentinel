@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-10-18
+
+DEV-985 P0 follow-up after #318 (`dc53c71`) and 3.3.0.
+
+### Added
+- Escalation claim and `AUDIT_ESCALATE` share one transaction.
+  A claim or audit failure rolls the claim back and writes
+  `escalate_failed` or `unkill_expire_failed`; `notify_failed`
+  is only for notify errors. Un-kill expiry reverts one batch
+  in one transaction.
+- Update 10039 deletes the unused pre-upgrade max-id state
+  key. Runtime still holds every keyless row while any stop
+  is active (the 10038 body is unchanged).
+- Drush refusals after Paladin resolution write
+  `operator_command_refused` with that principal. A first
+  `kill` has an empty `batch_id` (no batch yet). Commands
+  that already have a batch, including `kill-extend`, write
+  `batch_id`. An `invalid_ttl` refusal follows the same
+  rule.
+
 ## [3.3.0] - 2026-10-18
 
 Paladin-only kill-switch operator identity (DEV-986: #316, #319,
@@ -3299,7 +3319,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...1.x
+[3.3.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...3.3.1
 [3.3.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.2.0...3.3.0
 [3.2.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.1.0...3.2.0
 [3.1.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.0.1...3.1.0

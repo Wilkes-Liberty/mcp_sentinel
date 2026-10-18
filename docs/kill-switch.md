@@ -60,9 +60,13 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
    Drush-requested freezes, and requires every operator to re-bind.
    Update 10038 records the pre-upgrade max delivery id, drops
    unused `released`, and holds remaining keyless pending rows
-   when a stop is active. Every keyless row stays stopped while
-   any stop is active, including rows queued after 10038. Roll
-   back 10038 only as documented in `INSTALL.md`.
+   when a stop is active (the update fails if the audit logger
+   is missing). Update 10039 deletes that unused max-id state
+   key. Every keyless row stays stopped while any stop is
+   active, including rows queued after 10038. This is a
+   site-wide hold: a keyless row cannot be scoped to one stop,
+   so any active stop holds every keyless row. Roll back 10038
+   only as documented in `INSTALL.md`.
 2. Until the registry table exists, every governed call is refused.
    The module fails closed when it cannot read the registry.
 3. Pin Paladin introspection in `settings.php`. See
@@ -520,10 +524,10 @@ See `mcp_sentinel.api.php`.
   overwrite a held row.
 - Rows queued before update 10036 have empty keys. The 10038 hook
   records the pre-upgrade max delivery id and counts remaining
-  keyless pending rows. Every keyless row stays stopped while any
-  stop is active (release, pre-claim, post-claim, and retry),
-  including rows queued after 10038 and rows whose state key is
-  missing.
+  keyless pending rows. Update 10039 deletes that unused state
+  key. Every keyless row stays stopped while any stop is active
+  (release, pre-claim, post-claim, and retry), including rows
+  queued after 10038. This is a site-wide hold under any stop.
 - `kill-extend` never shortens a stop. `block_until` is
   `max(existing, now+ttl)`, capped at now + 7 days.
   `kill-confirm` uses the same batch-max window.

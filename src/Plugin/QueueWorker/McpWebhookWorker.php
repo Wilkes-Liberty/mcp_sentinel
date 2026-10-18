@@ -49,6 +49,28 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   private const BACKOFF = [30, 300, 1800, 7200, 28800];
 
   /**
+   * PHPUnit-only: skip the pre-claim hold check.
+   */
+  public const WEAKEN_SKIP_PRE_CLAIM_CHECK = 'skip_pre_claim_check';
+
+  /**
+   * PHPUnit-only: skip the post-claim hold re-check.
+   */
+  public const WEAKEN_SKIP_POST_CLAIM_RECHECK = 'skip_post_claim_recheck';
+
+  /**
+   * PHPUnit-only: skip the in_progress status guard on retry writes.
+   */
+  public const WEAKEN_SKIP_RETRY_STATUS_GUARD = 'skip_retry_status_guard';
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * @var array<string, true>
+   */
+  protected array $weakenForTest = [];
+
+  /**
    * PHPUnit-only callback between the pre-claim check and the claim.
    */
   protected ?\Closure $betweenCheckAndClaimForTest = NULL;
@@ -316,7 +338,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
 
     $fromItem = $item;
     $checkRow = $this->itemMergedRow($row, $fromItem);
-    if ($this->shouldHoldStoredOrItem($row, $checkRow)) {
+    if (!$this->weakened(self::WEAKEN_SKIP_PRE_CLAIM_CHECK)
+      && $this->shouldHoldStoredOrItem($row, $checkRow)) {
       $this->webhookQueue->markHeld($deliveryId);
       return;
     }
@@ -429,7 +452,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $row = $fresh;
       $checkRow = $this->itemMergedRow($row, $fromItem);
     }
-    if ($this->shouldHoldStoredOrItem($row, $checkRow)) {
+    if (!$this->weakened(self::WEAKEN_SKIP_POST_CLAIM_RECHECK)
+      && $this->shouldHoldStoredOrItem($row, $checkRow)) {
       $this->webhookQueue->holdClaimed($deliveryId);
       return;
     }
@@ -545,12 +569,15 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $backoff = self::backoffSeconds($attempts);
     $now = $this->time->getRequestTime();
     $nextAttempt = $now + $backoff;
-    if ($this->webhookQueue->holdAfterAttempt($id, $attempts, $code, $body, $nextAttempt)) {
+    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)
+      && $this->webhookQueue->holdAfterAttempt($id, $attempts, $code, $body, $nextAttempt)) {
       return;
     }
     $query = $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $id);
-    $query->condition('status', 'in_progress');
+    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
+      $query->condition('status', 'in_progress');
+    }
     $query->fields([
       'status'             => 'pending',
       'attempts'           => $attempts,
@@ -580,7 +607,9 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
   private function updateRow(int $id, string $status, ?int $code, ?string $body, int $attempts, bool $requireInProgress = FALSE): void {
     $query = $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $id);
-    $query->condition('status', $requireInProgress ? 'in_progress' : 'pending');
+    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
+      $query->condition('status', $requireInProgress ? 'in_progress' : 'pending');
+    }
     $query->fields([
       'status'             => $status,
       'attempts'           => $attempts,
@@ -828,6 +857,27 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return (int) $value;
     }
     return 0;
+  }
+
+  /**
+   * PHPUnit-only injection that disables one worker invariant.
+   *
+   * @param string $flag
+   *   One of the WEAKEN_* constants.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    $this->assertPhpunitSeam();
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
   }
 
   /**

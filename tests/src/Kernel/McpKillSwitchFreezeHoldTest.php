@@ -34,8 +34,8 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Freeze-first mass stop and held side effects (DEV-985).
  *
- * Deny evidence for these guards is recorded on a scratch branch, not
- * by production mutation switches.
+ * Mutation checks (test…WhenWeakened) turn one PHPUnit-only guard
+ * off and assert the product path that the guard was blocking.
  *
  * @group mcp_sentinel
  *
@@ -1206,6 +1206,84 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       ->condition('batch_id', $kill->batchId)
       ->execute();
     $this->assertTrue($this->killSwitch()->hasActiveStop());
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $listed = $this->killSwitch()->listActiveBlocks();
+    $hashes = array_column($listed, 'selector_hash');
+    $this->assertContains($human->hash(), $hashes);
+  }
+
+  /**
+   * An unreadable stored block_until fails closed in isKilled.
+   */
+  public function testUnreadableBlockUntilIsKilledFailsClosed(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-str-killed');
+    $kill = $this->killSwitch()->kill([$human], 'str-killed', $this->paladinA());
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 'not-a-number'])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * An unreadable stored block_until stays listed as an active block.
+   */
+  public function testUnreadableBlockUntilListActiveBlocksFailsClosed(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-str-list');
+    $kill = $this->killSwitch()->kill([$human], 'str-list', $this->paladinA());
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 'not-a-number'])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $listed = $this->killSwitch()->listActiveBlocks();
+    $hashes = array_column($listed, 'selector_hash');
+    $this->assertContains($human->hash(), $hashes);
+  }
+
+  /**
+   * A failed escalation audit rolls back the claim and uses escalate_failed.
+   */
+  public function testEscalateClaimFailureRollsBackAndUsesDistinctReason(): void {
+    $this->killSwitch()->afterEscalateClaimForTest(function (): void {
+      throw new \RuntimeException('audit boom');
+    });
+    $human = McpKillSelector::humanKey(self::ISS . '|esc-claim-fail');
+    $kill = $this->killSwitch()->kill([$human], 'esc-claim', $this->paladinA());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['confirm_until' => 1])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->killSwitch()->expireDue();
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame(0, (int) $row['escalated_at']);
+    $failed = $this->lastAuditMetadata(McpKillSwitch::AUDIT_ESCALATE);
+    $this->assertSame('escalate_failed', $failed['reason']);
+  }
+
+  /**
+   * A failed un-kill expiry rolls the batch back and uses unkill_expire_failed.
+   */
+  public function testUnkillExpireFailureRollsBackAndUsesDistinctReason(): void {
+    $this->killSwitch()->afterUnkillExpireForTest(function (): void {
+      throw new \RuntimeException('unkill boom');
+    });
+    $human = McpKillSelector::principalKey(self::ISS . '|subject-unkill-fail|agent-a');
+    $this->killSwitch()->kill([$human], 'unkill-fail', $this->paladinA());
+    $unkill = $this->killSwitch()->requestUnkill([$human], 'restore', $this->paladinA());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['unkill_confirm_until' => 1])
+      ->condition('unkill_batch_id', $unkill->batchId)
+      ->execute();
+    $this->killSwitch()->expireDue();
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame(McpKillBlockStatus::UnkillPending->value, $row['status']);
+    $failed = $this->lastAuditMetadata(McpKillSwitch::AUDIT_ESCALATE);
+    $this->assertSame('unkill_expire_failed', $failed['reason']);
+    $this->assertSame($unkill->batchId, $failed['batch_id']);
   }
 
   /**
@@ -1355,6 +1433,365 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->assertSame(2, $this->countAudit(McpKillSwitch::AUDIT_ESCALATE));
     $this->assertCount(1, $GLOBALS['mcp_sentinel_kill_hook_probe']);
     unset($GLOBALS['mcp_sentinel_kill_hook_probe_throw']);
+  }
+
+  /**
+   * Mutation check: a person-wide stop does not refuse when freeze is off.
+   */
+  public function testPersonWideStopDoesNotRefuseWhenFreezeWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_FREEZE);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-person-w');
+    $this->killSwitch()->kill([$human], 'person-wide', $this->paladinA());
+    $this->sealSubject('subject-person-w', 'agent-a');
+    try {
+      $this->assertSame(
+        'subject-person-w',
+        $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+      );
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->fail('A weakened mass freeze must not refuse the in-scope admit: ' . $e->getMessage());
+    }
+  }
+
+  /**
+   * Mutation check: a tenant-wide stop does not refuse when freeze is off.
+   */
+  public function testTenantWideStopDoesNotRefuseWhenFreezeWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_MASS_FREEZE);
+    $this->killSwitch()->kill(
+      [McpKillSelector::tenant('tenant-a')],
+      'tenant-wide',
+      $this->paladinA(),
+    );
+    $this->sealSubject('subject-tenant-w', 'agent-a');
+    try {
+      $this->assertSame(
+        'subject-tenant-w',
+        $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+      );
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->fail('A weakened tenant freeze must not refuse the in-scope admit: ' . $e->getMessage());
+    }
+  }
+
+  /**
+   * Mutation check: the window expiry lifts the freeze when that flag is on.
+   */
+  public function testUnconfirmedFreezeLiftsWhenTimeoutWeakenOn(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_LIFT_ON_CONFIRM_TIMEOUT);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-esc-w');
+    $result = $this->killSwitch()->kill([$human], 'escalate', $this->paladinA());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['confirm_until' => 1])
+      ->condition('batch_id', $result->batchId)
+      ->execute();
+    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Mutation check: the requester can lift when distinct-operator is off.
+   */
+  public function testRequesterLiftsWhenDistinctOperatorWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_DISTINCT_OPERATOR);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-lift-w');
+    $kill = $this->killSwitch()->kill([$human], 'lift', $this->paladinA());
+    try {
+      $this->killSwitch()->lift($kill->batchId, $this->paladinA());
+    }
+    catch (McpKillSwitchException $e) {
+      $this->fail('A weakened distinct-operator check must allow the requester to lift: ' . $e->getMessage());
+    }
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Mutation check: an extend above 7 days is accepted when the cap is off.
+   */
+  public function testExtendAboveSevenDaysWhenTtlCapWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_TTL_CAP);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-ttl-w');
+    $kill = $this->killSwitch()->kill([$human], 'ttl', $this->paladinA());
+    try {
+      $extended = $this->killSwitch()->extend(
+        $kill->batchId,
+        $this->paladinB(),
+        McpKillTtl::MAX + 1,
+      );
+    }
+    catch (McpKillSwitchException $e) {
+      $this->fail('A weakened TTL cap must accept an extend above 7 days: ' . $e->getMessage());
+    }
+    $this->assertSame(McpKillTtl::MAX + 1, $extended->ttl);
+  }
+
+  /**
+   * Mutation check: in-scope deliveries still send when hold is off.
+   */
+  public function testQueuedDeliveriesSendWhenHoldWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_QUEUE_HOLD);
+    $this->enableEndpoint();
+    $this->sealSubject('subject-hold-w', 'agent-hold-w');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'in']);
+    $this->killSwitch()->kill(
+      [$this->principalSelector('subject-hold-w', 'agent-hold-w')],
+      'hold-off',
+      $this->paladinA(),
+    );
+    $row = $this->latestDelivery();
+    $this->assertSame('pending', $row['status']);
+    $history = [];
+    $this->worker($history)->processItem($this->queueItem((int) $row['id'], $row));
+    $this->assertSame('sent', $this->loadDelivery((int) $row['id'])['status']);
+    $this->assertCount(1, $history);
+  }
+
+  /**
+   * Mutation check: lift releases held items when that flag is on.
+   */
+  public function testLiftReleasesHeldWhenAutoReleaseWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_AUTO_RELEASE_ON_LIFT);
+    $this->enableEndpoint();
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-autorelease');
+    $this->sealSubject('subject-autorelease', 'agent-a');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'auto']);
+    $row = $this->latestDelivery();
+    $kill = $this->killSwitch()->kill([$human], 'hold', $this->paladinA());
+    $this->killSwitch()->lift($kill->batchId, $this->paladinB());
+    $this->assertSame('pending', $this->loadDelivery((int) $row['id'])['status']);
+  }
+
+  /**
+   * Mutation check: cron re-queues held rows when that flag is on.
+   */
+  public function testCronRequeuesHeldWhenWeakenOn(): void {
+    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_REQUEUE_HELD);
+    $this->enableEndpoint();
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => McpWebhookQueueManager::STATUS_HELD,
+        'attempts' => 0,
+        'created' => 1,
+        'next_attempt' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+    $this->assertSame(1, $this->queue()->requeueDuePendingRows());
+    $this->assertNotNull(
+      $this->loadDelivery($id)['item_id'],
+    );
+  }
+
+  /**
+   * Mutation check: release under an active stop succeeds when that flag is on.
+   */
+  public function testReleaseUnderActiveStopWhenWeakened(): void {
+    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_RELEASE_UNDER_STOP);
+    $this->enableEndpoint();
+    $this->sealSubject('subject-rel-w', 'agent-rel-w');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'held']);
+    $in = $this->latestDelivery();
+    $this->killSwitch()->kill(
+      [$this->principalSelector('subject-rel-w', 'agent-rel-w')],
+      'hold',
+      $this->paladinA(),
+    );
+    try {
+      $released = $this->queue()->releaseHeld([(int) $in['id']], $this->paladinB());
+    }
+    catch (McpKillSwitchException $e) {
+      $this->fail('A weakened release-under-stop check must release the held row: ' . $e->getMessage());
+    }
+    $this->assertSame([(int) $in['id']], $released);
+    $this->assertSame('pending', $this->loadDelivery((int) $in['id'])['status']);
+  }
+
+  /**
+   * Mutation check: skipping the pre-claim check claims the row first.
+   */
+  public function testWorkerClaimsWhenPreClaimCheckWeakened(): void {
+    $this->enableEndpoint();
+    $this->sealSubject('subject-pre-w', 'agent-pre-w');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'pre']);
+    $row = $this->latestDelivery();
+    $this->killSwitch()->kill(
+      [$this->principalSelector('subject-pre-w', 'agent-pre-w')],
+      'hold',
+      $this->paladinA(),
+    );
+    $this->container->get('database')->update('mcp_sentinel_webhook_delivery')
+      ->fields(['status' => 'pending', 'last_attempt' => NULL])
+      ->condition('id', (int) $row['id'])
+      ->execute();
+    $history = [];
+    $worker = $this->worker($history);
+    $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_PRE_CLAIM_CHECK);
+    $worker->processItem($this->queueItem((int) $row['id'], $row));
+    $held = $this->loadDelivery((int) $row['id']);
+    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $held['status']);
+    $this->assertNotNull($held['last_attempt']);
+    $this->assertCount(0, $history);
+  }
+
+  /**
+   * Mutation check: skipping the post-claim re-check delivers the race.
+   */
+  public function testPostClaimRecheckWhenWeakened(): void {
+    $this->enableEndpoint();
+    $this->sealSubject('subject-race-w', 'agent-race-w');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'race']);
+    $row = $this->latestDelivery();
+    $history = [];
+    $worker = $this->worker($history);
+    $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_POST_CLAIM_RECHECK);
+    $worker->killBetweenCheckAndClaimForTest(function (): void {
+      $this->insertActiveKill($this->principalSelector('subject-race-w', 'agent-race-w'));
+    });
+    $worker->processItem($this->queueItem((int) $row['id'], $row));
+    $this->assertSame('sent', $this->loadDelivery((int) $row['id'])['status']);
+    $this->assertCount(1, $history);
+  }
+
+  /**
+   * Mutation check: a 500 retry overwrites held when the status guard is off.
+   */
+  public function testRetryOverwritesHeldWhenStatusGuardWeakened(): void {
+    $this->enableEndpoint();
+    $this->sealSubject('subject-500-w', 'agent-500-w');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'retry']);
+    $row = $this->latestDelivery();
+    $history = [];
+    $worker = $this->worker500($history);
+    $worker->weakenForTest(McpWebhookWorker::WEAKEN_SKIP_RETRY_STATUS_GUARD);
+    $worker->afterClaimForTest(function (): void {
+      $this->killSwitch()->kill(
+        [$this->principalSelector('subject-500-w', 'agent-500-w')],
+        'during-post',
+        $this->paladinA(),
+      );
+    });
+    $worker->processItem($this->queueItem((int) $row['id'], $row));
+    $this->assertSame('pending', $this->loadDelivery((int) $row['id'])['status']);
+  }
+
+  /**
+   * Mutation check: kill-switch writes no audit when that flag is on.
+   */
+  public function testKillWritesNoAuditWhenSkipAuditWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_AUDIT);
+    $selector = $this->principalSelector('subject-audit-w', 'agent-audit-w');
+    $this->killSwitch()->kill([$selector], 'audit-w', $this->paladinA());
+    $this->assertTrue($this->killSwitch()->isKilled($selector->key));
+    $this->assertSame(0, $this->countAudit(McpKillSwitch::AUDIT_KILL));
+    $this->assertSame(0, $this->countAudit(McpKillSwitch::AUDIT_FREEZE));
+  }
+
+  /**
+   * Mutation check: worker hold writes no audit when that flag is on.
+   */
+  public function testWorkerHoldAuditWhenWeakened(): void {
+    $this->queue()->weakenForTest(McpWebhookQueueManager::WEAKEN_SKIP_AUDIT);
+    $this->enableEndpoint();
+    $this->killSwitch()->kill(
+      [$this->principalSelector('subject-after-w', 'agent-after-w')],
+      'after',
+      $this->paladinA(),
+    );
+    $this->sealSubject('subject-after-w', 'agent-after-w');
+    $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'after']);
+    $row = $this->latestDelivery();
+    $history = [];
+    $this->worker($history)->processItem($this->queueItem((int) $row['id'], $row));
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery((int) $row['id'])['status'],
+    );
+    $this->assertSame(0, $this->countAudit(McpWebhookQueueManager::AUDIT_HOLD));
+  }
+
+  /**
+   * Mutation check: extend shortens when max() is off.
+   */
+  public function testExtendShortensWhenMaxWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_EXTEND_MAX);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-ext-w');
+    $kill = $this->killSwitch()->kill([$human], 'long', $this->paladinA(), McpKillTtl::MAX);
+    $before = (int) $this->killSwitch()->status($human)['block_until'];
+    $extended = $this->killSwitch()->extend($kill->batchId, $this->paladinB(), 1);
+    $this->assertLessThan($before, $extended->blockUntil);
+  }
+
+  /**
+   * Mutation check: unconfirmed freezes expire at TTL when that flag is on.
+   */
+  public function testUnconfirmedFreezeExpiresWhenWeakenOn(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_EXPIRE_UNCONFIRMED);
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-exp-w');
+    $kill = $this->killSwitch()->kill([$human], 'expire', $this->paladinA());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 1])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * Mutation check: skipping notify leaves hook and event silent.
+   */
+  public function testEscalationSkippedWhenWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_ESCALATION);
+    $GLOBALS['mcp_sentinel_kill_hook_probe'] = [];
+    $events = [];
+    $this->container->get('event_dispatcher')->addListener(
+      McpKillUnavailableConfirmerEvent::NAME,
+      function (McpKillUnavailableConfirmerEvent $event) use (&$events): void {
+        $events[] = $event;
+      },
+    );
+    $human = McpKillSelector::humanKey(self::ISS . '|esc-skip');
+    $kill = $this->killSwitch()->kill([$human], 'escalate', $this->paladinA());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['confirm_until' => 1])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->killSwitch()->expireDue();
+    $this->assertCount(0, $GLOBALS['mcp_sentinel_kill_hook_probe']);
+    $this->assertCount(0, $events);
+  }
+
+  /**
+   * Mutation check: any distinct operator can break-glass when the pin is off.
+   */
+  public function testBreakGlassIdentityWhenWeakened(): void {
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_SKIP_BREAK_GLASS_IDENTITY);
+    $kill = $this->killSwitch()->kill(
+      [McpKillSelector::humanKey(self::ISS . '|bg-w')],
+      'bg-w',
+      $this->paladinA(),
+    );
+    try {
+      $this->killSwitch()->breakGlass(
+        $kill->batchId,
+        McpKillBreakGlassAction::Keep,
+        $this->paladinB(),
+      );
+    }
+    catch (McpKillSwitchException $e) {
+      $this->fail('A weakened break-glass pin must accept a distinct operator: ' . $e->getMessage());
+    }
+    $this->assertSame(
+      McpKillBlockStatus::Killed->value,
+      $this->killSwitch()->status(McpKillSelector::humanKey(self::ISS . '|bg-w'))['status'],
+    );
   }
 
   /**

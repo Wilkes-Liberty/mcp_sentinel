@@ -1,10 +1,17 @@
 # Baseline for untouched 1.x code in McpKillSwitch.php and
-# mcp_sentinel.install. Generated under PHPStan max +
-# phpstan-strict-rules with messages so identifier buckets
-# cannot absorb new DEV-986 errors. The two 10037
+# mcp_sentinel.install, plus errors already present in
+# mcp_sentinel.module, McpWebhookQueueManager, and
+# McpWebhookWorker when those files joined the operator scan.
+# Generated under PHPStan max + phpstan-strict-rules with
+# messages so identifier buckets cannot absorb new DEV-986
+# errors. Install/KillSwitch entries are from Tests
+# 39110065729 (bff12db). Module/queue/worker messages are
+# file-local errors that predate this PR's product changes;
+# they are not a claim that Tests 39115568856 was a 1.x run
+# or that 39110065729 scanned the module. The two 10037
 # fetchAll(PDO::FETCH_ASSOC) hits are covered by the
 # path-scoped ignore in phpstan.operator.neon, not here.
-# New DEV-986 code must not add entries.
+# New DEV-985 / DEV-986 code must not add entries.
 parameters:
   ignoreErrors:
     -
@@ -262,3 +269,213 @@ parameters:
       identifier: return.type
       count: 1
       path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Function mcp_sentinel_jsonapi_entity_filter_access\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function _mcp_sentinel_scheduled_states_values\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Parameter \&\$cacheable by-ref type of function _mcp_sentinel_scheduled_states_values\(\) expects bool, mixed given\.$#'
+      identifier: parameterByRef.type
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_theme\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_page_top\(\) has parameter \$page with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Construct empty\(\) is not allowed\. Use more strict comparison\.$#'
+      identifier: empty.notAllowed
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Short ternary operator is not allowed\. Use null coalesce operator if applicable or consider using long ternary\.$#'
+      identifier: ternary.shortNotAllowed
+      count: 2
+      path: mcp_sentinel.module
+    -
+      message: '#^Parameter \#1 \$profile of method Drupal\\mcp_sentinel\\Service\\McpEvidenceGuard::precommit\(\) expects Drupal\\mcp_sentinel\\McpPolicyProfileInterface, Drupal\\mcp_sentinel\\McpPolicyProfileInterface\|null given\.$#'
+      identifier: argument.type
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_entity_create_access\(\) has parameter \$context with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Cannot cast mixed to string\.$#'
+      identifier: cast.string
+      count: 6
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_entity_field_access\(\) has parameter \$items with generic interface Drupal\\Core\\Field\\FieldItemListInterface but does not specify its types: T$#'
+      identifier: missingType.generics
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_entity_type_alter\(\) has parameter \$entity_types with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Cannot call method addConstraint\(\) on mixed\.$#'
+      identifier: method.nonObject
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_mail\(\) has parameter \$message with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_mail\(\) has parameter \$params with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Cannot access an offset on mixed\.$#'
+      identifier: offsetAccess.nonOffsetAccessible
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Only booleans are allowed in an if condition, array\<int, array\<string, mixed\>\> given\.$#'
+      identifier: if.condNotBoolean
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Casting to string something that''s already string\.$#'
+      identifier: cast.useless
+      count: 2
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_simple_oauth_private_claims_alter\(\) has parameter \$private_claims with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_entity_base_field_info_alter\(\) has parameter \$fields with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_module_implements_alter\(\) has parameter \$implementations with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer\(\) has parameter \$context with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Plugin\\QueueWorker\\McpWebhookWorker::__construct\(\) has parameter \$configuration with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: src/Plugin/QueueWorker/McpWebhookWorker.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Plugin\\QueueWorker\\McpWebhookWorker::create\(\) has parameter \$configuration with no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: src/Plugin/QueueWorker/McpWebhookWorker.php
+    -
+      message: '#^Casting to int something that''s already int\.$#'
+      identifier: cast.useless
+      count: 3
+      path: src/Plugin/QueueWorker/McpWebhookWorker.php
+    -
+      message: '#^Only booleans are allowed in &&, array\<mixed, mixed\> given on the left side\.$#'
+      identifier: booleanAnd.leftNotBoolean
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot cast mixed to string\.$#'
+      identifier: cast.string
+      count: 36
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Parameter \#1 \$endpoint of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::enqueueEndpoint\(\) expects array\<string, mixed\>, array\<mixed\> given\.$#'
+      identifier: argument.type
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot call method fetchAll\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
+      identifier: method.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$endpoint_id on mixed\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$payload on mixed\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$id on mixed\.$#'
+      identifier: property.nonObject
+      count: 2
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot cast mixed to int\.$#'
+      identifier: cast.int
+      count: 7
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$event_name on mixed\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$principal_key on mixed\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$human_key on mixed\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot access property \$tenant on mixed\.$#'
+      identifier: property.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Casting to int something that''s already int\.$#'
+      identifier: cast.useless
+      count: 2
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Cannot call method fetchAssoc\(\) on Drupal\\Core\\Database\\StatementInterface\|null\.$#'
+      identifier: method.nonObject
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Only booleans are allowed in a negated boolean, array\|false given\.$#'
+      identifier: booleanNot.exprNotBoolean
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Parameter \#1 \$row of method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::buildLegacyFallbackPayload\(\) expects array\<string, mixed\>, array given\.$#'
+      identifier: argument.type
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
+    -
+      message: '#^Method Drupal\\mcp_sentinel\\Service\\McpWebhookQueueManager::findEndpoint\(\) should return array\<string, mixed\>\|null but returns array\<mixed\>\.$#'
+      identifier: return.type
+      count: 1
+      path: src/Service/McpWebhookQueueManager.php
