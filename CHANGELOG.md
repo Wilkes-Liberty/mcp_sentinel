@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.3.2] - 2026-10-18
+
 DEV-985 P1 follow-up after 3.3.1 (`b613e44`).
 
 ### Security
@@ -276,7 +278,7 @@ held side effects (DEV-985: #318, #325).
   locked row no longer shortens the remaining stop. Re-issuing
   a stop onto a still-blocking selector keeps the longer
   stored TTL. Inheritance from lifted, un-killed, or expired
-  rows was incorrect (fixed under [Unreleased]).
+  rows was incorrect (fixed under [3.3.2]).
 - A claimless request on a Drupal test child served by the PHP
   built-in server is no longer sealed before readiness stamps role
   fallback. That early seal left JSON:API, GraphQL, and context with
@@ -3354,7 +3356,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...1.x
+[3.3.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...3.3.2
 [3.3.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...3.3.1
 [3.3.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.2.0...3.3.0
 [3.2.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.1.0...3.2.0
