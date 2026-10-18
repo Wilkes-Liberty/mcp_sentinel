@@ -13,7 +13,7 @@ namespace Drupal\mcp_sentinel\Enum;
  * unconfirmed freeze also stays frozen after block_until until two
  * operators lift it or break-glass is used. Confirmed stops still
  * expire at their TTL. An unkill_pending row stays refused until
- * the named second person confirms the lift.
+ * a distinct bound operator confirms the lift.
  */
 enum McpKillBlockStatus: string {
 

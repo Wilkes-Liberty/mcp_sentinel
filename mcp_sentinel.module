@@ -1169,7 +1169,7 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
  * consult the kill registry).
  *
  * DEV-985: an unconfirmed mass freeze stays frozen. This hook
- * notifies the named second person and the break-glass path. It
+ * notifies every target in the batch and the break-glass path. It
  * must not lift the freeze or complete a pending un-kill.
  */
 function mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer(
@@ -1180,12 +1180,15 @@ function mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer(
   if ($type === NULL || $key === '') {
     return;
   }
+  $targets = $context['targets'] ?? [];
+  $targets = is_array($targets) ? array_values(array_map('strval', $targets)) : [];
   \Drupal::service('event_dispatcher')->dispatch(
     new McpKillUnavailableConfirmerEvent(
       (string) ($context['batch_id'] ?? ''),
       (string) ($context['transition'] ?? ''),
       (string) ($context['first_operator_id'] ?? ''),
       new McpKillSelector($type, $key),
+      $targets,
     ),
     McpKillUnavailableConfirmerEvent::NAME,
   );

@@ -117,6 +117,11 @@ final class McpKillSwitchException extends \RuntimeException {
    * @param string $message
    *   Operator-facing text. Must not contain tokens.
    */
+  /**
+   * Whether auditOperatorRefusal() has already recorded this refusal.
+   */
+  public bool $audited = FALSE;
+
   public function __construct(
     public readonly string $reasonCode,
     string $message,

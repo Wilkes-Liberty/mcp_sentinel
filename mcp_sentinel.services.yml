@@ -166,6 +166,8 @@ services:
       - '@logger.channel.mcp_sentinel'
       - '@mcp_sentinel.principal_context_holder'
       - '@mcp_sentinel.audit_logger'
+      - !service_closure '@mcp_sentinel.kill_switch'
+      - '@state'
 
   mcp_sentinel.event_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpEventDispatcher

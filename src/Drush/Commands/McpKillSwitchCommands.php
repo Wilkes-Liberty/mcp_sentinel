@@ -262,21 +262,16 @@ final class McpKillSwitchCommands extends DrushCommands {
         $this->output()->writeln('held: none');
         return self::EXIT_SUCCESS;
       }
-      $table = [];
       foreach ($rows as $row) {
-        $table[] = [
+        $this->output()->writeln(implode("\t", [
           (string) $row['id'],
           (string) ($row['endpoint_id'] ?? ''),
           (string) ($row['event_name'] ?? ''),
           (string) ($row['principal_key'] ?? ''),
           (string) ($row['human_key'] ?? ''),
           (string) ($row['tenant'] ?? ''),
-        ];
+        ]));
       }
-      $this->io()->table(
-        ['id', 'endpoint', 'event', 'principal_key', 'human_key', 'tenant'],
-        $table,
-      );
       return self::EXIT_SUCCESS;
     });
   }
@@ -339,7 +334,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'human-key', description: 'iss|sub.')]
   #[CLI\Option(name: 'tenant', description: 'Tenant selector.')]
   #[CLI\Option(name: 'reason', description: 'Operator reason. Required. No tokens.')]
-  #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an un-kill request, to confirm as the named second person (secondary account holder).')]
+  #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an un-kill request, to confirm as a distinct bound operator.')]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
   #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=alice --principal-key=iss|sub|actor --reason="restored"', description: 'Request an un-kill (pending confirm).')]
@@ -418,7 +413,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Command(name: 'mcp-sentinel:operator-unbind', aliases: ['mcps:operator-unbind'])]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
-  #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an unbind request, to confirm as the named second person (secondary account holder).')]
+  #[CLI\Option(name: 'confirm-batch', description: 'Batch id from an unbind request, to confirm as a distinct bound operator.')]
   #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-unbind --operator=alice', description: 'Request unbind of this Paladin operator record (pending confirm).')]
   #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:operator-unbind --operator=bob --confirm-batch=BATCH', description: 'Confirm an unbind as a distinct operator.')]
   public function unbindOperator(
@@ -439,7 +434,7 @@ final class McpKillSwitchCommands extends DrushCommands {
       $this->output()->writeln('status: unbind_pending');
       $this->output()->writeln('batch: ' . $batchId);
       $this->output()->writeln(
-        'needs_confirm: yes (named second person / secondary account holder)',
+        'needs_confirm: yes (a distinct bound operator)',
       );
       return self::EXIT_SUCCESS;
     });
@@ -570,7 +565,7 @@ final class McpKillSwitchCommands extends DrushCommands {
     $this->output()->writeln('batch: ' . $result->batchId);
     if ($result->needsConfirm) {
       $this->output()->writeln(
-        'needs_confirm: yes (named second person / secondary account holder).',
+        'needs_confirm: yes (a distinct bound operator).',
       );
       $this->output()->writeln(
         'freeze: in force now. Unconfirmed timeout keeps it and escalates.',
@@ -663,6 +658,13 @@ final class McpKillSwitchCommands extends DrushCommands {
       return $callback($identity);
     }
     catch (McpKillSwitchException | McpPrincipalKeyException $e) {
+      if ($e instanceof McpKillSwitchException && !$e->audited) {
+        $this->killSwitch->auditOperatorRefusal(
+          $e,
+          '',
+          (string) ($options['batch'] ?? ''),
+        );
+      }
       $this->logger()->error($e->reasonCode . ': ' . $e->getMessage());
       return self::EXIT_FAILURE;
     }

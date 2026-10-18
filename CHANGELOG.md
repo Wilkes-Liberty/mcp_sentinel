@@ -20,6 +20,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   identity onto an already-bound record is refused. Run update
   10034. See INSTALL.md for the pinned Paladin keys, including
   `mcp_sentinel.paladin.operator_audience`.
+- **Behaviour change (DEV-985).** `McpKillBlockStatus::isBlocking()`
+  is now `TRUE` for `kill_pending` regardless of `block_until`.
+  `McpKillSwitchResult::$blockUntil` is non-zero while a mass
+  freeze is pending. Confirming a freeze refreshes `block_until`
+  the same way as extend (`min(now+7d, max(existing, now+ttl))`).
+- **Signature change (DEV-985).** `McpWebhookQueueManager` takes a
+  `!service_closure` of `McpKillEnforcerInterface` and
+  `StateInterface` instead of setter injection.
+  `McpWebhookWorker` no longer receives `McpKillSwitch`; hold
+  decisions go through `McpWebhookQueueManager::shouldHoldRow()`.
+  `McpKillEnforcerInterface` adds `hasActiveStop()` and
+  `wouldHoldKeys()`.
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
@@ -140,9 +152,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unavailable-confirmer hook; it never lifts on that timeout.
   Lifting a mass freeze always takes two operators. Break-glass
   keep / extend / lift (`mcp-sentinel:kill-break-glass`) is the
-  documented path when the named second person cannot be reached
-  and is covered by `McpKillSwitchBreakGlassDrillTest` (alongside
-  DEV-855). On any stop, queued webhook deliveries in scope are
+  documented path when no distinct bound operator is available.
+  Any distinct bound operator can confirm; there is no named
+  confirmer. On any stop, queued webhook deliveries in scope are
   held: principal keys are stored at enqueue, the worker checks the
   kill registry before claim, and `requeueDuePendingRows()` never
   re-queues held rows. Operators release or discard held items
@@ -152,17 +164,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (DEV-986 path). A released item delivers as originally
   queued; a discarded item is never sent; lifting a stop does not
   release holds. Release is refused while the scope is still
-  stopped. An unconfirmed freeze never expires at `block_until`;
-  it stays frozen until two operators lift it or break-glass is
-  used. Confirmed stops still expire at their TTL. Break-glass is
-  limited to the identity configured in `settings.php`. Escalation
-  notifies once per batch. `kill-extend` never shortens a stop.
-  Each freeze, confirm, extend, lift, escalation, break-glass
-  use, hold, release, and discard writes exactly one
-  `logAlways()` row with operator, scope, timestamp, and
-  correlation or item ids. Run update 10036. Drain or review the
-  webhook queue before updb: keyless pending rows are held when
-  any kill-block or freeze is active.
+  stopped. Retention prune never deletes held rows. An
+  unconfirmed freeze never expires at `block_until`; it stays
+  frozen until two operators lift it or break-glass is used.
+  Confirmed stops still expire at their TTL. Break-glass is
+  limited to the Paladin `iss|sub` configured in
+  `settings.php` (`mcp_sentinel.kill_switch.break_glass_operator`).
+  Escalation claims the batch, notifies every target, and writes
+  one audit row with actor `system`. `kill-extend` never shortens
+  a stop. Each successful freeze, confirm, extend, lift,
+  escalation, break-glass use, hold, release, and discard writes
+  one `logAlways()` row. Refusals write `agent_kill_refuse` or
+  `agent_side_effect_refuse`. Scope lists every selector;
+  `target_selector` is the first. Run update 10036. That hook
+  records the pre-upgrade max delivery id; keyless rows at or
+  below it stay stopped while any stop is active. Remaining
+  keyless pending rows are counted in the update message.
 
 ### Fixed
 - A claimless request on a Drupal test child served by the PHP

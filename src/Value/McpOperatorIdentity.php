@@ -82,7 +82,7 @@ final readonly class McpOperatorIdentity {
    * System actor for worker and update-hook holds.
    */
   public static function system(): self {
-    return new self(self::KIND_SYSTEM, 'worker');
+    return new self(self::KIND_SYSTEM, 'system');
   }
 
   /**

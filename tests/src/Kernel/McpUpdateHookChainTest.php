@@ -1085,6 +1085,9 @@ final class McpUpdateHookChainTest extends KernelTestBase {
         $schema->dropField($delivery, $field);
       }
     }
+    $this->container->get('state')->delete(
+      \Drupal\mcp_sentinel\Service\McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+    );
     $kill = 'mcp_sentinel_kill_block';
     if ($schema->fieldExists($kill, 'escalated_at')) {
       $schema->dropField($kill, 'escalated_at');
@@ -1120,13 +1123,12 @@ final class McpUpdateHookChainTest extends KernelTestBase {
 
     $message = mcp_sentinel_update_10036();
     $this->assertStringContainsString('principal_key', $message);
-    $this->assertStringContainsString('released', $message);
     $this->assertStringContainsString('escalated_at', $message);
-    $this->assertStringContainsString('Drain or review the webhook queue before updb', $message);
+    $this->assertStringContainsString('keyless pending webhook row(s) remain', $message);
     $this->assertTrue($schema->fieldExists($delivery, 'principal_key'));
     $this->assertTrue($schema->fieldExists($delivery, 'human_key'));
     $this->assertTrue($schema->fieldExists($delivery, 'tenant'));
-    $this->assertTrue($schema->fieldExists($delivery, 'released'));
+    $this->assertFalse($schema->fieldExists($delivery, 'released'));
     $this->assertTrue($schema->fieldExists($kill, 'escalated_at'));
     $held = $this->container->get('database')
       ->select($delivery, 'd')
@@ -1136,10 +1138,69 @@ final class McpUpdateHookChainTest extends KernelTestBase {
       ->fetchField();
     $this->assertSame('held', $held);
     $this->assertStringContainsString('Held ', $message);
+    $this->assertSame(
+      $id,
+      (int) $this->container->get('state')->get(
+        \Drupal\mcp_sentinel\Service\McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      ),
+    );
+    $this->assertSame(1, $this->countAuditOperation('agent_side_effect_hold'));
 
     $again = mcp_sentinel_update_10036();
     $this->assertStringContainsString('already present', $again);
-    $this->assertStringContainsString('Drain or review the webhook queue before updb', $again);
+    $this->assertStringContainsString('keyless pending webhook row(s) remain', $again);
+  }
+
+  /**
+   * Update 10036 leaves keyless rows pending when no stop is active.
+   */
+  public function testUpdate10036LeavesKeylessPendingWhenNoStop(): void {
+    $schema = $this->container->get('database')->schema();
+    $delivery = 'mcp_sentinel_webhook_delivery';
+    foreach (['principal_key', 'human_key', 'tenant'] as $field) {
+      if ($schema->indexExists($delivery, $field)) {
+        $schema->dropIndex($delivery, $field);
+      }
+      if ($schema->fieldExists($delivery, $field)) {
+        $schema->dropField($delivery, $field);
+      }
+    }
+    $this->container->get('database')->delete('mcp_sentinel_kill_block')->execute();
+    $id = (int) $this->container->get('database')
+      ->insert($delivery)
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => 'pending',
+        'attempts' => 0,
+        'created' => 1,
+      ])->execute();
+
+    $beforeHolds = $this->countAuditOperation('agent_side_effect_hold');
+    $message = mcp_sentinel_update_10036();
+    $this->assertStringContainsString('1 keyless pending webhook row(s) remain', $message);
+    $status = $this->container->get('database')
+      ->select($delivery, 'd')
+      ->fields('d', ['status'])
+      ->condition('id', $id)
+      ->execute()
+      ->fetchField();
+    $this->assertSame('pending', $status);
+    $this->assertSame($beforeHolds, $this->countAuditOperation('agent_side_effect_hold'));
+  }
+
+  /**
+   * Number of audit_chain_log rows for an operation.
+   */
+  private function countAuditOperation(string $operation): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', $operation)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
   }
 
   /**

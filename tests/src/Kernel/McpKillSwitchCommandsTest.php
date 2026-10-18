@@ -13,6 +13,7 @@ use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
 use Drupal\mcp_sentinel\Service\McpPaladinIntrospection;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
@@ -147,7 +148,12 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     parent::setUp();
     $this->installAuditChainSchema();
     $this->installEntitySchema('user');
+    $this->installSchema('mcp_sentinel', ['mcp_sentinel_webhook_delivery']);
     $this->installConfig(['system', 'user', 'mcp_sentinel']);
+    $this->setSetting(
+      'mcp_sentinel.kill_switch.break_glass_operator',
+      self::ISS . '|operator-b',
+    );
 
     $alice = $this->createUser([McpKillSwitch::PERMISSION], 'alice');
     $bob = $this->createUser([McpKillSwitch::PERMISSION], 'bob');
@@ -428,6 +434,175 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     $this->assertStringContainsString('Do not pass --token', $this->logText());
     $combined = $this->logText() . $this->output->fetch() . $this->allAuditJson();
     $this->assertStringNotContainsString(self::TOKEN, $combined);
+  }
+
+  /**
+   * The six DEV-985 commands run through runAsBoundOperator.
+   *
+   * @covers ::extendKill
+   * @covers ::liftKill
+   * @covers ::breakGlassKill
+   * @covers ::listHeld
+   * @covers ::releaseHeld
+   * @covers ::discardHeld
+   */
+  public function testNewCommandsThroughBoundOperator(): void {
+    $this->bindAlice();
+    $this->bindBob();
+    $this->queueActiveTokens([
+      'operator-a',
+      'operator-b',
+      'operator-a',
+      'operator-b',
+      'operator-b',
+      'operator-b',
+      'operator-b',
+      'operator-b',
+    ]);
+    $human = self::ISS . '|subject-cmd-ext';
+    $kill = $this->withToken('token-alice', function () use ($human): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'alice',
+        'human-key' => [$human],
+        'reason' => 'mass',
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $kill, $this->logText());
+    $batch = $this->batchFrom($this->output->fetch());
+
+    $extend = $this->withToken('token-bob', function () use ($batch): int {
+      return $this->commands->extendKill($batch, [
+        'ttl' => 86400,
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $extend, $this->logText());
+    $this->assertStringContainsString('block_until:', $this->output->fetch());
+
+    $liftHuman = self::ISS . '|subject-cmd-lift';
+    $liftKill = $this->withToken('token-alice', function () use ($liftHuman): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'alice',
+        'human-key' => [$liftHuman],
+        'reason' => 'mass-lift',
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $liftKill, $this->logText());
+    $liftBatch = $this->batchFrom($this->output->fetch());
+    $lift = $this->withToken('token-bob', function () use ($liftBatch): int {
+      return $this->commands->liftKill($liftBatch, [
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $lift, $this->logText());
+    $this->assertStringContainsString('held_items: unchanged', $this->output->fetch());
+
+    $bgHuman = self::ISS . '|subject-cmd-bg';
+    $bgKill = $this->container->get('mcp_sentinel.kill_switch')->kill(
+      [McpKillSelector::humanKey($bgHuman)],
+      'bg-cmd',
+      $this->paladinA(),
+    );
+    $bg = $this->withToken('token-bob', function () use ($bgKill): int {
+      return $this->commands->breakGlassKill($bgKill->batchId, [
+        'keep' => TRUE,
+        'extend' => FALSE,
+        'lift' => FALSE,
+        'ttl' => NULL,
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $bg, $this->logText());
+    $this->assertStringContainsString('break_glass: keep', $this->output->fetch());
+
+    $heldId = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => McpWebhookQueueManager::STATUS_HELD,
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+    $list = $this->withToken('token-bob', function (): int {
+      return $this->commands->listHeld([
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $list, $this->logText());
+    $this->assertStringContainsString((string) $heldId, $this->output->fetch());
+
+    $release = $this->withToken('token-bob', function () use ($heldId): int {
+      return $this->commands->releaseHeld([
+        'id' => [$heldId],
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $release, $this->logText());
+    $this->assertStringContainsString('released: ' . $heldId, $this->output->fetch());
+
+    $discardId = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => McpWebhookQueueManager::STATUS_HELD,
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+    $discard = $this->withToken('token-bob', function () use ($discardId): int {
+      return $this->commands->discardHeld([
+        'id' => [$discardId],
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_SUCCESS, $discard, $this->logText());
+    $this->assertStringContainsString('discarded: ' . $discardId, $this->output->fetch());
+  }
+
+  /**
+   * An --operator mismatch on kill-extend is refused and audited.
+   *
+   * @covers ::extendKill
+   */
+  public function testExtendOperatorMismatchIsRefusedAndAudited(): void {
+    $this->bindAlice();
+    $this->bindBob();
+    $pending = $this->container->get('mcp_sentinel.kill_switch')->kill(
+      [McpKillSelector::humanKey(self::ISS . '|subject-cmd-mismatch')],
+      'mismatch',
+      $this->paladinA(),
+    );
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withToken(self::TOKEN, function () use ($pending): int {
+      return $this->commands->extendKill($pending->batchId, [
+        'ttl' => NULL,
+        'operator' => 'bob',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertStringContainsString(McpKillSwitchException::OPERATOR_MISMATCH, $this->logText());
+    $this->assertStringContainsString(
+      McpKillSwitchException::OPERATOR_MISMATCH,
+      $this->allAuditJson(),
+    );
   }
 
   /**

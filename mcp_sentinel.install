@@ -67,26 +67,20 @@ function mcp_sentinel_schema(): array {
         'not null' => TRUE,
         'default' => '',
       ],
-      // Operator release: the worker must not re-hold this row.
-      'released'           => [
-        'type' => 'int',
-        'unsigned' => TRUE,
-        'not null' => TRUE,
-        'default' => 0,
-      ],
     ],
     'primary key' => ['id'],
     // 'status' + 'next_attempt' support the cron scan for due pending rows;
     // 'created' backs retention pruning; 'endpoint_id' backs per-endpoint
     // filtering in the delivery log UI. Principal-key columns back the
-    // kill-switch hold scan.
+    // kill-switch hold scan. utf8mb4 indexes use a 191-char prefix so
+    // MySQL 8 stays inside the 767-byte / 3072-byte limits.
     'indexes' => [
       'status'       => ['status'],
       'next_attempt' => ['next_attempt'],
       'created'      => ['created'],
       'endpoint_id'  => ['endpoint_id'],
-      'principal_key' => ['principal_key'],
-      'human_key'    => ['human_key'],
+      'principal_key' => [['principal_key', 191]],
+      'human_key'    => [['human_key', 191]],
       'tenant'       => ['tenant'],
     ],
   ];
@@ -1829,10 +1823,12 @@ function mcp_sentinel_update_10034(): string {
  */
 function mcp_sentinel_update_10036(): string {
   $schema = \Drupal::database()->schema();
+  $database = \Drupal::database();
   $messages = [];
   $delivery = 'mcp_sentinel_webhook_delivery';
+  $tableSpec = mcp_sentinel_schema()[$delivery];
   if ($schema->tableExists($delivery)) {
-    $fields = mcp_sentinel_schema()[$delivery]['fields'];
+    $fields = $tableSpec['fields'];
     foreach (['principal_key', 'human_key', 'tenant'] as $field) {
       if (!$schema->fieldExists($delivery, $field)) {
         $schema->addField($delivery, $field, $fields[$field]);
@@ -1842,16 +1838,27 @@ function mcp_sentinel_update_10036(): string {
         $schema->addIndex(
           $delivery,
           $field,
-          [$field],
-          mcp_sentinel_schema()[$delivery],
+          $tableSpec['indexes'][$field],
+          $tableSpec,
         );
         $messages[] = 'Added ' . $field . ' index.';
       }
     }
-    if (!$schema->fieldExists($delivery, 'released')) {
-      $schema->addField($delivery, 'released', $fields['released']);
-      $messages[] = 'Added ' . $delivery . '.released.';
+    if ($schema->fieldExists($delivery, 'released')) {
+      $schema->dropField($delivery, 'released');
+      $messages[] = 'Dropped unused ' . $delivery . '.released.';
     }
+    $maxId = (int) $database->select($delivery, 'd')
+      ->orderBy('id', 'DESC')
+      ->range(0, 1)
+      ->fields('d', ['id'])
+      ->execute()
+      ->fetchField();
+    \Drupal::state()->set(
+      \Drupal\mcp_sentinel\Service\McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      $maxId,
+    );
+    $messages[] = 'Recorded pre-upgrade max delivery id ' . $maxId . '.';
   }
   else {
     $messages[] = 'mcp_sentinel_webhook_delivery is missing; run update 10007.';
@@ -1873,10 +1880,26 @@ function mcp_sentinel_update_10036(): string {
   if ($held > 0) {
     $messages[] = 'Held ' . $held . ' keyless pending webhook row(s) because a kill-block or freeze is active.';
   }
-  $messages[] = 'Drain or review the webhook queue before updb.';
+  $keylessPending = 0;
+  if ($schema->tableExists($delivery)
+    && $schema->fieldExists($delivery, 'principal_key')) {
+    $keylessPending = (int) $database->select($delivery, 'd')
+      ->condition('status', 'pending')
+      ->condition('principal_key', '')
+      ->condition('human_key', '')
+      ->condition('tenant', '')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+  }
+  $messages[] = $keylessPending . ' keyless pending webhook row(s) remain.';
 
-  if (count($messages) === 1) {
-    return 'DEV-985 hold-queue and escalation columns already present. Drain or review the webhook queue before updb.';
+  $already = !str_contains(implode(' ', $messages), 'Added ')
+    && !str_contains(implode(' ', $messages), 'Held ')
+    && !str_contains(implode(' ', $messages), 'Dropped ');
+  if ($already && $schema->tableExists($delivery) && $schema->tableExists($kill)) {
+    return 'DEV-985 hold-queue and escalation columns already present. '
+      . $keylessPending . ' keyless pending webhook row(s) remain.';
   }
   return implode(' ', $messages);
 }
@@ -1916,6 +1939,11 @@ function mcp_sentinel_hold_keyless_pending_on_upgrade(): int {
     ->condition('tenant', '')
     ->execute()
     ->fetchCol();
+  if ($ids !== [] && !\Drupal::hasService('mcp_sentinel.audit_logger')) {
+    throw new UpdateException(
+      'mcp_sentinel.audit_logger is required before holding keyless deliveries.',
+    );
+  }
   $count = 0;
   $now = (string) \Drupal::time()->getRequestTime();
   foreach ($ids as $id) {
@@ -1928,20 +1956,18 @@ function mcp_sentinel_hold_keyless_pending_on_upgrade(): int {
     if ($updated < 1) {
       continue;
     }
-    if (\Drupal::hasService('mcp_sentinel.audit_logger')) {
-      \Drupal::service('mcp_sentinel.audit_logger')->logAlways(
-        'agent_side_effect_hold',
-        [
-          'actor' => 'system',
-          'scope' => 'keyless_upgrade',
-          'target_selector' => 'keyless_upgrade',
-          'timestamp' => $now,
-          'batch_id' => '',
-          'correlation_id' => (string) $id,
-          'item_ids' => (string) $id,
-        ],
-      );
-    }
+    \Drupal::service('mcp_sentinel.audit_logger')->logAlways(
+      'agent_side_effect_hold',
+      [
+        'actor' => 'system',
+        'scope' => 'keyless_upgrade',
+        'target_selector' => 'keyless_upgrade',
+        'timestamp' => $now,
+        'batch_id' => '',
+        'correlation_id' => (string) $id,
+        'item_ids' => (string) $id,
+      ],
+    );
     $count++;
   }
   return $count;

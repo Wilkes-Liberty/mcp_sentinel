@@ -287,41 +287,42 @@ cannot be configured upward. A killed row is never downgraded to
 `agent_kill`, `agent_kill_freeze`, `agent_kill_confirm`,
 `agent_kill_extend`, `agent_kill_lift`, `agent_kill_escalate`,
 `agent_kill_break_glass`, `agent_unkill_request`, `agent_unkill`,
-`agent_side_effect_hold`, `agent_side_effect_release`, and
-`agent_side_effect_discard` go through `logAlways()` and never
-include tokens. Each of those events writes exactly one row with
-operator, scope, timestamp, and correlation or batch / item ids.
-Callers of `admit()` never see a distinct killed or overlay signal
-(same code, message, and exception shape); the deny row holds the
-reason. Queue keys carried for the kill check are written as
-`unverified` on deny rows. Queue workers may pass `principal_key` /
-`human_key` / `tenant` on the item;
+`agent_side_effect_hold`, `agent_side_effect_release`,
+`agent_side_effect_discard`, `agent_kill_refuse`, and
+`agent_side_effect_refuse` go through `logAlways()` /
+`logSurvivingRollback()` and never include tokens. A successful
+transition writes one row (operator, scope of every selector, first
+target, timestamp, correlation or batch / item ids). Refusals write
+a refuse row. Callers of `admit()` never see a distinct killed or
+overlay signal (same code, message, and exception shape); the deny
+row holds the reason. Queue keys carried for the kill check are
+written as `unverified` on deny rows. Queue workers may pass
+`principal_key` / `human_key` / `tenant` on the item;
 `McpPrincipalContextJob::beginCarrying()` attaches those keys for
 the kill check without sealing identity. Delivery rows store those
-keys at enqueue. The worker checks the kill registry before it
-claims a row and moves in-scope rows to `held`.
-`requeueDuePendingRows()` never re-queues held rows. Release
+keys at enqueue. Oversized keys are not truncated and are not
+enqueued. The worker holds through
+`McpWebhookQueueManager::shouldHoldRow()` before claim, after
+claim, and on retry. `requeueDuePendingRows()` never re-queues
+held rows. Retention prune never deletes held rows. Release
 delivers the original payload, delivery id, and body signature;
 discard never delivers. Lifting a stop does not release held items.
 `hook_mcp_sentinel_kill_unavailable_confirmer` and
-`McpKillUnavailableConfirmerEvent` notify the named second person
-and the break-glass path when a freeze stays unconfirmed. They must
-not lift the freeze. They fire once per batch. Break-glass keep /
-extend / lift is limited to the identity configured in
-`settings.php` (`mcp-sentinel:kill-break-glass`).
-`expireDue()` runs from `hook_cron`. An unconfirmed freeze never
-expires at `block_until`; it stays frozen until two operators lift
-it or break-glass is used. Confirmed stops still expire at their
-TTL. `unkill` is refused on a `kill_pending` row (use `kill-lift`).
-Break-glass is limited to the identity configured in
-`settings.php` (`mcp_sentinel.kill_switch.break_glass_operator`).
-The requester is always refused. Release is refused while the
-scope is still stopped. Escalation notifies once per batch.
-`kill-extend` never shortens a stop. Run update 10036 before
-serving traffic so hold-queue columns exist. Drain or review the
-webhook queue before updb: keyless pending rows are held when any
-kill-block or freeze is active. The Drupal-side kill-block UI
-(DEV-925) reads freeze state through `listActiveBlocks()` and held
+`McpKillUnavailableConfirmerEvent` notify every target in the batch
+when a freeze stays unconfirmed. They must not lift the freeze.
+They fire once per claimed batch. Any distinct bound operator can
+confirm, extend, or lift. Break-glass
+(`mcp-sentinel:kill-break-glass`) is limited to the Paladin
+`iss|sub` in `$settings['mcp_sentinel.kill_switch.break_glass_operator']`.
+The requester is always refused. `expireDue()` runs from
+`hook_cron`. `unkill` is refused on a `kill_pending` row (use
+`kill-lift`). Release is refused while the scope is still stopped.
+`kill-extend` never shortens a stop. Confirm refreshes
+`block_until`. Run update 10036 before serving traffic so
+hold-queue columns exist. That hook records the pre-upgrade max
+delivery id; keyless rows at or below it stay stopped while any
+stop is active. The Drupal-side kill-block UI (DEV-925) reads
+freeze state through `status()` / the kill-block table and held
 items through `listHeld()`.
 
 `$governanceExfiltrationGuard` measures the

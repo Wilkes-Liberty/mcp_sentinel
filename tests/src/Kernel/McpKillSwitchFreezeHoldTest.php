@@ -14,6 +14,7 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
@@ -233,13 +234,19 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
     $this->sealSubject('subject-cel', 'agent-a');
     $this->expectGenericDeny();
-    $unkill = $this->killSwitch()->requestUnkill([$human], 'restore', $this->paladinA());
-    $this->killSwitch()->confirmUnkill($unkill->batchId, $this->paladinB());
-    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
-    $this->assertSame(
-      'subject-cel',
-      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+    $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $same = $this->lastAuditMetadata(McpKillSwitch::AUDIT_REFUSE);
+    $this->assertSame(McpKillSwitchException::SAME_OPERATOR, $same['reason_code']);
+
+    $second = $this->killSwitch()->kill(
+      [McpKillSelector::humanKey(self::ISS . '|subject-cel-lift')],
+      'cel-lift',
+      $this->paladinA(),
     );
+    $lifted = $this->killSwitch()->lift($second->batchId, $this->paladinB());
+    $this->assertSame(McpKillBlockStatus::Expired, $lifted->status);
+    $this->assertFalse($this->killSwitch()->isKilled('', self::ISS . '|subject-cel-lift'));
+    $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_LIFT));
   }
 
   /**
@@ -560,6 +567,10 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       $this->loadDelivery((int) $in['id'])['status'],
     );
     $this->assertSame(0, $this->countAudit(McpWebhookQueueManager::AUDIT_RELEASE));
+    $this->assertSame(1, $this->countAudit(McpWebhookQueueManager::AUDIT_REFUSE));
+    $refuse = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_REFUSE);
+    $this->assertSame(McpKillSwitchException::SCOPE_STOPPED, $refuse['reason_code']);
+    $this->assertSame($this->paladinB()->storageId(), $refuse['actor']);
   }
 
   /**
@@ -713,6 +724,10 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       McpWebhookQueueManager::STATUS_HELD,
       $this->loadDelivery((int) $row['id'])['status'],
     );
+    $this->assertGreaterThanOrEqual(2, $this->countAudit(McpWebhookQueueManager::AUDIT_HOLD));
+    $hold = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->assertSame('system', $hold['actor']);
+    $this->assertStringContainsString((string) $row['id'], (string) $hold['item_ids']);
   }
 
   /**
@@ -1209,6 +1224,222 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * Confirming an overdue freeze refreshes block_until so it stays in force.
+   */
+  public function testConfirmRefreshesElapsedBlockUntil(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-confirm-ttl');
+    $kill = $this->killSwitch()->kill([$human], 'confirm-ttl', $this->paladinA());
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => $now - 10])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $confirmed = $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->assertSame(McpKillBlockStatus::Killed, $confirmed->status);
+    $this->assertGreaterThan($now, $confirmed->blockUntil);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+  }
+
+  /**
+   * An unconfirmed freeze whose TTL has elapsed still escalates.
+   */
+  public function testOverdueUnconfirmedFreezeStillEscalates(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-overdue-esc');
+    $tenant = McpKillSelector::tenant('tenant-overdue-esc');
+    $kill = $this->killSwitch()->kill([$human, $tenant], 'overdue-esc', $this->paladinA());
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields([
+        'confirm_until' => $now - 1,
+        'block_until' => $now - 1,
+      ])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->assertGreaterThan(0, $this->killSwitch()->expireDue());
+    $row = $this->killSwitch()->status($human);
+    $this->assertSame(McpKillBlockStatus::KillPending->value, $row['status']);
+    $this->assertGreaterThan(0, (int) $row['escalated_at']);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_ESCALATE));
+    $esc = $this->lastAuditMetadata(McpKillSwitch::AUDIT_ESCALATE);
+    $this->assertSame('system', $esc['actor']);
+    $this->assertNotSame($esc['scope'], $esc['target_selector']);
+  }
+
+  /**
+   * Cron prune leaves held rows in place.
+   */
+  public function testPruneSkipsHeldRows(): void {
+    $this->container->get('config.factory')->getEditable('mcp_sentinel.settings')
+      ->set('webhook_delivery_retention_days', 1)
+      ->save();
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => McpWebhookQueueManager::STATUS_HELD,
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => 'p',
+        'human_key' => 'h',
+        'tenant' => 't',
+      ])->execute();
+    $this->assertSame(0, $this->queue()->pruneOldDeliveries());
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($id)['status'],
+    );
+  }
+
+  /**
+   * Pre-upgrade keyless rows stay stopped while any stop is active.
+   */
+  public function testPreUpgradeKeylessRowStaysStopped(): void {
+    $this->enableEndpoint();
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id' => 'ep1',
+        'event_name' => 'mcp.entity.presave',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload' => '{}',
+        'status' => 'pending',
+        'attempts' => 0,
+        'created' => 1,
+        'principal_key' => '',
+        'human_key' => '',
+        'tenant' => '',
+      ])->execute();
+    $this->container->get('state')->set(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      $id,
+    );
+    $this->killSwitch()->kill(
+      [McpKillSelector::tenant('other-tenant')],
+      'keyless',
+      $this->paladinA(),
+    );
+    $history = [];
+    $this->worker($history)->processItem($this->queueItem($id, $this->loadDelivery($id)));
+    $this->assertSame(McpWebhookQueueManager::STATUS_HELD, $this->loadDelivery($id)['status']);
+    $this->assertCount(0, $history);
+    try {
+      $this->queue()->releaseHeld([$id], $this->paladinB());
+      $this->fail('A keyless pre-upgrade row must stay held while any stop is active.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::SCOPE_STOPPED, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Keys longer than the column are not truncated and are not enqueued.
+   */
+  public function testOversizedPrincipalKeyIsNotEnqueued(): void {
+    $this->enableEndpoint();
+    $job = $this->container->get('mcp_sentinel.principal_context_job');
+    $this->assertInstanceOf(McpPrincipalContextJob::class, $job);
+    $handle = $job->beginCarrying(
+      str_repeat('p', McpWebhookQueueManager::KEY_MAX_LENGTH + 1),
+      'h',
+      't',
+    );
+    $before = (int) $this->container->get('database')
+      ->select('mcp_sentinel_webhook_delivery', 'd')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    try {
+      $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'oversize']);
+    }
+    finally {
+      $job->release($handle);
+    }
+    $after = (int) $this->container->get('database')
+      ->select('mcp_sentinel_webhook_delivery', 'd')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame($before, $after);
+  }
+
+  /**
+   * Break-glass accepts only the pinned Paladin iss|sub.
+   */
+  public function testBreakGlassPinIsPaladinIssSubOnly(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-bg-pin');
+    $kill = $this->killSwitch()->kill([$human], 'bg-pin', $this->paladinA());
+    try {
+      $this->killSwitch()->breakGlass(
+        $kill->batchId,
+        McpKillBreakGlassAction::Keep,
+        $this->paladinB(),
+      );
+      $this->fail('An unpinned Paladin identity must not use break-glass.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
+    }
+    $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->killSwitch()->weakenForTest(McpKillSwitch::WEAKEN_TRUST_UID);
+    try {
+      $this->killSwitch()->breakGlass(
+        $kill->batchId,
+        McpKillBreakGlassAction::Keep,
+        McpOperatorIdentity::fromDrupalUid('2'),
+      );
+      $this->fail('A Drupal uid must not match the Paladin break-glass pin.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
+    }
+    $this->setSetting('mcp_sentinel.kill_switch.break_glass_operator', '');
+    try {
+      $this->killSwitch()->breakGlass(
+        $kill->batchId,
+        McpKillBreakGlassAction::Keep,
+        $this->breakGlassOp(),
+      );
+      $this->fail('Break-glass with an empty pin must be refused.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
+    }
+    $this->setSetting(
+      'mcp_sentinel.kill_switch.break_glass_operator',
+      self::ISS . '|breakglass-op',
+    );
+    $kept = $this->killSwitch()->breakGlass(
+      $kill->batchId,
+      McpKillBreakGlassAction::Keep,
+      $this->breakGlassOp(),
+    );
+    $this->assertSame(McpKillBlockStatus::Killed, $kept->status);
+  }
+
+  /**
+   * Extend or lift of a confirmed-then-unkilled batch is NOT_FROZEN and audited.
+   */
+  public function testNotFrozenRefusalIsAudited(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-not-frozen');
+    $kill = $this->killSwitch()->kill([$human], 'nf', $this->paladinA());
+    $this->killSwitch()->lift($kill->batchId, $this->paladinB());
+    try {
+      $this->killSwitch()->extend($kill->batchId, $this->paladinB());
+      $this->fail('A lifted batch must not accept extend.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::NOT_FROZEN, $e->reasonCode);
+    }
+    $refuse = $this->lastAuditMetadata(McpKillSwitch::AUDIT_REFUSE);
+    $this->assertSame(McpKillSwitchException::NOT_FROZEN, $refuse['reason_code']);
+    $this->assertSame($kill->batchId, $refuse['batch_id']);
+  }
+
+  /**
    * Principal-key selector.
    */
   private function principalSelector(string $sub, string $azp): McpKillSelector {
@@ -1223,7 +1454,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
-   * Named second person.
+   * Second bound operator.
    */
   private function paladinB(): McpOperatorIdentity {
     return McpOperatorIdentity::paladin(self::ISS . '|operator-b');

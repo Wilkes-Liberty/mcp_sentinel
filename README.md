@@ -131,11 +131,12 @@ stop.
 
 **Unconfirmed freeze (fail-safe default):** if nobody confirms within
 the window (15 minutes by default), the freeze stays in place and
-escalates. The unavailable-confirmer hook notifies the named second
-person and the break-glass path. The freeze never lifts on that
+escalates. The unavailable-confirmer hook notifies every target in
+the batch and the break-glass path. The freeze never lifts on that
 timeout. An unconfirmed freeze also stays frozen after its TTL until
 two operators lift it or break-glass is used. Confirmed stops still
-expire at their TTL. Lifting a mass freeze always takes two operators.
+expire at their TTL. Any distinct bound operator can confirm.
+Lifting a mass freeze always takes two operators.
 Kill-block limits stay 24 hours default, 7 days maximum.
 
 **Queued side effects are held.** On any stop (single agent,
@@ -155,10 +156,10 @@ same delivery id, same `X-MCP-Signature`). `X-MCP-Timestamp` and
 `X-MCP-Signature-256` are new on each attempt. A discarded item is
 never sent. Release is refused while the scope is still stopped.
 
-**Break-glass** (when the named second person cannot be reached): only
-the identity configured in `settings.php`
-(`mcp_sentinel.kill_switch.break_glass_operator`, a Paladin `iss|sub`
-or a bound account) can keep, extend, or lift the freeze. Everyone
+**Break-glass** (when no distinct bound operator is available): only
+the Paladin `iss|sub` configured in `settings.php`
+(`mcp_sentinel.kill_switch.break_glass_operator`) can keep, extend,
+or lift the freeze. A Drupal username is not accepted. Everyone
 else is refused. The requester is always refused. That action is
 audited as break-glass use, not as a skip of the two-person rule.
 
@@ -168,10 +169,8 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=
 PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --lift
 ```
 
-Run the break-glass drill (`McpKillSwitchBreakGlassDrillTest`)
-alongside the scheduled kill-switch drill (DEV-855). New admits and
-in-flight governed writes are refused as soon as the stop is
-recorded.
+New admits and in-flight governed writes are refused as soon as the
+stop is recorded.
 
 ### Breaking: Paladin tokens required for governed tools
 
@@ -515,7 +514,9 @@ MCP policy profiles → Configuration governance**.
   Tier provisioning is one command: `drush mcp-sentinel:agent-provision <tier>
   --env=<env>`. The `mcp_admin` role is never standing — request it with
   `drush mcp-sentinel:break-glass <uid>`, which raises an approval; on approval
-  it is granted for `break_glass_ttl_seconds` and auto-revoked on cron. The role
+  it is granted for `break_glass_ttl_seconds` (the `mcp_admin` role grant
+  lifetime — not the kill-switch freeze TTL or
+  `mcp_sentinel.kill_switch.break_glass_operator`) and auto-revoked on cron. The role
   is a non-admin, five-permission operator break-glass set (not superuser); grants
   refuse if the role is missing, `is_admin`, or holds permissions outside that
   allowlist. Status report ERROR/WARNING mirrors that posture. Agent capability
@@ -1469,7 +1470,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:kill-confirm` | Confirm (keep) a mass freeze as a distinct operator. Same token and `--operator` rules. |
 | `drush mcp-sentinel:kill-extend` | Extend a mass freeze as a distinct operator (7-day cap). Never shortens a stop. |
 | `drush mcp-sentinel:kill-lift` | Lift an unconfirmed mass freeze as a distinct operator. Held deliveries stay held. |
-| `drush mcp-sentinel:kill-break-glass` | Keep, extend, or lift a freeze when the named second person cannot be reached. Limited to the identity configured in settings.php. The requester is always refused. |
+| `drush mcp-sentinel:kill-break-glass` | Keep, extend, or lift a freeze when no distinct bound operator is available. Limited to the Paladin `iss|sub` in `settings.php`. The requester is always refused. |
 | `drush mcp-sentinel:unkill` | Request or confirm an un-kill of a confirmed stop. Always needs two distinct Paladin operators. Refused on `kill_pending`; use `kill-lift`. |
 | `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. Same token and `--operator` rules. |
 | `drush mcp-sentinel:webhook-held` | List webhook deliveries held by a kill. |
