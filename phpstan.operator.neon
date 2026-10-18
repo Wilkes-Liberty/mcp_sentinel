@@ -1,6 +1,6 @@
 # Level max plus phpstan-strict-rules on the DEV-986 operator files
-# and the DEV-985 follow-up (#318) production classes. The project
-# neon stays at level 6 and still analyses mcp_sentinel.module.
+# and the DEV-985 kill-switch types. The project neon stays at
+# level 6 for the webhook worker, queue manager, and .module.
 # CI requires this file after composer require
 # phpstan/phpstan-strict-rules; extension-installer loads
 # rules.neon, so this file must not include it again.
@@ -31,7 +31,6 @@ parameters:
     - src/Value/McpKillSwitchResult.php
     - mcp_sentinel.install
     - mcp_sentinel.api.php
-    - tests/modules/mcp_sentinel_kill_hook_probe/mcp_sentinel_kill_hook_probe.module
   ignoreErrors:
     # Portable across Drupal 10.6 (int) and 11 (FetchAs). Same ignore as
     # phpstan.neon.dist. Scoped to the update hooks that still pass
