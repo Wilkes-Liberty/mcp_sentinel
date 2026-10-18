@@ -7,10 +7,19 @@
 
 /**
  * Implements hook_mcp_sentinel_kill_unavailable_confirmer().
+ *
+ * @param array<string, mixed> $context
+ *   Hook context.
  */
 function mcp_sentinel_kill_hook_probe_mcp_sentinel_kill_unavailable_confirmer(array $context): void {
-  $GLOBALS['mcp_sentinel_kill_hook_probe'][] = $context;
-  if (!empty($GLOBALS['mcp_sentinel_kill_hook_probe_throw'])) {
+  $probe = $GLOBALS['mcp_sentinel_kill_hook_probe'] ?? [];
+  if (!is_array($probe)) {
+    $probe = [];
+  }
+  $probe[] = $context;
+  $GLOBALS['mcp_sentinel_kill_hook_probe'] = $probe;
+  $throw = $GLOBALS['mcp_sentinel_kill_hook_probe_throw'] ?? FALSE;
+  if ($throw) {
     throw new \RuntimeException('unavailable confirmer hook threw');
   }
 }
