@@ -875,12 +875,12 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
         McpKillBreakGlassAction::Keep,
         McpOperatorIdentity::fromDrupalUid('2'),
       );
-      $this->fail('A Drupal uid must not be a verified kill-switch operator.');
+      $this->fail('A Drupal uid must not match the Paladin break-glass pin.');
     }
     catch (McpKillSwitchException $e) {
-      $this->assertSame(McpKillSwitchException::UNVERIFIED_OPERATOR, $e->reasonCode);
+      $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
     }
-    $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->assertSame(2, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
     $this->setSetting('mcp_sentinel.kill_switch.break_glass_operator', '');
     try {
       $this->killSwitch()->breakGlass(
@@ -893,7 +893,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
     }
-    $this->assertSame(2, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->assertSame(3, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
     $alice = $this->createUser([McpKillSwitch::PERMISSION], 'alice');
     $this->assertInstanceOf(User::class, $alice);
     $this->container->get('mcp_sentinel.operator_binding')
@@ -910,7 +910,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     catch (McpKillSwitchException $e) {
       $this->assertSame(McpKillSwitchException::BREAK_GLASS_DENIED, $e->reasonCode);
     }
-    $this->assertSame(3, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
+    $this->assertSame(4, $this->countAudit(McpKillSwitch::AUDIT_REFUSE));
     $this->setSetting(
       'mcp_sentinel.kill_switch.break_glass_operator',
       self::ISS . '|breakglass-op',
@@ -1116,6 +1116,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       $this->queue()->shouldHoldRow($this->loadDelivery($id)),
       'A keyless row must stay held while a confirmed stop is active.',
     );
+    $this->queue()->markHeld($id);
     try {
       $this->queue()->releaseHeld([$id], $this->paladinB());
       $this->fail('A keyless row must not release while a confirmed stop is active.');

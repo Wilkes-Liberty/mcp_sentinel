@@ -791,14 +791,15 @@ final class McpKillSwitchCommands extends DrushCommands {
    * @param callable(string): int $callback
    *   Work that receives the Paladin token string.
    */
-  private function withPaladinToken(array $options, callable $callback): int {
+  private function withPaladinToken(array $options, callable $callback, string $batch = ''): int {
+    $actor = '';
     try {
       $token = $this->paladinToken($options);
       return $callback($token);
     }
     catch (McpKillSwitchException | McpPrincipalKeyException $e) {
       $this->logError($e->reasonCode . ': ' . $e->getMessage());
-      $this->auditCommandRefusal($e, $options);
+      $this->auditCommandRefusal($e, $options, $actor, $batch);
       return self::EXIT_FAILURE;
     }
   }
@@ -813,10 +814,10 @@ final class McpKillSwitchCommands extends DrushCommands {
    * @param string $batch
    *   Kill batch when the command received one.
    */
-  private function runWithPaladinToken(array $options, callable $callback): int {
+  private function runWithPaladinToken(array $options, callable $callback, string $batch = ''): int {
     return $this->withPaladinToken($options, function (string $token) use ($callback): int {
       return $callback($this->operatorIdentities->fromPaladinToken($token));
-    });
+    }, $batch);
   }
 
   /**

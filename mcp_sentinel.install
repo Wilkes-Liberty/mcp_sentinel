@@ -2051,12 +2051,18 @@ function mcp_sentinel_hold_keyless_pending_audited(): int {
     || !$database->schema()->tableExists($kill)) {
     return 0;
   }
-  $active = mcp_sentinel_db_int(mcp_sentinel_fetch_field(
+  $activeRaw = mcp_sentinel_fetch_field(
     $database->select($kill, 'k')
       ->condition('status', ['killed', 'kill_pending', 'unkill_pending'], 'IN')
       ->countQuery()
       ->execute(),
-  ));
+  );
+  if ($activeRaw === NULL) {
+    throw new UpdateException(
+      'Could not read the kill registry before holding keyless deliveries.',
+    );
+  }
+  $active = mcp_sentinel_db_int($activeRaw);
   if ($active < 1) {
     return 0;
   }

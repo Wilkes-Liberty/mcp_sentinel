@@ -580,7 +580,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $active[] = $row;
         continue;
       }
-      if ($status->isBlocking((int) $row['block_until'], $now)) {
+      $blockUntil = $this->rowBlockUntil($row);
+      if ($blockUntil === NULL || $status->isBlocking($blockUntil, $now)) {
         $active[] = $row;
       }
     }

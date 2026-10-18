@@ -317,7 +317,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $checkRow['principal_key'] = $this->rowOrItemKey($row, $fromItem, 'principal_key');
     $checkRow['human_key'] = $this->rowOrItemKey($row, $fromItem, 'human_key');
     $checkRow['tenant'] = $this->rowOrItemKey($row, $fromItem, 'tenant');
-    if ($this->webhookQueue->shouldHoldRow($checkRow)) {
+    if ($this->webhookQueue->shouldHoldRow($row)
+      || $this->webhookQueue->shouldHoldRow($checkRow)) {
       $this->webhookQueue->markHeld($deliveryId);
       return;
     }
@@ -423,7 +424,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    if ($this->webhookQueue->shouldHoldRow($checkRow)) {
+    if ($this->webhookQueue->shouldHoldRow($row)
+      || $this->webhookQueue->shouldHoldRow($checkRow)) {
       $this->webhookQueue->holdClaimed($deliveryId);
       return;
     }
