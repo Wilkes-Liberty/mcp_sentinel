@@ -296,8 +296,8 @@ Restore the pre-updb backup, or re-add `released` (int unsigned
 not null default 0), `drush state:delete
 mcp_sentinel.webhook_pre_upgrade_max_id`, and set the schema
 version back to 10037. Held rows stay held. Rolling the module
-code back to commit 92e92d6 (the 10036 kill-switch hold
-release) re-enables the keyless fail-open.
+code back to commit 6515acf (the 10037 operator-token merge)
+re-enables the keyless fail-open.
 
 ## Updating
 

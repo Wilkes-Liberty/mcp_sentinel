@@ -116,7 +116,7 @@ final class McpOperatorBinding {
   /**
    * PHPUnit-only callback invoked immediately before an insert.
    */
-  private mixed $beforeUpsertForTest = NULL;
+  private ?\Closure $beforeUpsertForTest = NULL;
 
   /**
    * Constructs the binding store.
@@ -518,13 +518,13 @@ final class McpOperatorBinding {
    * Used so a concurrent insert can be shown to become an audited
    * binding-conflict refusal.
    *
-   * @param callable $callback
+   * @param \Closure $callback
    *   Receives the identity about to be inserted.
    *
    * @throws \LogicException
    *   When called outside PHPUnit.
    */
-  public function beforeUpsertForTest(callable $callback): void {
+  public function beforeUpsertForTest(\Closure $callback): void {
     if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
       throw new \LogicException(
         'Operator-binding upsert hooks can be set only under PHPUnit.',
@@ -575,7 +575,7 @@ final class McpOperatorBinding {
       }
       return;
     }
-    if (is_callable($this->beforeUpsertForTest)) {
+    if ($this->beforeUpsertForTest !== NULL) {
       ($this->beforeUpsertForTest)($identity, $operatorId);
     }
     $this->connection->insert(self::TABLE)

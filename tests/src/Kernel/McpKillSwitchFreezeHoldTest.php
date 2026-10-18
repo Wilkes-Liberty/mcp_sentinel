@@ -1649,6 +1649,42 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * A keyless row with an unreadable id fails closed while any stop is active.
+   */
+  public function testKeylessRowWithUnreadableIdIsStopped(): void {
+    $this->enableEndpoint();
+    $this->container->get('state')->set(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      0,
+    );
+    $this->killSwitch()->kill(
+      [McpKillSelector::tenant('other-bad-id')],
+      'keyless-bad-id',
+      $this->paladinA(),
+    );
+    $this->assertTrue($this->queue()->shouldHoldRow([
+      'id' => 0,
+      'principal_key' => '',
+      'human_key' => '',
+      'tenant' => '',
+    ]));
+  }
+
+  /**
+   * An unreadable stored block_until fails closed.
+   */
+  public function testUnreadableBlockUntilFailsClosed(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-str-block');
+    $kill = $this->killSwitch()->kill([$human], 'str-block', $this->paladinA());
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 'not-a-number'])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->assertTrue($this->killSwitch()->hasActiveStop());
+  }
+
+  /**
    * A 770-byte stored key is held while any stop is active.
    */
   public function testOversizedStoredKeyIsHeldUnderStop(): void {

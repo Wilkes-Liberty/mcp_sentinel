@@ -1607,7 +1607,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $kill = 'mcp_sentinel_kill_block';
     $this->container->get('database')->delete($delivery)->execute();
     $this->container->get('database')->delete($kill)->execute();
-    $this->container->get('database')
+    $id = (int) $this->container->get('database')
       ->insert($delivery)
       ->fields([
         'endpoint_id' => 'ep1',
@@ -1635,14 +1635,24 @@ final class McpUpdateHookChainTest extends KernelTestBase {
         'requested_at' => 1,
         'changed' => 1,
       ])->execute();
+    $this->container->get('state')->delete(
+      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+    );
     $this->container->set('mcp_sentinel.audit_logger', new \stdClass());
     try {
-      mcp_sentinel_hold_keyless_pending_audited();
-      $this->fail('A missing audit logger must fail the keyless hold.');
+      mcp_sentinel_update_10038();
+      $this->fail('A missing audit logger must fail update 10038.');
     }
     catch (UpdateException $e) {
       $this->assertStringContainsString('audit_logger', $e->getMessage());
     }
+    $status = $this->container->get('database')
+      ->select($delivery, 'd')
+      ->fields('d', ['status'])
+      ->condition('id', $id)
+      ->execute()
+      ->fetchField();
+    $this->assertSame('pending', $status);
   }
 
   /**

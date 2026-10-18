@@ -571,6 +571,8 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
     $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
     $this->assertSame(McpKillSwitchException::INVALID_TTL, $meta['reason_code']);
+    $this->assertSame($this->paladinA()->storageId(), $meta['actor']);
+    $this->assertSame('', $meta['batch_id']);
     $this->assertSame(0, (int) $this->container->get('database')
       ->select(McpKillSwitch::TABLE, 'k')
       ->countQuery()
@@ -605,9 +607,69 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
     $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
     $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
     $this->assertSame(McpKillSwitchException::INVALID_TTL, $meta['reason_code']);
+    $this->assertSame($this->paladinB()->storageId(), $meta['actor']);
+    $this->assertSame($pending->batchId, $meta['batch_id']);
     $row = $this->container->get('mcp_sentinel.kill_switch')->status($human);
     $this->assertIsArray($row);
     $this->assertSame('kill_pending', $row['status']);
+  }
+
+  /**
+   * A refused confirm writes actor and batch_id on operator_command_refused.
+   *
+   * @covers ::confirmKill
+   */
+  public function testConfirmOperatorMismatchWritesActorAndBatch(): void {
+    $this->bindAlice();
+    $this->bindBob();
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-confirm-meta');
+    $pending = $this->container->get('mcp_sentinel.kill_switch')->kill(
+      [$human],
+      'mass',
+      $this->paladinA(),
+    );
+    $this->queueActiveTokens(['operator-b']);
+    $code = $this->withToken(self::TOKEN, function () use ($pending): int {
+      return $this->commands->confirmKill($pending->batchId, [
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $meta['reason_code']);
+    $this->assertSame($this->paladinB()->storageId(), $meta['actor']);
+    $this->assertSame($pending->batchId, $meta['batch_id']);
+  }
+
+  /**
+   * A refused lift writes actor and batch_id on operator_command_refused.
+   *
+   * @covers ::liftKill
+   */
+  public function testLiftOperatorMismatchWritesActorAndBatch(): void {
+    $this->bindAlice();
+    $this->bindBob();
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-lift-meta');
+    $pending = $this->container->get('mcp_sentinel.kill_switch')->kill(
+      [$human],
+      'mass',
+      $this->paladinA(),
+    );
+    $this->queueActiveTokens(['operator-b']);
+    $code = $this->withToken(self::TOKEN, function () use ($pending): int {
+      return $this->commands->liftKill($pending->batchId, [
+        'operator' => 'alice',
+        'token' => '',
+      ]);
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::OPERATOR_MISMATCH, $meta['reason_code']);
+    $this->assertSame($this->paladinB()->storageId(), $meta['actor']);
+    $this->assertSame($pending->batchId, $meta['batch_id']);
   }
 
   /**

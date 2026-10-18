@@ -1053,6 +1053,7 @@ final class McpWebhookQueueManager {
    * installs record 0 so no keyless row is pre-upgrade. After a
    * recorded max of 1 or more, only ids at or below that max with
    * empty keys are pre-upgrade (rows queued before update 10036).
+   * An unreadable id (less than 1) fails closed.
    *
    * @param array<string, mixed> $row
    *   Delivery row.
@@ -1061,15 +1062,15 @@ final class McpWebhookQueueManager {
    *   TRUE when this keyless row is in the pre-upgrade set.
    */
   private function isPreUpgradeKeyless(array $row): bool {
-    $id = $this->asInt($row['id'] ?? 0);
-    if ($id < 1) {
-      return FALSE;
-    }
     $keyless = trim($this->asString($row['principal_key'] ?? '')) === ''
       && trim($this->asString($row['human_key'] ?? '')) === ''
       && trim($this->asString($row['tenant'] ?? '')) === '';
     if (!$keyless) {
       return FALSE;
+    }
+    $id = $this->asInt($row['id'] ?? 0);
+    if ($id < 1) {
+      return TRUE;
     }
     $raw = $this->state->get(self::STATE_PRE_UPGRADE_MAX_ID);
     if ($raw === NULL) {

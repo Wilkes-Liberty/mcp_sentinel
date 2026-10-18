@@ -1969,10 +1969,11 @@ function mcp_sentinel_update_10037(): string {
  * 10036 already added hold-queue columns. This hook records the highest
  * delivery id so keyless rows at or below it stay stopped while any
  * stop is active, drops the unused released column, and holds
- * remaining keyless pending rows only when the audit logger is
- * available. It does not rebuild key indexes: Drupal's MySQL driver
- * already shortens them, and a 191-char prefix becomes an unusable
- * substr() index on PostgreSQL.
+ * remaining keyless pending rows. The update fails when the
+ * audit logger is missing or the pre-upgrade max delivery id
+ * cannot be read. It does not rebuild key indexes: Drupal's
+ * MySQL driver already shortens them, and a 191-char prefix
+ * becomes an unusable substr() index on PostgreSQL.
  */
 function mcp_sentinel_update_10038(): string {
   $schema = \Drupal::database()->schema();
@@ -1988,13 +1989,17 @@ function mcp_sentinel_update_10038(): string {
       McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
     );
     if ($existingMax === NULL) {
-      $maxId = mcp_sentinel_db_int(mcp_sentinel_fetch_field(
-        $database->select($delivery, 'd')
-          ->orderBy('id', 'DESC')
-          ->range(0, 1)
-          ->fields('d', ['id'])
-          ->execute(),
-      ));
+      $statement = $database->select($delivery, 'd')
+        ->orderBy('id', 'DESC')
+        ->range(0, 1)
+        ->fields('d', ['id'])
+        ->execute();
+      if (!$statement instanceof StatementInterface) {
+        throw new UpdateException(
+          'Could not read the pre-upgrade max delivery id.',
+        );
+      }
+      $maxId = mcp_sentinel_db_int($statement->fetchField());
       \Drupal::state()->set(
         McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
         $maxId,
