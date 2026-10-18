@@ -1874,7 +1874,6 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       }
       return $lifted;
     }
-    $claimed = 0;
     $txn = $this->connection->startTransaction();
     try {
       $claimed = (int) $this->connection->update(self::TABLE)
@@ -2149,7 +2148,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @param \Throwable $e
    *   Exception thrown by claim or audit.
    * @param string $reason
-   *   escalate_failed or unkill_expire_failed.
+   *   Reason written for a claim or audit failure.
    */
   private function recordClaimFailure(
     string $batchId,
@@ -2201,7 +2200,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @param list<array<string, mixed>> $rows
    *   Stored rows in the batch.
    * @param string $reason
-   *   notify_failed, escalate_failed, or unkill_expire_failed.
+   *   Reason written on the follow-up audit row.
    */
   private function auditFailureRow(
     string $batchId,

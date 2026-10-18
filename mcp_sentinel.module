@@ -218,8 +218,7 @@ function mcp_sentinel_page_top(array &$page): void {
     if ($condition['severity'] !== 'critical') {
       continue;
     }
-    $dismissKey = $condition['key'] ?? '';
-    if (is_string($dismissKey) && isset($dismissed[$dismissKey]) && $dismissed[$dismissKey]) {
+    if (($dismissed[$condition['key']] ?? FALSE) === TRUE) {
       continue;
     }
     $critical[] = $condition;
@@ -843,8 +842,7 @@ function mcp_sentinel_entity_field_access(
  */
 function mcp_sentinel_entity_type_alter(array &$entity_types): void {
   foreach ($entity_types as $entity_type) {
-    if ($entity_type instanceof EntityTypeInterface
-      && $entity_type->entityClassImplements(ContentEntityInterface::class)) {
+    if ($entity_type->entityClassImplements(ContentEntityInterface::class)) {
       $entity_type->addConstraint('McpDenyPublish');
       // The shared write-precondition boundary (d.o #3616541): owner-aware
       // content locks and stale-default-version refusal on the validated
@@ -891,11 +889,19 @@ function mcp_sentinel_jsonapi_entity_filter_access(
  *
  * Formats outbound emails for anomaly alerts. The 'anomaly_alert' key is used
  * by McpAlertDispatcher when anomaly_alert_email is non-empty.
+ *
+ * @phpstan-param array<string, mixed> $message
+ * @phpstan-param array<string, mixed> $params
  */
 function mcp_sentinel_mail(string $key, array &$message, array $params): void {
   if ($key === 'anomaly_alert') {
     $message['subject'] = $params['subject'] ?? 'MCP Sentinel anomaly alert';
-    $message['body'][] = $params['body'] ?? '';
+    $body = $message['body'] ?? [];
+    if (!is_array($body)) {
+      $body = [];
+    }
+    $body[] = $params['body'] ?? '';
+    $message['body'] = $body;
   }
 }
 
@@ -965,7 +971,7 @@ function mcp_sentinel_cron(): void {
     /** @var \Drupal\mcp_sentinel\Service\McpAnomalyDetector $detector */
     $detector = \Drupal::service('mcp_sentinel.anomaly_detector');
     $firedRules = $detector->evaluate();
-    if ($firedRules) {
+    if ($firedRules !== []) {
       /** @var \Drupal\mcp_sentinel\Service\McpAlertDispatcher $alertDispatcher */
       $alertDispatcher = \Drupal::service('mcp_sentinel.anomaly_alert_dispatcher');
       $alertDispatcher->dispatch($firedRules);
@@ -1013,7 +1019,7 @@ function mcp_sentinel_route_alter(RouteCollection $collection): void {
     if (!is_array($auth) || !in_array('oauth2', $auth, TRUE)) {
       continue;
     }
-    if (!mcp_sentinel_route_accepts_sealed_token((string) $name, $route)) {
+    if (!mcp_sentinel_route_accepts_sealed_token($name, $route)) {
       continue;
     }
     if (!in_array('mcp_sealed_token', $auth, TRUE)) {
@@ -1061,9 +1067,11 @@ function mcp_sentinel_route_accepts_sealed_token(string $name, Route $route): bo
  * resource / audience support stays an upstream simple_oauth change; no
  * matching issue was in that queue when this shipped. Do not claim that
  * this hook unlocks site-as-issuer entitlement on its own.
+ *
+ * @phpstan-param array<string, mixed> $private_claims
  */
 function mcp_sentinel_simple_oauth_private_claims_alter(array &$private_claims, AccessTokenEntity $access_token_entity): void {
-  $client_id = (string) $access_token_entity->getClient()->getIdentifier();
+  $client_id = $access_token_entity->getClient()->getIdentifier();
   // Fill, do not overwrite: another alter may already have set a value.
   $private_claims += [
     'client_id' => $client_id,
@@ -1080,6 +1088,8 @@ function mcp_sentinel_simple_oauth_private_claims_alter(array &$private_claims, 
  * for Sentinel wrappers that call the originals for every request Sentinel
  * does not take over (d.o #3627557). Only fields SCMI itself defines are
  * touched, so the alter is a no-op without SCMI.
+ *
+ * @phpstan-param array<string, \Drupal\Core\Field\FieldDefinitionInterface> $fields
  */
 function mcp_sentinel_entity_base_field_info_alter(array &$fields, EntityTypeInterface $entity_type): void {
   foreach (array_keys(McpScheduledPublishGate::FIELDS) as $name) {
@@ -1128,6 +1138,8 @@ function _mcp_sentinel_scheduled_states_values(FieldStorageDefinitionInterface $
  * every request Sentinel does not take over (d.o #3627557). Drupal 11.2 and
  * later skip this function and read the RemoveHook attribute on
  * \Drupal\mcp_sentinel\Hook\McpScheduledPublishHooks instead.
+ *
+ * @phpstan-param array<string, mixed> $implementations
  */
 #[LegacyModuleImplementsAlter]
 function mcp_sentinel_module_implements_alter(array &$implementations, string $hook): void {

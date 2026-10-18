@@ -1,10 +1,11 @@
-# Baseline for untouched 1.x code in McpKillSwitch.php and
-# mcp_sentinel.install. Generated under PHPStan max +
-# phpstan-strict-rules with messages so identifier buckets
-# cannot absorb new DEV-986 errors. The two 10037
+# Baseline for untouched 1.x code in McpKillSwitch.php,
+# mcp_sentinel.install, and pre-existing mcp_sentinel.module
+# hooks. Generated under PHPStan max + phpstan-strict-rules
+# with messages so identifier buckets cannot absorb new
+# DEV-985 / DEV-986 errors. The two 10037
 # fetchAll(PDO::FETCH_ASSOC) hits are covered by the
 # path-scoped ignore in phpstan.operator.neon, not here.
-# New DEV-986 code must not add entries.
+# New DEV-985 / DEV-986 code must not add entries.
 parameters:
   ignoreErrors:
     -
@@ -262,3 +263,18 @@ parameters:
       identifier: return.type
       count: 1
       path: src/Service/McpKillSwitch.php
+    -
+      message: '#^Function mcp_sentinel_jsonapi_entity_filter_access\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Function _mcp_sentinel_scheduled_states_values\(\) return type has no value type specified in iterable type array\.$#'
+      identifier: missingType.iterableValue
+      count: 1
+      path: mcp_sentinel.module
+    -
+      message: '#^Parameter \&\$cacheable by-ref type of function _mcp_sentinel_scheduled_states_values\(\) expects bool, mixed given\.$#'
+      identifier: parameterByRef.type
+      count: 1
+      path: mcp_sentinel.module
