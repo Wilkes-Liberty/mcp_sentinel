@@ -203,6 +203,7 @@ either TTL setting is above 7 days, every stop fails with
 
 A requested `--ttl` above the maximum is also an error.
 A non-integer, zero, or negative `--ttl` is refused with
+`invalid_ttl`. A bare `--ttl` or empty `--ttl=` is also
 `invalid_ttl`.
 
 ## The two-operator rule
@@ -460,7 +461,7 @@ Every transition writes an audit row. These rows are written even when
 | `agent_side_effect_hold` | Queued deliveries in scope were held. |
 | `agent_side_effect_release` | An operator released held deliveries. |
 | `agent_side_effect_discard` | An operator discarded held deliveries. |
-| `operator_command_refused` | A Drush command refused before a service audit (missing token, token too large, `--token`). |
+| `operator_command_refused` | A Drush command refused before a service audit (missing token, token too large, `--token`, `--ttl` that is not a positive integer (`invalid_ttl`)). |
 | `operator_binding_uid_reset` | Update 10037 reset a Paladin uid. Metadata has `previous_uid` and `identity_hash`. |
 | `operator_binding_cleared` | Update 10037 deleted a leftover Drush binding row. |
 | `operator_binding_upgrade_pending_kept` | Update 10037 kept a Drush-requested freeze. |

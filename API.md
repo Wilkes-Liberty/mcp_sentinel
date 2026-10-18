@@ -277,7 +277,8 @@ refused. Every bind and every refusal writes an audit row
 (`operator_bind` / `operator_bind_refused`). A command refusal
 that the service has not already audited writes
 `operator_command_refused` (reason codes include `missing_token`,
-`token_too_large`, and `token_flag_refused`). Update 10037 writes
+`token_too_large`, `token_flag_refused`, and `invalid_ttl`).
+Update 10037 writes
 `operator_binding_uid_reset` (`previous_uid`, `identity_hash`),
 `operator_binding_cleared`, and
 `operator_binding_upgrade_pending_kept`. Unbind

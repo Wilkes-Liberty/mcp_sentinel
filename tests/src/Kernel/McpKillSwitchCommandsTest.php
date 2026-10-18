@@ -588,7 +588,10 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       [$human],
       'mass',
       $this->paladinA(),
+      3600,
     );
+    $before = $this->container->get('mcp_sentinel.kill_switch')->status($human);
+    $this->assertIsArray($before);
     $this->queueActiveTokens(['operator-b']);
     $code = $this->withToken(self::TOKEN, function () use ($pending): int {
       return $this->commands->extendKill($pending->batchId, [
@@ -597,13 +600,77 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
         'token' => '',
       ]);
     });
+    $row = $this->container->get('mcp_sentinel.kill_switch')->status($human);
+    $this->assertIsArray($row);
+    $this->assertSame('kill_pending', $row['status']);
+    $this->assertSame($before['block_until'], $row['block_until']);
+    $this->assertSame($before['ttl'], $row['ttl']);
     $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
     $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
     $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
     $this->assertSame(McpKillSwitchException::INVALID_TTL, $meta['reason_code']);
-    $row = $this->container->get('mcp_sentinel.kill_switch')->status($human);
-    $this->assertIsArray($row);
-    $this->assertSame('kill_pending', $row['status']);
+  }
+
+  /**
+   * An empty --ttl= is refused and writes no kill row.
+   *
+   * At 16d90cb this value used the 24 h default. It is now
+   * invalid_ttl. A bare --ttl (TRUE) was already refused.
+   *
+   * @covers ::kill
+   * @covers ::optionTtl
+   */
+  public function testKillRefusesEmptyTtl(): void {
+    $this->bindAlice();
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'alice',
+        'principal-key' => [self::ISS . '|subject-empty-ttl|agent-a'],
+        'reason' => 'compromise',
+        'ttl' => '',
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::INVALID_TTL, $meta['reason_code']);
+    $this->assertSame(0, (int) $this->container->get('database')
+      ->select(McpKillSwitch::TABLE, 'k')
+      ->countQuery()
+      ->execute()
+      ->fetchField());
+  }
+
+  /**
+   * A bare --ttl with no value is refused.
+   *
+   * Drush/Symfony pass boolean TRUE when the flag is present
+   * without a seconds value.
+   *
+   * @covers ::kill
+   * @covers ::optionTtl
+   */
+  public function testKillRefusesBareTtl(): void {
+    $this->bindAlice();
+    $this->queueActiveTokens(['operator-a']);
+    $code = $this->withToken(self::TOKEN, function (): int {
+      return $this->commands->kill($this->killOptions([
+        'operator' => 'alice',
+        'principal-key' => [self::ISS . '|subject-bare-ttl|agent-a'],
+        'reason' => 'compromise',
+        'ttl' => TRUE,
+      ]));
+    });
+    $this->assertSame(McpKillSwitchCommands::EXIT_FAILURE, $code);
+    $this->assertSame(1, $this->auditCount(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED));
+    $meta = $this->lastAuditMetadata(McpKillSwitchCommands::AUDIT_COMMAND_REFUSED);
+    $this->assertSame(McpKillSwitchException::INVALID_TTL, $meta['reason_code']);
+    $this->assertSame(0, (int) $this->container->get('database')
+      ->select(McpKillSwitch::TABLE, 'k')
+      ->countQuery()
+      ->execute()
+      ->fetchField());
   }
 
   /**
