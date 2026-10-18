@@ -224,9 +224,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
 
   /**
    * {@inheritdoc}
-   *
-   * @param array<string, mixed> $configuration
-   *   The plugin configuration.
    */
   public static function create(
     ContainerInterface $container,
@@ -422,7 +419,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       ->condition('status', 'pending')
       ->fields(['status' => 'in_progress', 'last_attempt' => $now])
       ->execute();
-    if (!$claimed) {
+    if (!is_int($claimed) || $claimed < 1) {
       // Another worker already claimed or sent this delivery.
       return;
     }
@@ -647,7 +644,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     if (!is_array($row)) {
       return NULL;
     }
-    return $row;
+    return $this->stringKeyed($row);
   }
 
   /**

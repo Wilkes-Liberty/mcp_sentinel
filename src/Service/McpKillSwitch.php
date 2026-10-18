@@ -1629,7 +1629,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * Drupal 11.3 stringifies integers on every driver. An unreadable
    * value fails closed.
    *
-   * @param array<string, mixed> $row
+   * @param array $row
    *   Stored row.
    */
   private function rowBlockUntil(array $row): ?int {
@@ -2026,8 +2026,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     $selectors = [];
     if ($first !== []) {
       $selectors[] = new McpKillSelector(
-        McpKillSelectorType::from((string) $first['selector_type']),
-        (string) $first['selector_key'],
+        McpKillSelectorType::from($this->rowString($first, 'selector_type')),
+        $this->rowString($first, 'selector_key'),
       );
     }
     $this->auditTransition(self::AUDIT_ESCALATE, [
@@ -2037,11 +2037,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       'target_selector' => '',
     ]) + [
       'reason' => 'notify_failed',
-      'ttl' => (string) ($first['ttl'] ?? ''),
-      'block_until' => (string) ($first['block_until'] ?? ''),
+      'ttl' => $this->rowString($first, 'ttl'),
+      'block_until' => $this->rowString($first, 'block_until'),
       'batch_id' => $batchId,
       'correlation_id' => $batchId,
-      'status' => (string) ($first['status'] ?? ''),
+      'status' => $this->rowString($first, 'status'),
       'second_confirmer' => '',
       'timestamp' => (string) $this->time->getRequestTime(),
     ]);
