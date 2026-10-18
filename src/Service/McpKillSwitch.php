@@ -196,6 +196,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   public const WEAKEN_SKIP_BREAK_GLASS_IDENTITY = 'skip_break_glass_identity';
 
   /**
+   * PHPUnit-only: confirm does not refresh an elapsed block_until.
+   */
+  public const WEAKEN_SKIP_CONFIRM_TTL = 'skip_confirm_ttl';
+
+  /**
+   * PHPUnit-only: escalate only when block_until is still in the future.
+   */
+  public const WEAKEN_SKIP_OVERDUE_ESCALATE = 'skip_overdue_escalate';
+
+  /**
    * State key for freezes already recorded as kept by update 10037.
    */
   public const STATE_UPGRADE_KEPT = 'mcp_sentinel.upgrade_10037_kept';
@@ -529,10 +539,12 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
         $blockUntil = (int) $row['block_until'];
         $reason = (string) $row['reason'];
       }
-      $blockUntil = min(
-        $now + McpKillTtl::MAX,
-        max($blockUntil, McpKillTtl::blockUntil($now, $ttl)),
-      );
+      if (!$this->weakened(self::WEAKEN_SKIP_CONFIRM_TTL)) {
+        $blockUntil = min(
+          $now + McpKillTtl::MAX,
+          max($blockUntil, McpKillTtl::blockUntil($now, $ttl)),
+        );
+      }
       $this->connection->update(self::TABLE)
         ->fields([
           'status' => McpKillBlockStatus::Killed->value,
@@ -1817,13 +1829,16 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * row is written per batch.
    */
   private function escalateUnconfirmedFreezes(int $now): int {
-    $statement = $this->connection->select(self::TABLE, 'k')
+    $query = $this->connection->select(self::TABLE, 'k')
       ->fields('k')
       ->condition('status', McpKillBlockStatus::KillPending->value)
       ->condition('confirm_until', $now, '<=')
       ->condition('confirm_until', 0, '>')
-      ->condition('escalated_at', 0)
-      ->execute();
+      ->condition('escalated_at', 0);
+    if ($this->weakened(self::WEAKEN_SKIP_OVERDUE_ESCALATE)) {
+      $query->condition('block_until', $now, '>');
+    }
+    $statement = $query->execute();
     if ($statement === NULL) {
       return 0;
     }

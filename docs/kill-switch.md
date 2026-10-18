@@ -61,11 +61,9 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
    Drush-requested freezes, and requires every operator to re-bind.
    Update 10038 records the pre-upgrade max delivery id, drops
    unused `released`, and holds remaining keyless pending rows
-   when a stop is active. Drain or review the webhook queue
-   before updb: keyless pending rows at or below that max id
-   are held when any kill-block or freeze is active. Fresh
-   installs record max id 0. Roll back 10038 only as documented
-   in `INSTALL.md`.
+   when a stop is active. Every keyless row stays stopped while
+   any stop is active, including rows queued after 10038. Roll
+   back 10038 only as documented in `INSTALL.md`.
 2. Until the registry table exists, every governed call is refused.
    The module fails closed when it cannot read the registry.
 3. Pin Paladin introspection in `settings.php`. See
@@ -274,7 +272,7 @@ The command prints:
 ```text
 status: kill_pending
 batch: <batch id>
-needs_confirm: yes (named second person / secondary account holder).
+needs_confirm: yes (a distinct bound operator).
 freeze: in force now. Unconfirmed timeout keeps it and escalates.
 block_until: <unix>
 ttl: <seconds>
@@ -298,8 +296,9 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-lift BATCH_ID --operator=bob
 ```
 
 `kill-confirm` keeps the freeze and records the second operator. The
-agents were already refused. The stop's end time is counted from the
-first operator's request, not from the confirmation.
+agents were already refused. Confirm also refreshes `block_until` to
+`min(now+7d, max(existing, now+ttl))` so an overdue freeze does not
+lift the moment it is confirmed.
 
 `kill-extend` moves the end time later, up to 7 days from now. A
 requested lifetime above 7 days is refused.
@@ -430,9 +429,11 @@ Pass exactly one selector. If there is no row, the command prints
 `block_until` is a Unix timestamp. The `requested_by` and `confirmed_by`
 values are operator identity hashes, not names.
 
-The status column is the stored row. Cron writes expiry. A row can still
-say `killed` after its `block_until` has passed. Compare `block_until`
-with the current time to know whether the stop still blocks.
+The status column is the stored row. Cron writes expiry for confirmed
+stops. `kill_pending` is always blocking: do not compare
+`block_until` to decide whether an unconfirmed freeze is in force.
+A `killed` or `unkill_pending` row blocks only while `block_until`
+is in the future.
 
 Check one target at a time. A person-wide stop is stored under the person's
 key (`iss|sub`), so check it with `--human-key`, not with each agent's key.
@@ -510,9 +511,12 @@ See `mcp_sentinel.api.php`.
   `settings.php`. The requester is always refused.
 - An in-flight webhook POST cannot be recalled. A retry cannot
   overwrite a held row.
-- Rows queued before update 10036 have empty keys. Drain or review
-  the webhook queue before `drush updb`; keyless pending rows are
-  held when any kill-block or freeze is active.
+- Rows queued before update 10036 have empty keys. The 10038 hook
+  records the pre-upgrade max delivery id and counts remaining
+  keyless pending rows. Every keyless row stays stopped while any
+  stop is active (release, pre-claim, post-claim, and retry),
+  including rows queued after 10038 and rows whose state key is
+  missing.
 - `kill-extend` never shortens a stop. `block_until` is
   `max(existing, now+ttl)`, capped at now + 7 days.
 - The worker re-checks the kill registry after a successful claim.

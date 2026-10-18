@@ -372,12 +372,12 @@ function mcp_sentinel_schema(): array {
  *
  * Drops the unused webhook `released` column that hook_schema still
  * declares so update 10036 can add it on upgrades. Records the
- * pre-upgrade max delivery id as 0 so a new site has no pre-upgrade
- * keyless rows (update 10038 never runs on a fresh install). Seeds
- * the 'mcp_api' role with the minimum read permissions an agent
- * account needs, so a fresh install has a ready-to-assign governed
- * identity. The role is only created when absent, keeping reinstall
- * idempotent.
+ * pre-upgrade max delivery id as 0 when absent (update 10038 never
+ * runs on a fresh install). Runtime still holds every keyless row
+ * while any stop is active. Seeds the 'mcp_api' role with the
+ * minimum read permissions an agent account needs, so a fresh
+ * install has a ready-to-assign governed identity. The role is only
+ * created when absent, keeping reinstall idempotent.
  */
 function mcp_sentinel_install(): void {
   $schema = \Drupal::database()->schema();
@@ -1965,13 +1965,14 @@ function mcp_sentinel_update_10037(): string {
 /**
  * Record pre-upgrade max id, drop unused released, hold remaining (DEV-985).
  *
- * 10036 already added hold-queue columns. This hook records the highest
- * delivery id so keyless rows at or below it stay stopped while any
- * stop is active, drops the unused released column, and holds
- * remaining keyless pending rows only when the audit logger is
- * available. It does not rebuild key indexes: Drupal's MySQL driver
- * already shortens them, and a 191-char prefix becomes an unusable
- * substr() index on PostgreSQL.
+ * 10036 already added hold-queue columns. This hook records the
+ * highest delivery id present before the upgrade, drops the unused
+ * released column, and holds remaining keyless pending rows only
+ * when the audit logger is available. Runtime treats every keyless
+ * row as stopped while any stop is active, including ids above
+ * that recorded max. It does not rebuild key indexes: Drupal's
+ * MySQL driver already shortens them, and a 191-char prefix
+ * becomes an unusable substr() index on PostgreSQL.
  */
 function mcp_sentinel_update_10038(): string {
   $schema = \Drupal::database()->schema();

@@ -286,9 +286,9 @@ wrote them into importable config. 10038 records the pre-upgrade
 max delivery id (only when absent), drops the unused `released`
 column, holds remaining keyless pending rows when any stop is
 active (and fails if the audit logger is missing), and counts
-remaining keyless pending rows. Fresh installs drop `released`
-in `hook_install` and record the pre-upgrade max delivery id
-as 0 so new-site keyless rows are not treated as pre-upgrade.
+remaining keyless pending rows. Runtime holds every keyless row
+while any stop is active, including rows queued after 10038.
+Fresh installs drop `released` in `hook_install`.
 
 ### Roll back update 10038
 

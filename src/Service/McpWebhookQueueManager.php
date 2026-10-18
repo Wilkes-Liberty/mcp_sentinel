@@ -78,6 +78,11 @@ final class McpWebhookQueueManager {
   public const WEAKEN_SKIP_RELEASE_UNDER_STOP = 'skip_release_under_stop';
 
   /**
+   * PHPUnit-only: treat keyless rows as not stopped.
+   */
+  public const WEAKEN_SKIP_KEYLESS_STOP = 'skip_keyless_stop';
+
+  /**
    * Audit operation for a refused hold/release/discard.
    */
   public const AUDIT_REFUSE = 'agent_side_effect_refuse';
@@ -928,9 +933,9 @@ final class McpWebhookQueueManager {
   /**
    * Whether a delivery row must stay held under the current kill registry.
    *
-   * Used by the worker at pre-claim, post-claim, and retry. Pre-upgrade
-   * keyless rows and keys at or above the column length are treated as
-   * stopped whenever any stop is active.
+   * Used by the worker at pre-claim, post-claim, and retry. Every
+   * keyless row and every key at or above the column length is
+   * treated as stopped whenever any stop is active.
    *
    * @param array<string, mixed> $row
    *   Delivery row (id and key columns).
@@ -1018,7 +1023,10 @@ final class McpWebhookQueueManager {
       || strlen($tenant) >= self::TENANT_MAX_LENGTH) {
       return $this->enforcer()->hasActiveStop();
     }
-    if ($this->isPreUpgradeKeyless($row)) {
+    if ($this->isKeyless($row)) {
+      if ($this->weakened(self::WEAKEN_SKIP_KEYLESS_STOP)) {
+        return FALSE;
+      }
       return $this->enforcer()->hasActiveStop();
     }
     return $this->enforcer()->wouldHoldKeys($principalKey, $humanKey, $tenant);
@@ -1044,35 +1052,20 @@ final class McpWebhookQueueManager {
   /**
    * Keyless row that must stay stopped while any stop is active.
    *
-   * When the 10038 state key is absent (code deployed before
-   * updb), every keyless row is treated as pre-upgrade. Fresh
-   * installs record 0 so no keyless row is pre-upgrade. After a
-   * recorded max of 1 or more, only ids at or below that max with
-   * empty keys are pre-upgrade (rows queued before update 10036).
+   * A delivery with no principal, human, or tenant key cannot be
+   * scoped to one stop. While any stop is active it stays held,
+   * including rows queued after update 10038.
    *
    * @param array<string, mixed> $row
    *   Delivery row.
    *
    * @return bool
-   *   TRUE when this keyless row is in the pre-upgrade set.
+   *   TRUE when every stored key is empty.
    */
-  private function isPreUpgradeKeyless(array $row): bool {
-    $id = (int) ($row['id'] ?? 0);
-    if ($id < 1) {
-      return FALSE;
-    }
-    $keyless = trim((string) ($row['principal_key'] ?? '')) === ''
+  private function isKeyless(array $row): bool {
+    return trim((string) ($row['principal_key'] ?? '')) === ''
       && trim((string) ($row['human_key'] ?? '')) === ''
       && trim((string) ($row['tenant'] ?? '')) === '';
-    if (!$keyless) {
-      return FALSE;
-    }
-    $raw = $this->state->get(self::STATE_PRE_UPGRADE_MAX_ID);
-    if ($raw === NULL) {
-      return TRUE;
-    }
-    $max = (int) $raw;
-    return $max >= 1 && $id <= $max;
   }
 
   /**

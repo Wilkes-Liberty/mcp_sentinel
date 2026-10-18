@@ -44,6 +44,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   integer number of seconds. A non-integer, zero,
   or negative value is refused with `invalid_ttl`
   and writes `operator_command_refused`.
+- **Behaviour change (DEV-985).** `McpKillBlockStatus::isBlocking()`
+  is now `TRUE` for `kill_pending` regardless of `block_until`.
+  `McpKillSwitchResult::$blockUntil` is non-zero while a mass
+  freeze is pending. Confirming a freeze refreshes `block_until`
+  the same way as extend (`min(now+7d, max(existing, now+ttl))`).
 - Undesignated Paladin clients now need a verified principal on
   JSON:API, GraphQL, and `/drupal-mcp/context`. Tokens that list
   scopes need `mcp_read`, or `mcp_write` for writes and mutations,
@@ -186,17 +191,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   it stays frozen until two operators lift it or break-glass is
   used. Confirmed stops still expire at their TTL. Break-glass is
   limited to the Paladin `iss|sub` configured in `settings.php`.
-  Escalation claims, audits, then notifies once per batch. A
-  hook throw writes watchdog plus `agent_kill_escalate` with
+  Escalation claims, audits, then notifies once per batch,
+  including when `block_until` has already elapsed. A hook
+  throw writes watchdog plus `agent_kill_escalate` with
   reason `notify_failed` and does not lift the freeze. Un-kill
   expiry reverts to killed and writes `agent_kill_expire`
-  before notify; each batch is isolated. Run updates 10036,
-  10037, then 10038. Drain or review the webhook queue before
-  updb: keyless pending rows at or below the recorded
-  pre-upgrade max id are held when any kill-block or freeze is
-  active. Fresh installs set that max id to 0 so new-site
-  keyless rows are not held under an unrelated stop. Rollback
-  for 10038 is documented only in INSTALL.md.
+  before notify; each batch is isolated. Confirm refreshes
+  `block_until` the same way as extend
+  (`min(now+7d, max(existing, now+ttl))`) so an overdue freeze
+  stays in force. Run updates 10036, 10037, then 10038. Every
+  keyless row stays stopped while any stop is active,
+  including rows queued after 10038. Rollback for 10038 is
+  documented only in INSTALL.md.
 
 ### Fixed
 - A claimless request on a Drupal test child served by the PHP
