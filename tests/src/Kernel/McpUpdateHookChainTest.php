@@ -1071,9 +1071,9 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
-   * Update 10035 adds hold-queue columns and the escalation stamp.
+   * Update 10036 adds hold-queue columns and the escalation stamp.
    */
-  public function testUpdate10035AddsHoldAndEscalationColumns(): void {
+  public function testUpdate10036AddsHoldAndEscalationColumns(): void {
     $schema = $this->container->get('database')->schema();
     $delivery = 'mcp_sentinel_webhook_delivery';
     $this->assertTrue($schema->tableExists($delivery));
@@ -1118,7 +1118,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
         'changed' => 1,
       ])->execute();
 
-    $message = mcp_sentinel_update_10035();
+    $message = mcp_sentinel_update_10036();
     $this->assertStringContainsString('principal_key', $message);
     $this->assertStringContainsString('released', $message);
     $this->assertStringContainsString('escalated_at', $message);
@@ -1137,7 +1137,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $this->assertSame('held', $held);
     $this->assertStringContainsString('Held ', $message);
 
-    $again = mcp_sentinel_update_10035();
+    $again = mcp_sentinel_update_10036();
     $this->assertStringContainsString('already present', $again);
     $this->assertStringContainsString('Drain or review the webhook queue before updb', $again);
   }

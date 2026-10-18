@@ -160,7 +160,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Each freeze, confirm, extend, lift, escalation, break-glass
   use, hold, release, and discard writes exactly one
   `logAlways()` row with operator, scope, timestamp, and
-  correlation or item ids. Run update 10035. Drain or review the
+  correlation or item ids. Run update 10036. Drain or review the
   webhook queue before updb: keyless pending rows are held when
   any kill-block or freeze is active.
 

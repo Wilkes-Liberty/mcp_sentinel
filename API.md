@@ -317,7 +317,7 @@ Break-glass is limited to the identity configured in
 `settings.php` (`mcp_sentinel.kill_switch.break_glass_operator`).
 The requester is always refused. Release is refused while the
 scope is still stopped. Escalation notifies once per batch.
-`kill-extend` never shortens a stop. Run update 10035 before
+`kill-extend` never shortens a stop. Run update 10036 before
 serving traffic so hold-queue columns exist. Drain or review the
 webhook queue before updb: keyless pending rows are held when any
 kill-block or freeze is active. The Drupal-side kill-block UI

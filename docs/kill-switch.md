@@ -53,7 +53,7 @@ the audit log, on a `denied_access` row with the reason `principal_killed`.
 1. Run database updates before the site serves traffic:
    `drush updb -y`. Update 10030 creates the registry table. Update
    10034 adds the Drupal uid column on operator bindings. Update
-   10035 adds hold-queue columns and the escalation stamp.
+   10036 adds hold-queue columns and the escalation stamp.
    Drain or review the webhook queue before updb: keyless pending
    rows are held when any kill-block or freeze is active.
 2. Until the registry table exists, every governed call is refused.
@@ -479,7 +479,7 @@ See `mcp_sentinel.api.php`.
   `settings.php`. The requester is always refused.
 - An in-flight webhook POST cannot be recalled. A retry cannot
   overwrite a held row.
-- Rows queued before update 10035 have empty keys. Drain or review
+- Rows queued before update 10036 have empty keys. Drain or review
   the webhook queue before `drush updb`; keyless pending rows are
   held when any kill-block or freeze is active.
 - `kill-extend` never shortens a stop. `block_until` is

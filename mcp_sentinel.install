@@ -1827,7 +1827,7 @@ function mcp_sentinel_update_10034(): string {
 /**
  * Hold-queue columns and freeze escalation stamp (DEV-985).
  */
-function mcp_sentinel_update_10035(): string {
+function mcp_sentinel_update_10036(): string {
   $schema = \Drupal::database()->schema();
   $messages = [];
   $delivery = 'mcp_sentinel_webhook_delivery';

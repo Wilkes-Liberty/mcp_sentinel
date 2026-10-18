@@ -538,6 +538,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->sealSubject('subject-rel-stop', 'agent-rel-stop');
     $this->queue()->enqueueForEvent('mcp.entity.presave', ['event' => 'held']);
     $in = $this->latestDelivery();
+    $this->assertNotSame('', $in['principal_key']);
     $this->killSwitch()->kill(
       [$this->principalSelector('subject-rel-stop', 'agent-rel-stop')],
       'hold',
@@ -891,6 +892,29 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $this->assertSame($kill->batchId, $events[0]->batchId);
     $this->assertSame($kill->batchId, $GLOBALS['mcp_sentinel_kill_hook_probe'][0]['batch_id']);
     $this->assertSame(1, $this->countAudit(McpKillSwitch::AUDIT_ESCALATE));
+  }
+
+  /**
+   * The unavailable-confirmer hook must be named {module}_{hook}.
+   *
+   * The hook already starts with mcp_sentinel_, so the prefix is
+   * repeated. The short name is not a Drupal hook implementation
+   * and never dispatches the event.
+   */
+  public function testEscalationHookUsesRepeatedModulePrefix(): void {
+    $this->assertTrue(
+      function_exists('mcp_sentinel_mcp_sentinel_kill_unavailable_confirmer'),
+      'hook_mcp_sentinel_kill_unavailable_confirmer must be {module}_{hook}.',
+    );
+    $this->assertFalse(
+      function_exists('mcp_sentinel_kill_unavailable_confirmer'),
+      'The unprefixed name is not a Drupal hook implementation.',
+    );
+    $this->assertTrue(
+      $this->container->get('module_handler')
+        ->hasImplementations('mcp_sentinel_kill_unavailable_confirmer', 'mcp_sentinel'),
+      'mcp_sentinel must implement hook_mcp_sentinel_kill_unavailable_confirmer.',
+    );
   }
 
   /**
