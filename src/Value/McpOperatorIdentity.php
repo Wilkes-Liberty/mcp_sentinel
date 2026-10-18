@@ -35,6 +35,11 @@ final readonly class McpOperatorIdentity {
   public const KIND_UID = 'uid';
 
   /**
+   * Worker or update-hook actor. Not a verified operator.
+   */
+  public const KIND_SYSTEM = 'system';
+
+  /**
    * Constructs a verified or test-only identity.
    *
    * @param string $kind
@@ -74,6 +79,13 @@ final readonly class McpOperatorIdentity {
   }
 
   /**
+   * System actor for worker and update-hook holds.
+   */
+  public static function system(): self {
+    return new self(self::KIND_SYSTEM, 'worker');
+  }
+
+  /**
    * Drupal uid. PHPUnit-only. Never a production operator identity.
    *
    * @throws \LogicException
@@ -100,6 +112,9 @@ final readonly class McpOperatorIdentity {
    * Durable id stored on kill-block and audit rows.
    */
   public function storageId(): string {
+    if ($this->kind === self::KIND_SYSTEM) {
+      return 'system';
+    }
     return $this->kind . ':' . $this->id;
   }
 

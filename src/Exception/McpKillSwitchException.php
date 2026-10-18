@@ -85,6 +85,31 @@ final class McpKillSwitchException extends \RuntimeException {
   public const TABLE_MISSING = 'table_missing';
 
   /**
+   * Break-glass action is not keep, extend, or lift.
+   */
+  public const INVALID_ACTION = 'invalid_action';
+
+  /**
+   * Target is not an active mass freeze.
+   */
+  public const NOT_FROZEN = 'not_frozen';
+
+  /**
+   * Held delivery row is missing or not in a held state.
+   */
+  public const NOT_HELD = 'not_held';
+
+  /**
+   * Release is refused while the delivery scope is still stopped.
+   */
+  public const SCOPE_STOPPED = 'scope_stopped';
+
+  /**
+   * Break-glass is limited to the identity in settings.php.
+   */
+  public const BREAK_GLASS_DENIED = 'break_glass_denied';
+
+  /**
    * Constructs the refusal.
    *
    * @param string $reasonCode

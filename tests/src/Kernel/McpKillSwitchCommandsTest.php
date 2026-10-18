@@ -164,8 +164,10 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.kill_switch'),
       $this->container->get('mcp_sentinel.operator_identity'),
       $this->container->get('mcp_sentinel.operator_binding'),
+      $this->container->get('mcp_sentinel.webhook_queue_manager'),
       $this->container->get('account_switcher'),
       $this->container->get('entity_type.manager'),
+      $this->container->get('uuid'),
     );
     $this->wireIo();
   }
@@ -628,8 +630,10 @@ final class McpKillSwitchCommandsTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.kill_switch'),
       $factory,
       $binding,
+      $this->container->get('mcp_sentinel.webhook_queue_manager'),
       $this->container->get('account_switcher'),
       $this->container->get('entity_type.manager'),
+      $this->container->get('uuid'),
     );
     foreach ($this->commandWeaken as $flag) {
       $this->commands->weakenForTest($flag);

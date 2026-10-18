@@ -252,7 +252,10 @@ $settings['mcp_sentinel.web_server_user'] = 'www-data';
 
 Even with that flag, euid 0 and the web-server user are refused.
 Run database updates: 10034 adds the Drupal uid column on
-`mcp_sentinel_operator_binding`. 10032 and 10033 delete dead
+`mcp_sentinel_operator_binding`. 10036 adds hold-queue columns
+and the escalation stamp. Drain or review the webhook queue
+before updb: keyless pending rows are held when any kill-block
+or freeze is active. 10032 and 10033 delete dead
 `paladin_introspection_*` keys if an earlier update wrote them
 into importable config.
 

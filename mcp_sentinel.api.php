@@ -8,12 +8,11 @@
 /**
  * Operator-decision hook when a two-person confirmer does not respond.
  *
- * @todo DEV-846 operator decision: the unavailable-confirmer rule is
- *   not decided. Implementations must not apply a pending mass kill or
- *   complete a pending un-kill. There is no timeout that promotes the
- *   request to a single-operator action and no break-glass skip. Until
- *   the operator decides, the pending request expires with the confirm
- *   window and the two-person rule holds.
+ * DEV-985: an unconfirmed person-wide or tenant-wide freeze stays
+ * frozen when the confirm window ends. This hook notifies the named
+ * second person and the break-glass path. Implementations must not
+ * lift the freeze or complete a pending un-kill. There is no timeout
+ * that promotes the request to a single-operator action.
  *
  * @param array $context
  *   Keys: batch_id, transition ('kill' or 'unkill'), first_operator_id
@@ -21,6 +20,6 @@
  *   tokens.
  */
 function hook_mcp_sentinel_kill_unavailable_confirmer(array $context): void {
-  // Record that the named second person (secondary account holder) did
-  // not confirm. Do not weaken the two-person rule.
+  // Notify the named second person and the break-glass operator.
+  // Do not lift the freeze.
 }

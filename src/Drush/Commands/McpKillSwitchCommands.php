@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Drush\Commands;
 
+use Drupal\Component\Uuid\UuidInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
+use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
@@ -64,10 +67,14 @@ final class McpKillSwitchCommands extends DrushCommands {
    *   Paladin token identity resolver.
    * @param \Drupal\mcp_sentinel\Service\McpOperatorBinding $operatorBindings
    *   Paladin-to-Drupal-account bindings.
+   * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
+   *   Held webhook deliveries.
    * @param \Drupal\Core\Session\AccountSwitcherInterface $accountSwitcher
    *   Switches to the mapped operator for the permission check.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   User storage for --operator and mapped uids.
+   * @param \Drupal\Component\Uuid\UuidInterface $uuid
+   *   Correlation ids for release and discard.
    */
   public function __construct(
     #[Autowire(service: 'mcp_sentinel.kill_switch')]
@@ -76,10 +83,14 @@ final class McpKillSwitchCommands extends DrushCommands {
     private readonly McpOperatorIdentityFactory $operatorIdentities,
     #[Autowire(service: 'mcp_sentinel.operator_binding')]
     private readonly McpOperatorBinding $operatorBindings,
+    #[Autowire(service: 'mcp_sentinel.webhook_queue_manager')]
+    private readonly McpWebhookQueueManager $webhookQueue,
     #[Autowire(service: 'account_switcher')]
     private readonly AccountSwitcherInterface $accountSwitcher,
     #[Autowire(service: 'entity_type.manager')]
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    #[Autowire(service: 'uuid')]
+    private readonly UuidInterface $uuid,
   ) {
     parent::__construct();
   }
@@ -96,7 +107,7 @@ final class McpKillSwitchCommands extends DrushCommands {
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
   #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --principal-key=iss|sub|actor --reason="compromise"', description: 'Kill one principal immediately.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --human-key=iss|sub --reason="mass revoke"', description: 'Mass kill pending second-operator confirm.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill --operator=alice --human-key=iss|sub --reason="mass revoke"', description: 'Person-wide freeze. In-scope agents are refused immediately; a second operator confirms, extends, or lifts.')]
   public function kill(
     array $options = [
       'principal-key' => [],
@@ -123,13 +134,13 @@ final class McpKillSwitchCommands extends DrushCommands {
   }
 
   /**
-   * Second operator confirms a pending mass kill.
+   * Second operator confirms a mass freeze (keeps it).
    */
   #[CLI\Command(name: 'mcp-sentinel:kill-confirm', aliases: ['mcps:kill-confirm'])]
   #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
   #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
   #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
-  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-confirm BATCH --operator=bob', description: 'Confirm a pending mass kill as a distinct operator.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-confirm BATCH --operator=bob', description: 'Confirm a mass freeze as a distinct operator.')]
   public function confirmKill(
     string $batch,
     array $options = [
@@ -140,6 +151,182 @@ final class McpKillSwitchCommands extends DrushCommands {
     return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch): int {
       $result = $this->killSwitch->confirm($batch, $identity);
       $this->printResult($result);
+      return self::EXIT_SUCCESS;
+    });
+  }
+
+  /**
+   * Second operator extends a mass freeze (7-day cap).
+   */
+  #[CLI\Command(name: 'mcp-sentinel:kill-extend', aliases: ['mcps:kill-extend'])]
+  #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
+  #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds from now. Default 86400, max 604800.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-extend BATCH --operator=bob --ttl=604800', description: 'Extend a mass freeze as a distinct operator.')]
+  public function extendKill(
+    string $batch,
+    array $options = [
+      'ttl' => NULL,
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch, $options): int {
+      $ttlRaw = $options['ttl'] ?? '';
+      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
+      $result = $this->killSwitch->extend($batch, $identity, $ttl);
+      $this->printResult($result);
+      return self::EXIT_SUCCESS;
+    });
+  }
+
+  /**
+   * Second operator lifts an unconfirmed mass freeze.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:kill-lift', aliases: ['mcps:kill-lift'])]
+  #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-lift BATCH --operator=bob', description: 'Lift an unconfirmed mass freeze. Held deliveries stay held.')]
+  public function liftKill(
+    string $batch,
+    array $options = [
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch): int {
+      $result = $this->killSwitch->lift($batch, $identity);
+      $this->printResult($result);
+      $this->output()->writeln('held_items: unchanged (release or discard explicitly)');
+      return self::EXIT_SUCCESS;
+    });
+  }
+
+  /**
+   * Break-glass keep, extend, or lift when the second person is unreachable.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:kill-break-glass', aliases: ['mcps:kill-break-glass'])]
+  #[CLI\Argument(name: 'batch', description: 'Batch id printed by mcp-sentinel:kill.')]
+  #[CLI\Option(name: 'keep', description: 'Confirm (keep) the freeze.')]
+  #[CLI\Option(name: 'extend', description: 'Extend the freeze. Pass seconds with --ttl.')]
+  #[CLI\Option(name: 'lift', description: 'Lift the freeze. Held deliveries stay held.')]
+  #[CLI\Option(name: 'ttl', description: 'Lifetime in seconds when extending. Default 86400, max 604800.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --keep', description: 'Break-glass keep of a mass freeze.')]
+  public function breakGlassKill(
+    string $batch,
+    array $options = [
+      'keep' => FALSE,
+      'extend' => FALSE,
+      'lift' => FALSE,
+      'ttl' => NULL,
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($batch, $options): int {
+      $action = $this->breakGlassAction($options);
+      $ttlRaw = $options['ttl'] ?? '';
+      $ttl = $ttlRaw === '' ? NULL : (int) $ttlRaw;
+      $result = $this->killSwitch->breakGlass(
+        $batch,
+        $action,
+        $identity,
+        $ttl,
+      );
+      $this->printResult($result);
+      $this->output()->writeln('break_glass: ' . $action->value);
+      return self::EXIT_SUCCESS;
+    });
+  }
+
+  /**
+   * List held webhook deliveries.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-held', aliases: ['mcps:webhook-held'])]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-held --operator=alice', description: 'List webhook deliveries held by a kill.')]
+  public function listHeld(
+    array $options = [
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (): int {
+      $rows = $this->webhookQueue->listHeld();
+      if ($rows === []) {
+        $this->output()->writeln('held: none');
+        return self::EXIT_SUCCESS;
+      }
+      $table = [];
+      foreach ($rows as $row) {
+        $table[] = [
+          (string) $row['id'],
+          (string) ($row['endpoint_id'] ?? ''),
+          (string) ($row['event_name'] ?? ''),
+          (string) ($row['principal_key'] ?? ''),
+          (string) ($row['human_key'] ?? ''),
+          (string) ($row['tenant'] ?? ''),
+        ];
+      }
+      $this->io()->table(
+        ['id', 'endpoint', 'event', 'principal_key', 'human_key', 'tenant'],
+        $table,
+      );
+      return self::EXIT_SUCCESS;
+    });
+  }
+
+  /**
+   * Release held webhook deliveries so they deliver as originally queued.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-release', aliases: ['mcps:webhook-release'])]
+  #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-release --operator=alice --id=12 --id=13', description: 'Release held deliveries. Same payload, id, and body signature.')]
+  public function releaseHeld(
+    array $options = [
+      'id' => [],
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
+      $ids = $this->idList($options['id'] ?? []);
+      $correlationId = $this->uuid->generate();
+      $released = $this->webhookQueue->releaseHeld($ids, $identity, $correlationId);
+      $this->output()->writeln('released: ' . implode(',', $released));
+      $this->output()->writeln('correlation_id: ' . $correlationId);
+      return self::EXIT_SUCCESS;
+    });
+  }
+
+  /**
+   * Discard held webhook deliveries. They are never delivered.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:webhook-discard', aliases: ['mcps:webhook-discard'])]
+  #[CLI\Option(name: 'id', description: 'Held delivery id. Repeat for a batch.')]
+  #[CLI\Option(name: 'operator', description: 'Drupal account name bound to this Paladin token.')]
+  #[CLI\Option(name: 'token', description: 'Refused. Pipe the token on stdin or set PALADIN_TOKEN.')]
+  #[CLI\Usage(name: 'PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-discard --operator=alice --id=12', description: 'Discard held deliveries. They are never sent.')]
+  public function discardHeld(
+    array $options = [
+      'id' => [],
+      'operator' => '',
+      'token' => '',
+    ],
+  ): int {
+    return $this->runAsBoundOperator($options, function (McpOperatorIdentity $identity) use ($options): int {
+      $ids = $this->idList($options['id'] ?? []);
+      $correlationId = $this->uuid->generate();
+      $discarded = $this->webhookQueue->discardHeld($ids, $identity, $correlationId);
+      $this->output()->writeln('discarded: ' . implode(',', $discarded));
+      $this->output()->writeln('correlation_id: ' . $correlationId);
       return self::EXIT_SUCCESS;
     });
   }
@@ -383,7 +570,10 @@ final class McpKillSwitchCommands extends DrushCommands {
     $this->output()->writeln('batch: ' . $result->batchId);
     if ($result->needsConfirm) {
       $this->output()->writeln(
-        'needs_confirm: yes (named second person / secondary account holder)',
+        'needs_confirm: yes (named second person / secondary account holder).',
+      );
+      $this->output()->writeln(
+        'freeze: in force now. Unconfirmed timeout keeps it and escalates.',
       );
     }
     if ($result->blockUntil > 0) {
@@ -580,6 +770,54 @@ final class McpKillSwitchCommands extends DrushCommands {
    */
   private function weakened(string $flag): bool {
     return isset($this->weakenForTest[$flag]);
+  }
+
+  /**
+   * Break-glass action from mutually exclusive flags.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpKillSwitchException
+   */
+  private function breakGlassAction(array $options): McpKillBreakGlassAction {
+    $keep = !empty($options['keep']);
+    $extend = !empty($options['extend']);
+    $lift = !empty($options['lift']);
+    $chosen = (int) $keep + (int) $extend + (int) $lift;
+    if ($chosen !== 1) {
+      throw new McpKillSwitchException(
+        McpKillSwitchException::INVALID_ACTION,
+        'Pass exactly one of --keep, --extend, or --lift.',
+      );
+    }
+    if ($keep) {
+      return McpKillBreakGlassAction::Keep;
+    }
+    if ($extend) {
+      return McpKillBreakGlassAction::Extend;
+    }
+    return McpKillBreakGlassAction::Lift;
+  }
+
+  /**
+   * Positive delivery ids from a repeated Drush option.
+   *
+   * @param mixed $value
+   *   Option value.
+   *
+   * @return list<int>
+   *   Ids.
+   */
+  private function idList(mixed $value): array {
+    $ids = [];
+    foreach ($this->optionList($value) as $item) {
+      $id = (int) $item;
+      if ($id > 0) {
+        $ids[] = $id;
+      }
+    }
+    return $ids;
   }
 
 }

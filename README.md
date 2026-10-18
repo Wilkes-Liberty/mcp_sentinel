@@ -64,12 +64,12 @@ user reference. Owner/author and user-reference fields stay refused.
 `config_set:data` stays fully scanned. Grant tables are not an
 identity source.
 
-### Agent kill switch (DEV-986)
+### Agent kill switch (DEV-846, DEV-985, DEV-986)
 
 Operator guide: [`docs/kill-switch.md`](docs/kill-switch.md). It covers
 setup, permissions, the two-operator rule, how to issue, confirm, check,
-and lift a stop, the limits, and planned work (DEV-985) that is not in a
-release.
+and lift a stop, freeze-first mass stops, held side effects, and
+break-glass.
 
 A durable kill-block registry (`mcp_sentinel.kill_switch`) keyed by
 `iss|sub|actor`, `iss|sub`, or tenant is checked on every governed
@@ -77,7 +77,9 @@ A durable kill-block registry (`mcp_sentinel.kill_switch`) keyed by
 same generic deny as a missing principal.
 
 **Operator commands.** Every kill-switch Drush command
-(`kill`, `kill-confirm`, `unkill`, `kill-status`, `operator-bind`,
+(`kill`, `kill-confirm`, `kill-extend`, `kill-lift`,
+`kill-break-glass`, `unkill`, `kill-status`, `webhook-held`,
+`webhook-release`, `webhook-discard`, `operator-bind`,
 `operator-unbind`) needs two things:
 
 1. A Paladin access token on `PALADIN_TOKEN` or stdin. Do not pass
@@ -120,11 +122,56 @@ cannot turn that on. Even then, euid 0 and the web-server user
 The process user and `SUDO_USER` are written to the audit row as
 advisory metadata only. They are not the operator identity.
 
-**Known limitation (webhook hold is DEV-985):** a kill does not
-cancel webhook deliveries already in
-`mcp_sentinel_webhook_delivery`. Those items still run. This
-release does not delete the queue or fail rows on the webhook
-admin page. New admits and in-flight governed writes are refused.
+A single-agent stop takes effect immediately. A person-wide or
+tenant-wide (mass) stop also takes effect immediately as a **freeze**.
+In-scope agents are refused from that moment. A distinct second
+operator can confirm (keep), extend (up to 7 days), or lift the
+freeze. The requesting operator cannot confirm or lift their own
+stop.
+
+**Unconfirmed freeze (fail-safe default):** if nobody confirms within
+the window (15 minutes by default), the freeze stays in place and
+escalates. The unavailable-confirmer hook notifies the named second
+person and the break-glass path. The freeze never lifts on that
+timeout. An unconfirmed freeze also stays frozen after its TTL until
+two operators lift it or break-glass is used. Confirmed stops still
+expire at their TTL. Lifting a mass freeze always takes two operators.
+Kill-block limits stay 24 hours default, 7 days maximum.
+
+**Queued side effects are held.** On any stop (single agent,
+person-wide, or tenant-wide), webhook deliveries already queued for
+that scope move to `held` and are not delivered. Items outside the
+scope still send. Lifting the stop does not release them. An operator
+reviews held rows and releases or discards each one, or a batch:
+
+```
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-held --operator=alice
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-release --operator=alice --id=12 --id=13
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:webhook-discard --operator=alice --id=12
+```
+
+A released item delivers exactly as originally queued (same payload,
+same delivery id, same `X-MCP-Signature`). `X-MCP-Timestamp` and
+`X-MCP-Signature-256` are new on each attempt. A discarded item is
+never sent. Release is refused while the scope is still stopped.
+
+**Break-glass** (when the named second person cannot be reached): only
+the identity configured in `settings.php`
+(`mcp_sentinel.kill_switch.break_glass_operator`, a Paladin `iss|sub`
+or a bound account) can keep, extend, or lift the freeze. Everyone
+else is refused. The requester is always refused. That action is
+audited as break-glass use, not as a skip of the two-person rule.
+
+```
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --keep
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --extend --ttl=604800
+PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:kill-break-glass BATCH --operator=breakglass-op --lift
+```
+
+Run the break-glass drill (`McpKillSwitchBreakGlassDrillTest`)
+alongside the scheduled kill-switch drill (DEV-855). New admits and
+in-flight governed writes are refused as soon as the stop is
+recorded.
 
 ### Breaking: Paladin tokens required for governed tools
 
@@ -1418,10 +1465,16 @@ default rather than merely guarded.
 
 | Command | Purpose |
 |---------|---------|
-| `drush mcp-sentinel:kill` | Kill one principal, every agent of this person, a tenant, or a mass set. Requires `PALADIN_TOKEN` (or stdin) and `--operator`. Mass kills stay pending until a distinct Paladin operator confirms. |
-| `drush mcp-sentinel:kill-confirm` | Confirm a pending mass kill as a distinct operator. Same token and `--operator` rules. |
-| `drush mcp-sentinel:unkill` | Request or confirm an un-kill. Always needs two distinct Paladin operators. |
+| `drush mcp-sentinel:kill` | Kill one principal immediately, or freeze every agent of this person / a tenant immediately. Requires `PALADIN_TOKEN` (or stdin) and `--operator`. A mass freeze still needs a distinct operator to confirm, extend, or lift. |
+| `drush mcp-sentinel:kill-confirm` | Confirm (keep) a mass freeze as a distinct operator. Same token and `--operator` rules. |
+| `drush mcp-sentinel:kill-extend` | Extend a mass freeze as a distinct operator (7-day cap). Never shortens a stop. |
+| `drush mcp-sentinel:kill-lift` | Lift an unconfirmed mass freeze as a distinct operator. Held deliveries stay held. |
+| `drush mcp-sentinel:kill-break-glass` | Keep, extend, or lift a freeze when the named second person cannot be reached. Limited to the identity configured in settings.php. The requester is always refused. |
+| `drush mcp-sentinel:unkill` | Request or confirm an un-kill of a confirmed stop. Always needs two distinct Paladin operators. Refused on `kill_pending`; use `kill-lift`. |
 | `drush mcp-sentinel:kill-status` | Print the kill-block row for one selector. Same token and `--operator` rules. |
+| `drush mcp-sentinel:webhook-held` | List webhook deliveries held by a kill. |
+| `drush mcp-sentinel:webhook-release` | Release held deliveries so they send as originally queued. Refused while the scope is still stopped. |
+| `drush mcp-sentinel:webhook-discard` | Discard held deliveries. They are never sent. |
 | `drush mcp-sentinel:operator-bind` | Bind this Paladin `iss|sub` to `--operator`. Token from `PALADIN_TOKEN` or stdin, never `--token`. Paladin down fails closed. A second identity on an already-bound record is refused. |
 | `drush mcp-sentinel:operator-unbind` | Request or confirm removal of an operator binding. Always needs two distinct Paladin operators. |
 | `drush mcp-sentinel:status` | Print source-contract readiness, active policy, audit, and lock state. Exits non-zero whenever the connector-facing source contract is not ready. |

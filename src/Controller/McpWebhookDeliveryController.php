@@ -175,7 +175,7 @@ class McpWebhookDeliveryController extends ControllerBase {
         '#rows'    => $tableRows,
         '#empty'   => $this->t('No webhook deliveries recorded.'),
         '#caption' => $this->t(
-          'Up to @n most recent webhook deliveries.',
+          'Up to @n most recent webhook deliveries. Held rows stay held after a kill is lifted. Release or discard them with drush mcp-sentinel:webhook-release or :webhook-discard.',
           ['@n' => self::MAX_ROWS]
         ),
         '#attached' => ['library' => ['mcp_sentinel/admin']],
@@ -194,8 +194,8 @@ class McpWebhookDeliveryController extends ControllerBase {
    */
   private function statusBadgeClass(string $status): string {
     return match ($status) {
-      'failed', 'failed_ssrf', 'failed_redirect', 'failed_key' => 'mcp-badge--crit',
-      'pending', 'in_progress' => 'mcp-badge--warn',
+      'failed', 'failed_ssrf', 'failed_redirect', 'failed_key', 'discarded' => 'mcp-badge--crit',
+      'pending', 'in_progress', 'held' => 'mcp-badge--warn',
       default => 'mcp-badge--ok',
     };
   }

@@ -12,7 +12,9 @@ use Drupal\Core\Queue\QueueWorkerBase;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
+use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use GuzzleHttp\ClientInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -38,6 +40,21 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactoryPluginInterface {
 
   /**
+   * PHPUnit-only: skip the pre-claim kill-registry check.
+   */
+  public const WEAKEN_SKIP_PRE_CLAIM_CHECK = 'skip_pre_claim_check';
+
+  /**
+   * PHPUnit-only: skip the post-claim isKilled re-check.
+   */
+  public const WEAKEN_SKIP_POST_CLAIM_RECHECK = 'skip_post_claim_recheck';
+
+  /**
+   * PHPUnit-only: allow retry writes to overwrite a held row.
+   */
+  public const WEAKEN_SKIP_RETRY_STATUS_GUARD = 'skip_retry_status_guard';
+
+  /**
    * Maximum delivery attempts before marking a permanent failure.
    */
   private const MAX_ATTEMPTS = 5;
@@ -46,6 +63,25 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    * Per-attempt backoff in seconds: 30 s, 5 min, 30 min, 2 h, 8 h.
    */
   private const BACKOFF = [30, 300, 1800, 7200, 28800];
+
+  /**
+   * Test-only weaken flags. Empty in production.
+   *
+   * Protected so DependencySerializationTrait can restore them.
+   *
+   * @var array<string, true>
+   */
+  protected array $weakenForTest = [];
+
+  /**
+   * PHPUnit-only callback between the pre-claim check and the claim.
+   */
+  protected mixed $betweenCheckAndClaimForTest = NULL;
+
+  /**
+   * PHPUnit-only callback after the post-claim re-check, before POST.
+   */
+  protected mixed $afterClaimForTest = NULL;
 
   /**
    * Returns the backoff delay (seconds) before the given attempt's retry.
@@ -194,6 +230,10 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The MCP Sentinel logger channel.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextJob $principalJob
    *   Internal job-boundary overlay (per queue item).
+   * @param \Drupal\mcp_sentinel\Service\McpKillSwitch $killSwitch
+   *   Kill registry checked before a row is claimed.
+   * @param \Drupal\mcp_sentinel\Service\McpWebhookQueueManager $webhookQueue
+   *   Moves in-scope rows to held.
    */
   public function __construct(
     array $configuration,
@@ -205,6 +245,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     protected TimeInterface $time,
     protected LoggerInterface $logger,
     protected McpPrincipalContextJob $principalJob,
+    protected McpKillSwitch $killSwitch,
+    protected McpWebhookQueueManager $webhookQueue,
   ) {
     parent::__construct($configuration, $plugin_id, $plugin_definition);
   }
@@ -228,6 +270,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $container->get('datetime.time'),
       $container->get('logger.channel.mcp_sentinel'),
       $container->get('mcp_sentinel.principal_context_job'),
+      $container->get('mcp_sentinel.kill_switch'),
+      $container->get('mcp_sentinel.webhook_queue_manager'),
     );
   }
 
@@ -280,13 +324,39 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     if ($row === NULL) {
       return;
     }
-    if (in_array($row['status'], ['sent', 'failed', 'failed_ssrf', 'failed_redirect', 'failed_key'], TRUE)) {
-      // Terminal states: already delivered or permanently failed.
+    if (in_array($row['status'], [
+      'sent',
+      'failed',
+      'failed_ssrf',
+      'failed_redirect',
+      'failed_key',
+      McpWebhookQueueManager::STATUS_HELD,
+      McpWebhookQueueManager::STATUS_DISCARDED,
+    ], TRUE)) {
+      // Terminal or held: already delivered, failed, held, or discarded.
       return;
     }
     // in_progress rows were claimed by another worker; skip without re-sending.
     if ($row['status'] === 'in_progress') {
       return;
+    }
+
+    $fromItem = is_array($data) ? $data : [];
+    $principalKey = $this->rowOrItemKey($row, $fromItem, 'principal_key');
+    $humanKey = $this->rowOrItemKey($row, $fromItem, 'human_key');
+    $tenant = $this->rowOrItemKey($row, $fromItem, 'tenant');
+    $operatorReleased = (int) ($row['released'] ?? 0) === 1;
+    if (!$operatorReleased
+      && !$this->weakened(self::WEAKEN_SKIP_PRE_CLAIM_CHECK)
+      && $this->killSwitch->shouldHoldSideEffects()
+      && ($principalKey !== '' || $humanKey !== '' || $tenant !== '')
+      && $this->killSwitch->isKilled($principalKey, $humanKey, $tenant)) {
+      $this->webhookQueue->markHeld($deliveryId);
+      return;
+    }
+
+    if (is_callable($this->betweenCheckAndClaimForTest)) {
+      ($this->betweenCheckAndClaimForTest)();
     }
 
     $attempts = (int) $row['attempts'];
@@ -385,6 +455,17 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
+    if (!$this->weakened(self::WEAKEN_SKIP_POST_CLAIM_RECHECK)
+      && $this->killSwitch->shouldHoldSideEffects()
+      && $this->killSwitch->isKilled($principalKey, $humanKey, $tenant)) {
+      $this->webhookQueue->holdClaimed($deliveryId);
+      return;
+    }
+
+    if (is_callable($this->afterClaimForTest)) {
+      ($this->afterClaimForTest)();
+    }
+
     // Fix 4: Use the stored payload for byte-identical delivery and replay.
     // Fall back to the queue-item payload if the column is empty (legacy rows).
     $storedPayload = (string) ($row['payload'] ?? '');
@@ -438,7 +519,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $code = $response->getStatusCode();
       $body = substr($response->getBody()->getContents(), 0, 512);
       if ($code >= 200 && $code < 300) {
-        $this->updateRow($deliveryId, 'sent', $code, $body, $newAttempts);
+        $this->updateRow($deliveryId, 'sent', $code, $body, $newAttempts, TRUE);
         return;
       }
       if ($code >= 300 && $code < 400) {
@@ -450,7 +531,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
         $this->updateRow($deliveryId, 'failed_redirect', $code,
           'Endpoint redirects to ' . ($location !== '' ? $location : '(no Location header)')
           . ' — configure the exact receiver URL; signed webhooks are never delivered through a redirect.',
-          $newAttempts);
+          $newAttempts, TRUE);
         $this->logger->error(
           'Webhook delivery @id blocked: endpoint @url answered @code redirecting to @loc. Configure the exact receiver URL.',
           [
@@ -484,24 +565,35 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    */
   private function scheduleRetry(int $id, int $attempts, ?int $code, ?string $body): void {
     if ($attempts >= self::MAX_ATTEMPTS) {
-      $this->updateRow($id, 'failed', $code, $body, $attempts);
+      $this->updateRow($id, 'failed', $code, $body, $attempts, TRUE);
       return;
     }
     // The attempt count is 1-based for the just-completed try; the next wait
     // uses the backoff slot for the upcoming attempt.
     $backoff = self::backoffSeconds($attempts);
     $now = $this->time->getRequestTime();
-    // Reset to 'pending' so the next cron scan can re-enqueue when due.
-    $this->database->update('mcp_sentinel_webhook_delivery')
-      ->condition('id', $id)
-      ->fields([
-        'status'             => 'pending',
-        'attempts'           => $attempts,
-        'last_attempt'       => $now,
-        'next_attempt'       => $now + $backoff,
-        'last_response_code' => $code,
-        'last_response_body' => $body,
-      ])->execute();
+    $row = $this->loadRow($id);
+    $hold = !$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)
+      && is_array($row)
+      && $this->killSwitch->shouldHoldSideEffects()
+      && $this->killSwitch->isKilled(
+        $this->rowOrItemKey($row, [], 'principal_key'),
+        $this->rowOrItemKey($row, [], 'human_key'),
+        $this->rowOrItemKey($row, [], 'tenant'),
+      );
+    $query = $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $id);
+    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
+      $query->condition('status', 'in_progress');
+    }
+    $query->fields([
+      'status'             => $hold ? McpWebhookQueueManager::STATUS_HELD : 'pending',
+      'attempts'           => $attempts,
+      'last_attempt'       => $now,
+      'next_attempt'       => $now + $backoff,
+      'last_response_code' => $code,
+      'last_response_body' => $body,
+    ])->execute();
   }
 
   /**
@@ -517,17 +609,22 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    *   The last response/error body, truncated.
    * @param int $attempts
    *   The attempt count to store.
+   * @param bool $requireInProgress
+   *   TRUE after a successful claim so a held row is not overwritten.
    */
-  private function updateRow(int $id, string $status, ?int $code, ?string $body, int $attempts): void {
-    $this->database->update('mcp_sentinel_webhook_delivery')
-      ->condition('id', $id)
-      ->fields([
-        'status'             => $status,
-        'attempts'           => $attempts,
-        'last_attempt'       => $this->time->getRequestTime(),
-        'last_response_code' => $code,
-        'last_response_body' => $body,
-      ])->execute();
+  private function updateRow(int $id, string $status, ?int $code, ?string $body, int $attempts, bool $requireInProgress = FALSE): void {
+    $query = $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $id);
+    if (!$this->weakened(self::WEAKEN_SKIP_RETRY_STATUS_GUARD)) {
+      $query->condition('status', $requireInProgress ? 'in_progress' : 'pending');
+    }
+    $query->fields([
+      'status'             => $status,
+      'attempts'           => $attempts,
+      'last_attempt'       => $this->time->getRequestTime(),
+      'last_response_code' => $code,
+      'last_response_body' => $body,
+    ])->execute();
   }
 
   /**
@@ -644,6 +741,75 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     }
     $key = $this->keyRepository->getKey($keyId);
     return $key ? (string) $key->getKeyValue() : '';
+  }
+
+  /**
+   * Row value when non-empty, otherwise the queue-item value.
+   *
+   * @param array<string, mixed> $row
+   *   Delivery row.
+   * @param array<string, mixed> $fromItem
+   *   Queue item payload.
+   * @param string $key
+   *   Column / item key.
+   */
+  private function rowOrItemKey(array $row, array $fromItem, string $key): string {
+    $fromRow = trim((string) ($row[$key] ?? ''));
+    return $fromRow !== '' ? $fromRow : trim((string) ($fromItem[$key] ?? ''));
+  }
+
+  /**
+   * PHPUnit-only: kill between the registry check and the claim.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function killBetweenCheckAndClaimForTest(callable $callback): void {
+    $this->assertPhpunitSeam();
+    $this->betweenCheckAndClaimForTest = $callback;
+  }
+
+  /**
+   * PHPUnit-only: run after a successful claim, before the POST.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function afterClaimForTest(callable $callback): void {
+    $this->assertPhpunitSeam();
+    $this->afterClaimForTest = $callback;
+  }
+
+  /**
+   * PHPUnit-only injection that disables one worker invariant.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function weakenForTest(string $flag): void {
+    $this->assertPhpunitSeam();
+    $this->weakenForTest[$flag] = TRUE;
+  }
+
+  /**
+   * Whether a PHPUnit weaken flag is on.
+   */
+  private function weakened(string $flag): bool {
+    return isset($this->weakenForTest[$flag]);
+  }
+
+  /**
+   * Test seams exist only under PHPUnit.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  private function assertPhpunitSeam(): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Webhook worker test seams can be set only under PHPUnit.',
+      );
+    }
   }
 
 }
