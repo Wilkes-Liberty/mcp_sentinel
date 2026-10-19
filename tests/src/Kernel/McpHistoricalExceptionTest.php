@@ -118,6 +118,7 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.role_assertions'),
       $this->container->get('mcp_sentinel.governance_readiness'),
       $this->container->get('mcp_sentinel.install_verifier'),
+      $this->container->get('mcp_sentinel.anomaly_evidence'),
     );
     $drushLogger = new DrushLoggerManager();
     $drushLogger->add('null', new NullLogger());

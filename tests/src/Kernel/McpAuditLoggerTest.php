@@ -8,6 +8,7 @@ use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
@@ -252,6 +253,94 @@ final class McpAuditLoggerTest extends KernelTestBase {
       ->execute()
       ->fetchField();
     $this->assertSame(1, $count);
+  }
+
+  /**
+   * Denied_access rows record Origin and Host for operator grouping.
+   *
+   * @covers ::log
+   */
+  public function testDeniedAccessCapturesOriginAndHost(): void {
+    $request = Request::create('https://mcp.example.test/mcp', 'POST', [], [], [], [
+      'HTTP_ORIGIN' => 'https://client.example.test',
+      'HTTP_HOST' => 'mcp.example.test',
+      'REMOTE_ADDR' => '192.0.2.10',
+    ]);
+    $this->pushRequestKeepingSession($request);
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('denied_access', [
+      'reason' => 'missing_bearer',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->condition('l.operation', 'denied_access')
+      ->execute()
+      ->fetchAssoc();
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame('https://client.example.test', $metadata['http_origin'] ?? NULL);
+    $this->assertSame('https://mcp.example.test', $metadata['http_host'] ?? NULL);
+    $this->assertSame('192.0.2.10', $row['ip_address']);
+  }
+
+  /**
+   * Origin and Host survive a rolled-back transaction.
+   *
+   * @covers ::logSurvivingRollback
+   */
+  public function testDeniedAccessCapturesOriginAndHostSurvivingRollback(): void {
+    $request = Request::create('https://mcp.example.test/mcp', 'POST', [], [], [], [
+      'HTTP_ORIGIN' => 'https://client.example.test',
+      'HTTP_HOST' => 'mcp.example.test',
+      'REMOTE_ADDR' => '192.0.2.10',
+    ]);
+    $this->pushRequestKeepingSession($request);
+    $database = $this->container->get('database');
+    $transaction = $database->startTransaction();
+    $this->container->get('mcp_sentinel.audit_logger')->logSurvivingRollback('denied_access', [
+      'reason' => 'missing_bearer',
+    ]);
+    $transaction->rollBack();
+    unset($transaction);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->condition('l.operation', 'denied_access')
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row);
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame('https://client.example.test', $metadata['http_origin'] ?? NULL);
+    $this->assertSame('https://mcp.example.test', $metadata['http_host'] ?? NULL);
+  }
+
+  /**
+   * Allow-path rows do not grow Origin/Host keys.
+   *
+   * @covers ::log
+   */
+  public function testAllowPathOmitsOriginAndHost(): void {
+    $request = Request::create('https://mcp.example.test/mcp', 'POST', [], [], [], [
+      'HTTP_ORIGIN' => 'https://client.example.test',
+      'HTTP_HOST' => 'mcp.example.test',
+    ]);
+    $this->pushRequestKeepingSession($request);
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
+      'id' => '11',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->condition('l.operation', 'entity_save')
+      ->execute()
+      ->fetchAssoc();
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertArrayNotHasKey('http_origin', $metadata ?? []);
+    $this->assertArrayNotHasKey('http_host', $metadata ?? []);
   }
 
   /**

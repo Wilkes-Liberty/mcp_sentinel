@@ -581,7 +581,7 @@ class McpSettingsForm extends ConfigFormBase {
       '#type' => 'email',
       '#title' => $this->t('Alert email address (empty = disabled)'),
       '#default_value' => $config->get('anomaly_alert_email') ?? '',
-      '#description' => $this->t('When non-empty, an email is sent to this address for each fired rule. Requires a working mail setup.'),
+      '#description' => $this->t('When non-empty, an email is sent to this address for each fired rule. The install default is empty (email disabled) so a new site does not mail a tenant-specific inbox. Set this in site configuration to the operator mailbox that should receive alerts. Requires a working mail setup. Each email names the site, host, window, top sources, reason codes, and tenants.'),
       '#states' => ['visible' => ['[name="anomaly_enabled"]' => ['checked' => TRUE]]],
     ];
     $form['anomaly']['anomaly_alert_webhook'] = [

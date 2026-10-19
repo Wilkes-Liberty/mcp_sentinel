@@ -9,6 +9,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\State\StateInterface;
+use Drupal\mcp_sentinel\Service\McpAnomalyEvidence;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpContentLock;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
@@ -65,6 +66,8 @@ final class McpSentinelCommands extends DrushCommands {
     private readonly McpGovernanceReadiness $governanceReadiness,
     #[Autowire(service: 'mcp_sentinel.install_verifier')]
     private readonly McpInstallVerifier $installVerifier,
+    #[Autowire(service: 'mcp_sentinel.anomaly_evidence')]
+    private readonly McpAnomalyEvidence $anomalyEvidence,
   ) {
     parent::__construct();
   }
@@ -396,6 +399,166 @@ final class McpSentinelCommands extends DrushCommands {
       (int) $result['broken_at'],
     ));
     return self::EXIT_FAILURE;
+  }
+
+  /**
+   * Summarize denied_access rows in a lookback window.
+   *
+   * Read-only. Groups by host, client, Origin, IP, and reason code so an
+   * operator can triage a denied-access storm on this site. The run is
+   * itself written to the audit chain; the summary is not printed if that
+   * write fails. Never prints tokens, Authorization headers, or bodies.
+   *
+   * A prefix pattern such as `denied*` on an anomaly rule would also
+   * count these `denied_access_summary` rows. The shipped storm rule
+   * matches `denied_access` exactly.
+   *
+   * @param array<string, mixed> $options
+   *   Command options.
+   */
+  #[CLI\Command(name: 'mcp-sentinel:denied-access-summary', aliases: ['mcps:denied-access-summary'])]
+  #[CLI\Option(name: 'window-seconds', description: 'Lookback window in seconds (1..604800, default 300).')]
+  #[CLI\Option(name: 'top', description: 'Maximum groups to print (1..32, default 8).')]
+  #[CLI\Option(name: 'json', description: 'Print the summary as JSON.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:denied-access-summary', description: 'Summarize denied_access rows in the last 300 seconds.')]
+  #[CLI\Usage(name: 'drush mcp-sentinel:denied-access-summary --window-seconds=3600 --json', description: 'One-hour window as JSON.')]
+  public function deniedAccessSummary(
+    array $options = [
+      'window-seconds' => 300,
+      'top' => 8,
+      'json' => FALSE,
+    ],
+  ): int {
+    $window = (int) $options['window-seconds'];
+    $top = (int) $options['top'];
+    if ($window < 1 || $window > McpAnomalyEvidence::WINDOW_MAX) {
+      return $this->refuseDeniedAccessSummary(
+        $window,
+        'invalid_window',
+        sprintf(
+          'window-seconds must be an integer from 1 to %d.',
+          McpAnomalyEvidence::WINDOW_MAX,
+        ),
+      );
+    }
+    if ($top < 1 || $top > McpAnomalyEvidence::TOP_MAX) {
+      return $this->refuseDeniedAccessSummary(
+        $window,
+        'invalid_top',
+        sprintf(
+          'top must be an integer from 1 to %d.',
+          McpAnomalyEvidence::TOP_MAX,
+        ),
+      );
+    }
+
+    try {
+      $summary = $this->anomalyEvidence->deniedAccessSummary($window, $top);
+    }
+    catch (\Throwable) {
+      try {
+        $this->anomalyEvidence->auditOperatorSummary($window, 0, 0, 'error');
+      }
+      catch (\Throwable) {
+        $this->logger()->error('Denied-access summary failed and was not audited; nothing was printed.');
+        return self::EXIT_FAILURE;
+      }
+      $this->logger()->error('Denied-access summary failed; nothing was printed.');
+      return self::EXIT_FAILURE;
+    }
+    try {
+      $this->anomalyEvidence->auditOperatorSummary(
+        $window,
+        $summary['count'],
+        count($summary['groups']),
+        'read',
+      );
+    }
+    catch (\Throwable) {
+      $this->logger()->error('Denied-access summary was not printed because the audit write failed.');
+      return self::EXIT_FAILURE;
+    }
+
+    if (!empty($options['json'])) {
+      return $this->writeDeniedAccessSummaryJson($summary);
+    }
+
+    $site = $summary['site'];
+    $this->output()->writeln('Site: ' . $site['site']);
+    $this->output()->writeln('Host: ' . $site['host']);
+    $this->output()->writeln('Environment: ' . $site['environment']);
+    $this->output()->writeln('Window: ' . $summary['window_seconds'] . ' s');
+    if ($summary['truncated']) {
+      $this->output()->writeln(sprintf(
+        'Count: %d (scanned %d, truncated)',
+        $summary['count'],
+        $summary['scanned'],
+      ));
+    }
+    else {
+      $this->output()->writeln('Count: ' . $summary['count']);
+    }
+    $this->output()->writeln('Groups (host, client, origin, ip, reason):');
+    if ($summary['groups'] === []) {
+      $this->output()->writeln('- ' . McpAnomalyEvidence::MISSING);
+      return self::EXIT_SUCCESS;
+    }
+    foreach ($summary['groups'] as $group) {
+      $this->output()->writeln(sprintf(
+        '- host=%s client=%s mcp_client=%s (self-reported) origin=%s ip=%s reason=%s count=%d',
+        $group['host'],
+        $group['client'],
+        $group['mcp_client'],
+        $group['origin'],
+        $group['ip'],
+        $group['reason'],
+        $group['count'],
+      ));
+    }
+    return self::EXIT_SUCCESS;
+  }
+
+  /**
+   * Audits a refused summary and prints nothing.
+   */
+  private function refuseDeniedAccessSummary(
+    int $window,
+    string $outcome,
+    string $message,
+  ): int {
+    try {
+      $this->anomalyEvidence->auditOperatorSummary($window, 0, 0, $outcome);
+    }
+    catch (\Throwable) {
+      $this->logger()->error('Denied-access summary refusal was not audited; nothing was printed.');
+      return self::EXIT_FAILURE;
+    }
+    $this->logger()->error($message);
+    return self::EXIT_FAILURE;
+  }
+
+  /**
+   * Prints the summary as JSON, or nothing on encode failure.
+   *
+   * @param array<string, mixed> $summary
+   *   Denied-access summary.
+   */
+  private function writeDeniedAccessSummaryJson(array $summary): int {
+    try {
+      $json = json_encode(
+        $summary,
+        JSON_PRETTY_PRINT
+        | JSON_UNESCAPED_SLASHES
+        | JSON_INVALID_UTF8_SUBSTITUTE
+        | JSON_THROW_ON_ERROR,
+      );
+    }
+    catch (\JsonException) {
+      $this->logger()->error('Denied-access summary JSON encoding failed; nothing was printed.');
+      return self::EXIT_FAILURE;
+    }
+    $this->output()->writeln($json);
+    return self::EXIT_SUCCESS;
   }
 
   /**

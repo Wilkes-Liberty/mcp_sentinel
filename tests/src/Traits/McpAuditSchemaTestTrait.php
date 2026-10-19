@@ -121,4 +121,19 @@ trait McpAuditSchemaTestTrait {
     $request->attributes->remove(McpPrincipalContext::FALLBACK_ATTRIBUTE);
   }
 
+  /**
+   * Pushes a request, copying the kernel session so tearDown can clear it.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The request to make current.
+   */
+  protected function pushRequestKeepingSession(Request $request): void {
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+  }
+
 }

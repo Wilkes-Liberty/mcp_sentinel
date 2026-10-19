@@ -517,6 +517,18 @@ services:
       - '@datetime.time'
       - '@entity_type.manager'
 
+  mcp_sentinel.anomaly_evidence:
+    class: Drupal\mcp_sentinel\Service\McpAnomalyEvidence
+    arguments:
+      - '@database'
+      - '@config.factory'
+      - '@settings'
+      - '@request_stack'
+      - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.dlp'
+      - '@mcp_sentinel.anomaly_detector'
+      - '@datetime.time'
+
   mcp_sentinel.anomaly_alert_dispatcher:
     class: Drupal\mcp_sentinel\Service\McpAlertDispatcher
     arguments:
@@ -526,6 +538,7 @@ services:
       - '@mcp_sentinel.webhook_queue_manager'
       - '@language_manager'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.anomaly_evidence'
 
   mcp_sentinel.content_lock:
     class: Drupal\mcp_sentinel\Service\McpContentLock

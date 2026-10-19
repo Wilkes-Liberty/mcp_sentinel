@@ -1077,7 +1077,7 @@ Three channels are available — mix and match:
 | Channel | Setting | Behaviour |
 |---|---|---|
 | **Log** | `anomaly_alert_log` (default `true`) | Writes a `warning` to the `mcp_sentinel` logger channel. Route this channel to syslog/SIEM for monitoring. |
-| **Email** | `anomaly_alert_email` | Sends an email to the configured address when non-empty; empty = disabled. Requires a working mail setup. |
+| **Email** | `anomaly_alert_email` | Sends an email to the configured address when non-empty; empty = disabled (the install default). Requires a working mail setup. Every fired rule uses the same body: site name, host URL, environment (`$settings['mcp_sentinel.environment']`, or `(unset)`), window, threshold, top sources (client_id/azp, self-reported mcp_client, Origin, Host, IP, Paladin principal), reason codes, and tenants. Tokens, Authorization headers, and request bodies are never included. The body includes client IPs, principal identifiers, Origin, and Host — personal data, so use an operator-only mailbox. Auth schemes, JWTs, URL tokens, userinfo, and control characters are redacted; DLP patterns apply only when DLP is enabled. `drush cron` needs `--uri` or `options.uri` so the Host line is a real host rather than `http://default`. |
 | **Webhook** | `anomaly_alert_webhook` | Enqueues an `mcp.anomaly.alert` event through the reliable webhook queue manager. Endpoints whose event filter includes `mcp.anomaly.alert` (or an empty filter) receive it, with retry/backoff/HMAC inherited. |
 
 ### Enabling anomaly detection
@@ -1101,6 +1101,20 @@ Three channels are available — mix and match:
    governed agent is denied 20+ times in 5 minutes. The third rule uses the
    `*` prefix to match all `entity_*` operations.
 5. Save. Alerts will fire on the next cron run where a rule is tripped.
+
+To see what is generating `denied_access` rows on this site (read-only;
+the run is itself audited):
+
+```bash
+drush mcp-sentinel:denied-access-summary --window-seconds=300
+drush mcp-sentinel:denied-access-summary --window-seconds=3600 --json
+```
+
+`--window-seconds` is 1..604800; `--top` is 1..32. Run it on each
+host that can send the alert (prod and staging) with `--uri` so the
+Host line is real. It groups matching rows by host, client, Origin,
+IP, and reason code. It does not change the rule threshold, window,
+or throttle.
 
 ### Debounce (alert-storm suppression)
 
@@ -1488,6 +1502,7 @@ default rather than merely guarded.
 | `drush mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Evidence that this install carries the secure, tenant-neutral floor. `--live` adds the hostile-input probes; nothing is saved. See `docs/verification.md`. |
 | `drush mcp-sentinel:role-audit` | Fail (non-zero) if a governed role holds a permission its profile forbids. Deploy gate. |
 | `drush mcp-sentinel:sql-query <sql> [--profile=ID]` | Run a single read-only SELECT under a policy profile. A local invocation has no bearer and is refused unless the profile sets `allow_raw_sql`. A sealed job principal is still checked. Every attempt is audited. |
+| `drush mcp-sentinel:denied-access-summary [--window-seconds=300] [--top=8] [--json]` | Read-only summary of `denied_access` rows in a lookback window (1..604800 s, `--top` 1..32), grouped by host, client, Origin, IP, and reason. Count is un-capped; a truncated scan is labelled. The run is audited. Never prints tokens or request bodies. |
 | `drush mcp-sentinel:audit-verify` | Verify the tamper-evident audit-log hash chain. |
 | `drush mcp-sentinel:audit-purge` | Delete audit entries past the retention window (also runs on cron). |
 | `drush mcp-sentinel:lock-clear` | Release expired content locks (also runs on cron). |

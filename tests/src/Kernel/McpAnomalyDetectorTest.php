@@ -63,6 +63,7 @@ class McpAnomalyDetectorTest extends KernelTestBase {
     $config = \Drupal::config('mcp_sentinel.settings');
     $this->assertFalse($config->get('anomaly_enabled'));
     $this->assertTrue($config->get('anomaly_alert_log'));
+    $this->assertSame('', $config->get('anomaly_alert_email'));
     $this->assertIsArray($config->get('anomaly_rules'));
   }
 

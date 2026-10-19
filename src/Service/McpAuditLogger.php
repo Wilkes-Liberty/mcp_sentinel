@@ -191,6 +191,16 @@ class McpAuditLogger {
         'HTTP_USER_AGENT' => substr((string) $source?->headers->get('User-Agent', ''), 0, 512),
         'HTTP_X_MCP_CLIENT' => substr((string) $source?->headers->get('X-MCP-Client', ''), 0, 256),
       ];
+      if ($operation === 'denied_access') {
+        $origin = $this->boundedOriginOrHost($source, 'Origin');
+        if ($origin !== NULL) {
+          $server['HTTP_ORIGIN'] = $origin;
+        }
+        $httpHost = $this->boundedOriginOrHost($source, 'Host');
+        if ($httpHost !== NULL) {
+          $server['HTTP_HOST'] = $httpHost;
+        }
+      }
       // Omit an unknown address: a NULL REMOTE_ADDR makes Symfony's
       // trusted-proxy check throw a TypeError when the row is written.
       $client_ip = $source?->getClientIp();
@@ -337,6 +347,19 @@ class McpAuditLogger {
     if ($mcpClient !== '') {
       $metadata['mcp_client'] = $mcpClient;
     }
+    // Origin and Host are forensic labels on denials only so an operator
+    // can group denied_access storms. They are never an enforcement
+    // signal. Omitted when absent so allow-path metadata stays unchanged.
+    if ($operation === 'denied_access' && $request) {
+      $origin = $this->boundedOriginOrHost($request, 'Origin');
+      if ($origin !== NULL && !array_key_exists('http_origin', $metadata)) {
+        $metadata['http_origin'] = $origin;
+      }
+      $httpHost = $this->boundedOriginOrHost($request, 'Host');
+      if ($httpHost !== NULL && !array_key_exists('http_host', $metadata)) {
+        $metadata['http_host'] = $httpHost;
+      }
+    }
 
     // Cite the attested floor on every row. A caller that already named a
     // digest (activate/revoke/rollback of a specific bundle) keeps that
@@ -349,6 +372,51 @@ class McpAuditLogger {
     }
 
     $this->requireChain()->log(self::CHANNEL, $operation, $metadata);
+  }
+
+  /**
+   * Bounded Origin or Host for denied_access forensic metadata.
+   *
+   * Scrubs invalid UTF-8, cuts at 256 bytes, then keeps only
+   * scheme://host[:port]. Userinfo, path, and query are dropped.
+   * Values that cannot be parsed are omitted.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request|null $request
+   *   Current or reconstructed request.
+   * @param string $header
+   *   Origin or Host.
+   *
+   * @return string|null
+   *   Normalised URL, or NULL when missing or not a URL.
+   */
+  private function boundedOriginOrHost(?Request $request, string $header): ?string {
+    if ($request === NULL) {
+      return NULL;
+    }
+    $raw = (string) $request->headers->get($header, '');
+    if ($raw === '') {
+      return NULL;
+    }
+    $text = mb_strcut(mb_scrub($raw, 'UTF-8'), 0, 256, 'UTF-8');
+    $parts = parse_url($text);
+    $host = is_array($parts) ? ($parts['host'] ?? '') : '';
+    if ($host === '') {
+      $scheme = $request->getScheme();
+      if ($scheme !== 'http' && $scheme !== 'https') {
+        $scheme = 'https';
+      }
+      $parts = parse_url($scheme . '://' . ltrim($text, '/'));
+    }
+    if (!is_array($parts)) {
+      return NULL;
+    }
+    $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+    $host = strtolower((string) ($parts['host'] ?? ''));
+    if (($scheme !== 'http' && $scheme !== 'https') || $host === '') {
+      return NULL;
+    }
+    $port = array_key_exists('port', $parts) ? ':' . (string) $parts['port'] : '';
+    return $scheme . '://' . $host . $port;
   }
 
   /**

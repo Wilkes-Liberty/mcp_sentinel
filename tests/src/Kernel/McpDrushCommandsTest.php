@@ -4,16 +4,21 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\key\Entity\Key;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelCommands;
+use Drupal\mcp_sentinel\Service\McpAnomalyEvidence;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drush\Log\DrushLoggerManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Kernel tests for McpSentinelCommands Drush commands.
@@ -105,6 +110,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.role_assertions'),
       $this->container->get('mcp_sentinel.governance_readiness'),
       $this->container->get('mcp_sentinel.install_verifier'),
+      $this->container->get('mcp_sentinel.anomaly_evidence'),
     );
 
     // Wire a no-op DrushLoggerManager so commands can call $this->logger()->
@@ -619,6 +625,289 @@ final class McpDrushCommandsTest extends KernelTestBase {
       ->contractStatus();
     $this->assertFalse($contract->isReady());
     $this->assertNotNull($contract->reason());
+  }
+
+  /**
+   * Denied-access summary groups rows and audits the operator read.
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryGroupsAndAudits(): void {
+    $this->config('system.site')->set('name', 'Example MCP site')->save();
+    $request = Request::create('https://mcp.example.test/mcp', 'POST', [], [], [], [
+      'REMOTE_ADDR' => '192.0.2.10',
+      'HTTP_ORIGIN' => 'https://client.example.test',
+      'HTTP_HOST' => 'mcp.example.test',
+    ]);
+    $this->pushRequestKeepingSession($request);
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('denied_access', [
+      'reason' => 'missing_bearer',
+      'client_id' => 'example-client',
+      'token' => 'secret-token-value',
+      'authorization' => 'Bearer secret-token-value',
+      'payload' => '{"password":"secret-token-value"}',
+    ]);
+
+    $output = new BufferedOutput();
+    $this->commands->setOutput($output);
+    $result = $this->commands->deniedAccessSummary([
+      'window-seconds' => 300,
+      'top' => 8,
+      'json' => FALSE,
+    ]);
+    $this->assertSame(McpSentinelCommands::EXIT_SUCCESS, $result);
+    $text = $output->fetch();
+    $this->assertStringContainsString('Site: Example MCP site', $text);
+    $this->assertStringContainsString('Host:', $text);
+    $this->assertStringContainsString('Environment:', $text);
+    $this->assertStringContainsString('Window: 300 s', $text);
+    $this->assertStringContainsString('client=example-client', $text);
+    $this->assertStringContainsString('origin=https://client.example.test', $text);
+    $this->assertStringContainsString('ip=192.0.2.10', $text);
+    $this->assertStringContainsString('reason=missing_bearer', $text);
+    $this->assertStringNotContainsString('secret-token-value', $text);
+    $this->assertStringNotContainsString('Bearer secret-token-value', $text);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->condition('l.operation', McpAnomalyEvidence::AUDIT_DENIED_ACCESS_SUMMARY)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row, 'The operator read must be audited.');
+    $metadata = json_decode((string) $row['metadata'], TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame(300, $metadata['window_seconds']);
+    $this->assertSame('read', $metadata['outcome']);
+    $this->assertSame(1, $metadata['count']);
+    $this->assertStringNotContainsString('secret-token-value', (string) $row['metadata']);
+  }
+
+  /**
+   * Invalid window is audited and prints no summary.
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryRefusesNonPositiveWindow(): void {
+    $output = new BufferedOutput();
+    $this->commands->setOutput($output);
+    $result = $this->commands->deniedAccessSummary([
+      'window-seconds' => 0,
+      'top' => 8,
+      'json' => FALSE,
+    ]);
+    $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+    $this->assertSame('', $output->fetch());
+
+    $metadata = json_decode((string) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', McpAnomalyEvidence::AUDIT_DENIED_ACCESS_SUMMARY)
+      ->execute()
+      ->fetchField(), TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame('invalid_window', $metadata['outcome']);
+  }
+
+  /**
+   * Negative and over-cap windows are refused and print nothing.
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryRefusesNegativeAndOverCapWindow(): void {
+    foreach ([-1, McpAnomalyEvidence::WINDOW_MAX + 1] as $window) {
+      $output = new BufferedOutput();
+      $this->commands->setOutput($output);
+      $result = $this->commands->deniedAccessSummary([
+        'window-seconds' => $window,
+        'top' => 8,
+        'json' => FALSE,
+      ]);
+      $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+      $this->assertSame('', $output->fetch());
+    }
+
+    $outcomes = [];
+    $rows = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', McpAnomalyEvidence::AUDIT_DENIED_ACCESS_SUMMARY)
+      ->execute();
+    foreach ($rows as $row) {
+      $metadata = json_decode((string) $row->metadata, TRUE);
+      $outcomes[] = is_array($metadata) ? ($metadata['outcome'] ?? NULL) : NULL;
+    }
+    $this->assertSame(['invalid_window', 'invalid_window'], $outcomes);
+  }
+
+  /**
+   * A --top value above 32 is refused as invalid_top.
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryRefusesOverCapTop(): void {
+    $output = new BufferedOutput();
+    $this->commands->setOutput($output);
+    $result = $this->commands->deniedAccessSummary([
+      'window-seconds' => 300,
+      'top' => McpAnomalyEvidence::TOP_MAX + 1,
+      'json' => FALSE,
+    ]);
+    $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+    $this->assertSame('', $output->fetch());
+
+    $metadata = json_decode((string) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', McpAnomalyEvidence::AUDIT_DENIED_ACCESS_SUMMARY)
+      ->execute()
+      ->fetchField(), TRUE);
+    $this->assertIsArray($metadata);
+    $this->assertSame('invalid_top', $metadata['outcome']);
+  }
+
+  /**
+   * Audit-chain failure prints nothing in text or JSON.
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryPrintsNothingWhenAuditFails(): void {
+    $chain = $this->createMock(AuditChainLoggerInterface::class);
+    $chain->method('log')->willThrowException(new \RuntimeException('chain down'));
+    $failingLogger = new McpAuditLogger(
+      $this->container->get('config.factory'),
+      $this->container->get('request_stack'),
+      $chain,
+      $this->container->get('mcp_sentinel.dlp'),
+      $this->container->get('database'),
+    );
+    $evidence = new McpAnomalyEvidence(
+      $this->container->get('database'),
+      $this->container->get('config.factory'),
+      $this->container->get('settings'),
+      $this->container->get('request_stack'),
+      $failingLogger,
+      $this->container->get('mcp_sentinel.dlp'),
+      $this->container->get('mcp_sentinel.anomaly_detector'),
+      $this->container->get('datetime.time'),
+    );
+    $commands = $this->buildCommands($evidence);
+
+    foreach ([FALSE, TRUE] as $json) {
+      $output = new BufferedOutput();
+      $commands->setOutput($output);
+      $result = $commands->deniedAccessSummary([
+        'window-seconds' => 300,
+        'top' => 8,
+        'json' => $json,
+      ]);
+      $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+      $this->assertSame('', $output->fetch());
+    }
+
+    $count = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpAnomalyEvidence::AUDIT_DENIED_ACCESS_SUMMARY)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $count);
+  }
+
+  /**
+   * JSON output decodes to an array, including a multibyte Origin.
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryJsonDecodesWithMultibyteOrigin(): void {
+    $origin = 'https://x' . str_repeat("\u{00E9}", 95);
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('denied_access', [
+      'reason' => 'missing_bearer',
+      'client_id' => 'mb-client',
+      'http_origin' => $origin,
+    ]);
+
+    $output = new BufferedOutput();
+    $this->commands->setOutput($output);
+    $result = $this->commands->deniedAccessSummary([
+      'window-seconds' => 300,
+      'top' => 8,
+      'json' => TRUE,
+    ]);
+    $this->assertSame(McpSentinelCommands::EXIT_SUCCESS, $result);
+    $decoded = json_decode($output->fetch(), TRUE);
+    $this->assertIsArray($decoded);
+    $this->assertArrayHasKey('groups', $decoded);
+    $this->assertArrayHasKey('count', $decoded);
+    $this->assertArrayHasKey('scanned', $decoded);
+    $this->assertArrayHasKey('truncated', $decoded);
+  }
+
+  /**
+   * Truncated scans print Count: N (scanned M, truncated).
+   *
+   * @covers ::deniedAccessSummary
+   */
+  public function testDeniedAccessSummaryPrintsTruncation(): void {
+    $request = Request::create('https://mcp.example.test/mcp', 'POST', [], [], [], [
+      'REMOTE_ADDR' => '192.0.2.10',
+      'HTTP_ORIGIN' => 'https://client.example.test',
+      'HTTP_HOST' => 'mcp.example.test',
+    ]);
+    $this->pushRequestKeepingSession($request);
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    for ($i = 0; $i < 3; $i++) {
+      $logger->logAlways('denied_access', [
+        'reason' => 'missing_bearer',
+        'client_id' => 'example-client',
+      ]);
+    }
+    $evidence = new McpAnomalyEvidence(
+      $this->container->get('database'),
+      $this->container->get('config.factory'),
+      $this->container->get('settings'),
+      $this->container->get('request_stack'),
+      $this->container->get('mcp_sentinel.audit_logger'),
+      $this->container->get('mcp_sentinel.dlp'),
+      $this->container->get('mcp_sentinel.anomaly_detector'),
+      $this->container->get('datetime.time'),
+      2,
+    );
+    $commands = $this->buildCommands($evidence);
+    $output = new BufferedOutput();
+    $commands->setOutput($output);
+    $result = $commands->deniedAccessSummary([
+      'window-seconds' => 300,
+      'top' => 8,
+      'json' => FALSE,
+    ]);
+    $this->assertSame(McpSentinelCommands::EXIT_SUCCESS, $result);
+    $this->assertStringContainsString('Count: 3 (scanned 2, truncated)', $output->fetch());
+  }
+
+  /**
+   * Builds a command object with an injected evidence service.
+   */
+  private function buildCommands(McpAnomalyEvidence $evidence): McpSentinelCommands {
+    $commands = new McpSentinelCommands(
+      $this->container->get('config.factory'),
+      $this->container->get('mcp_sentinel.audit_logger'),
+      $this->container->get('mcp_sentinel.content_lock'),
+      $this->container->get('database'),
+      $this->container->get('entity_type.manager'),
+      $this->container->get('mcp_sentinel.webhook_queue_manager'),
+      $this->container->get('state'),
+      $this->container->get('datetime.time'),
+      $this->container->get('mcp_sentinel.urgent_conditions'),
+      $this->container->get('mcp_sentinel.role_assertions'),
+      $this->container->get('mcp_sentinel.governance_readiness'),
+      $this->container->get('mcp_sentinel.install_verifier'),
+      $evidence,
+    );
+    $drushLogger = new DrushLoggerManager();
+    $drushLogger->add('null', new NullLogger());
+    $commands->setLogger($drushLogger);
+    return $commands;
   }
 
 }

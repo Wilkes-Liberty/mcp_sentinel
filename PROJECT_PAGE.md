@@ -220,6 +220,7 @@ filterable audit log on its **Audit log** tab.
 - `drush mcp-sentinel:audit-purge` — prune audit entries past retention
 - `drush mcp-sentinel:lock-clear` — release expired content locks
 - `drush mcp-sentinel:audit-verify` — verify the tamper-evident audit hash chain
+- `drush mcp-sentinel:denied-access-summary` — group `denied_access` rows by host, client, Origin, IP, and reason
 - `drush mcp-sentinel:webhook-replay <id>` — re-queue a webhook delivery
 - `drush mcp-sentinel:webhook-prune` — prune webhook delivery rows past retention
 
