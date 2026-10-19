@@ -89,10 +89,11 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
   }
 
   /**
-   * The built-in server must not freeze a claimless test-child request.
+   * A Drupal test child must not freeze a claimless request.
    *
-   * Production cli-server and fpm-fcgi do not defer. A bearer still
-   * seals on a test child.
+   * Production SAPIs (cli-server, Apache, FPM) do not defer. A
+   * bearer still seals on a test child. Drupal.org GitLab CI
+   * serves functional tests from Apache, not cli-server.
    *
    * @covers ::deferClaimlessBuiltinServer
    */
@@ -102,13 +103,25 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
       $claimless,
       new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
     ));
+    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('apache2handler', FALSE, TRUE),
+    ));
+    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, TRUE),
+    ));
     $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
       $claimless,
       new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE),
     ));
     $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
       $claimless,
-      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, TRUE),
+      new McpRoleFallbackEnvironment('apache2handler', FALSE, FALSE),
+    ));
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $claimless,
+      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE),
     ));
     $bearer = Request::create('/jsonapi/node/page');
     $bearer->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
@@ -117,6 +130,10 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
       $bearer,
       new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
+    ));
+    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+      $bearer,
+      new McpRoleFallbackEnvironment('apache2handler', FALSE, TRUE),
     ));
   }
 

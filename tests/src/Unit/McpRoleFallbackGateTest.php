@@ -35,6 +35,8 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
    * PHPUnit without a proxy header may use fallback.
    *
    * @covers ::permitted
+   * @covers ::inTestChildServer
+   * @covers ::inTestChildSite
    */
   public function testPhpUnitWithoutProxyIsPermitted(): void {
     $this->assertTrue(McpRoleFallbackGate::permitted(Request::create('/')));
@@ -42,6 +44,10 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
     $this->assertFalse(
       McpRoleFallbackGate::inTestChildServer(),
       'PHPUnit runs as cli, not a Drupal test child on cli-server.',
+    );
+    $this->assertFalse(
+      McpRoleFallbackGate::inTestChildSite(),
+      'PHPUnit is not a Drupal functional-test child site.',
     );
   }
 
@@ -84,6 +90,7 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
    *
    * @covers ::permitted
    * @covers ::inTestChildServer
+   * @covers ::inTestChildSite
    */
   public function testCliServerWithoutSettingsFlagIsRefused(): void {
     $plain = new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE);
@@ -92,12 +99,20 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
       $plain,
     ));
     $this->assertFalse(McpRoleFallbackGate::inTestChildServer($plain));
+    $this->assertFalse(McpRoleFallbackGate::inTestChildSite($plain));
     $testChild = new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE);
     $this->assertFalse(McpRoleFallbackGate::permitted(
       Request::create('/'),
       $testChild,
     ));
     $this->assertTrue(McpRoleFallbackGate::inTestChildServer($testChild));
+    $this->assertTrue(McpRoleFallbackGate::inTestChildSite($testChild));
+    $apacheChild = new McpRoleFallbackEnvironment('apache2handler', FALSE, TRUE);
+    $this->assertFalse(McpRoleFallbackGate::inTestChildServer($apacheChild));
+    $this->assertTrue(McpRoleFallbackGate::inTestChildSite($apacheChild));
+    $this->assertFalse(McpRoleFallbackGate::inTestChildSite(
+      new McpRoleFallbackEnvironment('apache2handler', FALSE, FALSE),
+    ));
   }
 
   /**

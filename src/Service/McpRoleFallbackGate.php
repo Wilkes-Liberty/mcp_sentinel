@@ -18,7 +18,10 @@ use Symfony\Component\HttpFoundation\Request;
  * unit-test permit. Functional tests write the settings.php flag.
  * HTTP fallback is refused when reverse_proxy is on or when any
  * Forwarded or X-Forwarded-* header is present. cli-server is not a
- * permit.
+ * permit. A Drupal test child (DRUPAL_TEST_IN_CHILD_SITE) on any
+ * SAPI — Apache on drupal.org CI, or the PHP built-in server —
+ * may use the settings.php test principal after readiness stamps
+ * role fallback. Production SAPIs without that constant ignore it.
  */
 final class McpRoleFallbackGate {
 
@@ -28,12 +31,12 @@ final class McpRoleFallbackGate {
   public const SETTINGS_KEY = 'mcp_sentinel_allow_role_fallback';
 
   /**
-   * Settings.php principal used by PHPUnit's built-in server only.
+   * Settings.php principal used by PHPUnit and Drupal test children.
    *
    * Functional tests cannot mint a Paladin bearer. The factory reads
    * this map only after readiness has taken the role-fallback path,
-   * and only in PHPUnit or a Drupal test child on cli-server. Other
-   * SAPIs ignore it.
+   * and only in PHPUnit or a Drupal test child site
+   * (DRUPAL_TEST_IN_CHILD_SITE). Production SAPIs ignore it.
    */
   public const TEST_PRINCIPAL_KEY = 'mcp_sentinel_role_fallback_test_principal';
 
@@ -97,12 +100,29 @@ final class McpRoleFallbackGate {
   }
 
   /**
+   * TRUE on any SAPI that is a Drupal functional-test child site.
+   *
+   * DRUPAL_TEST_IN_CHILD_SITE is written only into the isolated
+   * simpletest settings.php. Production Apache, FPM, and cli-server
+   * do not define it. Used for the test-principal map and the
+   * deferred claimless seal. Production php -S / drush runserver /
+   * a PaaS image is not a permit.
+   *
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process.
+   */
+  public static function inTestChildSite(
+    ?McpRoleFallbackEnvironment $environment = NULL,
+  ): bool {
+    $environment ??= McpRoleFallbackEnvironment::detect();
+    return $environment->inDrupalTestChildSite();
+  }
+
+  /**
    * TRUE on the PHP built-in server for a Drupal functional-test child.
    *
-   * Production cli-server (php -S, drush runserver, a PaaS image)
-   * is not a permit. Functional tests also write the settings.php
-   * flag; this is only for the test-principal map and the deferred
-   * claimless seal.
+   * Prefer inTestChildSite() for new callers. drupal.org GitLab CI
+   * serves functional tests from Apache, not cli-server.
    *
    * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
    *   Process probe. NULL reads the live process.

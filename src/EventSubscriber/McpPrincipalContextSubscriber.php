@@ -80,13 +80,14 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
   }
 
   /**
-   * Claimless built-in-server requests wait for the fallback stamp.
+   * Claimless Drupal test-child requests wait for the fallback stamp.
    *
-   * Drupal functional tests serve HTTP from cli-server, which is not
-   * the PHPUnit process. Sealing there before readiness runs freezes
-   * an empty principal, and the later ready-path check cannot replace
-   * it. Only a Drupal test child on cli-server defers. Production
-   * php -S / drush runserver seals immediately.
+   * Functional tests serve HTTP from a child process that is not
+   * PHPUnit — cli-server locally, Apache on drupal.org GitLab CI.
+   * Sealing there before readiness runs freezes an empty principal,
+   * and the later ready-path check cannot replace it. Only a Drupal
+   * test child (DRUPAL_TEST_IN_CHILD_SITE) defers. Production
+   * Apache / FPM / php -S / drush runserver seals immediately.
    *
    * @param \Symfony\Component\HttpFoundation\Request $request
    *   The main request.
@@ -101,8 +102,7 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     ?McpRoleFallbackEnvironment $environment = NULL,
   ): bool {
     $environment ??= McpRoleFallbackEnvironment::detect();
-    if ($environment->sapi() !== 'cli-server'
-      || !$environment->inDrupalTestChildSite()) {
+    if (!$environment->inDrupalTestChildSite()) {
       return FALSE;
     }
     $network = $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE);

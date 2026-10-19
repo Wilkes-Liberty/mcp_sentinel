@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
@@ -244,6 +245,49 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $refused = $factory->fromRequest($proxied);
     $this->assertTrue($refused->fromRoleFallback());
     $this->assertSame('', $refused->issuer());
+    new Settings([]);
+  }
+
+  /**
+   * An Apache test child receives the settings.php test principal.
+   *
+   * Drupal.org GitLab CI serves functional tests from Apache. The
+   * live process is PHPUnit here, so the probe injects
+   * apache2handler. Production Apache without
+   * DRUPAL_TEST_IN_CHILD_SITE stays empty.
+   *
+   * @covers ::fromRequest
+   */
+  public function testApacheTestChildReceivesTestPrincipal(): void {
+    new Settings([
+      McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'functional-role-fallback',
+        'azp' => 'functional-role-fallback-client',
+      ],
+    ]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(new RequestStack(), $oauth);
+
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $admitted = $factory->fromRequest(
+      $fallback,
+      new McpRoleFallbackEnvironment('apache2handler', FALSE, TRUE),
+    );
+    $this->assertTrue($admitted->fromRoleFallback());
+    $this->assertSame('https://idp.example/realms/agents', $admitted->issuer());
+    $this->assertSame('functional-role-fallback', $admitted->subject());
+    $this->assertSame('functional-role-fallback-client', $admitted->azp());
+
+    $production = $factory->fromRequest(
+      $fallback,
+      new McpRoleFallbackEnvironment('apache2handler', FALSE, FALSE),
+    );
+    $this->assertTrue($production->fromRoleFallback());
+    $this->assertSame('', $production->issuer());
     new Settings([]);
   }
 

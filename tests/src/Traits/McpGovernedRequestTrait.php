@@ -50,12 +50,13 @@ trait McpGovernedRequestTrait {
       ->getEditable('mcp_sentinel.settings')
       ->set('governed_role_fallback', TRUE)
       ->save();
-    // Functional tests hit a PHP built-in server that is not a PHPUnit
-    // process. settings.php is the only permit on that SAPI and is
-    // visible to the child process. The test principal is ignored
-    // except under PHPUnit or a Drupal test child, and on proxied
-    // requests. It exists so the ready-path principal check can run
-    // after readiness stamps role fallback.
+    // Functional tests hit a child SAPI that is not PHPUnit
+    // (cli-server locally, Apache on drupal.org CI). settings.php is
+    // the only permit on that SAPI and is visible to the child
+    // process. The test principal is ignored except under PHPUnit or
+    // a Drupal test child site, and on proxied requests. It exists so
+    // the ready-path principal check can run after readiness stamps
+    // role fallback.
     if (method_exists($this, 'writeSettings')) {
       $this->writeSettings([
         'settings' => [

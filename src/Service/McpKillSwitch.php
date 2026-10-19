@@ -219,6 +219,15 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   private ?\Closure $afterUnkillExpireForTest = NULL;
 
   /**
+   * PHPUnit-only: treat every stored block_until as unreadable.
+   *
+   * MySQL strict mode cannot write a non-integer into the INT
+   * column (error 1366). Kernel tests inject the same fail-closed
+   * read the SQLite fixture would have produced.
+   */
+  private bool $unreadableBlockUntilForTest = FALSE;
+
+  /**
    * Constructs the registry.
    *
    * @param \Drupal\Core\Database\Connection $connection
@@ -1833,6 +1842,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Stored row.
    */
   private function rowBlockUntil(array $row): ?int {
+    if ($this->unreadableBlockUntilForTest) {
+      return NULL;
+    }
     $value = $row['block_until'] ?? NULL;
     if (is_int($value)) {
       return $value;
@@ -2716,6 +2728,23 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
       );
     }
     $this->afterUnkillExpireForTest = $callback;
+  }
+
+  /**
+   * PHPUnit-only: make rowBlockUntil() fail closed on every row.
+   *
+   * Used when the driver cannot store a non-integer in block_until.
+   *
+   * @throws \LogicException
+   *   When called outside PHPUnit.
+   */
+  public function injectUnreadableBlockUntilForTest(): void {
+    if (!defined('PHPUNIT_COMPOSER_INSTALL') && !defined('__PHPUNIT_PHAR__')) {
+      throw new \LogicException(
+        'Kill-switch test seams can be set only under PHPUnit.',
+      );
+    }
+    $this->unreadableBlockUntilForTest = TRUE;
   }
 
   /**

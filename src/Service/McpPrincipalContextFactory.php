@@ -43,11 +43,18 @@ final class McpPrincipalContextFactory {
    *
    * @param \Symfony\Component\HttpFoundation\Request|null $request
    *   The request, or NULL when there is no HTTP request.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process. Tests inject a
+   *   production SAPI so the Drupal-test-child principal is not
+   *   hidden by PHPUnit.
    */
-  public function fromRequest(?Request $request): McpPrincipalContext {
+  public function fromRequest(
+    ?Request $request,
+    ?McpRoleFallbackEnvironment $environment = NULL,
+  ): McpPrincipalContext {
     $claims = $this->validatedClaims($request);
     if ($claims === []) {
-      $claims = $this->roleFallbackTestClaims($request);
+      $claims = $this->roleFallbackTestClaims($request, $environment);
     }
     $network = $this->isNetworkCall($request);
     $subject = $this->stringClaim($claims, ['sub']);
@@ -142,22 +149,28 @@ final class McpPrincipalContextFactory {
    * Test principal for a readiness-stamped role-fallback request.
    *
    * Empty unless the request already took the fallback path, the
-   * process is PHPUnit or a Drupal test child on cli-server, and the
+   * process is PHPUnit or a Drupal test child site, and the
    * request does not look proxied. A real bearer is never replaced.
    *
    * @param \Symfony\Component\HttpFoundation\Request|null $request
    *   The request readiness has already stamped.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process.
    *
    * @return array<string, string>
    *   iss, sub, and azp, plus tenant when present.
    */
-  private function roleFallbackTestClaims(?Request $request): array {
+  private function roleFallbackTestClaims(
+    ?Request $request,
+    ?McpRoleFallbackEnvironment $environment = NULL,
+  ): array {
     if ($request === NULL) {
       return [];
     }
+    $environment ??= McpRoleFallbackEnvironment::detect();
     $fallback = $request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE);
-    $testSapi = McpRoleFallbackGate::inPhpUnit()
-      || McpRoleFallbackGate::inTestChildServer();
+    $testSapi = $environment->inPhpUnit()
+      || $environment->inDrupalTestChildSite();
     if ($fallback !== TRUE
       || McpRoleFallbackGate::looksProxied($request)
       || !$testSapi) {

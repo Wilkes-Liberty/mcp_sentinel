@@ -67,6 +67,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callers in this repository or elsewhere in the Wilkes-Liberty org.
 
 ### Fixed
+- Functional JSON:API tests on drupal.org GitLab CI no longer
+  receive `403 MCP access is denied` on every governed request.
+  The claimless-seal deferral and
+  `mcp_sentinel_role_fallback_test_principal` map were gated on
+  the PHP built-in server (`cli-server`). d.o `run-tests.sh`
+  serves the child site from Apache (`apache2handler`) with
+  `DRUPAL_TEST_IN_CHILD_SITE`, so the empty principal was sealed
+  before readiness stamped role fallback and the ready-path
+  principal check failed closed. Any Drupal test child site now
+  defers and receives the test principal. Production Apache,
+  FPM, and cli-server without that constant still seal
+  immediately and ignore the map. Deny tests still fail when
+  the principal gate is removed (DEV-1014).
+- `McpKillSwitchFreezeHoldTest` no longer fatals on MySQL
+  strict mode (error 1366) when seeding an unreadable
+  `block_until`. SQLite still stores `not-a-number`. MySQL
+  injects the same fail-closed read at the typed reader.
 - Sealed-token authentication no longer constructs
   `mcp_sentinel.sealed_token_manager` (and therefore the audit
   logger and DLP) when Drupal's authentication collector is first

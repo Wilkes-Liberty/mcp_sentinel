@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Core\Database\DatabaseExceptionWrapper;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Enum\McpKillBlockStatus;
@@ -1405,10 +1406,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-str-block');
     $kill = $this->killSwitch()->kill([$human], 'str-block', $this->paladinA());
     $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['block_until' => 'not-a-number'])
-      ->condition('batch_id', $kill->batchId)
-      ->execute();
+    $this->writeUnreadableBlockUntil($kill->batchId);
     $this->assertTrue($this->killSwitch()->hasActiveStop());
     $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
     $listed = $this->killSwitch()->listActiveBlocks();
@@ -1423,10 +1421,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-str-killed');
     $kill = $this->killSwitch()->kill([$human], 'str-killed', $this->paladinA());
     $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['block_until' => 'not-a-number'])
-      ->condition('batch_id', $kill->batchId)
-      ->execute();
+    $this->writeUnreadableBlockUntil($kill->batchId);
     $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
   }
 
@@ -1437,10 +1432,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     $human = McpKillSelector::humanKey(self::ISS . '|subject-str-list');
     $kill = $this->killSwitch()->kill([$human], 'str-list', $this->paladinA());
     $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
-    $this->container->get('database')->update(McpKillSwitch::TABLE)
-      ->fields(['block_until' => 'not-a-number'])
-      ->condition('batch_id', $kill->batchId)
-      ->execute();
+    $this->writeUnreadableBlockUntil($kill->batchId);
     $listed = $this->killSwitch()->listActiveBlocks();
     $hashes = array_column($listed, 'selector_hash');
     $this->assertContains($human->hash(), $hashes);
@@ -2287,6 +2279,28 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
    */
   private function killSwitch(): McpKillSwitch {
     return $this->container->get('mcp_sentinel.kill_switch');
+  }
+
+  /**
+   * Seeds an unreadable stored block_until on the given kill batch.
+   *
+   * SQLite stores the garbage string. MySQL strict mode rejects it
+   * (error 1366), so the same unreadable value is injected at the
+   * reader — the fail-closed path the product already has.
+   *
+   * @param string $batchId
+   *   Kill batch whose rows should fail closed.
+   */
+  private function writeUnreadableBlockUntil(string $batchId): void {
+    try {
+      $this->container->get('database')->update(McpKillSwitch::TABLE)
+        ->fields(['block_until' => 'not-a-number'])
+        ->condition('batch_id', $batchId)
+        ->execute();
+    }
+    catch (DatabaseExceptionWrapper) {
+      $this->killSwitch()->injectUnreadableBlockUntilForTest();
+    }
   }
 
   /**
