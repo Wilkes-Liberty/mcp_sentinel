@@ -91,8 +91,8 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
   /**
    * The test-module hook can skip sealing a claimless request.
    *
-   * Production (no hook) still seals leftover CLI only. The
-   * hook is consulted first so Kernel tests can exercise it.
+   * Production evaluates the claimless predicate before consulting
+   * the hook. Leftover CLI still applies when the hook is NULL.
    *
    * @covers ::onRequest
    */
@@ -119,6 +119,36 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     ));
     $this->assertNull($holder->get());
     $this->assertFalse($claimless->attributes->has(McpPrincipalContext::REQUEST_ATTRIBUTE));
+  }
+
+  /**
+   * A bearer request is sealed even when the hook would defer.
+   *
+   * @covers ::onRequest
+   */
+  public function testAuthExtensionCannotDeferBearerSeal(): void {
+    $stack = new RequestStack();
+    $bearer = Request::create('/jsonapi/node/page');
+    $bearer->attributes->set(
+      McpPrincipalContext::CLAIMS_ATTRIBUTE,
+      $this->claims('human-1', 'agent-a'),
+    );
+    $stack->push($bearer);
+    $holder = new McpPrincipalContextHolder($stack);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('deferClaimlessSeal');
+    $subscriber = new McpPrincipalContextSubscriber(
+      $this->factory($stack),
+      $holder,
+      $extension,
+    );
+    $kernel = $this->createMock(HttpKernelInterface::class);
+    $subscriber->onRequest(new RequestEvent(
+      $kernel,
+      $bearer,
+      HttpKernelInterface::MAIN_REQUEST,
+    ));
+    $this->assertSame('human-1', $holder->get()?->subject());
   }
 
   /**

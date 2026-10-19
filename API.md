@@ -143,8 +143,14 @@ required name, including a token that lists no scopes, is refused
 sources skip that scope check. JSON:API, GraphQL, and
 `/drupal-mcp/context` require a verified principal on the ready
   path. Production seals a claimless request immediately.
-  `mcp_sentinel_test` (never enable on a live site) defers that
-  seal so readiness can stamp role fallback, and reads
+  `mcp_sentinel_test` (never enable on a live site) registers
+  `mcp_sentinel_test.principal_auth_extension`. Production
+  consults that hook only after its own admission checks
+  (fallback stamp, unproxied hop, `permitted()`; claimless
+  predicate before deferral) and never takes scopes from it.
+  `McpSentinelServiceProvider` drops any other provider of
+  that id. The test module defers the claimless seal so
+  readiness can stamp role fallback, and reads
   `mcp_sentinel_role_fallback_test_principal` only after that
   stamp and only when the request is not proxied. Core sets
   `DRUPAL_TEST_IN_CHILD_SITE` from the `drupal_valid_test_ua()`

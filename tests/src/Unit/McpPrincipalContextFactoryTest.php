@@ -237,6 +237,7 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
    * @covers ::fromRequest
    */
   public function testAuthExtensionSuppliesFallbackClaims(): void {
+    new Settings([]);
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
@@ -245,6 +246,7 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'functional-role-fallback',
       'azp' => 'functional-role-fallback-client',
+      'tenant' => 'tenant-a',
     ]);
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
@@ -258,6 +260,97 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $this->assertSame('https://idp.example/realms/agents', $ctx->issuer());
     $this->assertSame('functional-role-fallback', $ctx->subject());
     $this->assertSame('functional-role-fallback-client', $ctx->azp());
+    $this->assertSame('tenant-a', $ctx->tenant());
+    $this->assertSame([], $ctx->scopes());
+    new Settings([]);
+  }
+
+  /**
+   * Production does not consult the hook without the fallback stamp.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionIgnoredWithoutFallbackStamp(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('fallbackClaims');
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      $extension,
+    );
+    $ctx = $factory->fromRequest(Request::create('/jsonapi/node/page', 'PATCH'));
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    new Settings([]);
+  }
+
+  /**
+   * Production does not consult the hook on a proxied hop.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionIgnoredWhenProxied(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('fallbackClaims');
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      $extension,
+    );
+    $proxied = Request::create('/jsonapi/node/page', 'PATCH', [], [], [], [
+      'REMOTE_ADDR' => '127.0.0.1',
+      'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
+    ]);
+    $proxied->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($proxied);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    new Settings([]);
+  }
+
+  /**
+   * The hook cannot inject scopes, act, or client_id.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionCannotSupplyScopesOrAct(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->method('fallbackClaims')->willReturn([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'rogue-subject',
+      'azp' => 'rogue-client',
+      'tenant' => 'tenant-rogue',
+      'scope' => 'mcp_read mcp_write',
+      'scopes' => ['mcp_read', 'mcp_write'],
+      'act' => ['sub' => 'rogue-actor'],
+      'client_id' => 'rogue-client-id',
+    ]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      $extension,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('rogue-subject', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    $this->assertSame('', $ctx->clientId());
+    $this->assertSame([], $ctx->actChain());
+    $this->assertArrayNotHasKey('act', $ctx->keyClaims());
+    new Settings([]);
   }
 
   /**

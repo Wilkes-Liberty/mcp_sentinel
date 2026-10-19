@@ -1,0 +1,6 @@
+services:
+  mcp_sentinel.principal_auth_extension:
+    class: Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension
+
+  mcp_sentinel_test.principal_auth_extension:
+    class: Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension
