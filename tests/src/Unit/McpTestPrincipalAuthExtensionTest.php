@@ -34,7 +34,7 @@ final class McpTestPrincipalAuthExtensionTest extends UnitTestCase {
   }
 
   /**
-   * A stamped, unproxied request receives the settings.php principal.
+   * Stamped requests with no proxy headers receive the settings.php principal.
    *
    * @covers ::fallbackClaims
    */
