@@ -4,13 +4,20 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\Core\Extension\Extension;
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Site\Settings;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
+use Drupal\mcp_sentinel_test\Service\McpTestExtraClaimsPrincipalAuthExtension;
+use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
+use Drupal\mcp_sentinel_test\Spoof\NsSpoofPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -238,21 +245,23 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
    * @covers ::fromRequest
    */
   public function testAuthExtensionSuppliesFallbackClaims(): void {
-    new Settings([]);
+    new Settings([
+      McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'functional-role-fallback',
+        'azp' => 'functional-role-fallback-client',
+        'tenant' => 'tenant-a',
+      ],
+    ]);
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->method('fallbackClaims')->willReturn([
-      'iss' => 'https://idp.example/realms/agents',
-      'sub' => 'functional-role-fallback',
-      'azp' => 'functional-role-fallback-client',
-      'tenant' => 'tenant-a',
-    ]);
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
     );
     $fallback = Request::create('/jsonapi/node/page', 'PATCH');
     $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
@@ -276,12 +285,12 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->expects($this->never())->method('fallbackClaims');
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
     );
     $ctx = $factory->fromRequest(Request::create('/jsonapi/node/page', 'PATCH'));
     $this->assertSame('', $ctx->subject());
@@ -299,12 +308,12 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->expects($this->never())->method('fallbackClaims');
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
     );
     $proxied = Request::create('/jsonapi/node/page', 'PATCH', [], [], [], [
       'REMOTE_ADDR' => '127.0.0.1',
@@ -327,21 +336,12 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->method('fallbackClaims')->willReturn([
-      'iss' => 'https://idp.example/realms/agents',
-      'sub' => 'rogue-subject',
-      'azp' => 'rogue-client',
-      'tenant' => 'tenant-rogue',
-      'scope' => 'mcp_read mcp_write',
-      'scopes' => ['mcp_read', 'mcp_write'],
-      'act' => ['sub' => 'rogue-actor'],
-      'client_id' => 'rogue-client-id',
-    ]);
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpTestExtraClaimsPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
     );
     $fallback = Request::create('/jsonapi/node/page', 'PATCH');
     $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
@@ -364,13 +364,12 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->expects($this->never())->method('fallbackClaims');
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
       new McpRoleFallbackEnvironment(FALSE),
+      $this->owningTestModuleHandler(),
     );
     $fallback = Request::create('/jsonapi/node/page', 'PATCH');
     $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
@@ -397,6 +396,242 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $request->attributes->set(McpPrincipalContext::FIXTURE_ATTRIBUTE, TRUE);
     $ctx = $factory->fromRequest($request);
     $this->assertTrue($ctx->fromFixture());
+  }
+
+  /**
+   * A wired foreign object is ignored when the module handler is live.
+   *
+   * @covers ::trustedAuthExtension
+   */
+  public function testWiredForeignExtensionIsIgnored(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('fallbackClaims');
+    $modules = $this->createMock(ModuleHandlerInterface::class);
+    $modules->method('moduleExists')
+      ->with('mcp_sentinel_test')
+      ->willReturn(TRUE);
+    $modules->method('getModuleList')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      $extension,
+      NULL,
+      $modules,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    new Settings([]);
+  }
+
+  /**
+   * Ownership is the test-module path, not a namespace prefix.
+   *
+   * @covers ::classOwnedByTestModule
+   */
+  public function testOwnershipIsPathNotNamespace(): void {
+    $this->loadNsSpoofClass();
+    $this->assertTrue(McpPrincipalContextFactory::classOwnedByTestModule(
+      McpTestPrincipalAuthExtension::class,
+      [],
+    ));
+    $this->assertFalse(McpPrincipalContextFactory::classOwnedByTestModule(
+      NsSpoofPrincipalAuthExtension::class,
+      [],
+    ));
+    $this->assertFalse(McpPrincipalContextFactory::classOwnedByTestModule(
+      McpRoguePrincipalAuthExtension::class,
+      [],
+    ));
+  }
+
+  /**
+   * Extra keys from an admitted hook write claims_stripped.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionStrippedClaimsAreAudited(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      McpPrincipalContextFactory::AUDIT_OPERATION,
+      $this->callback(static function (array $metadata): bool {
+        return ($metadata['reason'] ?? '') === 'claims_stripped'
+          && isset($metadata['stripped'])
+          && in_array('scope', $metadata['stripped'], TRUE);
+      }),
+    );
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpTestExtraClaimsPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
+      $audit,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('rogue-subject', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    new Settings([]);
+  }
+
+  /**
+   * A foreign hook writes refused when the module handler is live.
+   *
+   * @covers ::trustedAuthExtension
+   */
+  public function testWiredForeignExtensionWritesRefusedAudit(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      McpPrincipalContextFactory::AUDIT_OPERATION,
+      $this->callback(static function (array $metadata): bool {
+        return ($metadata['reason'] ?? '') === 'refused'
+          && ($metadata['service'] ?? '') === McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID
+          && ($metadata['provider'] ?? NULL) !== '';
+      }),
+    );
+    $modules = $this->createMock(ModuleHandlerInterface::class);
+    $modules->method('moduleExists')->willReturn(FALSE);
+    $modules->method('getModuleList')->willReturn([
+      'mcp_sentinel_rogue_auth' => $this->extensionAt(
+        dirname((new \ReflectionClass(McpRoguePrincipalAuthExtension::class))->getFileName() ?: '', 3)
+        . '/mcp_sentinel_rogue_auth.info.yml',
+      ),
+    ]);
+    new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpRoguePrincipalAuthExtension(),
+      NULL,
+      $modules,
+      $audit,
+    );
+  }
+
+  /**
+   * A NULL handler does not honour the hook and writes refused.
+   *
+   * @covers ::trustedAuthExtension
+   */
+  public function testNullModuleHandlerRefusesAndAudits(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      McpPrincipalContextFactory::AUDIT_OPERATION,
+      $this->callback(static function (array $metadata): bool {
+        return ($metadata['reason'] ?? '') === 'refused';
+      }),
+    );
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpRoguePrincipalAuthExtension(),
+      NULL,
+      NULL,
+      $audit,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+  }
+
+  /**
+   * A nested fixture module wins over the parent tree.
+   *
+   * @covers ::providerFromModuleMap
+   */
+  public function testProviderPrefersLongestModulePrefix(): void {
+    $this->loadNsSpoofClass();
+    $sentinel = dirname((new \ReflectionClass(McpPrincipalContextFactory::class))->getFileName() ?: '', 3);
+    $spoof = dirname((new \ReflectionClass(NsSpoofPrincipalAuthExtension::class))->getFileName() ?: '', 2);
+    $this->assertSame('mcp_sentinel_ns_spoof', McpPrincipalContextFactory::providerFromModuleMap(
+      NsSpoofPrincipalAuthExtension::class,
+      [
+        'mcp_sentinel' => ['pathname' => $sentinel . '/mcp_sentinel.info.yml'],
+        'mcp_sentinel_ns_spoof' => ['pathname' => $spoof . '/mcp_sentinel_ns_spoof.info.yml'],
+      ],
+    ));
+  }
+
+  /**
+   * A throwing logger still leaves the hook ignored.
+   *
+   * @covers ::trustedAuthExtension
+   */
+  public function testThrowingAuditLoggerStillDenies(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->method('logAlways')->willThrowException(new \RuntimeException('audit down'));
+    $modules = $this->createMock(ModuleHandlerInterface::class);
+    $modules->method('moduleExists')->willReturn(FALSE);
+    $modules->method('getModuleList')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpRoguePrincipalAuthExtension(),
+      NULL,
+      $modules,
+      $audit,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+  }
+
+  /**
+   * Handler stub that reports mcp_sentinel_test at its real path.
+   */
+  private function owningTestModuleHandler(): ModuleHandlerInterface {
+    $info = dirname((new \ReflectionClass(McpTestPrincipalAuthExtension::class))->getFileName() ?: '', 3)
+      . '/mcp_sentinel_test.info.yml';
+    $module = $this->extensionAt($info);
+    $handler = $this->createMock(ModuleHandlerInterface::class);
+    $handler->method('moduleExists')->willReturnCallback(
+      static fn (string $name): bool => $name === 'mcp_sentinel_test',
+    );
+    $handler->method('getModule')->willReturn($module);
+    $handler->method('getModuleList')->willReturn(['mcp_sentinel_test' => $module]);
+    return $handler;
+  }
+
+  /**
+   * Extension whose pathname is $info.
+   */
+  private function extensionAt(string $info): Extension {
+    $module = $this->createMock(Extension::class);
+    $module->method('getPathname')->willReturn($info);
+    $module->method('getPath')->willReturn(dirname($info));
+    return $module;
+  }
+
+  /**
+   * Loads the foreign-path spoof (not a Drupal\mcp_sentinel_test\ file).
+   */
+  private function loadNsSpoofClass(): void {
+    $file = dirname(__DIR__, 2) . '/modules/mcp_sentinel_ns_spoof/src/NsSpoofPrincipalAuthExtension.php';
+    if (!class_exists(NsSpoofPrincipalAuthExtension::class, FALSE)) {
+      require_once $file;
+    }
   }
 
 }

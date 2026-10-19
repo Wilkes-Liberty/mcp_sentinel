@@ -26,6 +26,7 @@ final class McpKillBlockUntilReaderTest extends UnitTestCase {
    * Production reads integers and numeric strings; garbage is NULL.
    *
    * @covers ::read
+   * @covers ::parse
    */
   public function testProductionRead(): void {
     $reader = new McpKillBlockUntilReader();
@@ -33,6 +34,12 @@ final class McpKillBlockUntilReaderTest extends UnitTestCase {
     $this->assertSame(1700000000, $reader->read(['block_until' => '1700000000']));
     $this->assertNull($reader->read(['block_until' => 'not-a-number']));
     $this->assertNull($reader->read([]));
+    $this->assertSame(1700000000, McpKillBlockUntilReader::parse([
+      'block_until' => '1700000000',
+    ]));
+    $this->assertNull(McpKillBlockUntilReader::parse([
+      'block_until' => 'not-a-number',
+    ]));
   }
 
   /**
