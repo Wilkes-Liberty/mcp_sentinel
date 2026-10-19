@@ -17,12 +17,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `permitted()`, and keeps `iss`/`sub`/`azp`/`tenant`
   only. The subscriber evaluates the claimless predicate
   before `deferClaimlessSeal()`. The hook id is
-  `mcp_sentinel_test.principal_auth_extension`. A late
-  compiler pass drops the legacy id and any namespaced
-  definition whose class is not under
-  `Drupal\mcp_sentinel_test\`. The interface is
-  `@internal`. The kill-block reader seam is veto-only:
-  a decorator may make a block unreadable, never expired.
+  `mcp_sentinel_test.principal_auth_extension`. A
+  compiler pass at `TYPE_BEFORE_OPTIMIZATION` priority
+  `-1000` resolves aliases and decorations and drops the
+  legacy id and any namespaced definition that
+  `mcp_sentinel_test` does not own. Ownership is that
+  module's real path or provider, not a class-namespace
+  prefix. The factory and subscriber also fail closed on
+  the wired object unless the test gate is set (PHPUnit
+  or `$settings['mcp_sentinel_allow_role_fallback']`).
+  This requires the installed `mcp_sentinel_test` PHP
+  plus that gate; scopes from the hook are still
+  dropped. A failed check ignores the hook, keeps the
+  sealed path, and writes an `audit_chain` governance
+  row naming the offending service and its provider.
+  The interface is `@internal`. The kill-block reader
+  seam is veto-only: a decorator may make a block
+  unreadable, never expired.
 
 ### Fixed
 - `McpHistoricalExceptionTest` installs `system` date-format

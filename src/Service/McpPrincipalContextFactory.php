@@ -18,6 +18,16 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class McpPrincipalContextFactory {
 
   /**
+   * Whether compile-time rejections have been written.
+   */
+  private bool $compileRejectionsFlushed = FALSE;
+
+  /**
+   * Whether the wired hook has already been rejected.
+   */
+  private bool $extensionRejected = FALSE;
+
+  /**
    * Constructs the factory.
    *
    * @param \Symfony\Component\HttpFoundation\RequestStack $requestStack
@@ -27,17 +37,25 @@ final class McpPrincipalContextFactory {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
    *   Test-module hook
    *   (`mcp_sentinel_test.principal_auth_extension`). NULL
-   *   unless that module owns the id.
+   *   unless that module owns the id and the test gate is
+   *   set. Runtime admission fail-closes on the wired object.
    * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
    *   Process probe. NULL reads the live process. Tests inject
    *   a production process so permitted() is not hidden by
    *   PHPUnit.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
+   *   Writes a governance row when a hook is ignored. NULL
+   *   skips the write; the hook is still ignored.
+   * @param list<array{service?: mixed, provider?: mixed}> $compileRejections
+   *   Compile-time rejections to flush onto audit_chain.
    */
   public function __construct(
     private readonly RequestStack $requestStack,
     private readonly McpOauthContext $oauthContext,
     private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
     private readonly ?McpRoleFallbackEnvironment $environment = NULL,
+    private readonly ?McpAuditLogger $auditLogger = NULL,
+    private readonly array $compileRejections = [],
   ) {}
 
   /**
@@ -54,6 +72,7 @@ final class McpPrincipalContextFactory {
    *   The request, or NULL when there is no HTTP request.
    */
   public function fromRequest(?Request $request): McpPrincipalContext {
+    $this->flushCompileRejections();
     $claims = $this->validatedClaims($request);
     if ($claims === []) {
       $claims = $this->extensionFallbackClaims($request);
@@ -112,7 +131,11 @@ final class McpPrincipalContextFactory {
    *   iss, sub, azp, and tenant only.
    */
   private function extensionFallbackClaims(?Request $request): array {
-    if ($this->authExtension === NULL || $request === NULL) {
+    if ($request === NULL) {
+      return [];
+    }
+    $extension = $this->admittedExtension();
+    if ($extension === NULL) {
       return [];
     }
     if ($request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE) !== TRUE) {
@@ -124,7 +147,7 @@ final class McpPrincipalContextFactory {
     if (!McpRoleFallbackGate::permitted($request, $this->environment)) {
       return [];
     }
-    $raw = $this->authExtension->fallbackClaims($request);
+    $raw = $extension->fallbackClaims($request);
     $allowed = [];
     foreach (['iss', 'sub', 'azp', 'tenant'] as $name) {
       $value = $raw[$name] ?? NULL;
@@ -291,6 +314,55 @@ final class McpPrincipalContextFactory {
       $act = $act['act'] ?? NULL;
     }
     return $chain;
+  }
+
+  /**
+   * The wired hook after a fail-closed ownership check.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null
+   *   The hook, or NULL when it is missing or not owned.
+   */
+  private function admittedExtension(): ?McpPrincipalAuthExtensionInterface {
+    if ($this->authExtension === NULL) {
+      return NULL;
+    }
+    if (McpPrincipalAuthExtensionOwnership::isAdmitted($this->authExtension)) {
+      return $this->authExtension;
+    }
+    if (!$this->extensionRejected) {
+      $this->extensionRejected = TRUE;
+      McpPrincipalAuthExtensionOwnership::recordRejection(
+        $this->auditLogger,
+        McpPrincipalAuthExtensionOwnership::serviceIdOf($this->authExtension),
+        McpPrincipalAuthExtensionOwnership::providerOf($this->authExtension),
+      );
+    }
+    return NULL;
+  }
+
+  /**
+   * Writes compile-time rejections once.
+   */
+  private function flushCompileRejections(): void {
+    if ($this->compileRejectionsFlushed) {
+      return;
+    }
+    $this->compileRejectionsFlushed = TRUE;
+    foreach ($this->compileRejections as $rejection) {
+      if (!is_array($rejection)) {
+        continue;
+      }
+      $service = $rejection['service'] ?? '';
+      $provider = $rejection['provider'] ?? '';
+      if (!is_string($service) || $service === '') {
+        continue;
+      }
+      McpPrincipalAuthExtensionOwnership::recordRejection(
+        $this->auditLogger,
+        $service,
+        is_string($provider) ? $provider : '',
+      );
+    }
   }
 
 }

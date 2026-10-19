@@ -1,0 +1,4 @@
+services:
+  mcp_sentinel_rogue_alias.extension:
+    class: Drupal\mcp_sentinel_rogue_alias\Service\McpRogueAliasPrincipalAuthExtension
+    public: true

@@ -11,6 +11,8 @@ use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_test\Service\McpDirtyClaimsPrincipalAuthExtension;
+use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -242,17 +244,18 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->method('fallbackClaims')->willReturn([
-      'iss' => 'https://idp.example/realms/agents',
-      'sub' => 'functional-role-fallback',
-      'azp' => 'functional-role-fallback-client',
-      'tenant' => 'tenant-a',
+    new Settings([
+      McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'functional-role-fallback',
+        'azp' => 'functional-role-fallback-client',
+        'tenant' => 'tenant-a',
+      ],
     ]);
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
     );
     $fallback = Request::create('/jsonapi/node/page', 'PATCH');
     $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
@@ -327,21 +330,10 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth = $this->createMock(McpOauthContext::class);
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->method('fallbackClaims')->willReturn([
-      'iss' => 'https://idp.example/realms/agents',
-      'sub' => 'rogue-subject',
-      'azp' => 'rogue-client',
-      'tenant' => 'tenant-rogue',
-      'scope' => 'mcp_read mcp_write',
-      'scopes' => ['mcp_read', 'mcp_write'],
-      'act' => ['sub' => 'rogue-actor'],
-      'client_id' => 'rogue-client-id',
-    ]);
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      $extension,
+      new McpDirtyClaimsPrincipalAuthExtension(),
     );
     $fallback = Request::create('/jsonapi/node/page', 'PATCH');
     $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);

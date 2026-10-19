@@ -11,6 +11,8 @@ parameters:
     - .
   excludePaths:
     - vendor (?)
+    # Intentional namespace spoof: the class lives in a foreign module.
+    - tests/modules/mcp_sentinel_rogue_ns_spoof/spoof/*
   fileExtensions:
     - php
     - module

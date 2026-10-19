@@ -12,13 +12,18 @@ use Symfony\Component\HttpFoundation\Request;
  * @internal
  *
  * The mcp_sentinel_test module registers the only implementation, as
- * mcp_sentinel_test.principal_auth_extension. McpSentinelServiceProvider
- * drops any other definition. Production owns admission: the factory
- * calls fallbackClaims() only after the fallback stamp, an unproxied
- * hop, and permitted(), and keeps iss/sub/azp/tenant only. The
- * subscriber evaluates the claimless predicate before consulting
- * deferClaimlessSeal(). Absent that module the factory and subscriber
- * receive NULL and stay fail-closed.
+ * mcp_sentinel_test.principal_auth_extension. Ownership is that
+ * module's real path or provider, not a class-namespace prefix.
+ * McpSentinelServiceProvider drops any other definition at
+ * TYPE_BEFORE_OPTIMIZATION priority -1000, after alias, decorate,
+ * and register passes. The factory and subscriber also fail closed
+ * on the wired object unless the test gate is set. Production owns
+ * admission: fallbackClaims() runs only after the fallback stamp,
+ * an unproxied hop, and permitted(), and keeps iss/sub/azp/tenant
+ * only. The subscriber evaluates the claimless predicate before
+ * consulting deferClaimlessSeal(). A failed check ignores the hook
+ * and writes an audit_chain governance row naming the service and
+ * its provider.
  */
 interface McpPrincipalAuthExtensionInterface {
 

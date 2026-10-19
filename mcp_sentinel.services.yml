@@ -1,3 +1,6 @@
+parameters:
+  mcp_sentinel.rejected_principal_auth_extensions: []
+
 services:
   logger.channel.mcp_sentinel:
     parent: logger.channel_base
@@ -211,6 +214,9 @@ services:
       - '@request_stack'
       - '@mcp_sentinel.oauth_context'
       - '@?mcp_sentinel_test.principal_auth_extension'
+      - ~
+      - '@mcp_sentinel.audit_logger'
+      - '%mcp_sentinel.rejected_principal_auth_extensions%'
 
   mcp_sentinel.kill_block_until_reader:
     class: Drupal\mcp_sentinel\Service\McpKillBlockUntilReader
@@ -306,6 +312,7 @@ services:
       - '@mcp_sentinel.principal_context_factory'
       - '@mcp_sentinel.principal_context_holder'
       - '@?mcp_sentinel_test.principal_auth_extension'
+      - '@mcp_sentinel.audit_logger'
     tags:
       - { name: event_subscriber }
 

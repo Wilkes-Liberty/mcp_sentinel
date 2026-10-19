@@ -1,0 +1,8 @@
+name: 'MCP Sentinel rogue auth namespace spoof'
+type: module
+description: 'Regression fixture: spoofs the mcp_sentinel_test class namespace. Never enable on a production site.'
+package: Testing
+core_version_requirement: ^10.6 || ^11.3
+dependencies:
+  - mcp_sentinel:mcp_sentinel
+hidden: true

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
+use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionOwnership;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -26,6 +28,11 @@ use Symfony\Component\HttpKernel\KernelEvents;
 final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
 
   /**
+   * Whether the wired hook has already been rejected.
+   */
+  private bool $extensionRejected = FALSE;
+
+  /**
    * Constructs the subscriber.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
@@ -35,12 +42,17 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
    *   Test-module hook
    *   (`mcp_sentinel_test.principal_auth_extension`). NULL
-   *   unless that module owns the id.
+   *   unless that module owns the id and the test gate is
+   *   set. Runtime admission fail-closes on the wired object.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
+   *   Writes a governance row when a hook is ignored. NULL
+   *   skips the write; the hook is still ignored.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
     private readonly McpPrincipalContextHolder $holder,
     private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
+    private readonly ?McpAuditLogger $auditLogger = NULL,
   ) {}
 
   /**
@@ -65,7 +77,7 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     }
     $request = $event->getRequest();
     if ($this->isClaimlessUnsealed($request)
-      && $this->authExtension?->deferClaimlessSeal($request) === TRUE) {
+      && $this->admittedExtension()?->deferClaimlessSeal($request) === TRUE) {
       return;
     }
     if ($this->isLeftoverCliRequest($request)) {
@@ -118,6 +130,30 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     return !$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
       && !$request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)
       && $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE) !== TRUE;
+  }
+
+  /**
+   * The wired hook after a fail-closed ownership check.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null
+   *   The hook, or NULL when it is missing or not owned.
+   */
+  private function admittedExtension(): ?McpPrincipalAuthExtensionInterface {
+    if ($this->authExtension === NULL) {
+      return NULL;
+    }
+    if (McpPrincipalAuthExtensionOwnership::isAdmitted($this->authExtension)) {
+      return $this->authExtension;
+    }
+    if (!$this->extensionRejected) {
+      $this->extensionRejected = TRUE;
+      McpPrincipalAuthExtensionOwnership::recordRejection(
+        $this->auditLogger,
+        McpPrincipalAuthExtensionOwnership::serviceIdOf($this->authExtension),
+        McpPrincipalAuthExtensionOwnership::providerOf($this->authExtension),
+      );
+    }
+    return NULL;
   }
 
 }

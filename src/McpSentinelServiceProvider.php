@@ -8,25 +8,53 @@ use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ServiceProviderBase;
 use Drupal\mcp_sentinel\Controller\McpDraftResource;
 use Drupal\mcp_sentinel\Routing\McpDraftRoutes;
+use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionOwnership;
 use Symfony\Component\DependencyInjection\ChildDefinition;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder as SymfonyContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
 
 /**
  * Registers the optional JSON:API draft continuation surface.
  *
- * The principal-auth ownership guard runs as a late compiler
- * pass so a later module's alter() cannot re-add the hook.
+ * The principal-auth ownership guard runs at
+ * TYPE_BEFORE_OPTIMIZATION priority -1000 so alias, decorate,
+ * and register passes have already been applied, and before
+ * removal. Runtime admission still fail-closes on the object
+ * wired into the factory and subscriber.
  */
 final class McpSentinelServiceProvider extends ServiceProviderBase implements CompilerPassInterface {
+
+  /**
+   * Factory and subscriber argument that holds the optional hook.
+   */
+  private const EXTENSION_ARGUMENT = 2;
+
+  /**
+   * Service ids whose constructor receives the optional hook.
+   */
+  private const HOOK_CONSUMERS = [
+    'mcp_sentinel.principal_context_factory',
+    'mcp_sentinel.principal_context_subscriber',
+  ];
 
   /**
    * {@inheritdoc}
    */
   public function register(ContainerBuilder $container): void {
-    $container->addCompilerPass($this, PassConfig::TYPE_BEFORE_REMOVING);
+    $container->addCompilerPass(
+      $this,
+      PassConfig::TYPE_BEFORE_OPTIMIZATION,
+      -1000,
+    );
+    if (!$container->hasParameter(McpPrincipalAuthExtensionOwnership::REJECTED_PARAMETER)) {
+      $container->setParameter(
+        McpPrincipalAuthExtensionOwnership::REJECTED_PARAMETER,
+        [],
+      );
+    }
   }
 
   /**
@@ -66,62 +94,290 @@ final class McpSentinelServiceProvider extends ServiceProviderBase implements Co
   /**
    * Drops a principal-auth hook that mcp_sentinel_test does not own.
    *
-   * The legacy mcp_sentinel.principal_auth_extension id is always
-   * removed. The namespaced id is kept only when that test module
-   * is enabled and the class lives under Drupal\mcp_sentinel_test\.
+   * The legacy id is always removed. Aliases and decorations are
+   * resolved to the final definition. The namespaced id and any
+   * factory or subscriber argument are kept only when the defining
+   * module is mcp_sentinel_test, proven from that module's real
+   * path. A failed check records the service and provider for an
+   * audit_chain row and leaves the request on the sealed path.
    *
    * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
-   *   The container after every module alter().
+   *   The container after alias, decorate, and register passes.
    */
   private function restrictPrincipalAuthExtension(ContainerBuilder $container): void {
-    $legacy = 'mcp_sentinel.principal_auth_extension';
-    if ($container->hasDefinition($legacy)) {
-      $container->removeDefinition($legacy);
-    }
-    if ($container->hasAlias($legacy)) {
-      $container->removeAlias($legacy);
-    }
+    $modules = $this->moduleList($container);
+    $this->dropService(
+      $container,
+      McpPrincipalAuthExtensionOwnership::LEGACY_ID,
+      $modules,
+      TRUE,
+    );
+    $this->dropDecoratorsOf(
+      $container,
+      McpPrincipalAuthExtensionOwnership::LEGACY_ID,
+      $modules,
+    );
+    $this->dropDecoratorsOf(
+      $container,
+      McpPrincipalAuthExtensionOwnership::SERVICE_ID,
+      $modules,
+    );
+    $this->dropService(
+      $container,
+      McpPrincipalAuthExtensionOwnership::SERVICE_ID,
+      $modules,
+      FALSE,
+    );
+    $this->nullUnauthorizedArguments($container, $modules);
+  }
 
-    $id = 'mcp_sentinel_test.principal_auth_extension';
+  /**
+   * Removes $id unless it resolves to an owned definition.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container being compiled.
+   * @param string $id
+   *   Service id or alias.
+   * @param array<string, mixed> $modules
+   *   container.modules.
+   * @param bool $always
+   *   TRUE to drop even an owned definition (legacy id).
+   */
+  private function dropService(
+    ContainerBuilder $container,
+    string $id,
+    array $modules,
+    bool $always,
+  ): void {
     if (!$container->hasDefinition($id) && !$container->hasAlias($id)) {
       return;
     }
-    $modules = $container->hasParameter('container.modules')
-      ? $container->getParameter('container.modules')
-      : [];
-    $testEnabled = is_array($modules) && isset($modules['mcp_sentinel_test']);
-    $class = $this->principalAuthExtensionClass($container, $id);
-    if ($testEnabled && str_starts_with($class, 'Drupal\\mcp_sentinel_test\\')) {
+    $resolved = $this->resolveToDefinition($container, $id);
+    $class = $resolved['class'];
+    $owned = $class !== ''
+      && McpPrincipalAuthExtensionOwnership::classIsOwned($class, $modules);
+    if (!$always && $owned) {
       return;
     }
+    $provider = $resolved['provider'];
+    if ($provider === '' && $class !== '') {
+      $provider = McpPrincipalAuthExtensionOwnership::providerOfClass(
+        $class,
+        $modules,
+      );
+    }
+    $this->rememberRejection($container, $id, $provider);
     if ($container->hasDefinition($id)) {
       $container->removeDefinition($id);
     }
     if ($container->hasAlias($id)) {
       $container->removeAlias($id);
     }
+    if ($resolved['target'] !== $id
+      && $container->hasDefinition($resolved['target'])
+      && !$owned) {
+      $container->removeDefinition($resolved['target']);
+    }
   }
 
   /**
-   * Class name of the namespaced principal-auth hook, if any.
+   * Drops services that decorate $innerId without owning it.
    *
    * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
-   *   The container being altered.
+   *   The container being compiled.
+   * @param string $innerId
+   *   Decorated service id.
+   * @param array<string, mixed> $modules
+   *   container.modules.
+   */
+  private function dropDecoratorsOf(
+    ContainerBuilder $container,
+    string $innerId,
+    array $modules,
+  ): void {
+    foreach ($container->getDefinitions() as $id => $definition) {
+      $decorated = $definition->getDecoratedService();
+      if ($decorated === NULL || ($decorated[0] ?? '') !== $innerId) {
+        continue;
+      }
+      $class = (string) $definition->getClass();
+      if (McpPrincipalAuthExtensionOwnership::classIsOwned($class, $modules)) {
+        continue;
+      }
+      $provider = McpPrincipalAuthExtensionOwnership::providerOfClass(
+        $class,
+        $modules,
+      );
+      $this->rememberRejection($container, $id, $provider);
+      $container->removeDefinition($id);
+    }
+  }
+
+  /**
+   * Nulls factory and subscriber arguments that are not owned.
+   *
+   * Catches a rewired constructor argument that no longer uses
+   * the namespaced id.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container being compiled.
+   * @param array<string, mixed> $modules
+   *   container.modules.
+   */
+  private function nullUnauthorizedArguments(
+    ContainerBuilder $container,
+    array $modules,
+  ): void {
+    foreach (self::HOOK_CONSUMERS as $consumer) {
+      if (!$container->hasDefinition($consumer)) {
+        continue;
+      }
+      $definition = $container->getDefinition($consumer);
+      $arguments = $definition->getArguments();
+      if (!isset($arguments[self::EXTENSION_ARGUMENT])) {
+        continue;
+      }
+      $argument = $arguments[self::EXTENSION_ARGUMENT];
+      if (!$argument instanceof Reference) {
+        continue;
+      }
+      $target = (string) $argument;
+      if ($target === '') {
+        continue;
+      }
+      $resolved = $this->resolveToDefinition($container, $target);
+      if ($resolved['class'] !== ''
+        && McpPrincipalAuthExtensionOwnership::classIsOwned(
+          $resolved['class'],
+          $modules,
+        )) {
+        continue;
+      }
+      $provider = $resolved['provider'];
+      if ($provider === '' && $resolved['class'] !== '') {
+        $provider = McpPrincipalAuthExtensionOwnership::providerOfClass(
+          $resolved['class'],
+          $modules,
+        );
+      }
+      $this->rememberRejection($container, $target, $provider);
+      $definition->replaceArgument(self::EXTENSION_ARGUMENT, NULL);
+    }
+  }
+
+  /**
+   * Follows aliases to the final definition class and provider.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container being compiled.
    * @param string $id
    *   Service id or alias.
+   *
+   * @return array{target: string, class: string, provider: string}
+   *   Resolved target, class, and _provider tag when present.
    */
-  private function principalAuthExtensionClass(ContainerBuilder $container, string $id): string {
-    if ($container->hasDefinition($id)) {
-      return (string) $container->getDefinition($id)->getClass();
+  private function resolveToDefinition(
+    ContainerBuilder $container,
+    string $id,
+  ): array {
+    $seen = [];
+    $current = $id;
+    while ($container->hasAlias($current)) {
+      if (isset($seen[$current])) {
+        return ['target' => $current, 'class' => '', 'provider' => ''];
+      }
+      $seen[$current] = TRUE;
+      $current = (string) $container->getAlias($current);
     }
-    if (!$container->hasAlias($id)) {
-      return '';
+    if (!$container->hasDefinition($current)) {
+      return ['target' => $current, 'class' => '', 'provider' => ''];
     }
-    $target = (string) $container->getAlias($id);
-    if (!$container->hasDefinition($target)) {
-      return '';
+    $definition = $container->getDefinition($current);
+    return [
+      'target' => $current,
+      'class' => $this->definitionClass($definition),
+      'provider' => $this->definitionProvider($definition),
+    ];
+  }
+
+  /**
+   * Class of a definition, following decoration to the outer class.
+   *
+   * After DecoratorServicePass the public id is already the
+   * decorator. Before that pass, getClass() is this definition's
+   * own class.
+   *
+   * @param \Symfony\Component\DependencyInjection\Definition $definition
+   *   The resolved definition.
+   *
+   * @return string
+   *   FQCN, or empty when unset.
+   */
+  private function definitionClass(Definition $definition): string {
+    return (string) $definition->getClass();
+  }
+
+  /**
+   * Provider tag written when YAML loaded the definition.
+   *
+   * @param \Symfony\Component\DependencyInjection\Definition $definition
+   *   The resolved definition.
+   *
+   * @return string
+   *   Module machine name, or empty.
+   */
+  private function definitionProvider(Definition $definition): string {
+    $tags = $definition->getTags();
+    $provider = $tags['_provider'][0]['provider'] ?? '';
+    return is_string($provider) ? $provider : '';
+  }
+
+  /**
+   * Records a compile-time rejection for a later audit_chain row.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container being compiled.
+   * @param string $serviceId
+   *   Offending service id.
+   * @param string $provider
+   *   Defining module.
+   */
+  private function rememberRejection(
+    ContainerBuilder $container,
+    string $serviceId,
+    string $provider,
+  ): void {
+    $rejected = $container->hasParameter(McpPrincipalAuthExtensionOwnership::REJECTED_PARAMETER)
+      ? $container->getParameter(McpPrincipalAuthExtensionOwnership::REJECTED_PARAMETER)
+      : [];
+    if (!is_array($rejected)) {
+      $rejected = [];
     }
-    return (string) $container->getDefinition($target)->getClass();
+    $rejected[] = [
+      'service' => $serviceId,
+      'provider' => $provider,
+    ];
+    $container->setParameter(
+      McpPrincipalAuthExtensionOwnership::REJECTED_PARAMETER,
+      $rejected,
+    );
+  }
+
+  /**
+   * container.modules, or an empty list.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container being compiled.
+   *
+   * @return array<string, mixed>
+   *   Enabled extensions.
+   */
+  private function moduleList(ContainerBuilder $container): array {
+    if (!$container->hasParameter('container.modules')) {
+      return [];
+    }
+    $modules = $container->getParameter('container.modules');
+    return is_array($modules) ? $modules : [];
   }
 
 }
