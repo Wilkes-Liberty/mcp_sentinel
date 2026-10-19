@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- `McpHistoricalExceptionTest` installs `system` date-format
+  config so `audit_chain` 1.12.2 `ScheduledVerifier::runNow()`
+  can format the last-run time through `date.formatter`.
+  Kernel tests that omit those entities fataled on
+  `DateFormatter::format()` (`getPattern()` on null) after
+  that release started interpolating the run time.
+
 ## [3.4.0] - 2026-10-19
 
 ### Added
