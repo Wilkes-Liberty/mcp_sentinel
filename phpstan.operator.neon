@@ -43,6 +43,7 @@ parameters:
     - mcp_sentinel.install
     - mcp_sentinel.module
     - mcp_sentinel.api.php
+    - src/Authentication/McpSealedTokenAuthProvider.php
   ignoreErrors:
     # Portable across Drupal 10.6 (int) and 11 (FetchAs). Same ignore as
     # phpstan.neon.dist. Scoped to the update hooks that still pass

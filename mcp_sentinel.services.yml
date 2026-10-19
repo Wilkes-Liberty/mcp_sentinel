@@ -363,8 +363,13 @@ services:
   mcp_sentinel.sealed_token_auth:
     class: Drupal\mcp_sentinel\Authentication\McpSealedTokenAuthProvider
     arguments:
-      - '@mcp_sentinel.sealed_token_manager'
+      # Lazy: the collector constructs every tagged provider. A live
+      # manager argument built audit logging and DLP on that path.
+      # The cycle happens on downstream sites whose DLP graph
+      # reaches authentication_subscriber.
+      - !service_closure '@mcp_sentinel.sealed_token_manager'
       - '@entity_type.manager'
+      - !service_closure '@logger.channel.mcp_sentinel'
     tags:
       - { name: authentication_provider, provider_id: mcp_sealed_token, priority: 180 }
 

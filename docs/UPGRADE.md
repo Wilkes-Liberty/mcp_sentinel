@@ -4,6 +4,18 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Sealed-token auth provider first argument is a \Closure; a third \Closure logger was added
+
+The first argument of `McpSealedTokenAuthProvider` changed from
+`McpSealedTokenManager` to a `\Closure` (service closure for
+`mcp_sentinel.sealed_token_manager`) and a third `\Closure` logger
+argument was added. Rebuild caches (`drush cr` or `drush updb`)
+after updating. Until the container is rebuilt, the cached
+container passes the old argument and every web request fails with
+a TypeError in McpSealedTokenAuthProvider. Drush does not resolve
+`authentication_subscriber`, so `drush cr` / `drush updb` still
+recover the site. No update hook; 10039 is unchanged.
+
 ## Context and GraphQL operations require a principal
 
 A role-fallback session is no longer enough on these paths. Each one
