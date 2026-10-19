@@ -22,6 +22,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in `mcp_sentinel.install`. Runtime never read it; no remaining
   callers in this repository or elsewhere in the Wilkes-Liberty org.
 
+### Fixed
+- Sealed-token authentication no longer constructs
+  `mcp_sentinel.sealed_token_manager` (and therefore the audit
+  logger and DLP) when Drupal's authentication collector is first
+  resolved. The first argument of `McpSealedTokenAuthProvider`
+  changed from `McpSealedTokenManager` to a `\Closure` (service
+  closure for `mcp_sentinel.sealed_token_manager`) and a third
+  `\Closure` logger argument was added. The provider uses the
+  same `!service_closure` pattern
+  `mcp_sentinel.webhook_queue_manager` uses for
+  `mcp_sentinel.kill_switch`. `applies()` stays header-only.
+  Downstream sites that closed a
+  `ServiceCircularReferenceException` on
+  `authentication_subscriber` can drop their Composer patch once
+  a release containing this lands (DEV-1014).
+
+### Upgrade
+- Rebuild caches (`drush cr`, or `drush updb`) after updating.
+  The first argument of `McpSealedTokenAuthProvider` changed from
+  `McpSealedTokenManager` to a `\Closure` (service closure for
+  `mcp_sentinel.sealed_token_manager`) and a third `\Closure`
+  logger argument was added. Until the container is rebuilt, the
+  cached container passes the old argument and every web request
+  fails with a TypeError in McpSealedTokenAuthProvider.
+
 ## [3.3.2] - 2026-10-18
 
 DEV-985 P1 follow-up after 3.3.1 (`b613e44`).

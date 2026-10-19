@@ -10,6 +10,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\user\UserInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -21,10 +22,28 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
 
   /**
    * Constructs the provider.
+   *
+   * The first argument changed from McpSealedTokenManager to a
+   * \Closure (service closure for mcp_sentinel.sealed_token_manager)
+   * and a third \Closure logger argument was added.
+   *
+   * @param \Closure $lazyTokenManager
+   *   Lazy sealed-token manager. Drupal constructs every tagged
+   *   authentication provider when the collector is first resolved;
+   *   a live manager argument built audit logging and DLP on that
+   *   path. The cycle happens on downstream sites whose DLP graph
+   *   reaches authentication_subscriber (DEV-1014).
+   * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
+   *   The entity type manager.
+   * @param \Closure $lazyLogger
+   *   Lazy mcp_sentinel logger. Injected as a service closure so a
+   *   misconfigured manager does not add an eager logger edge to the
+   *   collector path. The audit logger sits in the graph that failed.
    */
   public function __construct(
-    private readonly McpSealedTokenManager $tokens,
+    private readonly \Closure $lazyTokenManager,
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    private readonly \Closure $lazyLogger,
   ) {}
 
   /**
@@ -41,7 +60,7 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
   public function authenticate(Request $request): ?AccountInterface {
     $header = (string) $request->headers->get('Authorization');
     $token = trim(substr($header, strlen('Bearer ')));
-    $claims = $this->tokens->verify($token);
+    $claims = $this->tokenManager()->verify($token);
     if ($claims === NULL) {
       return NULL;
     }
@@ -64,6 +83,59 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
     }
     $request->attributes->set(McpOauthContext::SEALED_ATTRIBUTE, $sealed);
     return $account;
+  }
+
+  /**
+   * Resolves the sealed-token manager through the service closure.
+   *
+   * Only this resolution is wrapped. A throwing or mis-typed closure is
+   * recorded on logger.channel.mcp_sentinel (exception class only; never
+   * the bearer) and then rethrown. Returning NULL would look like a
+   * forged token; a misconfigured closure is an operator error and must
+   * stay an uncaught exception so Drupal answers 500 instead of a deny.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpSealedTokenManager
+   *   Token manager.
+   *
+   * @throws \Throwable
+   *   When the closure throws, or when it does not return a
+   *   McpSealedTokenManager (\LogicException).
+   */
+  private function tokenManager(): McpSealedTokenManager {
+    try {
+      $manager = ($this->lazyTokenManager)();
+      if (!$manager instanceof McpSealedTokenManager) {
+        throw new \LogicException(
+          'mcp_sentinel.sealed_token_manager must be an instance of McpSealedTokenManager.',
+        );
+      }
+      return $manager;
+    }
+    catch (\Throwable $exception) {
+      $this->logResolutionFailure($exception);
+      throw $exception;
+    }
+  }
+
+  /**
+   * Records a manager-resolution failure without leaking the bearer.
+   *
+   * @param \Throwable $exception
+   *   The resolution failure.
+   */
+  private function logResolutionFailure(\Throwable $exception): void {
+    try {
+      $logger = ($this->lazyLogger)();
+      if ($logger instanceof LoggerInterface) {
+        $logger->critical(
+          'Sealed-token manager resolution failed with @class.',
+          ['@class' => $exception::class],
+        );
+      }
+    }
+    catch (\Throwable) {
+      // Logging must not replace the manager-resolution exception.
+    }
   }
 
 }
