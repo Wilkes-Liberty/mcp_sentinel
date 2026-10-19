@@ -22,6 +22,7 @@ name: Tests
 on:
   pull_request: { branches: ['**'] }
   push: { branches: ['1.x'] }
+  workflow_dispatch: {}
 
 permissions:
   contents: read
