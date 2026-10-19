@@ -213,6 +213,11 @@ jobs:
           # phpunit, phpunit wants sebastian/diff ^6, the lock says 7.0.0, and
           # resolution fails. -W lets it move them.
           #
+          # That is still not latest-stable contrib. d.o expand_composer_json
+          # + composer install has no recommended-project lock, so it resolved
+          # audit_chain 1.12.2 while this job stayed on 1.12.1 (DEV-1022).
+          # refresh-latest-contrib.sh updates locked drupal/* except core*.
+          #
           # twig/twig <3.30: 3.30.0 compiles Drupal's swapped escape filter
           # straight into EscaperRuntime::escape() and every rendered page
           # 500s (twigphp/Twig#4952). -W otherwise floats to 3.30. Drop the
@@ -233,6 +238,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Assert the versions actually under test
         working-directory: drupal
@@ -249,6 +255,8 @@ jobs:
           # here: a probe that cannot answer must fail, not improvise.
           core="$(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/core");')"
           echo "Drupal core: ${core}"
+          chain="$(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/audit_chain");')"
+          echo "drupal/audit_chain: ${chain}"
           vendor/bin/phpunit --version
           vendor/bin/drush --version || true
 
@@ -460,6 +468,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
@@ -634,6 +643,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
@@ -789,6 +799,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Assert the version actually under test
         working-directory: drupal
@@ -1004,6 +1015,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
@@ -1172,6 +1184,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal
@@ -1274,6 +1287,7 @@ jobs:
             "drupal/entity_usage:^2 || ^5" \
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal

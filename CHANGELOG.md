@@ -43,6 +43,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   time. Without those entities, `DateFormatter::format()` calls
   `getPattern()` on null.
 
+### Changed
+- GitHub Actions refreshes locked contrib to latest-stable
+  after the recommended-project scaffold so it cannot stay
+  on an older `audit_chain` than drupal.org (DEV-1022).
+
 ## [3.4.0] - 2026-10-19
 
 ### Added
