@@ -1196,9 +1196,12 @@ hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
 
 ### Retry behavior
 
-A kill-block does not cancel items already in this queue. Holding
-queued deliveries is DEV-985 and is not in this release. Those
-items still run after a kill.
+On any stop, in-scope items already in this queue move to `held`
+and are not delivered. Items outside the stop still send. Lifting
+the stop does not release them. Review held rows with
+`mcp-sentinel:webhook-held`, then release or discard each one
+(`mcp-sentinel:webhook-release` / `mcp-sentinel:webhook-discard`).
+See **Queued side effects are held** above.
 
 Delivery runs in the `mcp_sentinel_webhook_delivery` QueueWorker (processed on
 cron). A non-2xx response or network error schedules a retry: **5 attempts**

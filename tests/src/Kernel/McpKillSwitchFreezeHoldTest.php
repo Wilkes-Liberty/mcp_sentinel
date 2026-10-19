@@ -92,6 +92,11 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       'mcp_sentinel.kill_switch.break_glass_operator',
       self::ISS . '|breakglass-op',
     );
+    // Load the .install file so \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID
+    // is defined. Resolve the module path dynamically — the module
+    // is not always at modules/contrib/.
+    require_once \Drupal::root() . '/' . \Drupal::service('extension.list.module')
+      ->getPath('mcp_sentinel') . '/mcp_sentinel.install';
   }
 
   /**
@@ -1074,7 +1079,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
         'tenant' => '',
       ])->execute();
     $this->container->get('state')->set(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
       $id,
     );
     $this->killSwitch()->kill(
@@ -1244,7 +1249,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   public function testKeylessRowStopsWhenStateKeyAbsent(): void {
     $this->enableEndpoint();
     $this->container->get('state')->delete(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
     );
     $id = $this->insertDelivery([
       'principal_key' => '',
@@ -1275,7 +1280,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   public function testKeylessRowStopsAfterClaimWhenStateAbsent(): void {
     $this->enableEndpoint();
     $this->container->get('state')->delete(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
     );
     $id = $this->insertDelivery([
       'principal_key' => '',
@@ -1302,7 +1307,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   public function testKeylessRetryStopsWhenStateAbsent(): void {
     $this->enableEndpoint();
     $this->container->get('state')->delete(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
     );
     $id = $this->insertDelivery([
       'status' => 'in_progress',
@@ -1330,7 +1335,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
       'tenant' => '',
     ]);
     $this->container->get('state')->set(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
       $below,
     );
     $above = $this->insertDelivery([
@@ -1356,7 +1361,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   public function testFreshInstallKeylessRowStaysStopped(): void {
     $this->enableEndpoint();
     $this->container->get('state')->set(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
       0,
     );
     $id = $this->insertDelivery([

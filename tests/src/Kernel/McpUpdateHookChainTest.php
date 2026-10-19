@@ -9,7 +9,6 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
-use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -1219,7 +1218,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $from10038 = mcp_sentinel_update_10038();
     $this->assertStringContainsString('pre-upgrade max delivery id', $from10038);
     $this->assertNotNull($this->container->get('state')->get(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
     ));
   }
 
@@ -1399,6 +1398,24 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
+   * Schema spec for the upgrade-only released column.
+   *
+   * Update 10036 adds this column; 10038 drops it. hook_schema
+   * no longer declares it.
+   *
+   * @return array<string, mixed>
+   *   Schema API field specification.
+   */
+  private function releasedColumnSpec(): array {
+    return [
+      'type' => 'int',
+      'unsigned' => TRUE,
+      'not null' => TRUE,
+      'default' => 0,
+    ];
+  }
+
+  /**
    * Drops hold-queue and escalation columns so 10036 can run for real.
    */
   private function dropPre10036Columns(): void {
@@ -1461,13 +1478,13 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $delivery = 'mcp_sentinel_webhook_delivery';
     $kill = 'mcp_sentinel_kill_block';
     $this->container->get('state')->delete(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+      \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
     );
     if (!$schema->fieldExists($delivery, 'released')) {
       $schema->addField(
         $delivery,
         'released',
-        mcp_sentinel_schema()[$delivery]['fields']['released'],
+        $this->releasedColumnSpec(),
       );
     }
     $this->container->get('database')->delete($delivery)->execute();
@@ -1526,7 +1543,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $this->assertSame(
       $id,
       (int) $this->container->get('state')->get(
-        McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+        \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
       ),
     );
     $this->assertSame(
@@ -1594,7 +1611,7 @@ final class McpUpdateHookChainTest extends KernelTestBase {
     $this->assertSame(
       $id,
       (int) $this->container->get('state')->get(
-        McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
+        \MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID,
       ),
     );
   }
@@ -1662,24 +1679,21 @@ final class McpUpdateHookChainTest extends KernelTestBase {
   }
 
   /**
-   * Hook install drops released so a fresh install does not keep it.
+   * Fresh installs omit released and do not write the max-id state key.
    */
-  public function testFreshInstallDropsReleased(): void {
+  public function testFreshInstallOmitsReleased(): void {
     $schema = $this->container->get('database')->schema();
     $delivery = 'mcp_sentinel_webhook_delivery';
-    if (!$schema->fieldExists($delivery, 'released')) {
-      $schema->addField(
-        $delivery,
-        'released',
-        mcp_sentinel_schema()[$delivery]['fields']['released'],
-      );
-    }
-    $this->assertTrue($schema->fieldExists($delivery, 'released'));
+    $this->assertArrayNotHasKey(
+      'released',
+      mcp_sentinel_schema()[$delivery]['fields'],
+    );
+    $this->assertFalse($schema->fieldExists($delivery, 'released'));
     $state = $this->container->get('state');
-    $state->delete(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID);
+    $state->delete(\MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID);
     mcp_sentinel_install();
     $this->assertFalse($schema->fieldExists($delivery, 'released'));
-    $this->assertNull($state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID));
+    $this->assertNull($state->get(\MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID));
   }
 
   /**
@@ -1687,10 +1701,10 @@ final class McpUpdateHookChainTest extends KernelTestBase {
    */
   public function testUpdate10039DeletesPreUpgradeMaxId(): void {
     $state = $this->container->get('state');
-    $state->set(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID, 42);
+    $state->set(\MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID, 42);
     $message = mcp_sentinel_update_10039();
     $this->assertStringContainsString('Deleted unused', $message);
-    $this->assertNull($state->get(McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID));
+    $this->assertNull($state->get(\MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID));
     $again = mcp_sentinel_update_10039();
     $this->assertStringContainsString('already absent', $again);
   }
