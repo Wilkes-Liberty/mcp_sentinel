@@ -13,6 +13,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Kernel tests that omit those entities fataled on
   `DateFormatter::format()` (`getPattern()` on null) after
   that release started interpolating the run time.
+  `audit_chain` 1.12.3 (audit_chain PR #91) formats
+  verifier presentation with `DATE_ATOM`, so that path no
+  longer depends on date-format config. The test-setup
+  install is therefore unnecessary, but it is still
+  correct and is kept so the test stays independent of
+  the `audit_chain` version.
 
 ## [3.4.0] - 2026-10-19
 
