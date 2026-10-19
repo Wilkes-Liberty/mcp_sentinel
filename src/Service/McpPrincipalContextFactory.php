@@ -155,6 +155,24 @@ final class McpPrincipalContextFactory {
         $allowed[$name] = $value;
       }
     }
+    $stripped = [];
+    foreach (array_keys($raw) as $name) {
+      if (!is_string($name) || $name === '') {
+        continue;
+      }
+      if (!in_array($name, ['iss', 'sub', 'azp', 'tenant'], TRUE)) {
+        $stripped[] = $name;
+      }
+    }
+    if ($stripped !== []) {
+      McpPrincipalAuthExtensionOwnership::recordRejection(
+        $this->auditLogger,
+        McpPrincipalAuthExtensionOwnership::serviceIdOf($extension),
+        McpPrincipalAuthExtensionOwnership::providerOf($extension),
+        'claims_stripped',
+        $stripped,
+      );
+    }
     return $allowed;
   }
 

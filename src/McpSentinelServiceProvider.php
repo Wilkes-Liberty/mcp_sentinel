@@ -21,9 +21,11 @@ use Symfony\Component\DependencyInjection\Reference;
  *
  * The principal-auth ownership guard runs at
  * TYPE_BEFORE_OPTIMIZATION priority -1000 so alias, decorate,
- * and register passes have already been applied, and before
- * removal. Runtime admission still fail-closes on the object
- * wired into the factory and subscriber.
+ * and register passes have already been applied, and again
+ * at TYPE_AFTER_REMOVING at PHP_INT_MIN so a later pass
+ * cannot re-add the hook. Runtime admission still
+ * fail-closes on the object wired into the factory and
+ * subscriber.
  */
 final class McpSentinelServiceProvider extends ServiceProviderBase implements CompilerPassInterface {
 
@@ -48,6 +50,11 @@ final class McpSentinelServiceProvider extends ServiceProviderBase implements Co
       $this,
       PassConfig::TYPE_BEFORE_OPTIMIZATION,
       -1000,
+    );
+    $container->addCompilerPass(
+      $this,
+      PassConfig::TYPE_AFTER_REMOVING,
+      \PHP_INT_MIN,
     );
     if (!$container->hasParameter(McpPrincipalAuthExtensionOwnership::REJECTED_PARAMETER)) {
       $container->setParameter(

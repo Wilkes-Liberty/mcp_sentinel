@@ -154,11 +154,16 @@ sources skip that scope check. JSON:API, GraphQL, and
   not own (real module path or provider, not a class
   namespace prefix), at `TYPE_BEFORE_OPTIMIZATION`
   priority `-1000` after alias, decorate, and register
-  passes. The factory and subscriber also fail closed
+  passes, and again at `TYPE_AFTER_REMOVING`
+  `PHP_INT_MIN` so a later pass cannot re-add the
+  hook. The factory and subscriber also fail closed
   on the wired object unless the test gate is set
   (PHPUnit or `$settings['mcp_sentinel_allow_role_fallback']`).
   A failed check ignores the hook and writes an
-  `audit_chain` row naming the service and provider.
+  `audit_chain` row naming the service and provider
+  (`refused`, or `claims_stripped` when extra keys
+  are dropped). Sites on 3.4.0 apply this with
+  `drush cr`, not `updatedb` (last hook is 10039).
   The test module defers the claimless seal so
   readiness can stamp role fallback, and reads
   `mcp_sentinel_role_fallback_test_principal` only after that

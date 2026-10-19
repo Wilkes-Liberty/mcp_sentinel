@@ -32,6 +32,7 @@ final class McpSentinelRogueLatePassServiceProvider extends ServiceProviderBase 
     $container->addCompilerPass(
       new McpRogueLateReAddPass(),
       PassConfig::TYPE_AFTER_REMOVING,
+      \PHP_INT_MIN,
     );
   }
 

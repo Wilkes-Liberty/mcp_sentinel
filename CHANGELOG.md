@@ -34,7 +34,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   compiler pass at `TYPE_BEFORE_OPTIMIZATION` priority
   `-1000` resolves aliases and decorations and drops the
   legacy id and any namespaced definition that
-  `mcp_sentinel_test` does not own. Ownership is that
+  `mcp_sentinel_test` does not own. A second pass at
+  `TYPE_AFTER_REMOVING` `PHP_INT_MIN` runs after any
+  later pass can re-add the service. Ownership is that
   module's real path or provider, not a class-namespace
   prefix. The factory and subscriber also fail closed on
   the wired object unless the test gate is set (PHPUnit
@@ -43,16 +45,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   plus that gate; scopes from the hook are still
   dropped. A failed check ignores the hook, keeps the
   sealed path, and writes an `audit_chain` governance
-  row naming the offending service and its provider.
-  The interface is `@internal`. The kill-block reader
-  seam is veto-only: a decorator may make a block
-  unreadable, never expired.
-
-### Fixed
-- `McpHistoricalExceptionTest` installs `system` date-format
-  config so `audit_chain` 1.12.2 can format the scheduled-run
-  time. Without those entities, `DateFormatter::format()` calls
-  `getPattern()` on null.
+  row naming the offending service and its provider
+  (`refused`, or `claims_stripped` when extra keys are
+  dropped). Sites on 3.4.0 apply this with `drush cr`,
+  not `updatedb`: there is no new update hook (last is
+  10039). The interface is `@internal`. The kill-block
+  reader seam is veto-only: a decorator may make a
+  block unreadable, never expired.
 
 ## [3.4.0] - 2026-10-19
 

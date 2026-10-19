@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -145,6 +146,59 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
       HttpKernelInterface::MAIN_REQUEST,
     ));
     $this->assertSame('human-1', $holder->get()?->subject());
+  }
+
+  /**
+   * Runtime ownership runs before deferClaimlessSeal().
+   *
+   * @covers ::onRequest
+   */
+  public function testRogueExtensionCannotDeferClaimlessSeal(): void {
+    $stack = new RequestStack();
+    $claimless = Request::create('/jsonapi/node/page');
+    $stack->push($claimless);
+    $holder = new McpPrincipalContextHolder($stack);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('deferClaimlessSeal');
+    $extension->expects($this->never())->method('fallbackClaims');
+    $subscriber = new McpPrincipalContextSubscriber(
+      $this->factory($stack),
+      $holder,
+      $extension,
+    );
+    $kernel = $this->createMock(HttpKernelInterface::class);
+    $subscriber->onRequest(new RequestEvent(
+      $kernel,
+      $claimless,
+      HttpKernelInterface::MAIN_REQUEST,
+    ));
+    $this->assertNull($holder->get());
+    $this->assertFalse($claimless->attributes->has(McpPrincipalContext::REQUEST_ATTRIBUTE));
+  }
+
+  /**
+   * A foreign class on the wired argument cannot skip the seal.
+   *
+   * @covers ::onRequest
+   */
+  public function testForeignExtensionCannotDeferClaimlessSeal(): void {
+    $stack = new RequestStack();
+    $claimless = Request::create('/jsonapi/node/page');
+    $stack->push($claimless);
+    $holder = new McpPrincipalContextHolder($stack);
+    $subscriber = new McpPrincipalContextSubscriber(
+      $this->factory($stack),
+      $holder,
+      new McpRoguePrincipalAuthExtension(),
+    );
+    $kernel = $this->createMock(HttpKernelInterface::class);
+    $subscriber->onRequest(new RequestEvent(
+      $kernel,
+      $claimless,
+      HttpKernelInterface::MAIN_REQUEST,
+    ));
+    $this->assertNull($holder->get());
+    $this->assertFalse($claimless->attributes->has(McpPrincipalContext::REQUEST_ATTRIBUTE));
   }
 
   /**

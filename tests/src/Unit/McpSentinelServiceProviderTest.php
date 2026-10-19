@@ -28,6 +28,27 @@ use Symfony\Component\DependencyInjection\Reference;
 final class McpSentinelServiceProviderTest extends UnitTestCase {
 
   /**
+   * The guard runs at BEFORE_OPTIMIZATION -1000 and AFTER_REMOVING min.
+   *
+   * @covers ::register
+   */
+  public function testOwnershipPassesAreRegisteredLast(): void {
+    $container = new ContainerBuilder();
+    (new McpSentinelServiceProvider())->register($container);
+    $config = $container->getCompilerPassConfig();
+    $before = $config->getBeforeOptimizationPasses();
+    $after = $config->getAfterRemovingPasses();
+    $this->assertNotEmpty(array_filter(
+      $before,
+      static fn (mixed $pass): bool => $pass instanceof McpSentinelServiceProvider,
+    ));
+    $this->assertNotEmpty(array_filter(
+      $after,
+      static fn (mixed $pass): bool => $pass instanceof McpSentinelServiceProvider,
+    ));
+  }
+
+  /**
    * A later alter() re-add is stripped after every module alter().
    *
    * @covers ::process

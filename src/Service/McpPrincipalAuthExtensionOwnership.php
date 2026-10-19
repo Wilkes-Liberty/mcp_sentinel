@@ -234,20 +234,32 @@ final class McpPrincipalAuthExtensionOwnership {
    *   Offending service id.
    * @param string $provider
    *   Defining module, or empty when unknown.
+   * @param string $reason
+   *   refused, or claims_stripped when extra keys were
+   *   dropped from an otherwise admitted hook.
+   * @param list<string> $stripped
+   *   Dropped claim names when $reason is claims_stripped.
    */
   public static function recordRejection(
     ?McpAuditLogger $auditLogger,
     string $serviceId,
     string $provider,
+    string $reason = 'refused',
+    array $stripped = [],
   ): void {
     if ($auditLogger === NULL) {
       return;
     }
+    $metadata = [
+      'service' => $serviceId,
+      'provider' => $provider,
+      'reason' => $reason,
+    ];
+    if ($stripped !== []) {
+      $metadata['stripped'] = $stripped;
+    }
     try {
-      $auditLogger->logAlways(self::AUDIT_OPERATION, [
-        'service' => $serviceId,
-        'provider' => $provider,
-      ]);
+      $auditLogger->logAlways(self::AUDIT_OPERATION, $metadata);
     }
     catch (\Throwable) {
       // Fail closed: the hook stays ignored even if the row

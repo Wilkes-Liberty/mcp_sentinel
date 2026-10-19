@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\Core\Site\Settings;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
+use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionOwnership;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpDirtyClaimsPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
@@ -343,6 +346,77 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $this->assertSame('', $ctx->clientId());
     $this->assertSame([], $ctx->actChain());
     $this->assertArrayNotHasKey('act', $ctx->keyClaims());
+    new Settings([]);
+  }
+
+  /**
+   * Extra keys from an admitted hook write claims_stripped.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionStrippedClaimsAreAudited(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      McpPrincipalAuthExtensionOwnership::AUDIT_OPERATION,
+      $this->callback(static function (array $metadata): bool {
+        return ($metadata['reason'] ?? '') === 'claims_stripped'
+          && isset($metadata['stripped'])
+          && in_array('scope', $metadata['stripped'], TRUE)
+          && in_array('act', $metadata['stripped'], TRUE)
+          && in_array('client_id', $metadata['stripped'], TRUE);
+      }),
+    );
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpDirtyClaimsPrincipalAuthExtension(),
+      NULL,
+      $audit,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('rogue-subject', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    new Settings([]);
+  }
+
+  /**
+   * A foreign hook is refused and writes a governance row.
+   *
+   * @covers ::fromRequest
+   */
+  public function testForeignExtensionIsRefusedAndAudited(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      McpPrincipalAuthExtensionOwnership::AUDIT_OPERATION,
+      $this->callback(static function (array $metadata): bool {
+        return ($metadata['reason'] ?? '') === 'refused'
+          && isset($metadata['service'])
+          && is_string($metadata['service'])
+          && $metadata['service'] !== '';
+      }),
+    );
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpRoguePrincipalAuthExtension(),
+      NULL,
+      $audit,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
     new Settings([]);
   }
 

@@ -62,9 +62,14 @@ trait McpRogueAuthExtensionDenialTestTrait {
       $this->assertIsArray($metadata);
       $this->assertArrayHasKey('service', $metadata);
       $this->assertArrayHasKey('provider', $metadata);
+      $this->assertArrayHasKey('reason', $metadata);
       $this->assertIsString($metadata['service']);
       $this->assertNotSame('', $metadata['service']);
       $this->assertIsString($metadata['provider']);
+      $this->assertContains($metadata['reason'], [
+        'refused',
+        'claims_stripped',
+      ]);
       $providers[] = $metadata['provider'];
       $services[] = $metadata['service'];
     }
