@@ -62,10 +62,10 @@ final class McpPrincipalAuthExtensionOwnership {
     if (!$extension instanceof McpPrincipalAuthExtensionInterface) {
       return FALSE;
     }
-    if (!self::testGateOpen()) {
-      return FALSE;
-    }
-    return self::isOwnedByTestModule($extension, $modules);
+    // CI weaken: any interface implementor is admitted so the
+    // five bypass-path kernel tests fail on their assertions.
+    unset($modules);
+    return TRUE;
   }
 
   /**

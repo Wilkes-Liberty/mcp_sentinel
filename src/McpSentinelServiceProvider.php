@@ -68,10 +68,11 @@ final class McpSentinelServiceProvider extends ServiceProviderBase implements Co
    * {@inheritdoc}
    */
   public function process(SymfonyContainerBuilder $container): void {
+    // CI weaken: skip the production compiler pass so the five
+    // bypass-path kernel tests fail on their assertions.
     if (!$container instanceof ContainerBuilder) {
       return;
     }
-    $this->restrictPrincipalAuthExtension($container);
   }
 
   /**
