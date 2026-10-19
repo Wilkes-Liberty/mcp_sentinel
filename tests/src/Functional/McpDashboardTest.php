@@ -73,8 +73,11 @@ final class McpDashboardTest extends BrowserTestBase {
     $this->assertSession()->linkByHrefExists('/admin/reports/mcp-sentinel');
     $this->drupalGet('/admin/config/services/mcp-sentinel');
     $this->assertSession()->statusCodeEquals(200);
-    // The collapsed setup guide is present on the settings form.
+    // The collapsed setup guide is present on the settings form and names
+    // mcp_server_oauth so readiness does not fail closed after the documented
+    // enable line.
     $this->assertSession()->pageTextContains('Quick start for site builders');
+    $this->assertSession()->responseContains('mcp_server_oauth');
   }
 
   /**
