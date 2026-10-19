@@ -148,8 +148,11 @@ sources skip that scope check. JSON:API, GraphQL, and
   consults that hook only after its own admission checks
   (fallback stamp, unproxied hop, `permitted()`; claimless
   predicate before deferral) and never takes scopes from it.
-  `McpSentinelServiceProvider` drops any other provider of
-  that id. The test module defers the claimless seal so
+  `McpSentinelServiceProvider` drops the legacy
+  `mcp_sentinel.principal_auth_extension` id and any
+  namespaced definition that is not that test module's
+  class, in a late compiler pass after every `alter()`.
+  The test module defers the claimless seal so
   readiness can stamp role fallback, and reads
   `mcp_sentinel_role_fallback_test_principal` only after that
   stamp and only when the request is not proxied. Core sets

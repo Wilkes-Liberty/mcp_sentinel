@@ -16,8 +16,9 @@ use Symfony\Component\HttpFoundation\Request;
  * A rogue non-test module cannot widen principal admission.
  *
  * The mcp_sentinel_test module is off. The fixture registers both
- * the legacy and namespaced service ids; production must drop them
- * and deny a claimless, proxied PATCH that asks for mcp_write.
+ * the legacy and namespaced service ids in YAML and re-adds them
+ * in alter(); the late compiler pass must drop them and deny a
+ * claimless, proxied PATCH that asks for mcp_write.
  *
  * @group mcp_sentinel
  *

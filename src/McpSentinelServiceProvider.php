@@ -9,18 +9,40 @@ use Drupal\Core\DependencyInjection\ServiceProviderBase;
 use Drupal\mcp_sentinel\Controller\McpDraftResource;
 use Drupal\mcp_sentinel\Routing\McpDraftRoutes;
 use Symfony\Component\DependencyInjection\ChildDefinition;
+use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
+use Symfony\Component\DependencyInjection\Compiler\PassConfig;
+use Symfony\Component\DependencyInjection\ContainerBuilder as SymfonyContainerBuilder;
 use Symfony\Component\DependencyInjection\Reference;
 
 /**
  * Registers the optional JSON:API draft continuation surface.
+ *
+ * The principal-auth ownership guard runs as a late compiler
+ * pass so a later module's alter() cannot re-add the hook.
  */
-final class McpSentinelServiceProvider extends ServiceProviderBase {
+final class McpSentinelServiceProvider extends ServiceProviderBase implements CompilerPassInterface {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function register(ContainerBuilder $container): void {
+    $container->addCompilerPass($this, PassConfig::TYPE_BEFORE_REMOVING);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function process(SymfonyContainerBuilder $container): void {
+    if (!$container instanceof ContainerBuilder) {
+      return;
+    }
+    $this->restrictPrincipalAuthExtension($container);
+  }
 
   /**
    * {@inheritdoc}
    */
   public function alter(ContainerBuilder $container): void {
-    $this->restrictPrincipalAuthExtension($container);
     if ($container->hasDefinition('jsonapi.entity_resource')) {
       // Keep the JSON:API controller prefix so core's request subscribers and
       // normalizers recognize this as a JSON:API request.
@@ -49,7 +71,7 @@ final class McpSentinelServiceProvider extends ServiceProviderBase {
    * is enabled and the class lives under Drupal\mcp_sentinel_test\.
    *
    * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
-   *   The container being altered.
+   *   The container after every module alter().
    */
   private function restrictPrincipalAuthExtension(ContainerBuilder $container): void {
     $legacy = 'mcp_sentinel.principal_auth_extension';

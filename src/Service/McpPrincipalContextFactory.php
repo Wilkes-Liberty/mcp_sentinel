@@ -28,11 +28,16 @@ final class McpPrincipalContextFactory {
    *   Test-module hook
    *   (`mcp_sentinel_test.principal_auth_extension`). NULL
    *   unless that module owns the id.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process. Tests inject
+   *   a production process so permitted() is not hidden by
+   *   PHPUnit.
    */
   public function __construct(
     private readonly RequestStack $requestStack,
     private readonly McpOauthContext $oauthContext,
     private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
+    private readonly ?McpRoleFallbackEnvironment $environment = NULL,
   ) {}
 
   /**
@@ -116,7 +121,7 @@ final class McpPrincipalContextFactory {
     if (McpRoleFallbackGate::looksProxied($request)) {
       return [];
     }
-    if (!McpRoleFallbackGate::permitted($request)) {
+    if (!McpRoleFallbackGate::permitted($request, $this->environment)) {
       return [];
     }
     $raw = $this->authExtension->fallbackClaims($request);

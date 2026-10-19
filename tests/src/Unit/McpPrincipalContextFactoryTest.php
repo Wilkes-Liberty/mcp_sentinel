@@ -8,6 +8,7 @@ use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
+use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
@@ -350,6 +351,32 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $this->assertSame('', $ctx->clientId());
     $this->assertSame([], $ctx->actChain());
     $this->assertArrayNotHasKey('act', $ctx->keyClaims());
+    new Settings([]);
+  }
+
+  /**
+   * A production process without the settings.php flag ignores the hook.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionIgnoredWhenFallbackNotPermitted(): void {
+    new Settings([]);
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('fallbackClaims');
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      $extension,
+      new McpRoleFallbackEnvironment(FALSE),
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
     new Settings([]);
   }
 

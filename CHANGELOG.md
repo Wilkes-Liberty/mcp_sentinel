@@ -6,6 +6,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- 3.4.0 said a site that does not enable
+  `mcp_sentinel_test` cannot obtain a principal from
+  `mcp_sentinel_role_fallback_test_principal` or skip the
+  claimless seal. That held only while no other module
+  registered `mcp_sentinel.principal_auth_extension`.
+  Production now owns those checks: `fallbackClaims()`
+  runs only after the fallback stamp, an unproxied hop,
+  and `permitted()`, and keeps `iss`/`sub`/`azp`/`tenant`
+  only. The subscriber evaluates the claimless predicate
+  before `deferClaimlessSeal()`. The hook id is
+  `mcp_sentinel_test.principal_auth_extension`. A late
+  compiler pass drops the legacy id and any namespaced
+  definition whose class is not under
+  `Drupal\mcp_sentinel_test\`. The interface is
+  `@internal`. The kill-block reader seam is veto-only:
+  a decorator may make a block unreadable, never expired.
+
 ## [3.4.0] - 2026-10-19
 
 ### Added
@@ -29,21 +47,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Functional-test principal admission and claimless-seal
-  deferral live in `tests/modules/mcp_sentinel_test` as
-  `mcp_sentinel_test.principal_auth_extension`. Production
+  deferral live in `tests/modules/mcp_sentinel_test`. Production
   `McpPrincipalContextFactory` and
   `McpPrincipalContextSubscriber` take an optional
-  `@internal` `McpPrincipalAuthExtensionInterface` (NULL
-  unless that module owns the id). Production pre-gates
-  `fallbackClaims()` on the fallback stamp, an unproxied
-  hop, and `permitted()`, keeps `iss`/`sub`/`azp`/`tenant`
-  only, and evaluates the claimless predicate before
-  `deferClaimlessSeal()`. `McpSentinelServiceProvider`
-  drops the legacy `mcp_sentinel.principal_auth_extension`
-  id and any namespaced definition that is not that test
-  module. `McpKillSwitch` parses `block_until` itself; the
-  reader seam is veto-only (NULL is unreadable; a decorator
-  int cannot expire a live block). `inTestChildSite()`,
+  `McpPrincipalAuthExtensionInterface` (NULL unless that
+  module is enabled). `McpKillSwitch` reads `block_until`
+  through `McpKillBlockUntilReaderInterface`; the test module
+  decorates the reader. `inTestChildSite()`,
   `inTestChildServer()`, and
   `McpRoleFallbackEnvironment::sapi()` are gone.
 - `denied_access` metadata stores normalised
@@ -67,27 +77,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Security
 - Production no longer branches on
   `DRUPAL_TEST_IN_CHILD_SITE`, `PHP_SAPI`, or PHPUnit to
-  admit a principal or skip a claimless seal. Production
-  owns every admission check on the optional
-  `mcp_sentinel_test.principal_auth_extension` hook: the
-  factory consults `fallbackClaims()` only after the
-  fallback stamp, an unproxied hop, and `permitted()`, and
-  never takes scopes from the extension. The subscriber
-  consults `deferClaimlessSeal()` only after the claimless
-  predicate. `McpSentinelServiceProvider` removes the
-  legacy `mcp_sentinel.principal_auth_extension` id and
-  keeps the namespaced id only when `mcp_sentinel_test` is
-  enabled and the class lives under
-  `Drupal\mcp_sentinel_test\`. The interface is `@internal`.
-  Absent that owned provider, a site cannot obtain a
-  principal from
-  `mcp_sentinel_role_fallback_test_principal` and cannot
+  admit a principal or skip a claimless seal. Those paths
+  exist only while `mcp_sentinel_test` is enabled. A site
+  that does not enable that module cannot obtain a principal
+  from `mcp_sentinel_role_fallback_test_principal` and cannot
   skip the claimless seal. Reverse-proxy and X-Forwarded-*
   still refuse role fallback. Role fallback still requires
   `$settings['mcp_sentinel_allow_role_fallback']` (or PHPUnit
-  for kernel tests). The kill-block reader seam is
-  veto-only: a decorator may make a block unreadable, never
-  expired.
+  for kernel tests).
 - Alert email and webhook now carry client IPs, principal
   identifiers, Origin, and Host. That is personal data: route
   them to an operator-only mailbox. Redacted before send:
