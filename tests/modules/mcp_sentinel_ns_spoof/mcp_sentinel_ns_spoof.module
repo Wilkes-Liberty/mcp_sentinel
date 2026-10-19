@@ -1,0 +1,10 @@
+<?php
+
+/**
+ * @file
+ * Loads the cross-path Drupal\mcp_sentinel_test\ spoof class.
+ */
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/src/NsSpoofPrincipalAuthExtension.php';

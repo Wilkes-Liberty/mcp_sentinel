@@ -1,0 +1,3 @@
+services:
+  mcp_sentinel_test.principal_auth_extension:
+    class: Drupal\mcp_sentinel_test\Spoof\NsSpoofPrincipalAuthExtension

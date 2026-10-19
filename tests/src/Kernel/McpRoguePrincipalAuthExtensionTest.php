@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -69,8 +70,17 @@ final class McpRoguePrincipalAuthExtensionTest extends KernelTestBase {
    * Production drops a hook that mcp_sentinel_test does not own.
    */
   public function testProductionContainerDropsRogueExtension(): void {
-    $this->assertFalse($this->container->has('mcp_sentinel.principal_auth_extension'));
-    $this->assertFalse($this->container->has('mcp_sentinel_test.principal_auth_extension'));
+    $this->assertFalse($this->container->has(McpPrincipalContextFactory::AUTH_EXTENSION_LEGACY_ID));
+    $this->assertFalse($this->container->has(McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID));
+    $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest(Request::create('/jsonapi/node/page', 'GET'));
+    $count = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpPrincipalContextFactory::AUDIT_OPERATION)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertGreaterThanOrEqual(1, $count);
   }
 
   /**

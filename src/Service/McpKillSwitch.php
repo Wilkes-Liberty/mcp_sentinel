@@ -1600,11 +1600,14 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     if ($existing !== NULL) {
       $existingStatus = McpKillBlockStatus::tryFrom(McpStoredValue::rowString($existing, 'status'));
       $existingUntil = $this->rowBlockUntil($existing);
+      $parsedStored = McpKillBlockUntilReader::parse($existing);
+      $inheritUntil = $existingUntil ?? $parsedStored;
       $existingBlocking = $this->weakened(self::WEAKEN_INHERIT_DEAD_WINDOW)
+        || $existingUntil === NULL
         || ($existingStatus !== NULL
-          && $existingStatus->isBlocking($existingUntil ?? 0, $now));
+          && $existingStatus->isBlocking($parsedStored ?? 0, $now));
       $storedUntil = $existingBlocking
-        ? max($existingUntil ?? 0, $blockUntil)
+        ? max($inheritUntil ?? 0, $blockUntil)
         : $blockUntil;
       $storedTtl = $existingBlocking
         ? max(McpStoredValue::rowInt($existing, 'ttl'), $ttl)
@@ -1854,14 +1857,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Stored row.
    */
   private function parseBlockUntil(array $row): ?int {
-    $value = $row['block_until'] ?? NULL;
-    if (is_int($value)) {
-      return $value;
-    }
-    if (is_string($value) && is_numeric($value)) {
-      return (int) $value;
-    }
-    return NULL;
+    return McpKillBlockUntilReader::parse($row);
   }
 
   /**

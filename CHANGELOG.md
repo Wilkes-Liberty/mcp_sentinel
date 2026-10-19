@@ -19,29 +19,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   install is therefore unnecessary, but it is still
   correct and is kept so the test stays independent of
   the `audit_chain` version.
+
 ### Security
-- 3.4.0 said a site that does not enable
+- 3.4.0 left `mcp_sentinel.principal_auth_extension` as
+  an unguarded admission hook. Audit enabled modules for
+  a `mcp_sentinel.principal_auth_extension` service. That
+  release said a site that does not enable
   `mcp_sentinel_test` cannot obtain a principal from
   `mcp_sentinel_role_fallback_test_principal` or skip the
-  claimless seal. That held only while no other module
-  registered `mcp_sentinel.principal_auth_extension`.
-  Production now owns those checks: `fallbackClaims()`
-  runs only after the fallback stamp, an unproxied hop,
-  and `permitted()`, and keeps `iss`/`sub`/`azp`/`tenant`
-  only. The subscriber evaluates the claimless predicate
-  before `deferClaimlessSeal()`. The hook id is
-  `mcp_sentinel_test.principal_auth_extension`. A late
-  compiler pass drops the legacy id and any namespaced
-  definition whose class is not under
-  `Drupal\mcp_sentinel_test\`. The interface is
-  `@internal`. The kill-block reader seam is veto-only:
-  a decorator may make a block unreadable, never expired.
-
-### Fixed
-- `McpHistoricalExceptionTest` installs `system` date-format
-  config so `audit_chain` 1.12.2 can format the scheduled-run
-  time. Without those entities, `DateFormatter::format()` calls
-  `getPattern()` on null.
+  claimless seal; that held only while no other module
+  registered the hook. Production now owns those checks:
+  `fallbackClaims()` runs only after the fallback stamp,
+  an unproxied hop, and `permitted()`, and keeps
+  `iss`/`sub`/`azp`/`tenant` only. The subscriber
+  evaluates the claimless predicate before
+  `deferClaimlessSeal()`. The hook id is
+  `mcp_sentinel_test.principal_auth_extension`. The
+  compiler pass at `TYPE_BEFORE_OPTIMIZATION` (-1000)
+  removes the legacy id and a namespaced definition
+  that `mcp_sentinel_test` does not own. Ownership is
+  that module's real path or provider against the live
+  installed-module list, not a class-namespace prefix.
+  A missing `module_handler` is resolved from the live
+  list or the hook is refused. The factory and subscriber
+  fail closed on the wired object; the subscriber
+  re-checks before `deferClaimlessSeal()`. A refused
+  wired object, a compile-time removal, and stripped
+  claims each write an `audit_chain` row (`refused`, or
+  `claims_stripped` when extra keys are dropped).
+  Provider attribution uses the longest path prefix.
+  Sites on 3.4.0 apply this with `drush cr`, not
+  `updatedb`: there is no new update hook (last is
+  10039). The interface is `@internal`. The
+  kill-block reader seam is veto-only: a decorator
+  may make a block unreadable, never expired. A NULL
+  `block_until` read still blocks on re-issue.
 
 ### Changed
 - GitHub Actions refreshes locked contrib to latest-stable

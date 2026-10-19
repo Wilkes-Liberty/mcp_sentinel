@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\Core\Extension\Extension;
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -101,15 +104,11 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     $claimless = Request::create('/jsonapi/node/page');
     $stack->push($claimless);
     $holder = new McpPrincipalContextHolder($stack);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->expects($this->once())
-      ->method('deferClaimlessSeal')
-      ->with($claimless)
-      ->willReturn(TRUE);
     $subscriber = new McpPrincipalContextSubscriber(
       $this->factory($stack),
       $holder,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
+      $this->owningTestModuleHandler(),
     );
     $kernel = $this->createMock(HttpKernelInterface::class);
     $subscriber->onRequest(new RequestEvent(
@@ -149,6 +148,54 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
       HttpKernelInterface::MAIN_REQUEST,
     ));
     $this->assertSame('human-1', $holder->get()?->subject());
+  }
+
+  /**
+   * Runtime ownership runs before deferClaimlessSeal().
+   *
+   * @covers ::onRequest
+   */
+  public function testRogueExtensionCannotDeferClaimlessSeal(): void {
+    $stack = new RequestStack();
+    $claimless = Request::create('/jsonapi/node/page');
+    $stack->push($claimless);
+    $holder = new McpPrincipalContextHolder($stack);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->never())->method('deferClaimlessSeal');
+    $modules = $this->createMock(ModuleHandlerInterface::class);
+    $modules->method('moduleExists')->willReturn(FALSE);
+    $modules->method('getModuleList')->willReturn([]);
+    $subscriber = new McpPrincipalContextSubscriber(
+      $this->factory($stack),
+      $holder,
+      $extension,
+      $modules,
+    );
+    $kernel = $this->createMock(HttpKernelInterface::class);
+    $subscriber->onRequest(new RequestEvent(
+      $kernel,
+      $claimless,
+      HttpKernelInterface::MAIN_REQUEST,
+    ));
+    $this->assertNull($holder->get());
+  }
+
+  /**
+   * Handler stub that reports mcp_sentinel_test at its real path.
+   */
+  private function owningTestModuleHandler(): ModuleHandlerInterface {
+    $info = dirname((new \ReflectionClass(McpTestPrincipalAuthExtension::class))->getFileName() ?: '', 3)
+      . '/mcp_sentinel_test.info.yml';
+    $module = $this->createMock(Extension::class);
+    $module->method('getPathname')->willReturn($info);
+    $module->method('getPath')->willReturn(dirname($info));
+    $handler = $this->createMock(ModuleHandlerInterface::class);
+    $handler->method('moduleExists')->willReturnCallback(
+      static fn (string $name): bool => $name === 'mcp_sentinel_test',
+    );
+    $handler->method('getModule')->willReturn($module);
+    $handler->method('getModuleList')->willReturn(['mcp_sentinel_test' => $module]);
+    return $handler;
   }
 
   /**
