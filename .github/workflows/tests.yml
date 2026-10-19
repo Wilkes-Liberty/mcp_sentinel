@@ -217,8 +217,13 @@ jobs:
           # straight into EscaperRuntime::escape() and every rendered page
           # 500s (twigphp/Twig#4952). -W otherwise floats to 3.30. Drop the
           # pin when that issue ships a fixed release.
+          #
+          # audit_chain ^1.12.2 is required explicitly: GitHub resolved
+          # 1.12.1 while Drupal.org resolved 1.12.2 on the same SHA.
+          # 1.12.2 formats the scheduled last-run time through core.
           retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev" \
+            "drupal/audit_chain:^1.12.2" \
             "twig/twig:<3.30.0"
           # core-dev brings PHPUnit; drush because the module ships Drush
           # commands whose tests instantiate them (they extend
@@ -262,6 +267,9 @@ jobs:
             "${EXPECTED_DRUPAL}".*) ;;
             *) echo "::error::Leg claims Drupal ${EXPECTED_DRUPAL} but resolved ${core}. The leg is testing a version it does not name — fix matrix.constraint rather than this check."; exit 1 ;;
           esac
+          # The matrix require above pins audit_chain ^1.12.2. This line
+          # records the resolved version in the log.
+          echo "audit_chain: $(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/audit_chain");')"
 
       - name: Confirm the working copy is what is under test
         working-directory: drupal

@@ -19,6 +19,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   install is therefore unnecessary, but it is still
   correct and is kept so the test stays independent of
   the `audit_chain` version.
+- The GitHub PHPUnit matrix requires `drupal/audit_chain:^1.12.2`
+  and logs the resolved version, so that leg cannot stay on
+  1.12.1 while Drupal.org resolves 1.12.2.
+
 ### Security
 - 3.4.0 said a site that does not enable
   `mcp_sentinel_test` cannot obtain a principal from

@@ -93,8 +93,11 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
     ]);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
-    // audit_chain 1.12.2 formats the scheduled-run time through
-    // date.formatter (core.date_format.medium, then fallback).
+    // Audit Chain 1.12.2 formats the scheduled last-run time through
+    // the core date formatter (type "medium", then fallback).
+    // KernelTestBase does not install system date-format config unless
+    // asked; the formatter then fatals. Installed sites already have
+    // those config entities from the system module.
     $this->installConfig(['system', 'audit_chain', 'mcp_sentinel']);
     new Settings(['audit_chain_instance_id' => 'synthetic-instance'] + Settings::getAll());
     Key::create([
