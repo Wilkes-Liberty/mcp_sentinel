@@ -39,7 +39,7 @@ final class McpDraftLibraryBlockTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
-    'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
+    'audit_chain', 'mcp_sentinel', 'mcp_sentinel_test', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'workflows', 'content_moderation',
     'paragraphs', 'entity_reference_revisions', 'entity_usage', 'views',
     'paragraphs_library', 'block_content',

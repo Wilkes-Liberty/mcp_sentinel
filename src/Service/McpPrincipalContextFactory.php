@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
-use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -25,10 +24,13 @@ final class McpPrincipalContextFactory {
    *   The request stack.
    * @param \Drupal\mcp_sentinel\Service\McpOauthContext $oauthContext
    *   Validated OAuth channel (consumer + scopes).
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
+   *   Test-module hook. NULL in production.
    */
   public function __construct(
     private readonly RequestStack $requestStack,
     private readonly McpOauthContext $oauthContext,
+    private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
   ) {}
 
   /**
@@ -43,18 +45,11 @@ final class McpPrincipalContextFactory {
    *
    * @param \Symfony\Component\HttpFoundation\Request|null $request
    *   The request, or NULL when there is no HTTP request.
-   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
-   *   Process probe. NULL reads the live process. Tests inject a
-   *   production SAPI so the Drupal-test-child principal is not
-   *   hidden by PHPUnit.
    */
-  public function fromRequest(
-    ?Request $request,
-    ?McpRoleFallbackEnvironment $environment = NULL,
-  ): McpPrincipalContext {
+  public function fromRequest(?Request $request): McpPrincipalContext {
     $claims = $this->validatedClaims($request);
     if ($claims === []) {
-      $claims = $this->roleFallbackTestClaims($request, $environment);
+      $claims = $this->authExtension?->fallbackClaims($request) ?? [];
     }
     $network = $this->isNetworkCall($request);
     $subject = $this->stringClaim($claims, ['sub']);
@@ -143,61 +138,6 @@ final class McpPrincipalContextFactory {
     }
     $sealed = $request->attributes->get(McpOauthContext::SEALED_ATTRIBUTE);
     return is_array($sealed);
-  }
-
-  /**
-   * Test principal for a readiness-stamped role-fallback request.
-   *
-   * Empty unless the request already took the fallback path, the
-   * process is PHPUnit or a Drupal test child site, and the
-   * request does not look proxied. A real bearer is never replaced.
-   *
-   * @param \Symfony\Component\HttpFoundation\Request|null $request
-   *   The request readiness has already stamped.
-   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
-   *   Process probe. NULL reads the live process.
-   *
-   * @return array<string, string>
-   *   iss, sub, and azp, plus tenant when present.
-   */
-  private function roleFallbackTestClaims(
-    ?Request $request,
-    ?McpRoleFallbackEnvironment $environment = NULL,
-  ): array {
-    if ($request === NULL) {
-      return [];
-    }
-    $environment ??= McpRoleFallbackEnvironment::detect();
-    $fallback = $request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE);
-    $testSapi = $environment->inPhpUnit()
-      || $environment->inDrupalTestChildSite();
-    if ($fallback !== TRUE
-      || McpRoleFallbackGate::looksProxied($request)
-      || !$testSapi) {
-      return [];
-    }
-    try {
-      $raw = Settings::get(McpRoleFallbackGate::TEST_PRINCIPAL_KEY);
-    }
-    catch (\Throwable) {
-      return [];
-    }
-    if (!is_array($raw)) {
-      return [];
-    }
-    $claims = [];
-    foreach (['iss', 'sub', 'azp'] as $name) {
-      $value = $raw[$name] ?? NULL;
-      if (!is_string($value) || $value === '') {
-        return [];
-      }
-      $claims[$name] = $value;
-    }
-    $tenant = $raw['tenant'] ?? NULL;
-    if (is_string($tenant) && $tenant !== '') {
-      $claims['tenant'] = $tenant;
-    }
-    return $claims;
   }
 
   /**

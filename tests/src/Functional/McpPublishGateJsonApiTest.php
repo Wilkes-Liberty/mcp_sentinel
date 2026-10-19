@@ -40,6 +40,7 @@ final class McpPublishGateJsonApiTest extends BrowserTestBase {
   protected static $modules = [
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_test',
     'node',
     'serialization',
     'jsonapi',

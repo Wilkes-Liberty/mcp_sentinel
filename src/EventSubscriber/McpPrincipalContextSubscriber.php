@@ -6,9 +6,9 @@ namespace Drupal\mcp_sentinel\EventSubscriber;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
-use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -32,10 +32,13 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    *   Token-derived context factory.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
    *   Write-once sealed context.
+   * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
+   *   Test-module hook. NULL in production.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
     private readonly McpPrincipalContextHolder $holder,
+    private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
   ) {}
 
   /**
@@ -59,8 +62,8 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       return;
     }
     $request = $event->getRequest();
-    if ($this->isLeftoverCliRequest($request)
-      || self::deferClaimlessBuiltinServer($request)) {
+    if ($this->authExtension?->deferClaimlessSeal($request)
+      || $this->isLeftoverCliRequest($request)) {
       return;
     }
     $ctx = $this->factory->fromRequest($request);
@@ -77,40 +80,6 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       }
     }
     $request->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
-  }
-
-  /**
-   * Claimless Drupal test-child requests wait for the fallback stamp.
-   *
-   * Functional tests serve HTTP from a child process that is not
-   * PHPUnit — cli-server locally, Apache on drupal.org GitLab CI.
-   * Sealing there before readiness runs freezes an empty principal,
-   * and the later ready-path check cannot replace it. Only a Drupal
-   * test child (DRUPAL_TEST_IN_CHILD_SITE) defers. Production
-   * Apache / FPM / php -S / drush runserver seals immediately.
-   *
-   * @param \Symfony\Component\HttpFoundation\Request $request
-   *   The main request.
-   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
-   *   Process probe. NULL reads the live process.
-   *
-   * @return bool
-   *   TRUE when this process must not seal a claimless request yet.
-   */
-  public static function deferClaimlessBuiltinServer(
-    Request $request,
-    ?McpRoleFallbackEnvironment $environment = NULL,
-  ): bool {
-    $environment ??= McpRoleFallbackEnvironment::detect();
-    if (!$environment->inDrupalTestChildSite()) {
-      return FALSE;
-    }
-    $network = $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE);
-    $fixture = $request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE);
-    return !$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
-      && !$request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)
-      && $network !== TRUE
-      && $fixture !== TRUE;
   }
 
   /**

@@ -6,9 +6,9 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\EventSubscriber\McpPrincipalContextSubscriber;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
-use Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -89,52 +89,36 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
   }
 
   /**
-   * A Drupal test child must not freeze a claimless request.
+   * The test-module hook can skip sealing a claimless request.
    *
-   * Production SAPIs (cli-server, Apache, FPM) do not defer. A
-   * bearer still seals on a test child. Drupal.org GitLab CI
-   * serves functional tests from Apache, not cli-server.
+   * Production (no hook) still seals leftover CLI only. The
+   * hook is consulted first so Kernel tests can exercise it.
    *
-   * @covers ::deferClaimlessBuiltinServer
+   * @covers ::onRequest
    */
-  public function testBuiltinServerDefersOnlyClaimlessTestChild(): void {
+  public function testAuthExtensionDefersClaimlessSeal(): void {
+    $stack = new RequestStack();
     $claimless = Request::create('/jsonapi/node/page');
-    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
+    $stack->push($claimless);
+    $holder = new McpPrincipalContextHolder($stack);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->expects($this->once())
+      ->method('deferClaimlessSeal')
+      ->with($claimless)
+      ->willReturn(TRUE);
+    $subscriber = new McpPrincipalContextSubscriber(
+      $this->factory($stack),
+      $holder,
+      $extension,
+    );
+    $kernel = $this->createMock(HttpKernelInterface::class);
+    $subscriber->onRequest(new RequestEvent(
+      $kernel,
       $claimless,
-      new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
+      HttpKernelInterface::MAIN_REQUEST,
     ));
-    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $claimless,
-      new McpRoleFallbackEnvironment('apache2handler', FALSE, TRUE),
-    ));
-    $this->assertTrue(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $claimless,
-      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, TRUE),
-    ));
-    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $claimless,
-      new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE),
-    ));
-    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $claimless,
-      new McpRoleFallbackEnvironment('apache2handler', FALSE, FALSE),
-    ));
-    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $claimless,
-      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE),
-    ));
-    $bearer = Request::create('/jsonapi/node/page');
-    $bearer->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
-      'iss' => 'https://idp.example/realms/agents',
-    ]);
-    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $bearer,
-      new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE),
-    ));
-    $this->assertFalse(McpPrincipalContextSubscriber::deferClaimlessBuiltinServer(
-      $bearer,
-      new McpRoleFallbackEnvironment('apache2handler', FALSE, TRUE),
-    ));
+    $this->assertNull($holder->get());
+    $this->assertFalse($claimless->attributes->has(McpPrincipalContext::REQUEST_ATTRIBUTE));
   }
 
   /**

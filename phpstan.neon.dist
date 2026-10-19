@@ -77,6 +77,13 @@ parameters:
     -
       identifier: method.alreadyNarrowedType
       path: tests/src/Kernel/McpUpdateHookChainTest.php
+    # enableRoleFallbackGovernance() writes settings.php only on
+    # BrowserTestBase. Kernel hosts have no writeSettings(); they
+    # rely on the PHPUnit permit. Analysing the trait through a
+    # Functional class makes method_exists() look constant.
+    -
+      identifier: function.alreadyNarrowedType
+      path: tests/src/Traits/McpGovernedRequestTrait.php
     # Server registration test calls assertNotNull() on plugin instances that
     # phpstan considers non-null from the createInstance() @return type.
     -

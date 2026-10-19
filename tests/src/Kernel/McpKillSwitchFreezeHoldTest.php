@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel_test\Service\McpTestKillBlockUntilReader;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillSwitchResult;
@@ -77,6 +78,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     'encrypt',
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_test',
     'mcp_sentinel_kill_hook_probe',
   ];
 
@@ -2286,7 +2288,8 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
    *
    * SQLite stores the garbage string. MySQL strict mode rejects it
    * (error 1366), so the same unreadable value is injected at the
-   * reader — the fail-closed path the product already has.
+   * reader for this batch — the fail-closed path the product already
+   * has.
    *
    * @param string $batchId
    *   Kill batch whose rows should fail closed.
@@ -2298,9 +2301,28 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
         ->condition('batch_id', $batchId)
         ->execute();
     }
-    catch (DatabaseExceptionWrapper) {
-      $this->killSwitch()->injectUnreadableBlockUntilForTest();
+    catch (DatabaseExceptionWrapper $e) {
+      if (!$this->isMysqlIncorrectInteger($e)) {
+        throw $e;
+      }
+      $reader = $this->container->get('mcp_sentinel.kill_block_until_reader');
+      $this->assertInstanceOf(McpTestKillBlockUntilReader::class, $reader);
+      $reader->injectUnreadable($batchId);
     }
+  }
+
+  /**
+   * TRUE when MySQL rejected a non-integer INT write (error 1366).
+   */
+  private function isMysqlIncorrectInteger(DatabaseExceptionWrapper $e): bool {
+    if ($this->container->get('database')->driver() !== 'mysql') {
+      return FALSE;
+    }
+    $previous = $e->getPrevious();
+    if (!$previous instanceof \PDOException) {
+      return FALSE;
+    }
+    return (int) ($previous->errorInfo[1] ?? 0) === 1366;
   }
 
   /**
