@@ -289,8 +289,8 @@ active (and fails if the audit logger is missing), and counts
 remaining keyless pending rows. Runtime holds every keyless row
 while any stop is active, including rows queued after 10038.
 Update 10039 deletes the unused pre-upgrade max-id state key.
-Fresh installs drop `released` in `hook_install` and do not
-write that state key.
+Fresh installs never create `released` and do not write that
+state key.
 
 ### Roll back update 10038
 

@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- `hook_schema` no longer declares unused
+  `mcp_sentinel_webhook_delivery.released`. Update 10036 still
+  adds that column so 10038 can drop it. Fresh installs never
+  create it. 10038 and 10039 upgrade behavior is unchanged;
+  both now read the state key from the file-level constant
+  `MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID`.
+- README retry copy now matches the shipped hold:
+  `webhook-held`, `webhook-release`, `webhook-discard`.
+
+### Removed
+- Public constant `McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID`.
+  The upgrade-only state key is `MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID`
+  in `mcp_sentinel.install`. Runtime never read it; no remaining
+  callers in this repository or elsewhere in the Wilkes-Liberty org.
+
 ## [3.3.2] - 2026-10-18
 
 DEV-985 P1 follow-up after 3.3.1 (`b613e44`).

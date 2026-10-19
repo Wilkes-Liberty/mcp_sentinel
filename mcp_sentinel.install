@@ -8,7 +8,6 @@
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
-use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\Core\Database\StatementInterface;
 use Drupal\Core\Utility\UpdateException;
@@ -16,6 +15,16 @@ use Drupal\Core\Url;
 use Drupal\key\Entity\Key;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\user\Entity\Role;
+
+/**
+ * State key written by update 10038 and deleted by update 10039.
+ *
+ * Runtime does not read this key. Every keyless row is held while
+ * any stop is active. File-level so 10038, 10039, and their
+ * kernel tests share one definition; this is not runtime API.
+ */
+// phpcs:ignore DrupalPractice.Constants.GlobalConstant
+const MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID = 'mcp_sentinel.webhook_pre_upgrade_max_id';
 
 /**
  * Implements hook_schema().
@@ -71,14 +80,6 @@ function mcp_sentinel_schema(): array {
         'length' => 128,
         'not null' => TRUE,
         'default' => '',
-      ],
-      // Kept only because update 10036 reads this spec. hook_install
-      // and update 10038 drop the column.
-      'released'           => [
-        'type' => 'int',
-        'unsigned' => TRUE,
-        'not null' => TRUE,
-        'default' => 0,
       ],
     ],
     'primary key' => ['id'],
@@ -371,21 +372,12 @@ function mcp_sentinel_schema(): array {
 /**
  * Implements hook_install().
  *
- * Drops the unused webhook `released` column that hook_schema still
- * declares so update 10036 can add it on upgrades. Does not write
- * the dead pre-upgrade max-id state key; runtime holds every
- * keyless row while any stop is active. Seeds the 'mcp_api' role
- * with the minimum read permissions an agent account needs, so a
- * fresh install has a ready-to-assign governed identity. The role
- * is only created when absent, keeping reinstall idempotent.
+ * Seeds the 'mcp_api' role with the minimum read permissions an
+ * agent account needs, so a fresh install has a ready-to-assign
+ * governed identity. The role is only created when absent,
+ * keeping reinstall idempotent.
  */
 function mcp_sentinel_install(): void {
-  $schema = \Drupal::database()->schema();
-  $delivery = 'mcp_sentinel_webhook_delivery';
-  if ($schema->tableExists($delivery)
-    && $schema->fieldExists($delivery, 'released')) {
-    $schema->dropField($delivery, 'released');
-  }
   if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
     Role::create(['id' => 'mcp_api', 'label' => 'MCP API', 'weight' => 10])->save();
     user_role_grant_permissions('mcp_api', [
@@ -1867,8 +1859,16 @@ function mcp_sentinel_update_10036(): string {
         $messages[] = 'Added ' . $field . ' index.';
       }
     }
+    // The released column spec is inlined because released is
+    // no longer in hook_schema. Update 10038 later drops this
+    // column.
     if (!$schema->fieldExists($delivery, 'released')) {
-      $schema->addField($delivery, 'released', $fields['released']);
+      $schema->addField($delivery, 'released', [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ]);
       $messages[] = 'Added ' . $delivery . '.released.';
     }
   }
@@ -1981,9 +1981,8 @@ function mcp_sentinel_update_10038(): string {
       $schema->dropField($delivery, 'released');
       $messages[] = 'Dropped unused ' . $delivery . '.released.';
     }
-    $existingMax = \Drupal::state()->get(
-      McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
-    );
+    $preUpgradeMaxIdKey = MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID;
+    $existingMax = \Drupal::state()->get($preUpgradeMaxIdKey);
     if ($existingMax === NULL) {
       $maxId = mcp_sentinel_db_int(mcp_sentinel_fetch_field(
         $database->select($delivery, 'd')
@@ -1992,10 +1991,7 @@ function mcp_sentinel_update_10038(): string {
           ->fields('d', ['id'])
           ->execute(),
       ));
-      \Drupal::state()->set(
-        McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID,
-        $maxId,
-      );
+      \Drupal::state()->set($preUpgradeMaxIdKey, $maxId);
       $messages[] = 'Recorded pre-upgrade max delivery id ' . $maxId . '.';
     }
     else {
@@ -2036,7 +2032,7 @@ function mcp_sentinel_update_10038(): string {
  * never write it.
  */
 function mcp_sentinel_update_10039(): string {
-  $key = McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID;
+  $key = MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID;
   $state = \Drupal::state();
   if ($state->get($key) === NULL) {
     return 'Pre-upgrade max delivery id state key was already absent.';

@@ -73,11 +73,6 @@ final class McpWebhookQueueManager {
   public const REASON_OVERSIZED_KEY = 'oversized_key';
 
   /**
-   * State key for the highest delivery id present before update 10038.
-   */
-  public const STATE_PRE_UPGRADE_MAX_ID = 'mcp_sentinel.webhook_pre_upgrade_max_id';
-
-  /**
    * PHPUnit-only: cron re-queues held rows.
    */
   public const WEAKEN_REQUEUE_HELD = 'requeue_held';
