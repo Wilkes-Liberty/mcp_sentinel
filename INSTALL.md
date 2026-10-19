@@ -190,7 +190,13 @@ Review the active policy and audit/lock counts at any time:
 ```bash
 drush mcp-sentinel:status
 drush mcp-sentinel:verify
+drush mcp-sentinel:denied-access-summary --window-seconds=300
 ```
+
+`mcp-sentinel:denied-access-summary` is a read-only grouping of
+recent `denied_access` rows (window 1..604800 seconds, `--top`
+1..32). Use `--uri` so the Host line is the real site. The run is
+audited; nothing is printed if that write fails.
 
 `mcp-sentinel:verify` is the evidence document for the secure-install
 claim. It does not write content. Add `--live` to also run the

@@ -6,7 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Anomaly alert emails (every fired rule, one shared renderer)
+  name the site, host URL, environment, window, threshold, top
+  sources (client_id/azp, self-reported mcp_client, Origin,
+  Host, IP, Paladin principal), reason codes, and tenants so
+  a single email can be triaged. An enrichment failure still
+  sends the headline plus `Triage details unavailable
+  (<exception class>)` on every channel.
+- `drush mcp-sentinel:denied-access-summary` groups
+  `denied_access` rows by host, client, Origin, IP, and reason
+  over a lookback window of 1..604800 seconds (`--top` 1..32).
+  The text form reports `Count: N` from a count query and,
+  when the scan cap is hit, `Count: N (scanned M, truncated)`.
+  Read-only; the run is written to the audit chain and the
+  summary is not printed if that write fails. A `denied*`
+  anomaly pattern would also count these
+  `denied_access_summary` rows; the shipped storm rule matches
+  `denied_access` exactly.
+
 ### Changed
+- `denied_access` metadata stores normalised
+  `http_origin` / `http_host` as `scheme://host[:port]`,
+  dropping userinfo, path, and query. Allow-path rows are
+  unchanged.
+- The `mcp.anomaly.alert` webhook payload adds `site`,
+  `host`, `environment`, `sources`, `reasons`, and `tenants`.
+- The `anomaly_alert` audit row adds the same keys.
+- The anomaly log-channel context adds `site`, `host`, and
+  `environment`.
 - `hook_schema` no longer declares unused
   `mcp_sentinel_webhook_delivery.released`. Update 10036 still
   adds that column so 10038 can drop it. Fresh installs never
@@ -15,6 +43,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID`.
 - README retry copy now matches the shipped hold:
   `webhook-held`, `webhook-release`, `webhook-discard`.
+
+### Security
+- Alert email and webhook now carry client IPs, principal
+  identifiers, Origin, and Host. That is personal data: route
+  them to an operator-only mailbox. Redacted before send:
+  auth schemes (`Bearer`, `Basic`, `Digest`, `Token`,
+  `ApiKey`, `Negotiate`), JWT-shaped values, URL tokens
+  (`access_token`, `id_token`, `refresh_token`, `token`,
+  `code`, `key`, `sig`, `signature`, `password`), URL
+  userinfo, and control characters. DLP patterns apply only
+  when DLP is enabled.
+
+### Upgrade
+- No database update. The last hook remains 10039. Rows
+  written before this upgrade show `(none)` for the new
+  identity and grouping fields.
 
 ### Removed
 - Public constant `McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID`.

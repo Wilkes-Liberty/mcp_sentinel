@@ -873,13 +873,37 @@ function mcp_sentinel_jsonapi_entity_filter_access(
  * Implements hook_mail().
  *
  * Formats outbound emails for anomaly alerts. The 'anomaly_alert' key is used
- * by McpAlertDispatcher when anomaly_alert_email is non-empty.
+ * by McpAlertDispatcher when anomaly_alert_email is non-empty. The body is
+ * the bounded triage document (site, host, window, sources, reasons,
+ * tenants) already rendered by McpAnomalyEvidence.
  */
 function mcp_sentinel_mail(string $key, array &$message, array $params): void {
-  if ($key === 'anomaly_alert') {
-    $message['subject'] = $params['subject'] ?? 'MCP Sentinel anomaly alert';
-    $message['body'][] = $params['body'] ?? '';
+  if ($key !== 'anomaly_alert') {
+    return;
   }
+  $subject = $params['subject'] ?? 'MCP Sentinel anomaly alert';
+  $message['subject'] = is_string($subject) ? $subject : 'MCP Sentinel anomaly alert';
+  $lines = [];
+  $existing = $message['body'] ?? [];
+  if (is_array($existing)) {
+    foreach ($existing as $existingLine) {
+      if (is_string($existingLine)) {
+        $lines[] = $existingLine;
+      }
+    }
+  }
+  $body = $params['body'] ?? '';
+  if (is_array($body)) {
+    foreach ($body as $line) {
+      if (is_string($line)) {
+        $lines[] = $line;
+      }
+    }
+  }
+  elseif (is_string($body)) {
+    $lines[] = $body;
+  }
+  $message['body'] = $lines;
 }
 
 /**

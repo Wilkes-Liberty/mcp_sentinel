@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Mail\MailManagerInterface;
+use Drupal\mcp_sentinel\Value\McpAnomalyPreparedRule;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -19,7 +20,10 @@ use Psr\Log\LoggerInterface;
  *     manager.
  *
  * Debounce is handled upstream in McpAnomalyDetector; this dispatcher fires for
- * every rule result it receives without additional suppression.
+ * every rule result it receives without additional suppression. Every channel
+ * carries the same bounded site/host/source/reason/tenant evidence; the email
+ * body is the triage document. Enrichment failures never suppress an alert:
+ * the headline is still sent on every channel.
  */
 final class McpAlertDispatcher {
 
@@ -38,6 +42,8 @@ final class McpAlertDispatcher {
    *   The language manager (for mail langcode).
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Writes the bounded anomaly_alert evidence row.
+   * @param \Drupal\mcp_sentinel\Service\McpAnomalyEvidence $anomalyEvidence
+   *   Builds the bounded triage body and metadata for every fired rule.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -46,6 +52,7 @@ final class McpAlertDispatcher {
     private readonly McpWebhookQueueManager $webhookQueueManager,
     private readonly LanguageManagerInterface $languageManager,
     private readonly McpAuditLogger $auditLogger,
+    private readonly McpAnomalyEvidence $anomalyEvidence,
   ) {}
 
   /**
@@ -70,31 +77,83 @@ final class McpAlertDispatcher {
         continue;
       }
       $rule = $item['rule'];
+      if (!is_array($rule)) {
+        continue;
+      }
       $count = (int) $item['count'];
       $ruleLabel = (string) ($rule['label'] ?? $rule['id'] ?? 'unknown');
       $ruleId = (string) ($rule['id'] ?? '');
       $window = (int) ($item['window'] ?? $rule['window_seconds'] ?? 0);
       $threshold = (int) ($item['threshold'] ?? $rule['threshold'] ?? 0);
-      $evidence = $this->boundedEvidence($item, $rule, $count, $window, $threshold);
-      $this->auditLogger->log('anomaly_alert', $evidence);
-
-      $message = sprintf(
+      $headline = sprintf(
         'Rule "%s" triggered: %d operations in %d s (threshold %d).',
         $ruleLabel,
         $count,
         $window,
         $threshold,
       );
+      $body = $headline;
+      $identity = [
+        'site' => McpAnomalyEvidence::MISSING,
+        'host' => McpAnomalyEvidence::MISSING,
+        'environment' => McpAnomalyEvidence::ENV_UNSET,
+      ];
+      try {
+        $prepared = $this->anomalyEvidence->prepareFiredRule($item);
+        $identity = $prepared->identity;
+        if ($alertEmail !== '') {
+          $body = $this->anomalyEvidence->renderAlertBody($prepared);
+        }
+        $evidence = $this->boundedEvidence(
+          $item,
+          $rule,
+          $count,
+          $window,
+          $threshold,
+          $prepared,
+        );
+      }
+      catch (\Throwable $e) {
+        $this->sentinelLogger->error(
+          'Anomaly alert enrichment failed for @rule: @class. Sending headline only.',
+          [
+            '@rule' => $ruleId,
+            '@class' => $this->exceptionShortClass($e),
+            'exception' => $e,
+          ],
+        );
+        try {
+          $identity = $this->anomalyEvidence->siteIdentity();
+        }
+        catch (\Throwable) {
+          // Identity stays at the missing placeholders.
+        }
+        $body = $headline . "\nTriage details unavailable ("
+          . $this->exceptionShortClass($e) . ')';
+        $evidence = $this->fallbackEvidence(
+          $item,
+          $rule,
+          $count,
+          $window,
+          $threshold,
+          $identity,
+        );
+      }
+      $this->auditLogger->log('anomaly_alert', $evidence);
 
-      // Log channel alert.
+      // Log channel alert. Identity is in the PSR-3 context so a syslog
+      // line still names the site without dumping the full email body.
       if ($alertLog) {
         $this->sentinelLogger->warning(
           'mcp_sentinel_anomaly_alert @rule: @message',
           [
-            '@rule'    => $ruleId,
-            '@message' => $message,
-            'count'    => $count,
-            'rule'     => $rule,
+            '@rule' => $ruleId,
+            '@message' => $headline,
+            'count' => $count,
+            'rule' => $rule,
+            'site' => $identity['site'],
+            'host' => $identity['host'],
+            'environment' => $identity['environment'],
           ],
         );
       }
@@ -109,9 +168,9 @@ final class McpAlertDispatcher {
           $langcode,
           [
             'subject' => 'MCP Sentinel anomaly: ' . $ruleLabel,
-            'body'    => $message,
-            'rule'    => $rule,
-            'count'   => $count,
+            'body' => $body,
+            'rule' => $rule,
+            'count' => $count,
           ],
         );
       }
@@ -121,17 +180,23 @@ final class McpAlertDispatcher {
       // 'events' filter includes 'mcp.anomaly.alert' receive it.
       if ($alertWebhook) {
         $this->webhookQueueManager->enqueueForEvent('mcp.anomaly.alert', [
-          'rule_id'        => $ruleId,
-          'rule_label'     => $ruleLabel,
-          'count'          => $count,
-          'threshold'      => $threshold,
+          'rule_id' => $ruleId,
+          'rule_label' => $ruleLabel,
+          'count' => $count,
+          'threshold' => $threshold,
           'window_seconds' => $window,
-          'signal'         => $evidence['signal'],
-          'actor'          => $evidence['actor'],
-          'target_scope'   => $evidence['target_scope'],
-          'rule_version'   => $evidence['rule_version'],
-          'outcome'        => $evidence['outcome'],
-          'timestamp'      => time(),
+          'signal' => $evidence['signal'],
+          'actor' => $evidence['actor'],
+          'target_scope' => $evidence['target_scope'],
+          'rule_version' => $evidence['rule_version'],
+          'outcome' => $evidence['outcome'],
+          'site' => $evidence['site'],
+          'host' => $evidence['host'],
+          'environment' => $evidence['environment'],
+          'sources' => $evidence['sources'],
+          'reasons' => $evidence['reasons'],
+          'tenants' => $evidence['tenants'],
+          'timestamp' => time(),
         ]);
       }
     }
@@ -150,11 +215,21 @@ final class McpAlertDispatcher {
    *   Lookback window in seconds.
    * @param int $threshold
    *   Configured threshold.
+   * @param \Drupal\mcp_sentinel\Value\McpAnomalyPreparedRule $prepared
+   *   Result of McpAnomalyEvidence::prepareFiredRule().
    *
-   * @return array{signal: string, actor: list<int>, target_scope: list<string>, rule_version: string, window: int, threshold: int, outcome: string, rule_id: string, count: int}
+   * @return array{signal: string, actor: list<int>, target_scope: list<string>, rule_version: string, window: int, threshold: int, outcome: string, rule_id: string, count: int, site: string, host: string, environment: string, sources: list<array{client: string, mcp_client: string, principal: string, origin: string, host: string, ip: string, count: int}>, reasons: array<string, int>, tenants: array<string, int>}
    *   Audit metadata — no credentials or payload.
    */
-  private function boundedEvidence(array $item, array $rule, int $count, int $window, int $threshold): array {
+  private function boundedEvidence(
+    array $item,
+    array $rule,
+    int $count,
+    int $window,
+    int $threshold,
+    McpAnomalyPreparedRule $prepared,
+  ): array {
+    $meta = $this->anomalyEvidence->boundedAlertMetadata($prepared);
     $actor = $item['actor'] ?? [];
     $scope = $item['target_scope'] ?? [];
     return [
@@ -167,7 +242,70 @@ final class McpAlertDispatcher {
       'outcome' => (string) ($item['outcome'] ?? 'fired'),
       'rule_id' => (string) ($rule['id'] ?? ''),
       'count' => $count,
+      'site' => $meta['site'],
+      'host' => $meta['host'],
+      'environment' => $meta['environment'],
+      'sources' => $meta['sources'],
+      'reasons' => $meta['reasons'],
+      'tenants' => $meta['tenants'],
     ];
+  }
+
+  /**
+   * Headline-only evidence when enrichment throws.
+   *
+   * @param array<string, mixed> $item
+   *   The detector result.
+   * @param array<string, mixed> $rule
+   *   The rule map.
+   * @param int $count
+   *   Matching-row count that tripped the rule.
+   * @param int $window
+   *   Lookback window in seconds.
+   * @param int $threshold
+   *   Configured threshold.
+   * @param array{site: string, host: string, environment: string} $identity
+   *   Best-effort site identity.
+   *
+   * @return array{signal: string, actor: list<int>, target_scope: list<string>, rule_version: string, window: int, threshold: int, outcome: string, rule_id: string, count: int, site: string, host: string, environment: string, sources: list<array{client: string, mcp_client: string, principal: string, origin: string, host: string, ip: string, count: int}>, reasons: array<string, int>, tenants: array<string, int>}
+   *   Audit metadata — no credentials or payload.
+   */
+  private function fallbackEvidence(
+    array $item,
+    array $rule,
+    int $count,
+    int $window,
+    int $threshold,
+    array $identity,
+  ): array {
+    $actor = $item['actor'] ?? [];
+    $scope = $item['target_scope'] ?? [];
+    return [
+      'signal' => (string) ($item['signal'] ?? $rule['signal'] ?? 'count'),
+      'actor' => is_array($actor) ? array_values(array_map('intval', $actor)) : [],
+      'target_scope' => is_array($scope) ? array_values(array_map('strval', $scope)) : [],
+      'rule_version' => (string) ($item['rule_version'] ?? McpAnomalyDetector::ruleVersion($rule)),
+      'window' => $window,
+      'threshold' => $threshold,
+      'outcome' => (string) ($item['outcome'] ?? 'fired'),
+      'rule_id' => (string) ($rule['id'] ?? ''),
+      'count' => $count,
+      'site' => $identity['site'],
+      'host' => $identity['host'],
+      'environment' => $identity['environment'],
+      'sources' => [],
+      'reasons' => [],
+      'tenants' => [],
+    ];
+  }
+
+  /**
+   * Unqualified class name of a throwable.
+   */
+  private function exceptionShortClass(\Throwable $e): string {
+    $class = $e::class;
+    $pos = strrpos($class, '\\');
+    return $pos === FALSE ? $class : substr($class, $pos + 1);
   }
 
 }

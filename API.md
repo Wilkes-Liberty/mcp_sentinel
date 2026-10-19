@@ -557,6 +557,7 @@ content **publishing**. Both layers are additive and default to the safe value
 | `mcp-sentinel:verify [--live] [--content-target=UUID] [--json]` | Secure-install evidence document. Posture always; hostile-input probes with `--live`. Never persists. Skipped checks fail the run. |
 | `mcp-sentinel:role-audit` | Non-zero exit when a governed role holds a permission its profile forbids, or is an admin role. The deploy-time gate — run it after `config:import`. |
 | `mcp-sentinel:sql-query <sql> [--profile=ID]` | The only raw-SQL path this module can see. A local invocation has no bearer and is refused unless the resolved profile sets `allow_raw_sql` and `McpRawSqlGuard` accepts the statement. A sealed job principal is still checked. Every attempt is written to the audit chain with its statement text. Exists because `drush sql:query` caps its bootstrap below module-command discovery and therefore cannot be governed by any Drupal module. |
+| `mcp-sentinel:denied-access-summary [--window-seconds=300] [--top=8] [--json]` | Read-only grouping of `denied_access` rows by host, client, Origin, IP, and reason. `--window-seconds` is 1..604800; `--top` is 1..32. Count is the un-capped match total; a scan past 2000 rows reports `truncated`. The run is audited and the summary is not printed if that write fails. No tokens or bodies. A `denied*` anomaly pattern would also count `denied_access_summary` rows; the shipped storm rule matches `denied_access` exactly. |
 | `mcp-sentinel:setup` | Register the MCP tools (incl. the config tools) with `mcp_server`. OAuth is required unless `--allow-unauthenticated-development` is passed. `--require-oauth` is accepted and does nothing; it is kept so scripts written for earlier releases still run. |
 | `mcp-sentinel:agent-provision <tier> --env=<env>` | Idempotently provision a tier's role, dedicated agent account, and OAuth consumer (deterministic `client_id` = `<tier>-<env>`). Secrets stay a human action. |
 | `mcp-sentinel:break-glass <uid>` | Raise an always-gated approval request to grant the time-boxed `mcp_admin` role (auto-revoked at `break_glass_ttl_seconds`). |
@@ -589,7 +590,36 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.classification` | `McpClassificationResolver` | classification labels and egress ceilings (#3616540 part 2): `labels()`, `labelForEntity()` / `labelForField()`, `currentSurface()`, `effectiveCeiling($profile, $surface)` (min of profile and declared), `exceeds($label, $ceiling)`, `denies()`, bounded `evidence()`, `refusalResponse()` |
 | `mcp_sentinel.site_schema_builder` | `McpSiteSchemaBuilder` | `build($describes)` → content types (label, description, fields), vocabularies (label, description, term_count), and media types. Shared by `/drupal-mcp/context` and `McpSiteContextTool`; the caller supplies the per-surface bundle filter |
 | `mcp_sentinel.anomaly_detector` | `McpAnomalyDetector` | evaluate anomaly rules over the audit stream |
-| `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules |
+| `mcp_sentinel.anomaly_evidence` | `McpAnomalyEvidence` | bounded site/host/source/reason/tenant evidence for every anomaly alert and for `mcp-sentinel:denied-access-summary`. Never copies tokens, Authorization headers, or bodies |
+| `mcp_sentinel.anomaly_alert_dispatcher` | `McpAlertDispatcher` | dispatch log/email/webhook alerts for fired rules; email body is the triage document from `McpAnomalyEvidence`. Enrichment failure still sends the headline. |
+
+### `mcp.anomaly.alert` webhook payload
+
+Enqueued when `anomaly_alert_webhook` is on and a rule fires. Endpoints
+whose event filter includes `mcp.anomaly.alert` (or is empty) receive it.
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `rule_id` | string | Rule machine id |
+| `rule_label` | string | Rule label from admin config |
+| `count` | int | Matching operations in the window |
+| `threshold` | int | Configured threshold |
+| `window_seconds` | int | Lookback window |
+| `signal` | string | `count`, `off_hours`, or `bulk_read` |
+| `actor` | int[] | Actor uids from the detector, when present |
+| `target_scope` | string[] | Entity types from the detector, when present |
+| `rule_version` | string | Rule hash |
+| `outcome` | string | `fired` |
+| `site` | string | `system.site` name, or `(none)` |
+| `host` | string | Sending process host URL, or `(none)` |
+| `environment` | string | `$settings['mcp_sentinel.environment']`, or `(unset)` |
+| `sources` | object[] | Top sources: `client`, `mcp_client` (self-reported), `principal`, `origin`, `host`, `ip`, `count` |
+| `reasons` | object | Reason code → count |
+| `tenants` | object | Tenant → count |
+| `timestamp` | int | Unix time at enqueue |
+
+Tokens, Authorization headers, and request bodies are never included.
+Client IPs, principal identifiers, Origin, and Host are personal data.
 | `mcp_sentinel.content_lock` | `McpContentLock` | acquire/release/check short-lived content locks; when contrib Content Lock is installed, `conflictsForActor()` / `isLocked()` also honour a human's entity-form lock |
 | `mcp_sentinel.metrics` | `McpMetrics` | governance-dashboard data; reads existing stores only, every audit/webhook query window-bounded |
 | `mcp_sentinel.role_assertions` | `McpRoleAssertions` | `violations()` → governed roles holding forbidden permissions, resolving *effective* permissions (role ∪ `authenticated`) and treating `is_admin` as its own violation; `isAdminRole()` backs the forms' refusal to govern one |

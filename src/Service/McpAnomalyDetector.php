@@ -106,7 +106,11 @@ final class McpAnomalyDetector {
       $count = match ($signal) {
         'off_hours' => $this->countOffHours($pattern, $since, $config),
         'bulk_read' => $this->countBulkRead($pattern, $since, $rule),
-        default => $this->countOps($pattern, $since),
+        default => McpAuditOperationQuery::countMatching(
+          $this->database,
+          $pattern,
+          $since,
+        ),
       };
 
       if ($count >= $threshold) {
@@ -132,54 +136,13 @@ final class McpAnomalyDetector {
   }
 
   /**
-   * Counts audit log rows matching an operation pattern within a time window.
-   *
-   * Queries only the indexed 'operation' and 'timestamp' columns to stay cheap
-   * on large audit tables.
-   *
-   * Match semantics (set via the rule's operation_pattern field):
-   *   - Exact match (default): the pattern is compared with = so that 'entity'
-   *     matches only 'entity' and NOT 'entity_save' or 'entity_delete'. This is
-   *     the safe default; short patterns never silently swallow unrelated ops.
-   *   - Prefix match (opt-in): append a trailing '*' to use LIKE with a '%'
-   *     wildcard. For example, 'entity*' matches 'entity_save' and
-   *     'entity_delete'. The '*' is stripped before the SQL comparison.
-   *
-   * @param string $pattern
-   *   The operation pattern. A trailing '*' enables prefix matching; without it
-   *   an exact = comparison is used.
-   * @param int $since
-   *   Unix timestamp; only rows newer than this time are counted.
-   *
-   * @return int
-   *   Number of matching rows.
-   */
-  private function countOps(string $pattern, int $since): int {
-    $query = $this->database
-      ->select('audit_chain_log', 'l')
-      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
-      ->condition('l.timestamp', $since, '>');
-
-    if (str_ends_with($pattern, '*')) {
-      // Prefix match: strip the trailing '*' and use LIKE with '%'.
-      $prefix = substr($pattern, 0, -1);
-      $query->condition('l.operation', $this->database->escapeLike($prefix) . '%', 'LIKE');
-    }
-    else {
-      // Exact match (default): no LIKE, no implicit wildcard expansion.
-      $query->condition('l.operation', $pattern);
-    }
-
-    return (int) $query->countQuery()->execute()->fetchField();
-  }
-
-  /**
    * Counts matching operations whose timestamp falls outside operating hours.
    *
    * When the schedule is disabled, off-hours rules do not fire (count 0).
    *
    * @param string $pattern
-   *   Operation pattern (same semantics as countOps()).
+   *   Operation pattern (same semantics as
+   *   McpAuditOperationQuery::selectMatching()).
    * @param int $since
    *   Lookback start.
    * @param \Drupal\Core\Config\ImmutableConfig $config
@@ -288,7 +251,8 @@ final class McpAnomalyDetector {
    * the alert attributes only the collection that drove the fire.
    *
    * @param string $pattern
-   *   Operation pattern (same semantics as countOps()).
+   *   Operation pattern (same semantics as
+   *   McpAuditOperationQuery::selectMatching()).
    * @param int $since
    *   Lookback start.
    * @param string $signal
@@ -383,18 +347,7 @@ final class McpAnomalyDetector {
    * Shared audit query for an operation pattern in a window.
    */
   private function opsQuery(string $pattern, int $since): SelectInterface {
-    $query = $this->database
-      ->select('audit_chain_log', 'l')
-      ->condition('l.channel', McpAuditLogger::READ_CHANNELS, 'IN')
-      ->condition('l.timestamp', $since, '>');
-    if (str_ends_with($pattern, '*')) {
-      $prefix = substr($pattern, 0, -1);
-      $query->condition('l.operation', $this->database->escapeLike($prefix) . '%', 'LIKE');
-    }
-    else {
-      $query->condition('l.operation', $pattern);
-    }
-    return $query;
+    return McpAuditOperationQuery::selectMatching($this->database, $pattern, $since);
   }
 
 }

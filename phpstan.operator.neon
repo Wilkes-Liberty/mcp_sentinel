@@ -23,6 +23,8 @@ parameters:
     - php
     - install
   paths:
+    - src/Service/McpAnomalyEvidence.php
+    - src/Service/McpAuditOperationQuery.php
     - src/Service/McpOperatorBindingUidSchema.php
     - src/Service/McpOperatorIdentityFactory.php
     - src/Service/McpPaladinIntrospection.php

@@ -196,7 +196,7 @@ mcp_sentinel.settings:
       label: 'Anomaly detection enabled'
     anomaly_alert_email:
       type: string
-      label: 'Alert email address (empty = disabled)'
+      label: 'Alert email address (empty = disabled; install default is empty)'
     anomaly_alert_webhook:
       type: boolean
       label: 'Send alerts via webhook queue'
