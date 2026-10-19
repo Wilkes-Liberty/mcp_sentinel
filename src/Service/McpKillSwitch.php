@@ -285,7 +285,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     }
     $now = $this->time->getRequestTime();
     $statement = $this->connection->select(self::TABLE, 'k')
-      ->fields('k', ['status', 'block_until'])
+      // batch_id lets a veto-only decorator key one kill batch.
+      ->fields('k', ['status', 'block_until', 'batch_id'])
       ->condition('selector_hash', $hashes, 'IN')
       ->execute();
     if ($statement === NULL) {
@@ -1173,7 +1174,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     }
     $now = $this->time->getRequestTime();
     $statement = $this->connection->select(self::TABLE, 'k')
-      ->fields('k', ['status', 'block_until'])
+      ->fields('k', ['status', 'block_until', 'batch_id'])
       ->condition('status', [
         McpKillBlockStatus::Killed->value,
         McpKillBlockStatus::KillPending->value,
