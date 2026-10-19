@@ -66,14 +66,15 @@ final class McpTestPrincipalDeferralTest extends KernelTestBase {
    * The test module registers the principal-auth hook.
    */
   public function testExtensionIsRegistered(): void {
-    $this->assertTrue($this->container->has('mcp_sentinel.principal_auth_extension'));
+    $this->assertTrue($this->container->has('mcp_sentinel_test.principal_auth_extension'));
+    $this->assertFalse($this->container->has('mcp_sentinel.principal_auth_extension'));
   }
 
   /**
    * The subscriber consults the hook and does not seal a claimless request.
    */
   public function testSubscriberDefersClaimlessSeal(): void {
-    $extension = $this->container->get('mcp_sentinel.principal_auth_extension');
+    $extension = $this->container->get('mcp_sentinel_test.principal_auth_extension');
     $claimless = Request::create('/jsonapi/node/article');
     $this->assertTrue($extension->deferClaimlessSeal($claimless));
 

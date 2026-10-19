@@ -9,7 +9,7 @@ namespace Drupal\mcp_sentinel\Service;
  *
  * Drupal 11.3 stringifies integers on every driver. An unreadable
  * value fails closed (NULL). Tests decorate this service; production
- * has no PHPUnit branch.
+ * treats a NULL read as a veto and ignores a seam timestamp.
  */
 final class McpKillBlockUntilReader implements McpKillBlockUntilReaderInterface {
 

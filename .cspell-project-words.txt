@@ -99,6 +99,7 @@ phpcs
 phpstan
 phpunit
 proxied
+unproxied
 pgsql
 PKCE
 savepoint

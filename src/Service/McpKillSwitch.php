@@ -251,7 +251,9 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * @param \Psr\Log\LoggerInterface $logger
    *   Watchdog channel for notify failures after a claim or expire.
    * @param \Drupal\mcp_sentinel\Service\McpKillBlockUntilReaderInterface $blockUntilReader
-   *   Typed reader for stored block_until. Tests decorate this service.
+   *   Veto-only seam for stored block_until. NULL is unreadable.
+   *   Production ignores a seam timestamp so a decorator cannot
+   *   expire a live block.
    */
   public function __construct(
     private readonly Connection $connection,
@@ -1829,14 +1831,36 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   /**
    * Unix timestamp from a kill-block row.
    *
-   * Drupal 11.3 stringifies integers on every driver. An unreadable
-   * value fails closed.
+   * Drupal 11.3 stringifies integers on every driver. Production
+   * parses the stored value. The seam may only veto: NULL is
+   * unreadable (still blocking). A decorator int is ignored.
    *
    * @param array<string, mixed> $row
    *   Stored row.
    */
   private function rowBlockUntil(array $row): ?int {
-    return $this->blockUntilReader->read($row);
+    $parsed = $this->parseBlockUntil($row);
+    if ($this->blockUntilReader->read($row) === NULL) {
+      return NULL;
+    }
+    return $parsed;
+  }
+
+  /**
+   * Typed block_until from the stored row. Independent of the seam.
+   *
+   * @param array<string, mixed> $row
+   *   Stored row.
+   */
+  private function parseBlockUntil(array $row): ?int {
+    $value = $row['block_until'] ?? NULL;
+    if (is_int($value)) {
+      return $value;
+    }
+    if (is_string($value) && is_numeric($value)) {
+      return (int) $value;
+    }
+    return NULL;
   }
 
   /**
