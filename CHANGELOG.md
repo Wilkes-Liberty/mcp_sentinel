@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- `McpHistoricalExceptionTest` installs `system` date-format
+  config so `audit_chain` 1.12.2 `ScheduledVerifier::runNow()`
+  can format the last-run time through `date.formatter`.
+  Kernel tests that omit those entities fataled on
+  `DateFormatter::format()` (`getPattern()` on null) after
+  that release started interpolating the run time.
+  `audit_chain` 1.12.3 (audit_chain PR #91) formats
+  verifier presentation with `DATE_ATOM`, so that path no
+  longer depends on date-format config. The test-setup
+  install is therefore unnecessary, but it is still
+  correct and is kept so the test stays independent of
+  the `audit_chain` version.
 ### Security
 - 3.4.0 said a site that does not enable
   `mcp_sentinel_test` cannot obtain a principal from
