@@ -56,6 +56,7 @@ final class McpRoleFallbackWithoutTestPrincipalTest extends BrowserTestBase {
     }
     $this->enableRoleFallbackWithoutTestPrincipal();
     $this->configureDefaultProfile(TRUE, TRUE);
+    $this->container->get('router.builder')->rebuild();
   }
 
   /**
@@ -92,10 +93,6 @@ final class McpRoleFallbackWithoutTestPrincipalTest extends BrowserTestBase {
       'settings' => [
         McpRoleFallbackGate::SETTINGS_KEY => (object) [
           'value' => TRUE,
-          'required' => TRUE,
-        ],
-        McpRoleFallbackGate::TEST_PRINCIPAL_KEY => (object) [
-          'value' => [],
           'required' => TRUE,
         ],
       ],
