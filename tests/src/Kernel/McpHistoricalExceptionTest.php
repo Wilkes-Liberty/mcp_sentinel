@@ -93,7 +93,9 @@ final class McpHistoricalExceptionTest extends KernelTestBase {
     ]);
     $this->installEntitySchema('user');
     $this->installEntitySchema('node');
-    $this->installConfig(['audit_chain', 'mcp_sentinel']);
+    // audit_chain 1.12.2 formats the scheduled-run time through
+    // date.formatter (core.date_format.medium, then fallback).
+    $this->installConfig(['system', 'audit_chain', 'mcp_sentinel']);
     new Settings(['audit_chain_instance_id' => 'synthetic-instance'] + Settings::getAll());
     Key::create([
       'id' => 'historical_key',

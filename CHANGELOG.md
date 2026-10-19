@@ -6,6 +6,30 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+- 3.4.0 said a site that does not enable
+  `mcp_sentinel_test` cannot obtain a principal from
+  `mcp_sentinel_role_fallback_test_principal` or skip the
+  claimless seal. That held only while no other module
+  registered `mcp_sentinel.principal_auth_extension`.
+  Production now owns those checks: `fallbackClaims()`
+  runs only after the fallback stamp, an unproxied hop,
+  and `permitted()`, and keeps `iss`/`sub`/`azp`/`tenant`
+  only. The subscriber evaluates the claimless predicate
+  before `deferClaimlessSeal()`. The hook id is
+  `mcp_sentinel_test.principal_auth_extension`. A late
+  compiler pass drops the legacy id and any namespaced
+  definition whose class is not under
+  `Drupal\mcp_sentinel_test\`. The interface is
+  `@internal`. The kill-block reader seam is veto-only:
+  a decorator may make a block unreadable, never expired.
+
+### Fixed
+- `McpHistoricalExceptionTest` installs `system` date-format
+  config so `audit_chain` 1.12.2 can format the scheduled-run
+  time. Without those entities, `DateFormatter::format()` calls
+  `getPattern()` on null.
+
 ## [3.4.0] - 2026-10-19
 
 ### Added

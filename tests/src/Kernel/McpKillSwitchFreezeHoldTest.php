@@ -1428,6 +1428,48 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * Injecting one unreadable batch leaves the other batch readable.
+   */
+  public function testInjectUnreadableHonoursBatchId(): void {
+    $humanA = McpKillSelector::humanKey(self::ISS . '|subject-unread-a');
+    $humanB = McpKillSelector::humanKey(self::ISS . '|subject-unread-b');
+    $killA = $this->killSwitch()->kill([$humanA], 'unread-a', $this->paladinA());
+    $killB = $this->killSwitch()->kill([$humanB], 'unread-b', $this->paladinA());
+    $this->killSwitch()->confirm($killA->batchId, $this->paladinB());
+    $this->killSwitch()->confirm($killB->batchId, $this->paladinB());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 1])
+      ->condition('batch_id', $killB->batchId)
+      ->execute();
+    $this->assertTrue($this->killSwitch()->isKilled('', $humanA->key));
+    $this->assertFalse($this->killSwitch()->isKilled('', $humanB->key));
+
+    $reader = $this->container->get('mcp_sentinel.kill_block_until_reader');
+    $this->assertInstanceOf(McpTestKillBlockUntilReader::class, $reader);
+    $reader->injectUnreadable($killA->batchId);
+
+    $this->assertTrue($this->killSwitch()->isKilled('', $humanA->key));
+    $this->assertFalse($this->killSwitch()->isKilled('', $humanB->key));
+  }
+
+  /**
+   * A decorator expired int must not lift a live block.
+   */
+  public function testExpiredSeamIntDoesNotLiftBlock(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-expire-seam');
+    $kill = $this->killSwitch()->kill([$human], 'expire-seam', $this->paladinA());
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+
+    $reader = $this->container->get('mcp_sentinel.kill_block_until_reader');
+    $this->assertInstanceOf(McpTestKillBlockUntilReader::class, $reader);
+    $reader->injectExpired($kill->batchId);
+
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->assertTrue($this->killSwitch()->hasActiveStop());
+  }
+
+  /**
    * An unreadable stored block_until stays listed as an active block.
    */
   public function testUnreadableBlockUntilListActiveBlocksFailsClosed(): void {
