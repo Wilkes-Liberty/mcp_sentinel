@@ -16,6 +16,9 @@ bypassable
 Cerda
 chartjs
 ciphertext
+claims_stripped
+nsspoof
+NsSpoof
 Codegen
 cret
 cset

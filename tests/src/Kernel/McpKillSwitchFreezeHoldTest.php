@@ -1470,6 +1470,61 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * An expired stored value plus a NULL veto still blocks.
+   */
+  public function testExpiredStoredValueWithNullVetoStillBlocks(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-expired-null-veto');
+    $kill = $this->killSwitch()->kill([$human], 'expired-null-veto', $this->paladinA());
+    $this->killSwitch()->confirm($kill->batchId, $this->paladinB());
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 1])
+      ->condition('batch_id', $kill->batchId)
+      ->execute();
+    $this->assertFalse($this->killSwitch()->isKilled('', $human->key));
+
+    $reader = $this->container->get('mcp_sentinel.kill_block_until_reader');
+    $this->assertInstanceOf(McpTestKillBlockUntilReader::class, $reader);
+    $reader->injectUnreadable($kill->batchId);
+
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->assertTrue($this->killSwitch()->hasActiveStop());
+  }
+
+  /**
+   * Re-issue treats a NULL block_until read as still blocking.
+   */
+  public function testReissueNullBlockUntilStillBlocks(): void {
+    $human = McpKillSelector::humanKey(self::ISS . '|subject-reissue-null');
+    $first = $this->killSwitch()->kill(
+      [$human],
+      'reissue-null-first',
+      $this->paladinA(),
+      604800,
+    );
+    $this->killSwitch()->confirm($first->batchId, $this->paladinB());
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+
+    $reader = $this->container->get('mcp_sentinel.kill_block_until_reader');
+    $this->assertInstanceOf(McpTestKillBlockUntilReader::class, $reader);
+    $reader->injectUnreadable($first->batchId);
+    $this->container->get('database')->update(McpKillSwitch::TABLE)
+      ->fields(['block_until' => 1])
+      ->condition('batch_id', $first->batchId)
+      ->execute();
+
+    $second = $this->killSwitch()->kill(
+      [$human],
+      'reissue-null-short',
+      $this->paladinA(),
+      3600,
+    );
+    $row = $this->killSwitch()->status($human);
+    $this->assertIsArray($row);
+    $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
+    $this->assertSame(604800, $second->ttl);
+  }
+
+  /**
    * An unreadable stored block_until stays listed as an active block.
    */
   public function testUnreadableBlockUntilListActiveBlocksFailsClosed(): void {

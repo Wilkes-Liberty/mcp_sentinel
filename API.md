@@ -148,10 +148,25 @@ sources skip that scope check. JSON:API, GraphQL, and
   consults that hook only after its own admission checks
   (fallback stamp, unproxied hop, `permitted()`; claimless
   predicate before deferral) and never takes scopes from it.
-  `McpSentinelServiceProvider` drops the legacy
-  `mcp_sentinel.principal_auth_extension` id and any
-  namespaced definition that is not that test module's
-  class, in a late compiler pass after every `alter()`.
+  `McpSentinelServiceProvider` removes the legacy
+  `mcp_sentinel.principal_auth_extension` id and a
+  namespaced definition that `mcp_sentinel_test` does
+  not own (real module path or provider against the
+  live installed-module list, not a class namespace
+  prefix), in a `TYPE_BEFORE_OPTIMIZATION`
+  (-1000) compiler pass. A missing `module_handler`
+  is resolved from the live list or the hook is
+  refused. The factory and subscriber fail closed on
+  the wired object; the subscriber re-checks before
+  `deferClaimlessSeal()`. A refused wired object, a
+  compile-time removal, and stripped claims each write
+  an `audit_chain` row (`refused`, or `claims_stripped`
+  when extra keys are dropped). Provider attribution
+  uses the longest path prefix.
+  Sites on 3.4.0 apply this with `drush cr`, not
+  `updatedb` (last hook is 10039). Audit enabled
+  modules for a `mcp_sentinel.principal_auth_extension`
+  service.
   The test module defers the claimless seal so
   readiness can stamp role fallback, and reads
   `mcp_sentinel_role_fallback_test_principal` only after that

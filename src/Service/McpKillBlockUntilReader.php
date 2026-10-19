@@ -19,7 +19,7 @@ final class McpKillBlockUntilReader implements McpKillBlockUntilReaderInterface 
    * @param array<string, mixed> $row
    *   Stored row.
    */
-  public function read(array $row): ?int {
+  public static function parse(array $row): ?int {
     $value = $row['block_until'] ?? NULL;
     if (is_int($value)) {
       return $value;
@@ -28,6 +28,16 @@ final class McpKillBlockUntilReader implements McpKillBlockUntilReaderInterface 
       return (int) $value;
     }
     return NULL;
+  }
+
+  /**
+   * Unix timestamp from a kill-block row, or NULL when unreadable.
+   *
+   * @param array<string, mixed> $row
+   *   Stored row.
+   */
+  public function read(array $row): ?int {
+    return self::parse($row);
   }
 
 }

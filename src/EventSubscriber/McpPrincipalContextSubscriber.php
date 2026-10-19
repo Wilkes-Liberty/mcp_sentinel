@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\EventSubscriber;
 
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
@@ -34,13 +36,22 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    *   Write-once sealed context.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
    *   Test-module hook
-   *   (`mcp_sentinel_test.principal_auth_extension`). NULL
-   *   unless that module owns the id.
+   *   (`mcp_sentinel_test.principal_auth_extension`). The
+   *   wired object is re-checked at deferClaimlessSeal().
+   * @param \Drupal\Core\Extension\ModuleHandlerInterface|null $moduleHandler
+   *   Installed-module list. NULL uses the live handler
+   *   when Drupal is booted; if ownership still cannot
+   *   be proven the hook is refused.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
+   *   Writes a governance row when a hook is ignored. NULL
+   *   skips the write; the hook is still ignored.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
     private readonly McpPrincipalContextHolder $holder,
     private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
+    private readonly ?ModuleHandlerInterface $moduleHandler = NULL,
+    private readonly ?McpAuditLogger $auditLogger = NULL,
   ) {}
 
   /**
@@ -65,7 +76,7 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     }
     $request = $event->getRequest();
     if ($this->isClaimlessUnsealed($request)
-      && $this->authExtension?->deferClaimlessSeal($request) === TRUE) {
+      && $this->admittedExtension()?->deferClaimlessSeal($request) === TRUE) {
       return;
     }
     if ($this->isLeftoverCliRequest($request)) {
@@ -118,6 +129,20 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
     return !$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
       && !$request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)
       && $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE) !== TRUE;
+  }
+
+  /**
+   * The wired hook after a fail-closed ownership check.
+   *
+   * @return \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null
+   *   The hook, or NULL when it is missing or not owned.
+   */
+  private function admittedExtension(): ?McpPrincipalAuthExtensionInterface {
+    return McpPrincipalContextFactory::trustedAuthExtension(
+      $this->authExtension,
+      $this->moduleHandler,
+      $this->auditLogger,
+    );
   }
 
 }
