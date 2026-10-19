@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-10-19
+
 ### Added
 - Anomaly alert emails (every fired rule, one shared renderer)
   name the site, host URL, environment, window, threshold, top
@@ -3473,7 +3475,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...1.x
+[3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
 [3.3.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...3.3.2
 [3.3.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...3.3.1
 [3.3.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.2.0...3.3.0
