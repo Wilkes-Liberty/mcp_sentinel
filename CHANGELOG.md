@@ -24,6 +24,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `@internal`. The kill-block reader seam is veto-only:
   a decorator may make a block unreadable, never expired.
 
+### Fixed
+- `McpHistoricalExceptionTest` installs `system` date-format
+  config so `audit_chain` 1.12.2 can format the scheduled-run
+  time. Without those entities, `DateFormatter::format()` calls
+  `getPattern()` on null.
+
 ## [3.4.0] - 2026-10-19
 
 ### Added
