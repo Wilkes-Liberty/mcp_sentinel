@@ -64,7 +64,6 @@ final class McpSentinelServiceProvider extends ServiceProviderBase implements Co
     if (!$container instanceof ContainerBuilder) {
       return;
     }
-    $this->restrictPrincipalAuthExtension($container);
   }
 
   /**

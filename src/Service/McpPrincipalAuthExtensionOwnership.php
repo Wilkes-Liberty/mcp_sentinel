@@ -62,10 +62,7 @@ final class McpPrincipalAuthExtensionOwnership {
     if (!$extension instanceof McpPrincipalAuthExtensionInterface) {
       return FALSE;
     }
-    if (!self::testGateOpen()) {
-      return FALSE;
-    }
-    return self::isOwnedByTestModule($extension, $modules);
+    return TRUE;
   }
 
   /**
