@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpRoleFallbackGate;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -202,14 +203,14 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
   }
 
   /**
-   * The settings.php test principal is applied only after fallback.
+   * Production ignores the settings.php test principal.
    *
-   * A proxied request and an unmarked request stay empty. The
-   * fallback context is not a network call.
+   * The mcp_sentinel_test module is the only reader. A stamped fallback
+   * without that module stays empty.
    *
    * @covers ::fromRequest
    */
-  public function testRoleFallbackTestPrincipalIgnoresProxy(): void {
+  public function testProductionIgnoresSettingsTestPrincipal(): void {
     new Settings([
       McpRoleFallbackGate::TEST_PRINCIPAL_KEY => [
         'iss' => 'https://idp.example/realms/agents',
@@ -222,29 +223,41 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $oauth->method('clientId')->willReturn(NULL);
     $oauth->method('scopes')->willReturn([]);
     $factory = new McpPrincipalContextFactory(new RequestStack(), $oauth);
-
     $fallback = Request::create('/jsonapi/node/page', 'PATCH');
     $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
-    $admitted = $factory->fromRequest($fallback);
-    $this->assertTrue($admitted->fromRoleFallback());
-    $this->assertFalse($admitted->isNetwork());
-    $this->assertSame('https://idp.example/realms/agents', $admitted->issuer());
-    $this->assertSame('functional-role-fallback', $admitted->subject());
-    $this->assertSame('functional-role-fallback-client', $admitted->azp());
-
-    $unmarked = $factory->fromRequest(Request::create('/jsonapi/node/page'));
-    $this->assertSame(McpPrincipalContext::SOURCE_EMPTY, $unmarked->source());
-    $this->assertSame('', $unmarked->issuer());
-
-    $proxied = Request::create('/', 'GET', [], [], [], [
-      'REMOTE_ADDR' => '127.0.0.1',
-      'HTTP_X_FORWARDED_FOR' => '203.0.113.10',
-    ]);
-    $proxied->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
-    $refused = $factory->fromRequest($proxied);
-    $this->assertTrue($refused->fromRoleFallback());
-    $this->assertSame('', $refused->issuer());
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertTrue($ctx->fromRoleFallback());
+    $this->assertSame('', $ctx->issuer());
     new Settings([]);
+  }
+
+  /**
+   * The test-module hook supplies claims after fallback is stamped.
+   *
+   * @covers ::fromRequest
+   */
+  public function testAuthExtensionSuppliesFallbackClaims(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
+    $extension->method('fallbackClaims')->willReturn([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'functional-role-fallback',
+      'azp' => 'functional-role-fallback-client',
+    ]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      $extension,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertTrue($ctx->fromRoleFallback());
+    $this->assertSame('https://idp.example/realms/agents', $ctx->issuer());
+    $this->assertSame('functional-role-fallback', $ctx->subject());
+    $this->assertSame('functional-role-fallback-client', $ctx->azp());
   }
 
   /**

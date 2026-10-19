@@ -39,19 +39,18 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
   public function testPhpUnitWithoutProxyIsPermitted(): void {
     $this->assertTrue(McpRoleFallbackGate::permitted(Request::create('/')));
     $this->assertTrue(McpRoleFallbackGate::permitted(NULL));
-    $this->assertFalse(
-      McpRoleFallbackGate::inTestChildServer(),
-      'PHPUnit runs as cli, not a Drupal test child on cli-server.',
-    );
   }
 
   /**
-   * A production SAPI without the settings.php flag is refused.
+   * A production process without the settings.php flag is refused.
+   *
+   * A php -S, drush runserver, Apache, or FPM process stays closed
+   * unless settings.php opts in. cli-server is not a permit.
    *
    * @covers ::permitted
    */
-  public function testProductionSapiWithoutSettingsFlagIsRefused(): void {
-    $environment = new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE);
+  public function testProductionProcessWithoutSettingsFlagIsRefused(): void {
+    $environment = new McpRoleFallbackEnvironment(FALSE);
     $this->assertFalse(McpRoleFallbackGate::permitted(
       Request::create('/'),
       $environment,
@@ -60,44 +59,18 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
   }
 
   /**
-   * A production SAPI with the settings.php flag is permitted.
+   * A production process with the settings.php flag is permitted.
    *
    * @covers ::permitted
    */
-  public function testProductionSapiWithSettingsFlagIsPermitted(): void {
+  public function testProductionProcessWithSettingsFlagIsPermitted(): void {
     new Settings([McpRoleFallbackGate::SETTINGS_KEY => TRUE]);
-    $environment = new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE);
+    $environment = new McpRoleFallbackEnvironment(FALSE);
     $this->assertTrue(McpRoleFallbackGate::permitted(
       Request::create('/'),
       $environment,
     ));
     $this->assertTrue(McpRoleFallbackGate::permitted(NULL, $environment));
-  }
-
-  /**
-   * The PHP built-in server without the settings.php flag is refused.
-   *
-   * A php -S or drush runserver process, and a PaaS image that serves
-   * with the built-in server, stay closed unless settings.php opts in.
-   * A Drupal test child without the flag is also refused; functional
-   * tests write the flag.
-   *
-   * @covers ::permitted
-   * @covers ::inTestChildServer
-   */
-  public function testCliServerWithoutSettingsFlagIsRefused(): void {
-    $plain = new McpRoleFallbackEnvironment('cli-server', FALSE, FALSE);
-    $this->assertFalse(McpRoleFallbackGate::permitted(
-      Request::create('/'),
-      $plain,
-    ));
-    $this->assertFalse(McpRoleFallbackGate::inTestChildServer($plain));
-    $testChild = new McpRoleFallbackEnvironment('cli-server', FALSE, TRUE);
-    $this->assertFalse(McpRoleFallbackGate::permitted(
-      Request::create('/'),
-      $testChild,
-    ));
-    $this->assertTrue(McpRoleFallbackGate::inTestChildServer($testChild));
   }
 
   /**
@@ -118,7 +91,7 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
     $this->assertFalse(McpRoleFallbackGate::permitted($request));
     $this->assertFalse(McpRoleFallbackGate::permitted(
       $request,
-      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE),
+      new McpRoleFallbackEnvironment(FALSE),
     ));
   }
 
@@ -180,7 +153,7 @@ final class McpRoleFallbackGateTest extends UnitTestCase {
     $this->assertTrue(McpRoleFallbackGate::permitted($request));
     $this->assertFalse(McpRoleFallbackGate::permitted(
       $request,
-      new McpRoleFallbackEnvironment('fpm-fcgi', FALSE, FALSE),
+      new McpRoleFallbackEnvironment(FALSE),
     ));
   }
 

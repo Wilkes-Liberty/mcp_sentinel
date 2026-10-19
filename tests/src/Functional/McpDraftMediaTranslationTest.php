@@ -39,7 +39,7 @@ final class McpDraftMediaTranslationTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
-    'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
+    'audit_chain', 'mcp_sentinel', 'mcp_sentinel_test', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'language', 'content_translation', 'file',
     'image', 'media',
   ];

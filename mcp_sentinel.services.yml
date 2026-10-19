@@ -210,6 +210,10 @@ services:
     arguments:
       - '@request_stack'
       - '@mcp_sentinel.oauth_context'
+      - '@?mcp_sentinel.principal_auth_extension'
+
+  mcp_sentinel.kill_block_until_reader:
+    class: Drupal\mcp_sentinel\Service\McpKillBlockUntilReader
 
   mcp_sentinel.kill_switch:
     class: Drupal\mcp_sentinel\Service\McpKillSwitch
@@ -227,6 +231,7 @@ services:
       - '@settings'
       - '@state'
       - '@logger.channel.mcp_sentinel'
+      - '@mcp_sentinel.kill_block_until_reader'
 
   mcp_sentinel.operator_binding_uid_schema:
     class: Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema
@@ -300,6 +305,7 @@ services:
     arguments:
       - '@mcp_sentinel.principal_context_factory'
       - '@mcp_sentinel.principal_context_holder'
+      - '@?mcp_sentinel.principal_auth_extension'
     tags:
       - { name: event_subscriber }
 

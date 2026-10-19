@@ -18,7 +18,8 @@ use Symfony\Component\HttpFoundation\Request;
  * unit-test permit. Functional tests write the settings.php flag.
  * HTTP fallback is refused when reverse_proxy is on or when any
  * Forwarded or X-Forwarded-* header is present. cli-server is not a
- * permit.
+ * permit. The settings.php test principal is applied only by
+ * mcp_sentinel_test after readiness stamps role fallback.
  */
 final class McpRoleFallbackGate {
 
@@ -28,12 +29,11 @@ final class McpRoleFallbackGate {
   public const SETTINGS_KEY = 'mcp_sentinel_allow_role_fallback';
 
   /**
-   * Settings.php principal used by PHPUnit's built-in server only.
+   * Settings.php principal used when mcp_sentinel_test is enabled.
    *
-   * Functional tests cannot mint a Paladin bearer. The factory reads
-   * this map only after readiness has taken the role-fallback path,
-   * and only in PHPUnit or a Drupal test child on cli-server. Other
-   * SAPIs ignore it.
+   * Functional tests cannot mint a Paladin bearer. The test module
+   * reads this map only after readiness has taken the role-fallback
+   * path. Production ignores it.
    */
   public const TEST_PRINCIPAL_KEY = 'mcp_sentinel_role_fallback_test_principal';
 
@@ -44,7 +44,7 @@ final class McpRoleFallbackGate {
    *   The current HTTP request, or NULL on CLI.
    * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
    *   Process probe. NULL reads the live process. Tests inject a
-   *   production SAPI so the settings.php requirement is not hidden
+   *   production process so the settings.php requirement is not hidden
    *   by PHPUnit.
    */
   public static function permitted(
@@ -94,25 +94,6 @@ final class McpRoleFallbackGate {
    */
   public static function inPhpUnit(): bool {
     return McpRoleFallbackEnvironment::detect()->inPhpUnit();
-  }
-
-  /**
-   * TRUE on the PHP built-in server for a Drupal functional-test child.
-   *
-   * Production cli-server (php -S, drush runserver, a PaaS image)
-   * is not a permit. Functional tests also write the settings.php
-   * flag; this is only for the test-principal map and the deferred
-   * claimless seal.
-   *
-   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
-   *   Process probe. NULL reads the live process.
-   */
-  public static function inTestChildServer(
-    ?McpRoleFallbackEnvironment $environment = NULL,
-  ): bool {
-    $environment ??= McpRoleFallbackEnvironment::detect();
-    return $environment->sapi() === 'cli-server'
-      && $environment->inDrupalTestChildSite();
   }
 
 }

@@ -40,6 +40,7 @@ final class McpCompositeRedirectJsonApiTest extends BrowserTestBase {
   protected static $modules = [
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_test',
     'node',
     'field',
     'serialization',

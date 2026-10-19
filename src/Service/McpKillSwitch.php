@@ -250,6 +250,8 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Durable marker for freezes already kept by update 10037.
    * @param \Psr\Log\LoggerInterface $logger
    *   Watchdog channel for notify failures after a claim or expire.
+   * @param \Drupal\mcp_sentinel\Service\McpKillBlockUntilReaderInterface $blockUntilReader
+   *   Typed reader for stored block_until. Tests decorate this service.
    */
   public function __construct(
     private readonly Connection $connection,
@@ -265,6 +267,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
     private readonly Settings $settings,
     private readonly StateInterface $state,
     private readonly LoggerInterface $logger,
+    private readonly McpKillBlockUntilReaderInterface $blockUntilReader,
   ) {}
 
   /**
@@ -1833,14 +1836,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    *   Stored row.
    */
   private function rowBlockUntil(array $row): ?int {
-    $value = $row['block_until'] ?? NULL;
-    if (is_int($value)) {
-      return $value;
-    }
-    if (is_string($value) && is_numeric($value)) {
-      return (int) $value;
-    }
-    return NULL;
+    return $this->blockUntilReader->read($row);
   }
 
   /**

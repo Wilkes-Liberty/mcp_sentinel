@@ -41,7 +41,7 @@ final class McpDraftNestedReplacementTest extends BrowserTestBase {
    * {@inheritdoc}
    */
   protected static $modules = [
-    'audit_chain', 'mcp_sentinel', 'node', 'field', 'serialization',
+    'audit_chain', 'mcp_sentinel', 'mcp_sentinel_test', 'node', 'field', 'serialization',
     'jsonapi', 'basic_auth', 'workflows', 'content_moderation',
     'language', 'content_translation', 'paragraphs',
     'entity_reference_revisions', 'mcp_sentinel_nested_rollback_test',

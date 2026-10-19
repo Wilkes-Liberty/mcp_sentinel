@@ -26,6 +26,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `denied_access` exactly.
 
 ### Changed
+- Functional-test principal admission and claimless-seal
+  deferral live in `tests/modules/mcp_sentinel_test`. Production
+  `McpPrincipalContextFactory` and
+  `McpPrincipalContextSubscriber` take an optional
+  `McpPrincipalAuthExtensionInterface` (NULL unless that
+  module is enabled). `McpKillSwitch` reads `block_until`
+  through `McpKillBlockUntilReaderInterface`; the test module
+  decorates the reader. `inTestChildSite()`,
+  `inTestChildServer()`, and
+  `McpRoleFallbackEnvironment::sapi()` are gone.
 - `denied_access` metadata stores normalised
   `http_origin` / `http_host` as `scheme://host[:port]`,
   dropping userinfo, path, and query. Allow-path rows are
@@ -45,6 +55,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `webhook-held`, `webhook-release`, `webhook-discard`.
 
 ### Security
+- Production no longer branches on
+  `DRUPAL_TEST_IN_CHILD_SITE`, `PHP_SAPI`, or PHPUnit to
+  admit a principal or skip a claimless seal. Those paths
+  exist only while `mcp_sentinel_test` is enabled. A site
+  that does not enable that module cannot obtain a principal
+  from `mcp_sentinel_role_fallback_test_principal` and cannot
+  skip the claimless seal. Reverse-proxy and X-Forwarded-*
+  still refuse role fallback. Role fallback still requires
+  `$settings['mcp_sentinel_allow_role_fallback']` (or PHPUnit
+  for kernel tests).
 - Alert email and webhook now carry client IPs, principal
   identifiers, Origin, and Host. That is personal data: route
   them to an operator-only mailbox. Redacted before send:
@@ -55,11 +75,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   userinfo, and control characters. DLP patterns apply only
   when DLP is enabled.
 
-### Upgrade
-- No database update. The last hook remains 10039. Rows
-  written before this upgrade show `(none)` for the new
-  identity and grouping fields.
-
 ### Removed
 - Public constant `McpWebhookQueueManager::STATE_PRE_UPGRADE_MAX_ID`.
   The upgrade-only state key is `MCP_SENTINEL_WEBHOOK_PRE_UPGRADE_MAX_ID`
@@ -67,6 +82,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   callers in this repository or elsewhere in the Wilkes-Liberty org.
 
 ### Fixed
+- Functional JSON:API tests on drupal.org GitLab CI no longer
+  receive `403 MCP access is denied` on every governed request.
+  The claimless-seal deferral and
+  `mcp_sentinel_role_fallback_test_principal` map now live in
+  `mcp_sentinel_test`, which Functional tests enable. Production
+  seals immediately and ignores the map (DEV-1014).
+- `McpKillSwitchFreezeHoldTest` no longer fatals on MySQL
+  strict mode (error 1366) when seeding an unreadable
+  `block_until`. SQLite still stores `not-a-number`. MySQL
+  injects the same fail-closed read at the decorated reader
+  for that batch only.
 - Sealed-token authentication no longer constructs
   `mcp_sentinel.sealed_token_manager` (and therefore the audit
   logger and DLP) when Drupal's authentication collector is first
@@ -83,7 +109,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a release containing this lands (DEV-1014).
 
 ### Upgrade
-- Rebuild caches (`drush cr`, or `drush updb`) after updating.
+- No database update. The last hook remains 10039. Rows
+  written before this upgrade show `(none)` for the new
+  identity and grouping fields. Rebuild caches (`drush cr`,
+  or `drush updb`) after updating.
+  `McpKillSwitch` now takes a
+  `McpKillBlockUntilReaderInterface` argument (container
+  service `mcp_sentinel.kill_block_until_reader`).
   The first argument of `McpSealedTokenAuthProvider` changed from
   `McpSealedTokenManager` to a `\Closure` (service closure for
   `mcp_sentinel.sealed_token_manager`) and a third `\Closure`

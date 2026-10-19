@@ -1,0 +1,9 @@
+services:
+  mcp_sentinel.principal_auth_extension:
+    class: Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension
+
+  mcp_sentinel_test.kill_block_until_reader:
+    class: Drupal\mcp_sentinel_test\Service\McpTestKillBlockUntilReader
+    decorates: mcp_sentinel.kill_block_until_reader
+    arguments:
+      - '@mcp_sentinel_test.kill_block_until_reader.inner'

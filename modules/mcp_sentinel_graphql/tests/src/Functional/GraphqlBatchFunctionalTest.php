@@ -42,6 +42,7 @@ final class GraphqlBatchFunctionalTest extends BrowserTestBase {
   protected static $modules = [
     'audit_chain',
     'mcp_sentinel',
+    'mcp_sentinel_test',
     'mcp_sentinel_graphql',
     'node',
     'serialization',
