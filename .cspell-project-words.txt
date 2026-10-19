@@ -117,7 +117,10 @@ redactions
 reentrancy
 refinable
 relock
+rewire
+rewired
 replayable
+spoofed
 Revisionable
 rollup
 runbook

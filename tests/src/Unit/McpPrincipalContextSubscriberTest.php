@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -101,15 +102,10 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     $claimless = Request::create('/jsonapi/node/page');
     $stack->push($claimless);
     $holder = new McpPrincipalContextHolder($stack);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->expects($this->once())
-      ->method('deferClaimlessSeal')
-      ->with($claimless)
-      ->willReturn(TRUE);
     $subscriber = new McpPrincipalContextSubscriber(
       $this->factory($stack),
       $holder,
-      $extension,
+      new McpTestPrincipalAuthExtension(),
     );
     $kernel = $this->createMock(HttpKernelInterface::class);
     $subscriber->onRequest(new RequestEvent(

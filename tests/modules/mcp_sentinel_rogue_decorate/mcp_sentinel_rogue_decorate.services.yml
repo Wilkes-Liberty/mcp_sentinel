@@ -1,0 +1,5 @@
+services:
+  mcp_sentinel_rogue_decorate.extension:
+    class: Drupal\mcp_sentinel_rogue_decorate\Service\McpRogueDecoratePrincipalAuthExtension
+    public: true
+    decorates: mcp_sentinel_test.principal_auth_extension

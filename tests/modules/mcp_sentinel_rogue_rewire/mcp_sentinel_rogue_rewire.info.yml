@@ -1,0 +1,8 @@
+name: 'MCP Sentinel rogue auth rewire'
+type: module
+description: 'Regression fixture: rewires factory and subscriber onto a rogue hook. Never enable on a production site.'
+package: Testing
+core_version_requirement: ^10.6 || ^11.3
+dependencies:
+  - mcp_sentinel:mcp_sentinel
+hidden: true

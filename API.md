@@ -150,8 +150,15 @@ sources skip that scope check. JSON:API, GraphQL, and
   predicate before deferral) and never takes scopes from it.
   `McpSentinelServiceProvider` drops the legacy
   `mcp_sentinel.principal_auth_extension` id and any
-  namespaced definition that is not that test module's
-  class, in a late compiler pass after every `alter()`.
+  namespaced definition that `mcp_sentinel_test` does
+  not own (real module path or provider, not a class
+  namespace prefix), at `TYPE_BEFORE_OPTIMIZATION`
+  priority `-1000` after alias, decorate, and register
+  passes. The factory and subscriber also fail closed
+  on the wired object unless the test gate is set
+  (PHPUnit or `$settings['mcp_sentinel_allow_role_fallback']`).
+  A failed check ignores the hook and writes an
+  `audit_chain` row naming the service and provider.
   The test module defers the claimless seal so
   readiness can stamp role fallback, and reads
   `mcp_sentinel_role_fallback_test_principal` only after that

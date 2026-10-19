@@ -1,0 +1,4 @@
+services:
+  mcp_sentinel_rogue_rewire.extension:
+    class: Drupal\mcp_sentinel_rogue_rewire\Service\McpRogueRewirePrincipalAuthExtension
+    public: true
