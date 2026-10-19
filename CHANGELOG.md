@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Kernel tests that call Audit Chain scheduled
+  verification now install system date-format
+  config. Audit Chain 1.12.2 formats the last-run
+  time; without that config the call fatals.
+  The GitHub PHPUnit matrix pins
+  audit_chain ^1.12.2 so it exercises the same
+  path as Drupal.org.
+
 ## [3.4.0] - 2026-10-19
 
 ### Added
