@@ -33,7 +33,9 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextHolder $holder
    *   Write-once sealed context.
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
-   *   Test-module hook. NULL in production.
+   *   Test-module hook
+   *   (`mcp_sentinel_test.principal_auth_extension`). NULL
+   *   unless that module owns the id.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
@@ -62,8 +64,11 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       return;
     }
     $request = $event->getRequest();
-    if ($this->authExtension?->deferClaimlessSeal($request)
-      || $this->isLeftoverCliRequest($request)) {
+    if ($this->isClaimlessUnsealed($request)
+      && $this->authExtension?->deferClaimlessSeal($request) === TRUE) {
+      return;
+    }
+    if ($this->isLeftoverCliRequest($request)) {
       return;
     }
     $ctx = $this->factory->fromRequest($request);
@@ -80,6 +85,21 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
       }
     }
     $request->attributes->set(McpPrincipalContext::REQUEST_ATTRIBUTE, $ctx);
+  }
+
+  /**
+   * Claimless, unsealed, non-network, non-fixture request.
+   *
+   * Production evaluates this before consulting the test hook.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The current request.
+   */
+  private function isClaimlessUnsealed(Request $request): bool {
+    return !$request->attributes->has(McpPrincipalContext::CLAIMS_ATTRIBUTE)
+      && !$request->attributes->has(McpOauthContext::SEALED_ATTRIBUTE)
+      && $request->attributes->get(McpPrincipalContext::NETWORK_ATTRIBUTE) !== TRUE
+      && $request->attributes->get(McpPrincipalContext::FIXTURE_ATTRIBUTE) !== TRUE;
   }
 
   /**

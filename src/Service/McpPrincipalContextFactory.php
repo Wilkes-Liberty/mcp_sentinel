@@ -25,12 +25,19 @@ final class McpPrincipalContextFactory {
    * @param \Drupal\mcp_sentinel\Service\McpOauthContext $oauthContext
    *   Validated OAuth channel (consumer + scopes).
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $authExtension
-   *   Test-module hook. NULL in production.
+   *   Test-module hook
+   *   (`mcp_sentinel_test.principal_auth_extension`). NULL
+   *   unless that module owns the id.
+   * @param \Drupal\mcp_sentinel\Service\McpRoleFallbackEnvironment|null $environment
+   *   Process probe. NULL reads the live process. Tests inject
+   *   a production process so permitted() is not hidden by
+   *   PHPUnit.
    */
   public function __construct(
     private readonly RequestStack $requestStack,
     private readonly McpOauthContext $oauthContext,
     private readonly ?McpPrincipalAuthExtensionInterface $authExtension = NULL,
+    private readonly ?McpRoleFallbackEnvironment $environment = NULL,
   ) {}
 
   /**
@@ -49,7 +56,7 @@ final class McpPrincipalContextFactory {
   public function fromRequest(?Request $request): McpPrincipalContext {
     $claims = $this->validatedClaims($request);
     if ($claims === []) {
-      $claims = $this->authExtension?->fallbackClaims($request) ?? [];
+      $claims = $this->extensionFallbackClaims($request);
     }
     $network = $this->isNetworkCall($request);
     $subject = $this->stringClaim($claims, ['sub']);
@@ -91,6 +98,41 @@ final class McpPrincipalContextFactory {
       $this->fromSealedTokenProvider($request),
       $this->sourceFromRequest($request),
     );
+  }
+
+  /**
+   * Test-hook claims after production admission checks.
+   *
+   * Scopes, act, and client_id from the hook are dropped.
+   *
+   * @param \Symfony\Component\HttpFoundation\Request|null $request
+   *   The request, or NULL when there is no HTTP request.
+   *
+   * @return array<string, string>
+   *   iss, sub, azp, and tenant only.
+   */
+  private function extensionFallbackClaims(?Request $request): array {
+    if ($this->authExtension === NULL || $request === NULL) {
+      return [];
+    }
+    if ($request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE) !== TRUE) {
+      return [];
+    }
+    if (McpRoleFallbackGate::looksProxied($request)) {
+      return [];
+    }
+    if (!McpRoleFallbackGate::permitted($request, $this->environment)) {
+      return [];
+    }
+    $raw = $this->authExtension->fallbackClaims($request);
+    $allowed = [];
+    foreach (['iss', 'sub', 'azp', 'tenant'] as $name) {
+      $value = $raw[$name] ?? NULL;
+      if (is_string($value) && $value !== '') {
+        $allowed[$name] = $value;
+      }
+    }
+    return $allowed;
   }
 
   /**

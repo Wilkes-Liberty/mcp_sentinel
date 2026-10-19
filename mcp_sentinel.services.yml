@@ -210,7 +210,7 @@ services:
     arguments:
       - '@request_stack'
       - '@mcp_sentinel.oauth_context'
-      - '@?mcp_sentinel.principal_auth_extension'
+      - '@?mcp_sentinel_test.principal_auth_extension'
 
   mcp_sentinel.kill_block_until_reader:
     class: Drupal\mcp_sentinel\Service\McpKillBlockUntilReader
@@ -305,7 +305,7 @@ services:
     arguments:
       - '@mcp_sentinel.principal_context_factory'
       - '@mcp_sentinel.principal_context_holder'
-      - '@?mcp_sentinel.principal_auth_extension'
+      - '@?mcp_sentinel_test.principal_auth_extension'
     tags:
       - { name: event_subscriber }
 

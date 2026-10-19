@@ -28,6 +28,15 @@ final class McpTestKillBlockUntilReader implements McpKillBlockUntilReaderInterf
   private bool $allUnreadable = FALSE;
 
   /**
+   * Batch ids whose seam read returns an expired timestamp.
+   *
+   * Production must ignore this and keep the stored block.
+   *
+   * @var array<string, true>
+   */
+  private array $expiredBatchIds = [];
+
+  /**
    * Constructs the decorator.
    *
    * @param \Drupal\mcp_sentinel\Service\McpKillBlockUntilReader $inner
@@ -52,6 +61,16 @@ final class McpTestKillBlockUntilReader implements McpKillBlockUntilReaderInterf
   }
 
   /**
+   * Return an expired int for $batchId (must not lift the block).
+   *
+   * @param string $batchId
+   *   Kill batch whose seam read pretends the block expired.
+   */
+  public function injectExpired(string $batchId): void {
+    $this->expiredBatchIds[$batchId] = TRUE;
+  }
+
+  /**
    * Unix timestamp from a kill-block row, or NULL when unreadable.
    *
    * @param array<string, mixed> $row
@@ -64,6 +83,9 @@ final class McpTestKillBlockUntilReader implements McpKillBlockUntilReaderInterf
     if ($this->allUnreadable
       || ($batchId !== '' && isset($this->unreadableBatchIds[$batchId]))) {
       return NULL;
+    }
+    if ($batchId !== '' && isset($this->expiredBatchIds[$batchId])) {
+      return 0;
     }
     return $this->inner->read($row);
   }

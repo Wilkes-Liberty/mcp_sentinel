@@ -9,12 +9,35 @@ use Drupal\Core\DependencyInjection\ServiceProviderBase;
 use Drupal\mcp_sentinel\Controller\McpDraftResource;
 use Drupal\mcp_sentinel\Routing\McpDraftRoutes;
 use Symfony\Component\DependencyInjection\ChildDefinition;
+use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
+use Symfony\Component\DependencyInjection\Compiler\PassConfig;
+use Symfony\Component\DependencyInjection\ContainerBuilder as SymfonyContainerBuilder;
 use Symfony\Component\DependencyInjection\Reference;
 
 /**
  * Registers the optional JSON:API draft continuation surface.
+ *
+ * The principal-auth ownership guard runs as a late compiler
+ * pass so a later module's alter() cannot re-add the hook.
  */
-final class McpSentinelServiceProvider extends ServiceProviderBase {
+final class McpSentinelServiceProvider extends ServiceProviderBase implements CompilerPassInterface {
+
+  /**
+   * {@inheritdoc}
+   */
+  public function register(ContainerBuilder $container): void {
+    $container->addCompilerPass($this, PassConfig::TYPE_BEFORE_REMOVING);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function process(SymfonyContainerBuilder $container): void {
+    if (!$container instanceof ContainerBuilder) {
+      return;
+    }
+    $this->restrictPrincipalAuthExtension($container);
+  }
 
   /**
    * {@inheritdoc}
@@ -38,6 +61,67 @@ final class McpSentinelServiceProvider extends ServiceProviderBase {
       $container->register('mcp_sentinel.draft_routes', McpDraftRoutes::class)
         ->addTag('event_subscriber');
     }
+  }
+
+  /**
+   * Drops a principal-auth hook that mcp_sentinel_test does not own.
+   *
+   * The legacy mcp_sentinel.principal_auth_extension id is always
+   * removed. The namespaced id is kept only when that test module
+   * is enabled and the class lives under Drupal\mcp_sentinel_test\.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container after every module alter().
+   */
+  private function restrictPrincipalAuthExtension(ContainerBuilder $container): void {
+    $legacy = 'mcp_sentinel.principal_auth_extension';
+    if ($container->hasDefinition($legacy)) {
+      $container->removeDefinition($legacy);
+    }
+    if ($container->hasAlias($legacy)) {
+      $container->removeAlias($legacy);
+    }
+
+    $id = 'mcp_sentinel_test.principal_auth_extension';
+    if (!$container->hasDefinition($id) && !$container->hasAlias($id)) {
+      return;
+    }
+    $modules = $container->hasParameter('container.modules')
+      ? $container->getParameter('container.modules')
+      : [];
+    $testEnabled = is_array($modules) && isset($modules['mcp_sentinel_test']);
+    $class = $this->principalAuthExtensionClass($container, $id);
+    if ($testEnabled && str_starts_with($class, 'Drupal\\mcp_sentinel_test\\')) {
+      return;
+    }
+    if ($container->hasDefinition($id)) {
+      $container->removeDefinition($id);
+    }
+    if ($container->hasAlias($id)) {
+      $container->removeAlias($id);
+    }
+  }
+
+  /**
+   * Class name of the namespaced principal-auth hook, if any.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   The container being altered.
+   * @param string $id
+   *   Service id or alias.
+   */
+  private function principalAuthExtensionClass(ContainerBuilder $container, string $id): string {
+    if ($container->hasDefinition($id)) {
+      return (string) $container->getDefinition($id)->getClass();
+    }
+    if (!$container->hasAlias($id)) {
+      return '';
+    }
+    $target = (string) $container->getAlias($id);
+    if (!$container->hasDefinition($target)) {
+      return '';
+    }
+    return (string) $container->getDefinition($target)->getClass();
   }
 
 }
