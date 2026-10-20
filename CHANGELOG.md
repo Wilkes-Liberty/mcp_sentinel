@@ -55,6 +55,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   may make a block unreadable, never expired. A NULL
   `block_until` read still blocks on re-issue.
 
+### Changed
+- GitHub Actions refreshes locked contrib to latest-stable
+  after the recommended-project scaffold so it cannot stay
+  on an older `audit_chain` than drupal.org (DEV-1022).
+
 ## [3.4.0] - 2026-10-19
 
 ### Added

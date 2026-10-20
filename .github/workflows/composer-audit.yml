@@ -79,6 +79,7 @@ jobs:
           retry composer require -W --no-interaction --no-progress \
             "drupal/mcp_sentinel:*@dev" \
             "twig/twig:<3.30.0"
+          bash ../module/.github/ci/refresh-latest-contrib.sh
       - name: Audit the installed scaffold
         working-directory: drupal
         run: composer audit
