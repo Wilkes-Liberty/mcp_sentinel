@@ -18,6 +18,7 @@ use Drupal\mcp_sentinel\Authentication\McpSealedTokenAuthProvider;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Service\McpSealedTokenDenialAuditor;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -189,6 +190,8 @@ final class McpSealedTokenAuthCycleTest extends KernelTestBase {
    *   The site settings.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   The audit logger.
+   * @param \Drupal\mcp_sentinel\Service\McpSealedTokenDenialAuditor $denialAuditor
+   *   Sealed-token denial auditor.
    * @param object $subscriber
    *   The authentication_subscriber service, resolved to close the
    *   collector cycle.
@@ -205,6 +208,7 @@ final class McpSealedTokenAuthCycleTest extends KernelTestBase {
     PrivateKey $privateKey,
     Settings $settings,
     McpAuditLogger $auditLogger,
+    McpSealedTokenDenialAuditor $denialAuditor,
     object $subscriber,
   ): McpSealedTokenManager {
     if (!$subscriber instanceof AuthenticationSubscriber) {
@@ -221,6 +225,7 @@ final class McpSealedTokenAuthCycleTest extends KernelTestBase {
       $privateKey,
       $settings,
       $auditLogger,
+      $denialAuditor,
     );
   }
 
@@ -306,7 +311,7 @@ final class McpSealedTokenAuthCycleTest extends KernelTestBase {
     $this->assertCloserFactory(
       'mcp_sentinel.sealed_token_manager',
       'createManagerClosingSubscriberCycle',
-      9,
+      10,
     );
   }
 

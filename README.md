@@ -1582,6 +1582,18 @@ long-lived channel; sealed tokens are short-lived and client-bound.
 Path B is not claimed: this is a prerequisite pin, not a public HTTPS
 cut.
 
+Mint and revoke already write `sealed_token_mint` /
+`sealed_token_revoke`. Every authentication denial also writes a
+`denied_access` row (`tool: sealed_token`) with one of
+`malformed`, `bad_signature`, `expired`, `unknown_token`,
+`revoked`, `hash_mismatch`, `client_not_designated`,
+`audience_mismatch`, `consumer_missing`, `consumer_unpublished`,
+`owner_mismatch`, `account_missing`, `account_blocked`. The row
+carries jti (or a hash prefix), uid, client_id, site, and path —
+never the bearer. Repeat denials of the same reason, principal,
+and source share one row per 60-second window
+(`mcp_sentinel.settings:sealed_token_deny_audit_window`).
+
 ## Companion Node.js Connector
 
 [drupal-mcp-connector](https://github.com/Wilkes-Liberty/drupal-mcp-connector) is a

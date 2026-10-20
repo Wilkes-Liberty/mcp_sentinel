@@ -4,6 +4,19 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Sealed-token authentication denials are written to audit_chain
+
+`McpSealedTokenManager::verify()` and
+`McpSealedTokenAuthProvider::authenticate()` write a
+`denied_access` row (`tool: sealed_token`) on every denial.
+Repeat denials of the same reason, principal, and source share
+one row per 60-second window (`sealed_token_deny_audit_window`
+on `mcp_sentinel.settings`; 1..3600, default 60). Rebuild
+caches (`drush cr`). No `updatedb`; 10039 is unchanged.
+`McpSealedTokenManager` gained a `McpSealedTokenDenialAuditor`
+constructor argument. Until the container is rebuilt, resolving
+the manager fails with a TypeError.
+
 ## Sealed-token auth provider first argument is a \Closure; a third \Closure logger was added
 
 The first argument of `McpSealedTokenAuthProvider` changed from

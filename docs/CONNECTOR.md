@@ -79,7 +79,11 @@ revocable. Use it as `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness`
 (whoami), JSON:API, GraphQL, and `mcp_server` routes that already accept
 oauth2. Unrelated oauth2 routes do not accept this bearer. This is not a
 public HTTPS Path B or an OAuth login wizard. The 1.x tip is a
-prerequisite pin for Path B, not a public HTTPS cut.
+prerequisite pin for Path B, not a public HTTPS cut. Authentication
+denials write a `denied_access` audit row (`tool: sealed_token`) with
+an enumerated reason; the bearer is never stored. Repeat denials of
+the same reason, principal, and source share one row per 60-second
+window.
 
 ### Access-token TTL
 
