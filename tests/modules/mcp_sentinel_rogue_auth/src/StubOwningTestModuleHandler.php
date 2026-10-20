@@ -17,11 +17,6 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   use FakeTestModuleExtensionTrait;
 
   /**
-   * Absolute path of the fake mcp_sentinel_test.info.yml.
-   */
-  private readonly string $infoPathname;
-
-  /**
    * Constructs the stub.
    *
    * Writes the fake info.yml at runtime so phpunit's extension
@@ -36,10 +31,10 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
     private readonly ModuleHandlerInterface $inner,
   ) {
     $file = (new \ReflectionClass(McpRoguePrincipalAuthExtension::class))->getFileName();
-    $this->infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
-    if (!is_file($this->infoPathname)) {
+    $infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
+    if (!is_file($infoPathname)) {
       file_put_contents(
-        $this->infoPathname,
+        $infoPathname,
         "name: 'MCP Sentinel stub-handler fake'\ntype: module\nhidden: true\n",
       );
     }
@@ -47,7 +42,7 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
       if (is_file($path)) {
         unlink($path);
       }
-    }, $this->infoPathname);
+    }, $infoPathname);
   }
 
   /**
