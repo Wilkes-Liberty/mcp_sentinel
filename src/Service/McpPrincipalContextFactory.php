@@ -121,21 +121,17 @@ final class McpPrincipalContextFactory {
       return NULL;
     }
     try {
-      if ($moduleHandler !== NULL) {
-        $owned = self::classOwnedByLiveHandler($extension::class, $moduleHandler);
-        $provider = self::providerOf($extension, $moduleHandler);
+      $modules = self::containerModules();
+      if ($modules !== []) {
+        $owned = isset($modules['mcp_sentinel_test'])
+          && self::classOwnedByTestModule($extension::class, $modules);
+        $provider = self::providerFromModuleMap($extension::class, $modules);
       }
       else {
-        $modules = self::containerModules();
-        if ($modules !== []) {
-          $owned = isset($modules['mcp_sentinel_test'])
-            && self::classOwnedByTestModule($extension::class, $modules);
-          $provider = self::providerFromModuleMap($extension::class, $modules);
-        }
-        else {
-          $owned = self::classOwnedByTestModule($extension::class, []);
-          $provider = '';
-        }
+        $owned = self::classOwnedByTestModule($extension::class, []);
+        $provider = $moduleHandler !== NULL
+          ? self::providerOf($extension, $moduleHandler)
+          : '';
       }
       if ($owned) {
         return $extension;
@@ -157,39 +153,6 @@ final class McpPrincipalContextFactory {
       'refused',
     );
     return NULL;
-  }
-
-  /**
-   * TRUE when the live handler says $class lives under mcp_sentinel_test.
-   *
-   * Temporary mutation for DEV-1049: prove the decorated-handler
-   * deny test goes red when ownership trusts @module_handler.
-   */
-  private static function classOwnedByLiveHandler(
-    string $class,
-    ModuleHandlerInterface $moduleHandler,
-  ): bool {
-    $file = self::realClassFile($class);
-    if ($file === NULL) {
-      return FALSE;
-    }
-    try {
-      if (!$moduleHandler->moduleExists('mcp_sentinel_test')) {
-        return FALSE;
-      }
-      $pathname = $moduleHandler->getModule('mcp_sentinel_test')->getPathname();
-    }
-    catch (\Throwable) {
-      return FALSE;
-    }
-    $dir = self::realDirectoryFromPathname(
-      $pathname,
-      'mcp_sentinel_test.info.yml',
-    );
-    if ($dir === NULL) {
-      return FALSE;
-    }
-    return str_starts_with($file, $dir . DIRECTORY_SEPARATOR);
   }
 
   /**
