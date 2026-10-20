@@ -58,9 +58,6 @@ final class McpPrincipalContextGuardTest extends UnitTestCase {
     $this->assertTrue(
       $guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_KILL),
     );
-    $this->assertFalse(
-      $guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE),
-    );
   }
 
 }

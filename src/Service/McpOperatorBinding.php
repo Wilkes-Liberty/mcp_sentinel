@@ -39,11 +39,6 @@ final class McpOperatorBinding {
   public const TABLE = 'mcp_sentinel_operator_binding';
 
   /**
-   * Per-driver unique index: one uid greater than 0 per iss|sub.
-   */
-  public const UID_UNIQUE_INDEX = McpOperatorBindingUidSchema::INDEX;
-
-  /**
    * Audit operation for a successful bind.
    */
   public const AUDIT_BIND = 'operator_bind';
