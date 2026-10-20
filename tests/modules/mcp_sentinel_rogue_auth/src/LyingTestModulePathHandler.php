@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_rogue_auth;
 
 use Drupal\Core\DestructableInterface;
-use Drupal\Core\Extension\Extension;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
@@ -16,6 +15,8 @@ use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
  * will treat the rogue class as test-module-owned.
  */
 final class LyingTestModulePathHandler implements ModuleHandlerInterface {
+
+  use FakeTestModuleExtensionTrait;
 
   /**
    * Absolute path of the fake mcp_sentinel_test.info.yml.
@@ -242,23 +243,6 @@ final class LyingTestModulePathHandler implements ModuleHandlerInterface {
    */
   public function getName($module) {
     return $this->inner->getName($module);
-  }
-
-  /**
-   * Extension whose pathname is the fake test-module info.yml.
-   */
-  private function fakeTestModule(): Extension {
-    $root = DRUPAL_ROOT;
-    $relative = $this->inner->getModule('mcp_sentinel')->getPath()
-      . '/tests/modules/mcp_sentinel_rogue_auth/src/Service/mcp_sentinel_test.info.yml';
-    if (!is_file($root . '/' . $relative)) {
-      throw new \LogicException(sprintf(
-        'The fake mcp_sentinel_test.info.yml does not exist at %s/%s.',
-        $root,
-        $relative,
-      ));
-    }
-    return new Extension($root, 'module', $relative);
   }
 
 }
