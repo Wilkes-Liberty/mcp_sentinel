@@ -581,7 +581,6 @@ final class McpSealedTokenManager {
    *   Non-secret context. Never the bearer or signature.
    */
   public function auditDenial(McpSealedTokenDenyReason $reason, array $context = []): void {
-    $this->denialAuditor->record($reason, $context);
   }
 
   /**
