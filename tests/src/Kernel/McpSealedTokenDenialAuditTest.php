@@ -76,6 +76,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
+    $this->installSchema('user', ['users_data']);
     $this->installEntitySchema('consumer');
     $this->installEntitySchema('oauth2_token');
     $this->installConfig(['mcp_sentinel', 'system']);
@@ -421,7 +422,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
    * @covers \Drupal\mcp_sentinel\Authentication\McpSealedTokenAuthProvider::authenticate
    */
   public function testAuthenticateDoesNotDoubleAuditVerifyDenial(): void {
-    $token = McpSealedTokenManager::PREFIX . 'forged.not.real';
+    $token = McpSealedTokenManager::PREFIX . 'only.two';
     $request = Request::create('https://sentinel.example/jsonapi/node/page');
     $request->headers->set('Authorization', 'Bearer ' . $token);
     $this->pushRequestKeepingSession($request);

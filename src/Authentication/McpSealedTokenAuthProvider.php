@@ -150,10 +150,13 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
     array $claims,
     McpSealedTokenDenyReason $reason,
   ): null {
+    $jti = $claims['jti'] ?? NULL;
+    $uid = $claims['uid'] ?? NULL;
+    $clientId = $claims['client_id'] ?? NULL;
     $this->tokenManager()->auditDenial($reason, [
-      'jti' => (string) $claims['jti'],
-      'uid' => (int) $claims['uid'],
-      'client_id' => (string) $claims['client_id'],
+      'jti' => is_string($jti) ? $jti : '',
+      'uid' => is_int($uid) ? $uid : 0,
+      'client_id' => is_string($clientId) ? $clientId : '',
       'path' => $request->getPathInfo(),
       'site' => $request->getHost(),
     ]);
