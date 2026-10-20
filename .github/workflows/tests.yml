@@ -63,6 +63,16 @@ jobs:
               - '!docs/**'
               - '!LICENSE'
 
+  # Cheap, always-on: a swallowed `composer show` must fail this job,
+  # not the later scaffold. Docs-only PRs still run it (DEV-1022).
+  refresh-latest-contrib-fail-closed:
+    name: Latest-stable refresh fails closed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: composer show failure and empty list must fail the refresh
+        run: bash .github/ci/test-refresh-latest-contrib-fail-closed.sh
+
   phpunit:
     name: PHPUnit (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
     needs: changes
@@ -1326,6 +1336,7 @@ jobs:
     if: always()
     needs:
       - changes
+      - refresh-latest-contrib-fail-closed
       - phpunit
       - phpunit-functional
       - phpunit-functional-pgsql-draft

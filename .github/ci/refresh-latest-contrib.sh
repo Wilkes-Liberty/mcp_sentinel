@@ -17,10 +17,18 @@ if [ -n "${repo_cache}" ] && [ -d "${repo_cache}" ]; then
   rm -rf "${repo_cache}"
 fi
 
-pkgs="$(composer show --locked --name-only | grep '^drupal/' | grep -vE '^drupal/core' || true)"
+# composer show is its own guard. Piped through grep under pipefail,
+# a no-match already failed the assignment, so an empty-list check
+# never ran. `|| true` on show then skipped the refresh and exited 0
+# (DEV-1022).
+if ! show_out="$(composer show --locked --name-only)"; then
+  echo 'Failed to list locked contrib: composer show --locked failed.' >&2
+  exit 1
+fi
+pkgs="$(printf '%s\n' "$show_out" | grep '^drupal/' | grep -vE '^drupal/core' || true)"
 if [ -z "${pkgs}" ]; then
-  echo "No locked contrib packages to refresh."
-  exit 0
+  echo "Locked contrib list is empty after excluding drupal/core*. Refusing to skip latest-stable refresh." >&2
+  exit 1
 fi
 echo "Refreshing latest-stable contrib:"
 echo "${pkgs}"

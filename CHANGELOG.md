@@ -7,6 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Latest-stable contrib refresh fails the job when
+  `composer show --locked` fails or lists no contrib,
+  instead of skipping the refresh and exiting 0
+  (DEV-1022).
 - `McpHistoricalExceptionTest` installs `system` date-format
   config so `audit_chain` 1.12.2 `ScheduledVerifier::runNow()`
   can format the last-run time through `date.formatter`.
