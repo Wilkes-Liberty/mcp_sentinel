@@ -24,7 +24,8 @@ if ($root === '') {
   exit(1);
 }
 
-$class = 'Drupal\\mcp_sentinel_rogue_auth\\Service\\McpRoguePrincipalAuthExtension';
+$class = 'Drupal\\mcp_sentinel_rogue_auth\\Service\\'
+  . 'McpRoguePrincipalAuthExtension';
 if (!class_exists($class)) {
   fwrite(STDERR, "Unable to load {$class}.\n");
   exit(1);
@@ -32,7 +33,8 @@ if (!class_exists($class)) {
 
 $filename = (new ReflectionClass($class))->getFileName();
 $filename = is_string($filename) ? $filename : '';
-$infoPathname = dirname($filename) . '/mcp_sentinel_test.info.yml';
+$infoPathname = dirname($filename)
+  . '/mcp_sentinel_test.info.yml';
 
 fwrite(STDOUT, "DRUPAL_ROOT: {$root}\n");
 fwrite(STDOUT, "rogue getFileName: {$filename}\n");
@@ -46,7 +48,8 @@ if ($filename === '' || !is_file($filename)) {
 if (!is_file($infoPathname)) {
   file_put_contents(
     $infoPathname,
-    "name: 'MCP Sentinel unfixed-algorithm probe'\ntype: module\nhidden: true\n",
+    "name: 'MCP Sentinel unfixed-algorithm probe'\n"
+    . "type: module\nhidden: true\n",
   );
 }
 
@@ -60,9 +63,11 @@ try {
   new Drupal\Core\Extension\Extension($root, 'module', $pathname);
 }
 catch (AssertionError $e) {
-  fwrite(STDOUT, "unfixed fakeTestModule fatals as on d.o: {$e->getMessage()}\n");
+  fwrite(STDOUT, "unfixed fakeTestModule fatals as on d.o: ");
+  fwrite(STDOUT, $e->getMessage() . "\n");
   exit(0);
 }
 
-fwrite(STDERR, "::error::unfixed fakeTestModule would succeed; getFileName is still under DRUPAL_ROOT.\n");
+fwrite(STDERR, "::error::unfixed fakeTestModule would succeed; ");
+fwrite(STDERR, "getFileName is still under DRUPAL_ROOT.\n");
 exit(1);
