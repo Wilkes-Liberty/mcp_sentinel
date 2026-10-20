@@ -21,7 +21,7 @@ fi
 # a no-match already failed the assignment, so an empty-list check
 # never ran. `|| true` on show then skipped the refresh and exited 0
 # (DEV-1022).
-if ! show_out="$(composer show --locked --name-only || true)"; then
+if ! show_out="$(composer show --locked --name-only)"; then
   echo 'Failed to list locked contrib: composer show --locked failed.' >&2
   exit 1
 fi
