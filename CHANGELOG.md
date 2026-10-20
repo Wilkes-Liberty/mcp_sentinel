@@ -29,9 +29,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mcp_sentinel_role_fallback_test_principal` or skip the
   claimless seal; that held only while no other module
   registered the hook. Production now owns those checks:
-  `fallbackClaims()` runs only after the fallback stamp,
-  an unproxied hop, and `permitted()`, and keeps
-  `iss`/`sub`/`azp`/`tenant` only. The subscriber
+  `fallbackClaims()` runs only after the fallback stamp
+  and `permitted()` (which refuses a proxied hop), and
+  keeps `iss`/`sub`/`azp`/`tenant` only. The subscriber
   evaluates the claimless predicate before
   `deferClaimlessSeal()`. The hook id is
   `mcp_sentinel_test.principal_auth_extension`. The

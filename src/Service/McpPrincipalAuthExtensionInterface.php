@@ -28,11 +28,11 @@ use Symfony\Component\HttpFoundation\Request;
  * compiler pass with installed PHP can delete or forge the
  * principal_auth_extension_rejected parameter. Production owns
  * admission: the factory calls fallbackClaims() only after the
- * fallback stamp, an unproxied hop, and permitted(), and keeps
- * iss/sub/azp/tenant only. The subscriber evaluates the claimless
- * predicate before consulting deferClaimlessSeal(). Absent that
- * module the factory and subscriber receive NULL and stay
- * fail-closed.
+ * fallback stamp and permitted() (which refuses a proxied hop),
+ * and keeps iss/sub/azp/tenant only. The subscriber evaluates
+ * the claimless predicate before consulting deferClaimlessSeal().
+ * Absent that module the factory and subscriber receive NULL
+ * and stay fail-closed.
  */
 interface McpPrincipalAuthExtensionInterface {
 

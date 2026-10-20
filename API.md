@@ -146,8 +146,9 @@ sources skip that scope check. JSON:API, GraphQL, and
   `mcp_sentinel_test` (never enable on a live site) registers
   `mcp_sentinel_test.principal_auth_extension`. Production
   consults that hook only after its own admission checks
-  (fallback stamp, unproxied hop, `permitted()`; claimless
-  predicate before deferral) and never takes scopes from it.
+  (fallback stamp and `permitted()`, which refuses a
+  proxied hop; claimless predicate before deferral) and
+  never takes scopes from it.
   `McpSentinelServiceProvider` removes the legacy
   `mcp_sentinel.principal_auth_extension` id and a
   namespaced definition that `mcp_sentinel_test` does
