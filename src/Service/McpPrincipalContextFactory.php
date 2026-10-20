@@ -119,7 +119,7 @@ final class McpPrincipalContextFactory {
     if ($extension === NULL) {
       return NULL;
     }
-    $handler = NULL;
+    $handler = $moduleHandler;
     try {
       $live = self::liveModuleHandler();
       if ($moduleHandler !== NULL && $live !== NULL
@@ -132,7 +132,9 @@ final class McpPrincipalContextFactory {
         );
         return NULL;
       }
-      $handler = $live ?? $moduleHandler;
+      if ($live !== NULL) {
+        $handler = $live;
+      }
       if ($handler !== NULL
         && self::objectOwnedByTestModule($extension, $handler)) {
         return $extension;
@@ -290,9 +292,6 @@ final class McpPrincipalContextFactory {
     if ($auditLogger === NULL) {
       return;
     }
-    $rows = [];
-    $hash = '';
-    $state = NULL;
     try {
       if (!\Drupal::hasContainer()) {
         return;
@@ -301,48 +300,38 @@ final class McpPrincipalContextFactory {
       if (!$container->hasParameter(self::REJECTED_PARAMETER)) {
         return;
       }
-      $parameter = $container->getParameter(self::REJECTED_PARAMETER);
-      if (!is_array($parameter) || $parameter === []) {
+      $rows = $container->getParameter(self::REJECTED_PARAMETER);
+      if (!is_array($rows) || $rows === []) {
         return;
       }
-      $rows = $parameter;
       $hash = hash('sha256', serialize($rows));
-      $resolved = $container->has('state') ? $container->get('state') : NULL;
-      if (!$resolved instanceof StateInterface) {
+      $state = $container->has('state') ? $container->get('state') : NULL;
+      if (!$state instanceof StateInterface) {
         return;
       }
-      $state = $resolved;
       if ($state->get(self::REJECTED_FLUSH_STATE) === $hash) {
         return;
       }
+      foreach ($rows as $row) {
+        if (!is_array($row)) {
+          continue;
+        }
+        $service = $row['service'] ?? self::AUTH_EXTENSION_SERVICE_ID;
+        $provider = $row['provider'] ?? '';
+        $reason = $row['reason'] ?? 'refused';
+        self::recordRejection(
+          $auditLogger,
+          is_string($service) && $service !== ''
+            ? $service
+            : self::AUTH_EXTENSION_SERVICE_ID,
+          is_string($provider) ? $provider : '',
+          is_string($reason) && $reason !== '' ? $reason : 'refused',
+        );
+      }
+      $state->set(self::REJECTED_FLUSH_STATE, $hash);
     }
     catch (\Throwable) {
-      return;
-    }
-    foreach ($rows as $row) {
-      if (!is_array($row)) {
-        continue;
-      }
-      $service = $row['service'] ?? self::AUTH_EXTENSION_SERVICE_ID;
-      $provider = $row['provider'] ?? '';
-      $reason = $row['reason'] ?? 'refused';
-      self::recordRejection(
-        $auditLogger,
-        is_string($service) && $service !== ''
-          ? $service
-          : self::AUTH_EXTENSION_SERVICE_ID,
-        is_string($provider) ? $provider : '',
-        is_string($reason) && $reason !== '' ? $reason : 'refused',
-      );
-    }
-    try {
-      if ($state instanceof StateInterface) {
-        $state->set(self::REJECTED_FLUSH_STATE, $hash);
-      }
-    }
-    catch (\Throwable) {
-      // The rows were written. A later construct may write
-      // them again if state cannot record the hash.
+      // Fail closed: a later construct may retry the flush.
     }
   }
 

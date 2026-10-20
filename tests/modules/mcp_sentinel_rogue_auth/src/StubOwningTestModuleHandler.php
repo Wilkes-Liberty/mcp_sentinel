@@ -74,7 +74,7 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
-  public function loadAll() {}
+  public function loadAll(): void {}
 
   /**
    * {@inheritdoc}
@@ -86,22 +86,22 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
-  public function reload() {}
+  public function reload(): void {}
 
   /**
    * {@inheritdoc}
    */
-  public function setModuleList(array $module_list = []) {}
+  public function setModuleList(array $module_list = []): void {}
 
   /**
    * {@inheritdoc}
    */
-  public function addModule($name, $path) {}
+  public function addModule($name, $path): void {}
 
   /**
    * {@inheritdoc}
    */
-  public function addProfile($name, $path) {}
+  public function addProfile($name, $path): void {}
 
   /**
    * {@inheritdoc}
@@ -113,7 +113,7 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
-  public function loadAllIncludes($type, $name = NULL) {}
+  public function loadAllIncludes($type, $name = NULL): void {}
 
   /**
    * {@inheritdoc}
@@ -132,12 +132,12 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
-  public function writeCache() {}
+  public function writeCache(): void {}
 
   /**
    * {@inheritdoc}
    */
-  public function resetImplementations() {}
+  public function resetImplementations(): void {}
 
   /**
    * {@inheritdoc}
@@ -182,12 +182,12 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
-  public function alter($type, &$data, &$context1 = NULL, &$context2 = NULL) {}
+  public function alter($type, &$data, &$context1 = NULL, &$context2 = NULL): void {}
 
   /**
    * {@inheritdoc}
    */
-  public function alterDeprecated($description, $type, &$data, &$context1 = NULL, &$context2 = NULL) {}
+  public function alterDeprecated($description, $type, &$data, &$context1 = NULL, &$context2 = NULL): void {}
 
   /**
    * {@inheritdoc}

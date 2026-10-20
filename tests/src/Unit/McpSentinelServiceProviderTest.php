@@ -239,7 +239,7 @@ final class McpSentinelServiceProviderTest extends UnitTestCase {
     $this->assertTrue($container->hasParameter(McpPrincipalContextFactory::REJECTED_PARAMETER));
     $rows = $container->getParameter(McpPrincipalContextFactory::REJECTED_PARAMETER);
     $this->assertIsArray($rows);
-    $this->assertSame($services, array_values(array_column($rows, 'service')));
+    $this->assertSame($services, array_column($rows, 'service'));
   }
 
   /**
