@@ -362,7 +362,6 @@ final class McpPrincipalContextDispatcher {
     array $requiredScopes,
   ): void {
     if (!$this->guard->required()
-      || $this->guard->weakened(McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE)
       || $requiredScopes === []
       || $ctx->fromRoleFallback()
       || $ctx->fromFixture()) {

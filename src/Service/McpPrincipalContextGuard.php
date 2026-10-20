@@ -19,11 +19,6 @@ final class McpPrincipalContextGuard {
   public const WEAKEN_SKIP_KILL = 'skip_kill';
 
   /**
-   * PHPUnit-only: skip assertScopesAllowed() so a scope deny test can go red.
-   */
-  public const WEAKEN_SKIP_SCOPE = 'skip_scope';
-
-  /**
    * Whether reserved-key and principal denies are enforced.
    */
   private bool $required = TRUE;
@@ -63,8 +58,8 @@ final class McpPrincipalContextGuard {
   /**
    * PHPUnit-only injection that disables one dispatcher check.
    *
-   * Impossible outside the PHPUnit process. Used so a kill-only or
-   * scope-only red run can fail without turning the whole guard off.
+   * Impossible outside the PHPUnit process. Used so a kill-only
+   * red run can fail without turning the whole guard off.
    *
    * @param string $flag
    *   One of the WEAKEN_* constants.

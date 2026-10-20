@@ -84,6 +84,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions refreshes locked contrib to latest-stable
   after the recommended-project scaffold so it cannot stay
   on an older `audit_chain` than drupal.org (DEV-1022).
+- `phpstan.neon.dist` keeps a single
+  `function.unusedParameter` ignore for Drupal hook
+  implementations (`mcp_sentinel.module`,
+  `modules/*/*.module`, and the rogue-auth stubs). The
+  duplicate path list is gone.
+
+### Removed
+- Unused `McpSealedTokenManager::MAX_TTL`. Mint TTL is
+  clamped to `TTL_CHOICES` (`clampTtl()`); 86400 remains
+  the 24-hour choice, not a separate ceiling.
+- Unused alias `McpOperatorBinding::UID_UNIQUE_INDEX`
+  (same value as `McpOperatorBindingUidSchema::INDEX`,
+  zero callers).
+- Unused `McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE` and
+  the dispatcher short-circuit that skipped
+  `assertScopesAllowed()`. Nothing set the flag, so the
+  skip was permanently false. Scope checks stay
+  fail-closed. `WEAKEN_SKIP_KILL` remains.
 
 ## [3.4.0] - 2026-10-19
 

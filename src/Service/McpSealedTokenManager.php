@@ -54,11 +54,6 @@ final class McpSealedTokenManager {
   public const MAX_TENANT_LENGTH = 256;
 
   /**
-   * Maximum lifetime, in seconds.
-   */
-  public const MAX_TTL = 86400;
-
-  /**
    * Allowed TTL choices for the mint UI.
    */
   public const TTL_CHOICES = [
@@ -154,7 +149,7 @@ final class McpSealedTokenManager {
    * @param string $clientId
    *   Designated consumer client_id.
    * @param int $ttl
-   *   Lifetime in seconds, clamped to MAX_TTL.
+   *   Lifetime in seconds, whitelisted via TTL_CHOICES.
    * @param \Drupal\Core\Session\AccountInterface $operator
    *   The minting administrator.
    * @param string|null $tenant
