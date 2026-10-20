@@ -468,7 +468,9 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
       $this->callback(static function (array $metadata): bool {
         return ($metadata['reason'] ?? '') === 'claims_stripped'
           && isset($metadata['stripped'])
-          && in_array('scope', $metadata['stripped'], TRUE);
+          && in_array('scope', $metadata['stripped'], TRUE)
+          && in_array('client_id', $metadata['stripped'], TRUE)
+          && in_array('act', $metadata['stripped'], TRUE);
       }),
     );
     $factory = new McpPrincipalContextFactory(
@@ -592,7 +594,9 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $audit->expects($this->once())->method('logAlways')->with(
       McpPrincipalContextFactory::AUDIT_OPERATION,
       $this->callback(static function (array $metadata): bool {
-        return ($metadata['reason'] ?? '') === 'refused';
+        return ($metadata['reason'] ?? '') === 'refused'
+          && ($metadata['service'] ?? '') === McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID
+          && ($metadata['provider'] ?? NULL) === '';
       }),
     );
     $handler = $this->createMock(ModuleHandlerInterface::class);

@@ -251,29 +251,24 @@ final class McpPrincipalContextFactory {
     object $extension,
     ModuleHandlerInterface $moduleHandler,
   ): bool {
-    try {
-      if (!$moduleHandler->moduleExists('mcp_sentinel_test')) {
-        return FALSE;
-      }
-      $file = self::realClassFile($extension::class);
-      if ($file === NULL) {
-        return FALSE;
-      }
-      $module = $moduleHandler->getModule('mcp_sentinel_test');
-      $pathname = $module->getPathname();
-      if ($pathname === '') {
-        $pathname = $module->getPath() . '/mcp_sentinel_test.info.yml';
-      }
-      $dir = self::realDirectoryFromPathname(
-        $pathname,
-        'mcp_sentinel_test.info.yml',
-      );
-      return $dir !== NULL
-        && str_starts_with($file, $dir . DIRECTORY_SEPARATOR);
-    }
-    catch (\Throwable) {
+    if (!$moduleHandler->moduleExists('mcp_sentinel_test')) {
       return FALSE;
     }
+    $file = self::realClassFile($extension::class);
+    if ($file === NULL) {
+      return FALSE;
+    }
+    $module = $moduleHandler->getModule('mcp_sentinel_test');
+    $pathname = $module->getPathname();
+    if ($pathname === '') {
+      $pathname = $module->getPath() . '/mcp_sentinel_test.info.yml';
+    }
+    $dir = self::realDirectoryFromPathname(
+      $pathname,
+      'mcp_sentinel_test.info.yml',
+    );
+    return $dir !== NULL
+      && str_starts_with($file, $dir . DIRECTORY_SEPARATOR);
   }
 
   /**
@@ -584,15 +579,13 @@ final class McpPrincipalContextFactory {
     if ($request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE) !== TRUE) {
       return [];
     }
-    if (McpRoleFallbackGate::looksProxied($request)) {
-      return [];
-    }
     if (!McpRoleFallbackGate::permitted($request, $this->environment)) {
       return [];
     }
     $raw = $this->authExtension->fallbackClaims($request);
+    $keep = ['iss', 'sub', 'azp', 'tenant'];
     $allowed = [];
-    foreach (['iss', 'sub', 'azp', 'tenant'] as $name) {
+    foreach ($keep as $name) {
       $value = $raw[$name] ?? NULL;
       if (is_string($value) && $value !== '') {
         $allowed[$name] = $value;
@@ -600,12 +593,10 @@ final class McpPrincipalContextFactory {
     }
     $stripped = [];
     foreach (array_keys($raw) as $name) {
-      if ($name === '') {
+      if ($name === '' || in_array($name, $keep, TRUE)) {
         continue;
       }
-      if (!in_array($name, ['iss', 'sub', 'azp', 'tenant'], TRUE)) {
-        $stripped[] = $name;
-      }
+      $stripped[] = $name;
     }
     if ($stripped !== []) {
       self::recordRejection(
