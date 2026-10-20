@@ -212,19 +212,12 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
    * Extension whose pathname is the fake test-module info.yml.
    */
   private function fakeTestModule(): Extension {
-    $root = DRUPAL_ROOT;
-    // The stub is not a decorator; the live handler still knows the
-    // registered mcp_sentinel path.
-    $relative = \Drupal::service('module_handler')->getModule('mcp_sentinel')->getPath()
-      . '/tests/modules/mcp_sentinel_rogue_auth/src/Service/mcp_sentinel_test.info.yml';
-    if (!is_file($root . '/' . $relative)) {
-      throw new \LogicException(sprintf(
-        'The fake mcp_sentinel_test.info.yml does not exist at %s/%s.',
-        $root,
-        $relative,
-      ));
+    $root = defined('DRUPAL_ROOT') ? (string) DRUPAL_ROOT : '';
+    $pathname = $this->infoPathname;
+    if ($root !== '' && str_starts_with($pathname, $root . '/')) {
+      $pathname = substr($pathname, strlen($root) + 1);
     }
-    return new Extension($root, 'module', $relative);
+    return new Extension($root !== '' ? $root : dirname($this->infoPathname, 6), 'module', $pathname);
   }
 
 }
