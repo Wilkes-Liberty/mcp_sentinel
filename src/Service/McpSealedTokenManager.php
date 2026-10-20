@@ -17,6 +17,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Site\Settings;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
+use Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason;
 use Drupal\user\UserInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -128,6 +129,7 @@ final class McpSealedTokenManager {
     private readonly PrivateKey $privateKey,
     private readonly Settings $settings,
     private readonly McpAuditLogger $auditLogger,
+    private readonly McpSealedTokenDenialAuditor $denialAuditor,
   ) {}
 
   /**
@@ -252,19 +254,33 @@ final class McpSealedTokenManager {
   public function verify(string $token): ?array {
     $token = trim($token);
     if (!str_starts_with($token, self::PREFIX)) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::Malformed, [
+        'token_hash_prefix' => $this->tokenHashPrefix($token),
+      ]);
     }
     $parts = explode('.', substr($token, strlen(self::PREFIX)));
     if (count($parts) !== 3) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::Malformed, [
+        'token_hash_prefix' => $this->tokenHashPrefix($token),
+      ]);
     }
     [$jti, $bodyEncoded, $sig] = $parts;
     if ($jti === '' || $bodyEncoded === '' || $sig === '') {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::Malformed, [
+        'jti' => $jti,
+        'token_hash_prefix' => $this->tokenHashPrefix($token),
+      ]);
     }
-    $expected = $this->b64(hash_hmac('sha256', $jti . '.' . $bodyEncoded, $this->material(), TRUE));
+    $expected = $this->b64(hash_hmac(
+      'sha256',
+      $jti . '.' . $bodyEncoded,
+      $this->material(),
+      TRUE,
+    ));
     if (!hash_equals($expected, $sig)) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::BadSignature, [
+        'jti' => $jti,
+      ]);
     }
     $body = json_decode((string) $this->unb64($bodyEncoded), TRUE);
     if (!is_array($body)
@@ -272,11 +288,19 @@ final class McpSealedTokenManager {
       || !is_string($body['cid'] ?? NULL)
       || !isset($body['uid'], $body['exp'])
     ) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::Malformed, [
+        'jti' => $jti,
+      ]);
     }
     $now = $this->time->getRequestTime();
+    $uid = (int) $body['uid'];
+    $clientId = (string) $body['cid'];
     if ((int) $body['exp'] <= $now) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::Expired, [
+        'jti' => $jti,
+        'uid' => $uid,
+        'client_id' => $clientId,
+      ]);
     }
 
     $row = $this->database->select(self::TABLE, 't')
@@ -284,31 +308,48 @@ final class McpSealedTokenManager {
       ->condition('jti', $jti)
       ->execute()
       ->fetchAssoc();
-    if (!is_array($row) || (int) $row['revoked'] === 1) {
-      return NULL;
+    if (!is_array($row)) {
+      return $this->deny(McpSealedTokenDenyReason::UnknownToken, [
+        'jti' => $jti,
+        'uid' => $uid,
+        'client_id' => $clientId,
+      ]);
+    }
+    $rowContext = $this->rowContext($jti, $row);
+    if ((int) $row['revoked'] === 1) {
+      return $this->deny(McpSealedTokenDenyReason::Revoked, $rowContext);
     }
     if ((int) $row['expires'] <= $now) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::Expired, $rowContext);
     }
     if (!hash_equals((string) $row['token_hash'], $this->hashToken($token))) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::HashMismatch, $rowContext);
     }
     if (!in_array((string) $row['client_id'], $this->designatedClientIds(), TRUE)) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::ClientNotDesignated, $rowContext);
     }
-    if ((string) $row['client_id'] !== $body['cid'] || (int) $row['uid'] !== (int) $body['uid']) {
-      return NULL;
+    if ((string) $row['client_id'] !== $clientId) {
+      return $this->deny(McpSealedTokenDenyReason::AudienceMismatch, $rowContext);
+    }
+    if ((int) $row['uid'] !== $uid) {
+      return $this->deny(McpSealedTokenDenyReason::AudienceMismatch, $rowContext);
     }
     $consumer = $this->loadConsumer((string) $row['client_id']);
-    if (!$consumer instanceof ConsumerInterface || !$consumer->isPublished()) {
-      return NULL;
+    if (!$consumer instanceof ConsumerInterface) {
+      return $this->deny(McpSealedTokenDenyReason::ConsumerMissing, $rowContext);
+    }
+    if (!$consumer->isPublished()) {
+      return $this->deny(McpSealedTokenDenyReason::ConsumerUnpublished, $rowContext);
     }
     if ((int) $consumer->getOwnerId() !== (int) $row['uid']) {
-      return NULL;
+      return $this->deny(McpSealedTokenDenyReason::OwnerMismatch, $rowContext);
     }
     $owner = $this->entityTypeManager->getStorage('user')->load((int) $row['uid']);
-    if (!$owner instanceof UserInterface || !$owner->isActive()) {
-      return NULL;
+    if (!$owner instanceof UserInterface) {
+      return $this->deny(McpSealedTokenDenyReason::AccountMissing, $rowContext);
+    }
+    if (!$owner->isActive()) {
+      return $this->deny(McpSealedTokenDenyReason::AccountBlocked, $rowContext);
     }
 
     $scopes = is_array($body['scp'] ?? NULL)
@@ -486,7 +527,61 @@ final class McpSealedTokenManager {
    * HMAC material. Site-local; never exported as config.
    */
   private function material(): string {
-    return hash('sha256', (string) $this->settings->get('hash_salt', '') . $this->privateKey->get(), TRUE);
+    return hash(
+      'sha256',
+      (string) $this->settings->get('hash_salt', '') . $this->privateKey->get(),
+      TRUE,
+    );
+  }
+
+  /**
+   * Non-secret context taken from a stored token row.
+   *
+   * @param string $jti
+   *   Token id.
+   * @param array<string, mixed> $row
+   *   Database row.
+   *
+   * @return array{jti: string, uid: int, client_id: string}
+   *   Context for auditDenial().
+   */
+  private function rowContext(string $jti, array $row): array {
+    return [
+      'jti' => $jti,
+      'uid' => (int) $row['uid'],
+      'client_id' => (string) $row['client_id'],
+    ];
+  }
+
+  /**
+   * Writes a sealed-token denial audit row and returns NULL.
+   *
+   * @param \Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason $reason
+   *   Enumerated denial reason.
+   * @param array<string, mixed> $context
+   *   Non-secret context (jti, uid, client_id, hash prefix).
+   *
+   * @return null
+   *   Always NULL so verify() stays fail-closed.
+   */
+  private function deny(McpSealedTokenDenyReason $reason, array $context = []): ?array {
+    $this->auditDenial($reason, $context);
+    return NULL;
+  }
+
+  /**
+   * Records one sealed-token authentication denial.
+   *
+   * Used by verify() and by the auth provider after a missing or
+   * blocked account. A throwing writer still leaves the caller denied.
+   *
+   * @param \Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason $reason
+   *   Enumerated denial reason.
+   * @param array<string, mixed> $context
+   *   Non-secret context. Never the bearer or signature.
+   */
+  public function auditDenial(McpSealedTokenDenyReason $reason, array $context = []): void {
+    $this->denialAuditor->record($reason, $context);
   }
 
   /**
@@ -494,6 +589,17 @@ final class McpSealedTokenManager {
    */
   private function hashToken(string $token): string {
     return hash('sha256', $token);
+  }
+
+  /**
+   * Non-secret prefix of the stored token hash, used when no jti is known.
+   */
+  private function tokenHashPrefix(string $token): string {
+    return substr(
+      $this->hashToken($token),
+      0,
+      McpSealedTokenDenialAuditor::HASH_PREFIX_LENGTH,
+    );
   }
 
   /**

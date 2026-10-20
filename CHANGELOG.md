@@ -21,6 +21,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the `audit_chain` version.
 
 ### Security
+- Sealed-token authentication denials now write a `denied_access`
+  audit_chain row (`tool: sealed_token`) with a stable reason:
+  `malformed`, `bad_signature`, `expired`, `unknown_token`,
+  `revoked`, `hash_mismatch`, `client_not_designated`,
+  `audience_mismatch`, `consumer_missing`, `consumer_unpublished`,
+  `owner_mismatch`, `account_missing`, `account_blocked`. Metadata
+  is non-secret only (jti or a 12-hex token-hash prefix, uid,
+  client_id, site, path). The bearer and signature are never
+  stored. Repeat denials of the same reason, principal, and
+  source collapse to one row per 60-second window
+  (`mcp_sentinel.settings:sealed_token_deny_audit_window`,
+  1..3600; invalid values use 60). A throwing audit write still
+  denies; the failure is logged on `mcp_sentinel` with the
+  exception class only. Apply with `drush cr` (last hook remains
+  10039).
 - 3.4.0 left `mcp_sentinel.principal_auth_extension` as
   an unguarded admission hook. Audit enabled modules for
   a `mcp_sentinel.principal_auth_extension` service. That

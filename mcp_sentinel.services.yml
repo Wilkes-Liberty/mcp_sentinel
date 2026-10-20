@@ -348,6 +348,16 @@ services:
       - '@datetime.time'
       - '@current_user'
 
+  mcp_sentinel.sealed_token_denial_auditor:
+    class: Drupal\mcp_sentinel\Service\McpSealedTokenDenialAuditor
+    arguments:
+      - '@mcp_sentinel.audit_logger'
+      - '@config.factory'
+      - '@datetime.time'
+      - '@request_stack'
+      - '@logger.channel.mcp_sentinel'
+      - '@keyvalue.expirable'
+
   mcp_sentinel.sealed_token_manager:
     class: Drupal\mcp_sentinel\Service\McpSealedTokenManager
     arguments:
@@ -359,6 +369,7 @@ services:
       - '@private_key'
       - '@settings'
       - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.sealed_token_denial_auditor'
 
   # Copy-once reveal handoff. Expire is REVEAL_STORE_TTL (120s), not the
   # site-wide private tempstore. get() takes only the collection name.

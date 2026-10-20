@@ -90,6 +90,13 @@ mcp_sentinel.settings:
       constraints:
         Range:
           min: 1
+    sealed_token_deny_audit_window:
+      type: integer
+      label: 'Sealed-token denial audit aggregation window in seconds (60 default; 1..3600)'
+      constraints:
+        Range:
+          min: 1
+          max: 3600
     agent_oauth_clients:
       type: sequence
       label: 'Agent OAuth client IDs (consumer client_id values)'

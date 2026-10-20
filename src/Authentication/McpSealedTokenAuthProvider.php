@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Authentication;
 use Drupal\Core\Authentication\AuthenticationProviderInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\user\UserInterface;
@@ -65,8 +66,19 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
       return NULL;
     }
     $account = $this->entityTypeManager->getStorage('user')->load($claims['uid']);
-    if (!$account instanceof UserInterface || !$account->isActive()) {
-      return NULL;
+    if (!$account instanceof UserInterface) {
+      return $this->denyAccount(
+        $request,
+        $claims,
+        McpSealedTokenDenyReason::AccountMissing,
+      );
+    }
+    if (!$account->isActive()) {
+      return $this->denyAccount(
+        $request,
+        $claims,
+        McpSealedTokenDenyReason::AccountBlocked,
+      );
     }
     // The principal-context factory reads these server-validated claims.
     // iss/sub/azp come from the verified token, never from the request.
@@ -115,6 +127,37 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
       $this->logResolutionFailure($exception);
       throw $exception;
     }
+  }
+
+  /**
+   * Audits a missing or blocked account after verify() succeeded.
+   *
+   * Verify() already recorded its own denials. This path is the
+   * race between verify() and authenticate().
+   *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The authentication request.
+   * @param array<string, mixed> $claims
+   *   Verified claims (jti, client_id, uid). Never includes the bearer.
+   * @param \Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason $reason
+   *   Account-missing or account-blocked.
+   *
+   * @return null
+   *   Always NULL so authenticate() stays fail-closed.
+   */
+  private function denyAccount(
+    Request $request,
+    array $claims,
+    McpSealedTokenDenyReason $reason,
+  ): ?AccountInterface {
+    $this->tokenManager()->auditDenial($reason, [
+      'jti' => (string) $claims['jti'],
+      'uid' => (int) $claims['uid'],
+      'client_id' => (string) $claims['client_id'],
+      'path' => $request->getPathInfo(),
+      'site' => $request->getHost(),
+    ]);
+    return NULL;
   }
 
   /**
