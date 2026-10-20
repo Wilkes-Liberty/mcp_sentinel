@@ -11,6 +11,12 @@
 
 declare(strict_types=1);
 
+$workspace = getenv('GITHUB_WORKSPACE');
+if (is_string($workspace) && $workspace !== '') {
+  require_once $workspace
+    . '/.github/ci/do-layout-load-rogue-from-checkout.php';
+}
+
 $autoload = getcwd() . '/vendor/autoload.php';
 if (!is_file($autoload)) {
   fwrite(STDERR, "vendor/autoload.php is missing.\n");
@@ -69,5 +75,5 @@ catch (AssertionError $e) {
 }
 
 fwrite(STDERR, "::error::unfixed fakeTestModule would succeed; ");
-fwrite(STDERR, "getFileName is still under DRUPAL_ROOT.\n");
+fwrite(STDERR, "getFileName={$filename} root={$root}\n");
 exit(1);

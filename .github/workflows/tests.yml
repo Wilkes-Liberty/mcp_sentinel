@@ -1451,29 +1451,10 @@ jobs:
             ln -sfn "${GITHUB_WORKSPACE}/${item}" \
               "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel/${item}"
           done
-          # Drupal's classloader includes through the custom mount.
-          # Composer files-autoload loads the rogue class from the
-          # checkout so getFileName() matches d.o (__DIR__ outside
-          # the docroot), including PHPUnit separate processes.
-          (
-            cd "${COMPOSER_DIR}"
-            iface="${GITHUB_WORKSPACE}/src/Service/McpPrincipalAuthExtensionInterface.php"
-            rogue="${GITHUB_WORKSPACE}/tests/modules/mcp_sentinel_rogue_auth/src/Service/McpRoguePrincipalAuthExtension.php"
-            php -r '
-              $file = "composer.json";
-              $json = json_decode(file_get_contents($file), TRUE, 512, JSON_THROW_ON_ERROR);
-              $files = $json["autoload"]["files"] ?? [];
-              foreach (array_slice($argv, 1) as $path) {
-                $files[] = $path;
-              }
-              $json["autoload"]["files"] = array_values(array_unique($files));
-              file_put_contents($file, json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-            ' -- "${iface}" "${rogue}"
-            composer dump-autoload --no-interaction
-          )
-          # PHPUnit RunTestsInSeparateProcesses does not reliably
-          # inherit composer files-autoload. Prepend the checkout
-          # class in every PHP process on this job.
+          # PHPUnit child processes load the rogue class through the
+          # custom mount (getFileName under DRUPAL_ROOT). A prepend
+          # autoloader maps that FQCN to the checkout file so
+          # getFileName() matches d.o.
           scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
           mkdir -p "${RUNNER_TEMP}/php-scan"
           printf 'auto_prepend_file=%s\n' \
@@ -1529,11 +1510,13 @@ jobs:
           # The fixture that fatals on this layout. Run it first so the
           # Extension assertion is visible without waiting for the rest.
           echo "--- unfixed fakeTestModule probe"
-          php "${GITHUB_WORKSPACE}/.github/ci/do-layout-probe-unfixed-extension.php" \
+          php -d auto_prepend_file="${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
+            "${GITHUB_WORKSPACE}/.github/ci/do-layout-probe-unfixed-extension.php" \
             "${PWD}/web"
 
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
-          vendor/bin/phpunit -c "${config}" \
+          php -d auto_prepend_file="${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
+            vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \
             "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
 
