@@ -1326,6 +1326,174 @@ jobs:
             || status=1
           exit "${status}"
 
+  # drupal.org gitlab_templates layout (DEV-1014). The matrix job above
+  # installs this module through a composer path repo at
+  # web/modules/contrib/mcp_sentinel, which is why GitHub stayed green
+  # while pipeline 1008628 failed: the checkout is the project root,
+  # Drupal's web/ lives inside it, and the module is reached through
+  # web/modules/custom/mcp_sentinel. This job rebuilds that shape and
+  # runs the Kernel suite so a fixture that hardcodes the GitHub path
+  # cannot merge.
+  phpunit-drupalorg-layout:
+    name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module as the project root
+        uses: actions/checkout@v7
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Cache Composer downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/.composer/cache
+          key: ${{ runner.os }}-php8.4-composer
+          restore-keys: |
+            ${{ runner.os }}-php8.4-composer
+            ${{ runner.os }}-composer-
+
+      - name: Scaffold a Drupal site
+        env:
+          DRUPAL_CONSTRAINT: '^11'
+          COMPOSER_DIR: ${{ runner.temp }}/drupal
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          scaffold() {
+            rm -rf "${COMPOSER_DIR}"
+            composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" "${COMPOSER_DIR}" \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
+          cd "${COMPOSER_DIR}"
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.phpstan/extension-installer true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer config repositories.mcp_sentinel path "${GITHUB_WORKSPACE}"
+          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+
+      - name: Install dependencies
+        working-directory: ${{ runner.temp }}/drupal
+        env:
+          DRUPAL_CONSTRAINT: '^11'
+          PHPUNIT_CONSTRAINT: '^11.5'
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          retry composer require -W --no-interaction --no-progress \
+            "drupal/mcp_sentinel:*@dev" \
+            "twig/twig:<3.30.0"
+          retry composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
+            "phpunit/phpunit:${PHPUNIT_CONSTRAINT}" \
+            "drush/drush:^13" \
+            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
+            "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
+            "drupal/entity_usage:^2 || ^5" \
+            "drupal/content_lock:^3.0" \
+            "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
+          bash "${GITHUB_WORKSPACE}/.github/ci/refresh-latest-contrib.sh"
+
+      - name: Reshape into the drupal.org gitlab_templates layout
+        env:
+          COMPOSER_DIR: ${{ runner.temp }}/drupal
+        run: |
+          set -euo pipefail
+          # Checkout is the project root. Move the docroot inside it and
+          # mount the module at the custom installer path, the same shape
+          # gitlab_templates uses (CI_PROJECT_DIR/web, symlink under
+          # modules/custom). Drop the path-repo contrib link so a fixture
+          # that hardcodes that GitHub path cannot hide here.
+          rm -rf "${GITHUB_WORKSPACE}/web"
+          mv "${COMPOSER_DIR}/web" "${GITHUB_WORKSPACE}/web"
+          ln -sfn "${GITHUB_WORKSPACE}/web" "${COMPOSER_DIR}/web"
+          rm -f "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel"
+          mkdir -p "${GITHUB_WORKSPACE}/web/modules/custom"
+          ln -sfn "${GITHUB_WORKSPACE}" "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+
+      - name: Confirm the drupal.org layout
+        run: |
+          set -euo pipefail
+          test -f mcp_sentinel.info.yml \
+            || { echo "::error::checkout is not the module project root"; exit 1; }
+          test -d web/core \
+            || { echo "::error::web/ is not the Drupal docroot inside the checkout"; exit 1; }
+          test -L web/modules/custom/mcp_sentinel \
+            || { echo "::error::module is not symlinked at the custom installer path"; exit 1; }
+          test "$(realpath web/modules/custom/mcp_sentinel)" = "$(realpath "${GITHUB_WORKSPACE}")" \
+            || { echo "::error::custom symlink does not resolve to the checkout"; exit 1; }
+          test ! -e web/modules/contrib/mcp_sentinel \
+            || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
+          echo "DRUPAL_ROOT candidate: ${GITHUB_WORKSPACE}/web"
+          echo "module realpath: $(realpath web/modules/custom/mcp_sentinel)"
+          echo "custom symlink: $(readlink web/modules/custom/mcp_sentinel)"
+
+      - name: PHPUnit — Kernel (drupal.org layout)
+        working-directory: ${{ runner.temp }}/drupal
+        env:
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          MIN_TESTS: '400'
+        run: |
+          set -euo pipefail
+          config="${GITHUB_WORKSPACE}/web/core/phpunit.xml.dist"
+          module="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+          suites=()
+          for dir in "${module}"/tests/src/Kernel \
+                     "${module}"/modules/*/tests/src/Kernel; do
+            [ -d "${dir}" ] && suites+=("${dir}")
+          done
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "::error::No Kernel test directories found under ${module}."
+            exit 1
+          fi
+          i=0
+          for dir in "${suites[@]}"; do
+            i=$((i + 1))
+            echo "--- ${dir#"${module}/"}"
+            vendor/bin/phpunit -c "${config}" \
+              --log-junit "${PWD}/junit-do-${i}.xml" \
+              "${dir}"
+          done
+          total="$(cat junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          echo "Collected ${total} Kernel tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} Kernel tests, below the floor of ${MIN_TESTS}."
+            exit 1
+          fi
+
   # The single required check for the suite (#255). A matrix job skipped by a
   # job-level `if:` reports under its unexpanded name, so the per-leg PHPUnit
   # names cannot be required without blocking every docs-only pull request.
@@ -1341,6 +1509,7 @@ jobs:
       - phpunit-functional
       - phpunit-functional-pgsql-draft
       - phpunit-functional-d10
+      - phpunit-drupalorg-layout
       - phpcs
       - phpstan
       - phpunit-mysql-operator-binding
@@ -1359,3 +1528,16 @@ jobs:
               *) echo "::error::A test job ended with '${result}'."; exit 1 ;;
             esac
           done
+
+      - uses: actions/checkout@v7
+
+      - name: Forbid hardcoded installer paths in tests
+        run: |
+          set -euo pipefail
+          # A fixture that spells either installer path cannot see the
+          # other venue. Derive the path from the registered module.
+          if grep -R -n -E --binary-files=without-match \
+            'modules/(contrib|custom)/mcp_sentinel' tests/; then
+            echo "::error::tests/ hardcodes a modules/contrib or modules/custom mcp_sentinel path."
+            exit 1
+          fi
