@@ -9,6 +9,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_rogue_auth\LyingTestModulePathHandler;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 use Drupal\mcp_sentinel_rogue_auth\StubOwningTestModuleHandler;
 use Drupal\mcp_sentinel_test\Service\McpTestExtraClaimsPrincipalAuthExtension;
@@ -31,8 +32,8 @@ use Symfony\Component\HttpFoundation\Request;
  * paths assert the hook is gone and a flushed row names
  * service, reason, and provider. Runtime-refuse paths
  * assert a row the compile flush cannot explain. Removing
- * the guard, identity refuse, or runtime recordRejection()
- * admits rogue-subject or drops that row.
+ * the guard, container.modules ownership, or runtime
+ * recordRejection() admits rogue-subject or drops that row.
  *
  * @group mcp_sentinel
  *
@@ -89,7 +90,8 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       'testSpoofedTestNamespaceClassIsDenied' => 'spoof',
       'testNullModuleHandlerRewireIsDenied' => 'null_handler',
       'testStubModuleHandlerRewireIsDenied' => 'stub_handler',
-      'testStubModuleHandlerWithOwnedExtensionIsDenied' => 'stub_owned',
+      'testStubModuleHandlerStillAdmitsOwnedExtension' => 'stub_owned',
+      'testDecoratedModuleHandlerRewireIsDenied' => 'decorated_handler',
       default => '',
     };
     parent::setUp();
@@ -126,6 +128,7 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       'null_handler' => $this->registerNullHandler($container),
       'stub_handler' => $this->registerStubHandler($container),
       'stub_owned' => $this->registerStubOwnedHandler($container),
+      'decorated_handler' => $this->registerDecoratedHandler($container),
       default => NULL,
     };
   }
@@ -219,14 +222,36 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
   }
 
   /**
-   * A stub handler with an owned hook is refused by identity.
+   * A stub handler does not block an owned ExtraClaims hook.
    *
-   * Live-wins alone would admit ExtraClaims. Identity refuse
-   * writes refused / mcp_sentinel_test.
+   * Ownership is container.modules, so ExtraClaims is
+   * admitted. Scopes and act stay stripped.
    */
-  public function testStubModuleHandlerWithOwnedExtensionIsDenied(): void {
+  public function testStubModuleHandlerStillAdmitsOwnedExtension(): void {
+    $request = Request::create('/jsonapi/node/page', 'PATCH');
+    $request->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $this->assertSame('rogue-subject', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    $this->assertArrayNotHasKey('act', $ctx->keyClaims());
+  }
+
+  /**
+   * A decorated live handler that lies about the test path is denied.
+   *
+   * The decorator is the live @module_handler. Ownership that
+   * asks it admits the rewired rogue. container.modules does not.
+   */
+  public function testDecoratedModuleHandlerRewireIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
-    $this->assertRuntimeRefusedAudit('mcp_sentinel_test');
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -445,6 +470,28 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
     $container->getDefinition('mcp_sentinel.principal_context_subscriber')
       ->setArgument(2, $owned)
       ->setArgument(3, $stub);
+  }
+
+  /**
+   * Decorate @module_handler and rewire the factory to the rogue.
+   */
+  private function registerDecoratedHandler(ContainerBuilder $container): void {
+    $container->register(
+      'mcp_sentinel_bypass.rogue',
+      McpRoguePrincipalAuthExtension::class,
+    )->setPublic(TRUE);
+    $container->register(
+      'mcp_sentinel_bypass.lying_handler',
+      LyingTestModulePathHandler::class,
+    )
+      ->setPublic(TRUE)
+      ->setDecoratedService('module_handler')
+      ->setArgument(0, new Reference('mcp_sentinel_bypass.lying_handler.inner'));
+    $rogue = new Reference('mcp_sentinel_bypass.rogue');
+    $container->getDefinition('mcp_sentinel.principal_context_factory')
+      ->setArgument(2, $rogue);
+    $container->getDefinition('mcp_sentinel.principal_context_subscriber')
+      ->setArgument(2, $rogue);
   }
 
   /**

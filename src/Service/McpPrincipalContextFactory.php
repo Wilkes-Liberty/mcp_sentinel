@@ -65,10 +65,9 @@ final class McpPrincipalContextFactory {
    *   a production process so permitted() is not hidden by
    *   PHPUnit.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface|null $moduleHandler
-   *   Installed-module list. The live handler wins when
-   *   Drupal is booted. A different injected handler is
-   *   refused. NULL uses the live handler; if ownership
-   *   still cannot be proven the hook is refused.
+   *   Unused when the container is booted: ownership
+   *   reads container.modules. When it is not booted,
+   *   used only to name the provider on a refused row.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Writes a governance row when a hook is ignored. NULL
    *   skips the write; the hook is still ignored.
@@ -94,17 +93,19 @@ final class McpPrincipalContextFactory {
    *
    * Ownership is that module's real path (info.yml basename
    * mcp_sentinel_test.info.yml), not a class-namespace prefix
-   * and not a provider name. The live installed-module list
-   * wins when Drupal is booted. An injected handler that is
-   * not that live object is refused. A missing handler is
-   * resolved from the live list. A throwing handler is
-   * refused. If ownership cannot be proven the hook is
-   * refused and a refused row is written.
+   * and not a provider name. When the container is booted,
+   * that path comes from container.modules (the same map
+   * the compiler pass uses), not @module_handler. A later
+   * compiler pass with installed PHP can delete or forge
+   * container.modules or the compile-refusal parameter.
+   * If ownership cannot be proven the hook is refused and
+   * a refused row is written.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $extension
    *   Wired hook, if any.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface|null $moduleHandler
-   *   Candidate module list, or NULL to use the booted handler.
+   *   Used only to name the provider when the container
+   *   is not booted. Ignored for ownership.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Optional chain writer for a refused hook.
    *
@@ -119,24 +120,20 @@ final class McpPrincipalContextFactory {
     if ($extension === NULL) {
       return NULL;
     }
-    $handler = $moduleHandler;
     try {
-      $live = self::liveModuleHandler();
-      if ($moduleHandler !== NULL && $live !== NULL
-        && $moduleHandler !== $live) {
-        self::recordRejection(
-          $auditLogger,
-          self::AUTH_EXTENSION_SERVICE_ID,
-          self::providerOf($extension, $live),
-          'refused',
-        );
-        return NULL;
+      $modules = self::containerModules();
+      if ($modules !== []) {
+        $owned = isset($modules['mcp_sentinel_test'])
+          && self::classOwnedByTestModule($extension::class, $modules);
+        $provider = self::providerFromModuleMap($extension::class, $modules);
       }
-      if ($live !== NULL) {
-        $handler = $live;
+      else {
+        $owned = self::classOwnedByTestModule($extension::class, []);
+        $provider = $moduleHandler !== NULL
+          ? self::providerOf($extension, $moduleHandler)
+          : '';
       }
-      if ($handler !== NULL
-        && self::objectOwnedByTestModule($extension, $handler)) {
+      if ($owned) {
         return $extension;
       }
     }
@@ -152,7 +149,7 @@ final class McpPrincipalContextFactory {
     self::recordRejection(
       $auditLogger,
       self::AUTH_EXTENSION_SERVICE_ID,
-      $handler !== NULL ? self::providerOf($extension, $handler) : '',
+      $provider,
       'refused',
     );
     return NULL;
@@ -237,48 +234,15 @@ final class McpPrincipalContextFactory {
   }
 
   /**
-   * TRUE when the object file lives under mcp_sentinel_test.
-   *
-   * @param object $extension
-   *   Candidate hook.
-   * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
-   *   Live module list.
-   *
-   * @return bool
-   *   TRUE when mcp_sentinel_test owns the file.
-   */
-  private static function objectOwnedByTestModule(
-    object $extension,
-    ModuleHandlerInterface $moduleHandler,
-  ): bool {
-    if (!$moduleHandler->moduleExists('mcp_sentinel_test')) {
-      return FALSE;
-    }
-    $file = self::realClassFile($extension::class);
-    if ($file === NULL) {
-      return FALSE;
-    }
-    $module = $moduleHandler->getModule('mcp_sentinel_test');
-    $pathname = $module->getPathname();
-    if ($pathname === '') {
-      $pathname = $module->getPath() . '/mcp_sentinel_test.info.yml';
-    }
-    $dir = self::realDirectoryFromPathname(
-      $pathname,
-      'mcp_sentinel_test.info.yml',
-    );
-    return $dir !== NULL
-      && str_starts_with($file, $dir . DIRECTORY_SEPARATOR);
-  }
-
-  /**
    * Writes compiled refusals once per compiled parameter hash.
    *
    * The hash is stored in state so a new request with the same
    * compiled list does not rewrite the rows, and a container
    * rebuild that changes the list writes them again. A later
    * compiler pass with installed PHP can delete or forge the
-   * compiled parameter; this flush writes whatever survived.
+   * compiled parameter or container.modules; this flush
+   * writes whatever survived, and runtime ownership reads
+   * that same module map rather than @module_handler.
    *
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Chain writer. NULL skips the write.
@@ -331,21 +295,25 @@ final class McpPrincipalContextFactory {
   }
 
   /**
-   * Live module handler when Drupal is booted.
+   * Installed-module map from the booted container.
    *
-   * @return \Drupal\Core\Extension\ModuleHandlerInterface|null
-   *   The handler, or NULL when it cannot be resolved.
+   * @return array<string, mixed>
+   *   The container.modules parameter, or an empty list.
    */
-  private static function liveModuleHandler(): ?ModuleHandlerInterface {
+  private static function containerModules(): array {
     try {
-      if (!\Drupal::hasContainer()
-        || !\Drupal::hasService('module_handler')) {
-        return NULL;
+      if (!\Drupal::hasContainer()) {
+        return [];
       }
-      return \Drupal::moduleHandler();
+      $container = \Drupal::getContainer();
+      if (!$container->hasParameter('container.modules')) {
+        return [];
+      }
+      $modules = $container->getParameter('container.modules');
+      return is_array($modules) ? $modules : [];
     }
     catch (\Throwable) {
-      return NULL;
+      return [];
     }
   }
 

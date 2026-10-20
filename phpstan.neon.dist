@@ -113,6 +113,7 @@ parameters:
         - mcp_sentinel.module
         - modules/*/*.module
         - tests/modules/mcp_sentinel_rogue_auth/src/StubOwningTestModuleHandler.php
+        - tests/modules/mcp_sentinel_rogue_auth/src/LyingTestModulePathHandler.php
     # MCP Server's authorization-denied event is not in an MCP Server release
     # yet. Until it is, the subscriber is never called and the stream test
     # skips. Remove this when the supported MCP Server ships the event.
