@@ -152,15 +152,12 @@ sources skip that scope check. JSON:API, GraphQL, and
   `McpSentinelServiceProvider` removes the legacy
   `mcp_sentinel.principal_auth_extension` id and a
   namespaced definition that `mcp_sentinel_test` does
-  not own (real module path against the live
-  installed-module list, not a class namespace prefix
-  and not a provider name), in a
+  not own (real module path against
+  `container.modules`, the same map the compiler pass
+  uses, not `@module_handler`, not a class namespace
+  prefix, and not a provider name), in a
   `TYPE_BEFORE_OPTIMIZATION` (-1000) compiler pass.
-  The live handler wins when Drupal is booted; an
-  injected handler that is not that object is refused.
-  A missing or throwing `module_handler` is resolved
-  from the live list or the hook is refused. The
-  factory and subscriber fail closed on the wired
+  The factory and subscriber fail closed on the wired
   object; the subscriber re-checks before
   `deferClaimlessSeal()`. A refused wired object, a
   compile-time removal, and stripped claims each write
@@ -169,8 +166,9 @@ sources skip that scope check. JSON:API, GraphQL, and
   flush once per compiled parameter hash (state-keyed:
   once per rebuild, not every request). A later
   compiler pass with installed PHP can delete or forge
-  that parameter. Provider attribution uses the
-  longest path prefix.
+  `container.modules` or the compile-refusal
+  parameter. Provider attribution uses the longest
+  path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb` (last hook is 10039). Audit enabled
   modules for a `mcp_sentinel.principal_auth_extension`
