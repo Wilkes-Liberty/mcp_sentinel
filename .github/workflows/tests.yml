@@ -1435,9 +1435,12 @@ jobs:
           # gitlab_templates uses (CI_PROJECT_DIR/web, symlink under
           # modules/custom). Drop the path-repo contrib link so a fixture
           # that hardcodes that GitHub path cannot hide here.
-          rm -rf "${GITHUB_WORKSPACE}/web"
+          rm -rf "${GITHUB_WORKSPACE}/web" "${GITHUB_WORKSPACE}/vendor"
           mv "${COMPOSER_DIR}/web" "${GITHUB_WORKSPACE}/web"
           ln -sfn "${GITHUB_WORKSPACE}/web" "${COMPOSER_DIR}/web"
+          # web/autoload.php requires ../vendor (the project root), the
+          # same place gitlab_templates puts composer vendor next to web/.
+          ln -sfn "${COMPOSER_DIR}/vendor" "${GITHUB_WORKSPACE}/vendor"
           rm -f "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel"
           mkdir -p "${GITHUB_WORKSPACE}/web/modules/custom"
           ln -sfn "${GITHUB_WORKSPACE}" "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
@@ -1455,6 +1458,8 @@ jobs:
             || { echo "::error::custom symlink does not resolve to the checkout"; exit 1; }
           test ! -e web/modules/contrib/mcp_sentinel \
             || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
+          test -f vendor/autoload.php \
+            || { echo "::error::vendor/ is not at the project root next to web/"; exit 1; }
           echo "DRUPAL_ROOT candidate: ${GITHUB_WORKSPACE}/web"
           echo "module realpath: $(realpath web/modules/custom/mcp_sentinel)"
           echo "custom symlink: $(readlink web/modules/custom/mcp_sentinel)"
