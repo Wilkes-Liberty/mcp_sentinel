@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\State\StateInterface;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -39,9 +40,9 @@ final class McpPrincipalContextFactory {
   public const REJECTED_PARAMETER = 'mcp_sentinel.principal_auth_extension_rejected';
 
   /**
-   * TRUE after compile-time refusals have been written once.
+   * State key holding the hash of the last flushed compile-refusal list.
    */
-  private static bool $compileRejectionsFlushed = FALSE;
+  public const REJECTED_FLUSH_STATE = 'mcp_sentinel.principal_auth_extension_rejected_flush';
 
   /**
    * Test-module hook, or NULL when the wired object is not owned.
@@ -64,9 +65,9 @@ final class McpPrincipalContextFactory {
    *   a production process so permitted() is not hidden by
    *   PHPUnit.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface|null $moduleHandler
-   *   Installed-module list. NULL uses the live handler
-   *   when Drupal is booted; if ownership still cannot
-   *   be proven the hook is refused.
+   *   Unused when the container is booted: ownership
+   *   reads container.modules. When it is not booted,
+   *   used only to name the provider on a refused row.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Writes a governance row when a hook is ignored. NULL
    *   skips the write; the hook is still ignored.
@@ -90,16 +91,21 @@ final class McpPrincipalContextFactory {
   /**
    * Honour a hook only when mcp_sentinel_test owns the wired object.
    *
-   * Ownership is that module's real path or provider (info.yml
-   * basename mcp_sentinel_test.info.yml), not a class-namespace
-   * prefix. A missing handler is resolved from the live
-   * installed-module list. If ownership cannot be proven the
-   * hook is refused and a refused row is written.
+   * Ownership is that module's real path (info.yml basename
+   * mcp_sentinel_test.info.yml), not a class-namespace prefix
+   * and not a provider name. When the container is booted,
+   * that path comes from container.modules (the same map
+   * the compiler pass uses), not @module_handler. A later
+   * compiler pass with installed PHP can delete or forge
+   * container.modules or the compile-refusal parameter.
+   * If ownership cannot be proven the hook is refused and
+   * a refused row is written.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface|null $extension
    *   Wired hook, if any.
    * @param \Drupal\Core\Extension\ModuleHandlerInterface|null $moduleHandler
-   *   Live module list, or NULL to use the booted handler.
+   *   Used only to name the provider when the container
+   *   is not booted. Ignored for ownership.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Optional chain writer for a refused hook.
    *
@@ -114,15 +120,36 @@ final class McpPrincipalContextFactory {
     if ($extension === NULL) {
       return NULL;
     }
-    $handler = $moduleHandler ?? self::liveModuleHandler();
-    if ($handler !== NULL
-      && self::objectOwnedByTestModule($extension, $handler)) {
-      return $extension;
+    try {
+      $modules = self::containerModules();
+      if ($modules !== []) {
+        $owned = isset($modules['mcp_sentinel_test'])
+          && self::classOwnedByTestModule($extension::class, $modules);
+        $provider = self::providerFromModuleMap($extension::class, $modules);
+      }
+      else {
+        $owned = self::classOwnedByTestModule($extension::class, []);
+        $provider = $moduleHandler !== NULL
+          ? self::providerOf($extension, $moduleHandler)
+          : '';
+      }
+      if ($owned) {
+        return $extension;
+      }
+    }
+    catch (\Throwable) {
+      self::recordRejection(
+        $auditLogger,
+        self::AUTH_EXTENSION_SERVICE_ID,
+        '',
+        'refused',
+      );
+      return NULL;
     }
     self::recordRejection(
       $auditLogger,
       self::AUTH_EXTENSION_SERVICE_ID,
-      $handler !== NULL ? self::providerOf($extension, $handler) : '',
+      $provider,
       'refused',
     );
     return NULL;
@@ -144,7 +171,18 @@ final class McpPrincipalContextFactory {
     if ($file === NULL) {
       return FALSE;
     }
-    $dir = self::testModuleDirectoryFromList($modules);
+    $pathname = '';
+    if (isset($modules['mcp_sentinel_test'])
+      && is_array($modules['mcp_sentinel_test'])) {
+      $candidate = $modules['mcp_sentinel_test']['pathname'] ?? '';
+      if (is_string($candidate)) {
+        $pathname = $candidate;
+      }
+    }
+    $dir = self::realDirectoryFromPathname(
+      $pathname,
+      'mcp_sentinel_test.info.yml',
+    );
     if ($dir === NULL) {
       $dir = self::shippedTestModuleDirectory();
     }
@@ -196,59 +234,23 @@ final class McpPrincipalContextFactory {
   }
 
   /**
-   * TRUE when the object file lives under mcp_sentinel_test.
+   * Writes compiled refusals once per compiled parameter hash.
    *
-   * @param object $extension
-   *   Candidate hook.
-   * @param \Drupal\Core\Extension\ModuleHandlerInterface $moduleHandler
-   *   Live module list.
-   *
-   * @return bool
-   *   TRUE when mcp_sentinel_test owns the file.
-   */
-  private static function objectOwnedByTestModule(
-    object $extension,
-    ModuleHandlerInterface $moduleHandler,
-  ): bool {
-    if (!$moduleHandler->moduleExists('mcp_sentinel_test')) {
-      return FALSE;
-    }
-    $file = self::realClassFile($extension::class);
-    if ($file === NULL) {
-      return FALSE;
-    }
-    try {
-      $module = $moduleHandler->getModule('mcp_sentinel_test');
-    }
-    catch (\Throwable) {
-      return FALSE;
-    }
-    $pathname = $module->getPathname();
-    if ($pathname === '') {
-      $pathname = $module->getPath() . '/mcp_sentinel_test.info.yml';
-    }
-    if (!str_starts_with($pathname, '/') && defined('DRUPAL_ROOT')) {
-      $pathname = DRUPAL_ROOT . '/' . $pathname;
-    }
-    $realInfo = realpath($pathname);
-    if ($realInfo === FALSE
-      || basename($realInfo) !== 'mcp_sentinel_test.info.yml') {
-      return FALSE;
-    }
-    return str_starts_with($file, dirname($realInfo) . DIRECTORY_SEPARATOR);
-  }
-
-  /**
-   * Writes compiled refusals into the audit chain once.
+   * The hash is stored in state so a new request with the same
+   * compiled list does not rewrite the rows, and a container
+   * rebuild that changes the list writes them again. A later
+   * compiler pass with installed PHP can delete or forge the
+   * compiled parameter or container.modules; this flush
+   * writes whatever survived, and runtime ownership reads
+   * that same module map rather than @module_handler.
    *
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Chain writer. NULL skips the write.
    */
   public static function flushCompileRejections(?McpAuditLogger $auditLogger): void {
-    if (self::$compileRejectionsFlushed || $auditLogger === NULL) {
+    if ($auditLogger === NULL) {
       return;
     }
-    self::$compileRejectionsFlushed = TRUE;
     try {
       if (!\Drupal::hasContainer()) {
         return;
@@ -258,48 +260,56 @@ final class McpPrincipalContextFactory {
         return;
       }
       $rows = $container->getParameter(self::REJECTED_PARAMETER);
+      if (!is_array($rows) || $rows === []) {
+        return;
+      }
+      $hash = hash('sha256', serialize($rows));
+      $state = $container->has('state') ? $container->get('state') : NULL;
+      if (!$state instanceof StateInterface) {
+        return;
+      }
+      if ($state->get(self::REJECTED_FLUSH_STATE) === $hash) {
+        return;
+      }
+      foreach ($rows as $row) {
+        if (!is_array($row)) {
+          continue;
+        }
+        $service = $row['service'] ?? self::AUTH_EXTENSION_SERVICE_ID;
+        $provider = $row['provider'] ?? '';
+        $reason = $row['reason'] ?? 'refused';
+        self::recordRejection(
+          $auditLogger,
+          is_string($service) && $service !== ''
+            ? $service
+            : self::AUTH_EXTENSION_SERVICE_ID,
+          is_string($provider) ? $provider : '',
+          is_string($reason) && $reason !== '' ? $reason : 'refused',
+        );
+      }
+      $state->set(self::REJECTED_FLUSH_STATE, $hash);
     }
     catch (\Throwable) {
-      return;
-    }
-    if (!is_array($rows)) {
-      return;
-    }
-    foreach ($rows as $row) {
-      if (!is_array($row)) {
-        continue;
-      }
-      $service = $row['service'] ?? self::AUTH_EXTENSION_SERVICE_ID;
-      $provider = $row['provider'] ?? '';
-      $reason = $row['reason'] ?? 'refused';
-      self::recordRejection(
-        $auditLogger,
-        is_string($service) && $service !== ''
-          ? $service
-          : self::AUTH_EXTENSION_SERVICE_ID,
-        is_string($provider) ? $provider : '',
-        is_string($reason) && $reason !== '' ? $reason : 'refused',
-      );
+      // Fail closed: a later construct may retry the flush.
     }
   }
 
   /**
-   * Live module handler when Drupal is booted.
+   * Installed-module map from the booted container.
    *
-   * @return \Drupal\Core\Extension\ModuleHandlerInterface|null
-   *   The handler, or NULL when it cannot be resolved.
+   * @return array<string, mixed>
+   *   The container.modules parameter, or an empty list.
    */
-  private static function liveModuleHandler(): ?ModuleHandlerInterface {
-    try {
-      if (!\Drupal::hasContainer()
-        || !\Drupal::hasService('module_handler')) {
-        return NULL;
-      }
-      return \Drupal::moduleHandler();
+  private static function containerModules(): array {
+    if (!\Drupal::hasContainer()) {
+      return [];
     }
-    catch (\Throwable) {
-      return NULL;
+    $container = \Drupal::getContainer();
+    if (!$container->hasParameter('container.modules')) {
+      return [];
     }
+    $modules = $container->getParameter('container.modules');
+    return is_array($modules) ? $modules : [];
   }
 
   /**
@@ -318,7 +328,13 @@ final class McpPrincipalContextFactory {
     ModuleHandlerInterface $moduleHandler,
   ): string {
     $map = [];
-    foreach ($moduleHandler->getModuleList() as $name => $module) {
+    try {
+      $list = $moduleHandler->getModuleList();
+    }
+    catch (\Throwable) {
+      return '';
+    }
+    foreach ($list as $name => $module) {
       try {
         $pathname = $module->getPathname();
         if ($pathname === '') {
@@ -375,13 +391,22 @@ final class McpPrincipalContextFactory {
   /**
    * Absolute directory of an info.yml pathname, or NULL.
    *
+   * Relative paths are resolved from DRUPAL_ROOT when that
+   * constant is defined. $requiredBasename, when set, must
+   * match the resolved file's basename.
+   *
    * @param string $pathname
    *   Module info path, relative or absolute.
+   * @param string|null $requiredBasename
+   *   Expected info.yml basename, or NULL to skip that check.
    *
    * @return string|null
    *   Real directory, or NULL when it cannot be resolved.
    */
-  private static function realDirectoryFromPathname(string $pathname): ?string {
+  private static function realDirectoryFromPathname(
+    string $pathname,
+    ?string $requiredBasename = NULL,
+  ): ?string {
     if ($pathname === '') {
       return NULL;
     }
@@ -389,33 +414,13 @@ final class McpPrincipalContextFactory {
       $pathname = DRUPAL_ROOT . '/' . $pathname;
     }
     $real = realpath($pathname);
-    return $real === FALSE ? NULL : dirname($real);
-  }
-
-  /**
-   * Directory from container.modules for mcp_sentinel_test.
-   *
-   * @param array<string, mixed> $modules
-   *   The container.modules parameter.
-   *
-   * @return string|null
-   *   Absolute module directory, or NULL.
-   */
-  private static function testModuleDirectoryFromList(array $modules): ?string {
-    if (!isset($modules['mcp_sentinel_test'])
-      || !is_array($modules['mcp_sentinel_test'])) {
+    if ($real === FALSE) {
       return NULL;
     }
-    $pathname = $modules['mcp_sentinel_test']['pathname'] ?? '';
-    if (!is_string($pathname) || $pathname === '') {
+    if ($requiredBasename !== NULL && basename($real) !== $requiredBasename) {
       return NULL;
     }
-    $realInfo = realpath($pathname);
-    if ($realInfo === FALSE
-      || basename($realInfo) !== 'mcp_sentinel_test.info.yml') {
-      return NULL;
-    }
-    return dirname($realInfo);
+    return dirname($real);
   }
 
   /**
@@ -537,15 +542,13 @@ final class McpPrincipalContextFactory {
     if ($request->attributes->get(McpPrincipalContext::FALLBACK_ATTRIBUTE) !== TRUE) {
       return [];
     }
-    if (McpRoleFallbackGate::looksProxied($request)) {
-      return [];
-    }
     if (!McpRoleFallbackGate::permitted($request, $this->environment)) {
       return [];
     }
     $raw = $this->authExtension->fallbackClaims($request);
+    $keep = ['iss', 'sub', 'azp', 'tenant'];
     $allowed = [];
-    foreach (['iss', 'sub', 'azp', 'tenant'] as $name) {
+    foreach ($keep as $name) {
       $value = $raw[$name] ?? NULL;
       if (is_string($value) && $value !== '') {
         $allowed[$name] = $value;
@@ -553,12 +556,10 @@ final class McpPrincipalContextFactory {
     }
     $stripped = [];
     foreach (array_keys($raw) as $name) {
-      if ($name === '') {
+      if ($name === '' || in_array($name, $keep, TRUE)) {
         continue;
       }
-      if (!in_array($name, ['iss', 'sub', 'azp', 'tenant'], TRUE)) {
-        $stripped[] = $name;
-      }
+      $stripped[] = $name;
     }
     if ($stripped !== []) {
       self::recordRejection(

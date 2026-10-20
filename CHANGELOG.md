@@ -29,25 +29,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mcp_sentinel_role_fallback_test_principal` or skip the
   claimless seal; that held only while no other module
   registered the hook. Production now owns those checks:
-  `fallbackClaims()` runs only after the fallback stamp,
-  an unproxied hop, and `permitted()`, and keeps
-  `iss`/`sub`/`azp`/`tenant` only. The subscriber
+  `fallbackClaims()` runs only after the fallback stamp
+  and `permitted()` (which refuses a proxied hop), and
+  keeps `iss`/`sub`/`azp`/`tenant` only. The subscriber
   evaluates the claimless predicate before
   `deferClaimlessSeal()`. The hook id is
   `mcp_sentinel_test.principal_auth_extension`. The
   compiler pass at `TYPE_BEFORE_OPTIMIZATION` (-1000)
   removes the legacy id and a namespaced definition
   that `mcp_sentinel_test` does not own. Ownership is
-  that module's real path or provider against the live
-  installed-module list, not a class-namespace prefix.
-  A missing `module_handler` is resolved from the live
-  list or the hook is refused. The factory and subscriber
-  fail closed on the wired object; the subscriber
-  re-checks before `deferClaimlessSeal()`. A refused
-  wired object, a compile-time removal, and stripped
-  claims each write an `audit_chain` row (`refused`, or
-  `claims_stripped` when extra keys are dropped).
-  Provider attribution uses the longest path prefix.
+  that module's real path (info.yml basename) against
+  `container.modules` (the same map the compiler pass
+  uses), not `@module_handler`, not a class-namespace
+  prefix, and not a provider name. The factory and
+  subscriber fail closed on the wired object; the
+  subscriber re-checks before `deferClaimlessSeal()`.
+  A refused wired object, a compile-time removal, and
+  stripped claims each write an `audit_chain` row
+  (`refused`, or `claims_stripped` when extra keys are
+  dropped). Compile-time refusals flush once per
+  compiled parameter hash (state-keyed: once per
+  rebuild, not every request). A later compiler pass
+  with installed PHP can delete or forge
+  `container.modules` or the compile-refusal
+  parameter. Provider attribution uses the longest
+  path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb`: there is no new update hook (last is
   10039). The interface is `@internal`. The

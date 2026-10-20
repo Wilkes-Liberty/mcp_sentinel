@@ -14,19 +14,24 @@ use Symfony\Component\HttpFoundation\Request;
  * The mcp_sentinel_test module registers the only implementation, as
  * mcp_sentinel_test.principal_auth_extension. McpSentinelServiceProvider
  * removes any other definition at TYPE_BEFORE_OPTIMIZATION / -1000.
- * Ownership is that module's real path or provider, not a
- * class-namespace prefix, and is checked against the live
- * installed-module list. The subscriber re-checks the wired
- * object before deferClaimlessSeal(). A refused wired object,
- * a compile-time removal, and stripped claims each write an
- * audit_chain row (refused, or claims_stripped). A missing
- * module handler is resolved from the live list or the hook
- * is refused. Production owns admission: the factory calls
- * fallbackClaims() only after the fallback stamp, an unproxied
- * hop, and permitted(), and keeps iss/sub/azp/tenant only. The
- * subscriber evaluates the claimless predicate before consulting
- * deferClaimlessSeal(). Absent that module the factory and subscriber
- * receive NULL and stay fail-closed.
+ * Ownership is that module's real path (info.yml basename), not a
+ * class-namespace prefix and not a provider name, and is checked
+ * against container.modules (the same map the compiler pass uses),
+ * not @module_handler. The factory and subscriber fail closed on
+ * the wired object. The subscriber re-checks before
+ * deferClaimlessSeal(). A refused wired object, a compile-time
+ * removal, and stripped claims each write an audit_chain row
+ * (refused, or claims_stripped). Compile-time refusals are
+ * flushed once per compiled parameter hash (state-keyed; once
+ * per rebuild, not every request). A later compiler pass with
+ * installed PHP can delete or forge container.modules or the
+ * principal_auth_extension_rejected parameter. Production owns
+ * admission: the factory calls fallbackClaims() only after the
+ * fallback stamp and permitted() (which refuses a proxied hop),
+ * and keeps iss/sub/azp/tenant only. The subscriber evaluates
+ * the claimless predicate before consulting deferClaimlessSeal().
+ * Absent that module the factory and subscriber receive NULL
+ * and stay fail-closed.
  */
 interface McpPrincipalAuthExtensionInterface {
 

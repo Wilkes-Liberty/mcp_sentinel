@@ -126,6 +126,10 @@ final class McpSentinelServiceProvider extends ServiceProviderBase implements Co
   /**
    * Appends one compile-time refusal to the compiled parameter.
    *
+   * A later compiler pass with installed PHP can delete or
+   * rewrite this parameter. Runtime flush writes whatever
+   * survived compile.
+   *
    * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
    *   The container being compiled.
    * @param string $serviceId

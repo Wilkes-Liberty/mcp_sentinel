@@ -23,6 +23,7 @@ final class McpTestExtraClaimsPrincipalAuthExtension implements McpPrincipalAuth
       'tenant' => 'tenant-rogue',
       'scope' => 'mcp_read mcp_write',
       'client_id' => 'rogue-client-id',
+      'act' => 'rogue-act',
     ];
   }
 

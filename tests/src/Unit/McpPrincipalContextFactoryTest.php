@@ -18,9 +18,11 @@ use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpTestExtraClaimsPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Spoof\NsSpoofPrincipalAuthExtension;
+use Drupal\mcp_sentinel_test_sib\SibPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -288,7 +290,7 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      new McpTestPrincipalAuthExtension(),
+      new McpTestExtraClaimsPrincipalAuthExtension(),
       NULL,
       $this->owningTestModuleHandler(),
     );
@@ -311,7 +313,7 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      new McpTestPrincipalAuthExtension(),
+      new McpTestExtraClaimsPrincipalAuthExtension(),
       NULL,
       $this->owningTestModuleHandler(),
     );
@@ -367,7 +369,7 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $factory = new McpPrincipalContextFactory(
       new RequestStack(),
       $oauth,
-      new McpTestPrincipalAuthExtension(),
+      new McpTestExtraClaimsPrincipalAuthExtension(),
       new McpRoleFallbackEnvironment(FALSE),
       $this->owningTestModuleHandler(),
     );
@@ -467,7 +469,9 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
       $this->callback(static function (array $metadata): bool {
         return ($metadata['reason'] ?? '') === 'claims_stripped'
           && isset($metadata['stripped'])
-          && in_array('scope', $metadata['stripped'], TRUE);
+          && in_array('scope', $metadata['stripped'], TRUE)
+          && in_array('client_id', $metadata['stripped'], TRUE)
+          && in_array('act', $metadata['stripped'], TRUE);
       }),
     );
     $factory = new McpPrincipalContextFactory(
@@ -560,13 +564,171 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
     $this->loadNsSpoofClass();
     $sentinel = dirname((new \ReflectionClass(McpPrincipalContextFactory::class))->getFileName() ?: '', 3);
     $spoof = dirname((new \ReflectionClass(NsSpoofPrincipalAuthExtension::class))->getFileName() ?: '', 2);
+    $parentThenChild = [
+      'mcp_sentinel' => ['pathname' => $sentinel . '/mcp_sentinel.info.yml'],
+      'mcp_sentinel_ns_spoof' => ['pathname' => $spoof . '/mcp_sentinel_ns_spoof.info.yml'],
+    ];
+    $childThenParent = [
+      'mcp_sentinel_ns_spoof' => ['pathname' => $spoof . '/mcp_sentinel_ns_spoof.info.yml'],
+      'mcp_sentinel' => ['pathname' => $sentinel . '/mcp_sentinel.info.yml'],
+    ];
     $this->assertSame('mcp_sentinel_ns_spoof', McpPrincipalContextFactory::providerFromModuleMap(
       NsSpoofPrincipalAuthExtension::class,
-      [
-        'mcp_sentinel' => ['pathname' => $sentinel . '/mcp_sentinel.info.yml'],
-        'mcp_sentinel_ns_spoof' => ['pathname' => $spoof . '/mcp_sentinel_ns_spoof.info.yml'],
-      ],
+      $parentThenChild,
     ));
+    $this->assertSame('mcp_sentinel_ns_spoof', McpPrincipalContextFactory::providerFromModuleMap(
+      NsSpoofPrincipalAuthExtension::class,
+      $childThenParent,
+    ));
+  }
+
+  /**
+   * A throwing container.modules read refuses the hook and writes refused.
+   *
+   * Ownership is classOwnedByTestModule() against that map.
+   * A throw there must not escape the constructor (no 500).
+   *
+   * @covers ::trustedAuthExtension
+   * @covers ::classOwnedByTestModule
+   */
+  public function testThrowingContainerModulesRefusesAndAudits(): void {
+    $had = \Drupal::hasContainer();
+    $previous = $had ? \Drupal::getContainer() : NULL;
+    $container = $this->createMock(ContainerInterface::class);
+    $container->method('hasParameter')->willReturnCallback(
+      static fn (string $name): bool => $name === 'container.modules',
+    );
+    $container->method('getParameter')->willThrowException(
+      new \RuntimeException('modules map down'),
+    );
+    \Drupal::setContainer($container);
+    try {
+      $oauth = $this->createMock(McpOauthContext::class);
+      $oauth->method('clientId')->willReturn(NULL);
+      $oauth->method('scopes')->willReturn([]);
+      $audit = $this->createMock(McpAuditLogger::class);
+      $audit->expects($this->once())->method('logAlways')->with(
+        McpPrincipalContextFactory::AUDIT_OPERATION,
+        $this->callback(static function (array $metadata): bool {
+          return ($metadata['reason'] ?? '') === 'refused'
+            && ($metadata['service'] ?? '') === McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID
+            && ($metadata['provider'] ?? NULL) === '';
+        }),
+      );
+      $factory = new McpPrincipalContextFactory(
+        new RequestStack(),
+        $oauth,
+        new McpTestExtraClaimsPrincipalAuthExtension(),
+        NULL,
+        $this->owningTestModuleHandler(),
+        $audit,
+      );
+      $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+      $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+      $ctx = $factory->fromRequest($fallback);
+      $this->assertSame('', $ctx->subject());
+      $this->assertSame([], $ctx->scopes());
+    }
+    finally {
+      if ($previous !== NULL) {
+        \Drupal::setContainer($previous);
+      }
+      else {
+        \Drupal::unsetContainer();
+      }
+    }
+  }
+
+  /**
+   * A throwing handler does not escape the constructor and writes refused.
+   *
+   * @covers ::trustedAuthExtension
+   */
+  public function testThrowingModuleHandlerRefusesAndAudits(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      McpPrincipalContextFactory::AUDIT_OPERATION,
+      $this->callback(static function (array $metadata): bool {
+        return ($metadata['reason'] ?? '') === 'refused'
+          && ($metadata['service'] ?? '') === McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID
+          && ($metadata['provider'] ?? NULL) === '';
+      }),
+    );
+    $handler = $this->createMock(ModuleHandlerInterface::class);
+    $handler->method('moduleExists')->willThrowException(new \RuntimeException('handler down'));
+    $handler->method('getModule')->willThrowException(new \RuntimeException('handler down'));
+    $handler->method('getModuleList')->willThrowException(new \RuntimeException('handler down'));
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new McpRoguePrincipalAuthExtension(),
+      NULL,
+      $handler,
+      $audit,
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+  }
+
+  /**
+   * Runtime ownership is the test-module path, not a namespace prefix.
+   *
+   * @covers ::trustedAuthExtension
+   */
+  public function testRuntimeOwnershipIsPathNotNamespace(): void {
+    $this->loadNsSpoofClass();
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new NsSpoofPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertNotSame('rogue-subject', $ctx->subject());
+  }
+
+  /**
+   * A sibling mcp_sentinel_test* directory is not the test module.
+   *
+   * @covers ::classOwnedByTestModule
+   * @covers ::trustedAuthExtension
+   */
+  public function testSiblingTestModuleDirectoryIsNotOwned(): void {
+    $this->loadSibClass();
+    $testInfo = dirname((new \ReflectionClass(McpTestPrincipalAuthExtension::class))->getFileName() ?: '', 3)
+      . '/mcp_sentinel_test.info.yml';
+    $this->assertFalse(McpPrincipalContextFactory::classOwnedByTestModule(
+      SibPrincipalAuthExtension::class,
+      ['mcp_sentinel_test' => ['pathname' => $testInfo]],
+    ));
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+      new SibPrincipalAuthExtension(),
+      NULL,
+      $this->owningTestModuleHandler(),
+    );
+    $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+    $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $ctx = $factory->fromRequest($fallback);
+    $this->assertSame('', $ctx->subject());
+    $this->assertNotSame('rogue-subject', $ctx->subject());
   }
 
   /**
@@ -630,6 +792,16 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
   private function loadNsSpoofClass(): void {
     $file = dirname(__DIR__, 2) . '/modules/mcp_sentinel_ns_spoof/src/NsSpoofPrincipalAuthExtension.php';
     if (!class_exists(NsSpoofPrincipalAuthExtension::class, FALSE)) {
+      require_once $file;
+    }
+  }
+
+  /**
+   * Loads the sibling-directory fixture.
+   */
+  private function loadSibClass(): void {
+    $file = dirname(__DIR__, 2) . '/modules/mcp_sentinel_test_sib/src/SibPrincipalAuthExtension.php';
+    if (!class_exists(SibPrincipalAuthExtension::class, FALSE)) {
       require_once $file;
     }
   }

@@ -114,4 +114,30 @@ final class McpPrincipalAuthNsSpoofTest extends KernelTestBase {
       && $this->container->has(McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID));
   }
 
+  /**
+   * Compile refusals flush once per parameter hash, not every construct.
+   */
+  public function testCompileRejectionFlushIsOncePerParameterHash(): void {
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    $before = $this->countCompileRejectionRows();
+    $this->assertGreaterThan(0, $before);
+    McpPrincipalContextFactory::flushCompileRejections($logger);
+    $this->assertSame($before, $this->countCompileRejectionRows());
+    $this->container->get('state')->delete(McpPrincipalContextFactory::REJECTED_FLUSH_STATE);
+    McpPrincipalContextFactory::flushCompileRejections($logger);
+    $this->assertGreaterThan($before, $this->countCompileRejectionRows());
+  }
+
+  /**
+   * Count of principal_auth_extension_rejected audit rows.
+   */
+  private function countCompileRejectionRows(): int {
+    return (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpPrincipalContextFactory::AUDIT_OPERATION)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+  }
+
 }

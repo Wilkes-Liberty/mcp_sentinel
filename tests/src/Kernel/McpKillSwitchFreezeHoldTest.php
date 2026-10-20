@@ -1520,6 +1520,10 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     );
     $row = $this->killSwitch()->status($human);
     $this->assertIsArray($row);
+    $this->assertGreaterThan(
+      $this->container->get('datetime.time')->getRequestTime(),
+      (int) $row['block_until'],
+    );
     $this->assertTrue($this->killSwitch()->isKilled('', $human->key));
     $this->assertSame(604800, $second->ttl);
   }

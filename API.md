@@ -146,23 +146,29 @@ sources skip that scope check. JSON:API, GraphQL, and
   `mcp_sentinel_test` (never enable on a live site) registers
   `mcp_sentinel_test.principal_auth_extension`. Production
   consults that hook only after its own admission checks
-  (fallback stamp, unproxied hop, `permitted()`; claimless
-  predicate before deferral) and never takes scopes from it.
+  (fallback stamp and `permitted()`, which refuses a
+  proxied hop; claimless predicate before deferral) and
+  never takes scopes from it.
   `McpSentinelServiceProvider` removes the legacy
   `mcp_sentinel.principal_auth_extension` id and a
   namespaced definition that `mcp_sentinel_test` does
-  not own (real module path or provider against the
-  live installed-module list, not a class namespace
-  prefix), in a `TYPE_BEFORE_OPTIMIZATION`
-  (-1000) compiler pass. A missing `module_handler`
-  is resolved from the live list or the hook is
-  refused. The factory and subscriber fail closed on
-  the wired object; the subscriber re-checks before
+  not own (real module path against
+  `container.modules`, the same map the compiler pass
+  uses, not `@module_handler`, not a class namespace
+  prefix, and not a provider name), in a
+  `TYPE_BEFORE_OPTIMIZATION` (-1000) compiler pass.
+  The factory and subscriber fail closed on the wired
+  object; the subscriber re-checks before
   `deferClaimlessSeal()`. A refused wired object, a
   compile-time removal, and stripped claims each write
   an `audit_chain` row (`refused`, or `claims_stripped`
-  when extra keys are dropped). Provider attribution
-  uses the longest path prefix.
+  when extra keys are dropped). Compile-time refusals
+  flush once per compiled parameter hash (state-keyed:
+  once per rebuild, not every request). A later
+  compiler pass with installed PHP can delete or forge
+  `container.modules` or the compile-refusal
+  parameter. Provider attribution uses the longest
+  path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb` (last hook is 10039). Audit enabled
   modules for a `mcp_sentinel.principal_auth_extension`

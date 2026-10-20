@@ -9,7 +9,10 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_rogue_auth\LyingTestModulePathHandler;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
+use Drupal\mcp_sentinel_rogue_auth\StubOwningTestModuleHandler;
+use Drupal\mcp_sentinel_test\Service\McpTestExtraClaimsPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Spoof\SpoofedPrincipalAuthExtension;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
@@ -25,9 +28,12 @@ use Symfony\Component\HttpFoundation\Request;
  * Alias, later-pass, decorate, and rewire attacks stay denied.
  *
  * Each attack is applied during container compile. A stamped,
- * unproxied PATCH must stay claimless. Removing the guard
- * (process no-op or trustedAuthExtension identity) admits
- * rogue-subject; those mutants are shown red then restored.
+ * unproxied PATCH must stay claimless. Compile-stripped
+ * paths assert the hook is gone and a flushed row names
+ * service, reason, and provider. Runtime-refuse paths
+ * assert a row the compile flush cannot explain. Removing
+ * the guard, container.modules ownership, or runtime
+ * recordRejection() admits rogue-subject or drops that row.
  *
  * @group mcp_sentinel
  *
@@ -83,6 +89,9 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       'testArgumentRewireIsDenied' => 'rewire',
       'testSpoofedTestNamespaceClassIsDenied' => 'spoof',
       'testNullModuleHandlerRewireIsDenied' => 'null_handler',
+      'testStubModuleHandlerRewireIsDenied' => 'stub_handler',
+      'testStubModuleHandlerStillAdmitsOwnedExtension' => 'stub_owned',
+      'testDecoratedModuleHandlerRewireIsDenied' => 'decorated_handler',
       default => '',
     };
     parent::setUp();
@@ -117,6 +126,9 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       'rewire' => $this->registerRewire($container),
       'spoof' => $this->registerSpoof($container),
       'null_handler' => $this->registerNullHandler($container),
+      'stub_handler' => $this->registerStubHandler($container),
+      'stub_owned' => $this->registerStubOwnedHandler($container),
+      'decorated_handler' => $this->registerDecoratedHandler($container),
       default => NULL,
     };
   }
@@ -126,6 +138,8 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testAliasOnNamespacedIdIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertNamespacedHookRemoved();
+    $this->assertCompileFlushedRejection('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -133,6 +147,11 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testLaterBeforeRemovingPassIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertCompileParameterHas(
+      McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
+      'mcp_sentinel_rogue_auth',
+    );
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -140,6 +159,11 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testLaterRemovePassIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertCompileParameterHas(
+      McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
+      'mcp_sentinel_rogue_auth',
+    );
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -147,6 +171,11 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testLaterAfterRemovingPassIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertCompileParameterHas(
+      McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
+      'mcp_sentinel_rogue_auth',
+    );
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -154,6 +183,8 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testDecorateWithTestModuleOnIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertNamespacedHookRemoved();
+    $this->assertCompileFlushedRejection('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -161,6 +192,8 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testArgumentRewireIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertNamespacedHookRemoved();
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -168,6 +201,8 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testSpoofedTestNamespaceClassIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
+    $this->assertNamespacedHookRemoved();
+    $this->assertCompileFlushedRejection('mcp_sentinel');
   }
 
   /**
@@ -175,7 +210,48 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   public function testNullModuleHandlerRewireIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
-    $this->assertRefusedAuditRow();
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
+  }
+
+  /**
+   * Rewiring the handler to a stub that owns the rogue path is denied.
+   */
+  public function testStubModuleHandlerRewireIsDenied(): void {
+    $this->assertStampedUnproxiedPatchDenied();
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
+  }
+
+  /**
+   * A stub handler does not block an owned ExtraClaims hook.
+   *
+   * Ownership is container.modules, so ExtraClaims is
+   * admitted. Scopes and act stay stripped.
+   */
+  public function testStubModuleHandlerStillAdmitsOwnedExtension(): void {
+    $request = Request::create('/jsonapi/node/page', 'PATCH');
+    $request->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $this->assertSame('rogue-subject', $ctx->subject());
+    $this->assertSame([], $ctx->scopes());
+    $this->assertArrayNotHasKey('act', $ctx->keyClaims());
+  }
+
+  /**
+   * A decorated live handler that lies about the test path is denied.
+   *
+   * The decorator is the live @module_handler. Ownership that
+   * asks it admits the rewired rogue. container.modules does not.
+   */
+  public function testDecoratedModuleHandlerRewireIsDenied(): void {
+    $this->assertStampedUnproxiedPatchDenied();
+    $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }
 
   /**
@@ -197,9 +273,13 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
     $this->assertSame([], $ctx->scopes());
     $this->assertNotSame('rogue-subject', $ctx->subject());
 
-    $this->expectException(McpPrincipalContextDeniedException::class);
-    $this->container->get('mcp_sentinel.principal_context_dispatcher')
-      ->assertDispatchAllowed([], 'jsonapi', [], [], ['mcp_write']);
+    try {
+      $this->container->get('mcp_sentinel.principal_context_dispatcher')
+        ->assertDispatchAllowed([], 'jsonapi', [], [], ['mcp_write']);
+      $this->fail('A claimless PATCH must stay denied.');
+    }
+    catch (McpPrincipalContextDeniedException) {
+    }
   }
 
   /**
@@ -349,21 +429,183 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
   }
 
   /**
-   * Latest principal_auth_extension_rejected row is refused.
+   * Point factory and subscriber at a rogue id and a lying handler.
    */
-  private function assertRefusedAuditRow(): void {
-    $row = $this->container->get('database')
+  private function registerStubHandler(ContainerBuilder $container): void {
+    $container->register(
+      'mcp_sentinel_bypass.rogue',
+      McpRoguePrincipalAuthExtension::class,
+    )->setPublic(TRUE);
+    $container->register(
+      'mcp_sentinel_bypass.stub_handler',
+      StubOwningTestModuleHandler::class,
+    )->setPublic(TRUE);
+    $rogue = new Reference('mcp_sentinel_bypass.rogue');
+    $stub = new Reference('mcp_sentinel_bypass.stub_handler');
+    $container->getDefinition('mcp_sentinel.principal_context_factory')
+      ->setArgument(2, $rogue)
+      ->setArgument(4, $stub);
+    $container->getDefinition('mcp_sentinel.principal_context_subscriber')
+      ->setArgument(2, $rogue)
+      ->setArgument(3, $stub);
+  }
+
+  /**
+   * Point factory and subscriber at ExtraClaims and a stub handler.
+   */
+  private function registerStubOwnedHandler(ContainerBuilder $container): void {
+    $container->register(
+      'mcp_sentinel_bypass.owned',
+      McpTestExtraClaimsPrincipalAuthExtension::class,
+    )->setPublic(TRUE);
+    $container->register(
+      'mcp_sentinel_bypass.stub_handler',
+      StubOwningTestModuleHandler::class,
+    )->setPublic(TRUE);
+    $owned = new Reference('mcp_sentinel_bypass.owned');
+    $stub = new Reference('mcp_sentinel_bypass.stub_handler');
+    $container->getDefinition('mcp_sentinel.principal_context_factory')
+      ->setArgument(2, $owned)
+      ->setArgument(4, $stub);
+    $container->getDefinition('mcp_sentinel.principal_context_subscriber')
+      ->setArgument(2, $owned)
+      ->setArgument(3, $stub);
+  }
+
+  /**
+   * Decorate @module_handler and rewire the factory to the rogue.
+   */
+  private function registerDecoratedHandler(ContainerBuilder $container): void {
+    $container->register(
+      'mcp_sentinel_bypass.rogue',
+      McpRoguePrincipalAuthExtension::class,
+    )->setPublic(TRUE);
+    $container->register(
+      'mcp_sentinel_bypass.lying_handler',
+      LyingTestModulePathHandler::class,
+    )
+      ->setPublic(TRUE)
+      ->setDecoratedService('module_handler')
+      ->setArgument(0, new Reference('mcp_sentinel_bypass.lying_handler.inner'));
+    $rogue = new Reference('mcp_sentinel_bypass.rogue');
+    $container->getDefinition('mcp_sentinel.principal_context_factory')
+      ->setArgument(2, $rogue);
+    $container->getDefinition('mcp_sentinel.principal_context_subscriber')
+      ->setArgument(2, $rogue);
+  }
+
+  /**
+   * Namespaced hook id is gone after compile.
+   */
+  private function assertNamespacedHookRemoved(): void {
+    $id = McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID;
+    $this->assertFalse($this->container->has($id));
+  }
+
+  /**
+   * Compiled refusal list names this service, reason, and provider.
+   *
+   * @param string $serviceId
+   *   Expected service id.
+   * @param string $provider
+   *   Expected provider module.
+   */
+  private function assertCompileParameterHas(
+    string $serviceId,
+    string $provider,
+  ): void {
+    $this->assertTrue(
+      $this->container->hasParameter(McpPrincipalContextFactory::REJECTED_PARAMETER),
+    );
+    $rows = $this->container->getParameter(
+      McpPrincipalContextFactory::REJECTED_PARAMETER,
+    );
+    $this->assertIsArray($rows);
+    $found = FALSE;
+    foreach ($rows as $row) {
+      if (!is_array($row)) {
+        continue;
+      }
+      if (($row['service'] ?? '') === $serviceId
+        && ($row['reason'] ?? '') === 'refused'
+        && ($row['provider'] ?? '') === $provider) {
+        $found = TRUE;
+        break;
+      }
+    }
+    $this->assertTrue($found);
+  }
+
+  /**
+   * Compile flush wrote service, refused, and this provider.
+   *
+   * @param string $provider
+   *   Expected provider module.
+   */
+  private function assertCompileFlushedRejection(string $provider): void {
+    $found = FALSE;
+    foreach ($this->refusedAuditRows() as $metadata) {
+      if (($metadata['service'] ?? '') === McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID
+        && ($metadata['reason'] ?? '') === 'refused'
+        && ($metadata['provider'] ?? '') === $provider) {
+        $found = TRUE;
+        break;
+      }
+    }
+    $this->assertTrue($found);
+  }
+
+  /**
+   * A refused row the compile flush cannot explain, with provider.
+   *
+   * @param string $provider
+   *   Expected provider on the latest runtime row.
+   */
+  private function assertRuntimeRefusedAudit(string $provider): void {
+    $compiled = [];
+    if ($this->container->hasParameter(McpPrincipalContextFactory::REJECTED_PARAMETER)) {
+      $rows = $this->container->getParameter(
+        McpPrincipalContextFactory::REJECTED_PARAMETER,
+      );
+      if (is_array($rows)) {
+        $compiled = $rows;
+      }
+    }
+    $logged = $this->refusedAuditRows();
+    $this->assertGreaterThan(
+      count($compiled),
+      count($logged),
+      'Runtime recordRejection() must write a row the compile flush cannot explain.',
+    );
+    $latest = $logged === [] ? NULL : $logged[array_key_last($logged)];
+    $this->assertIsArray($latest);
+    $this->assertSame(
+      McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
+      $latest['service'] ?? '',
+    );
+    $this->assertSame('refused', $latest['reason'] ?? '');
+    $this->assertSame($provider, $latest['provider'] ?? '');
+  }
+
+  /**
+   * Decoded principal_auth_extension_rejected rows, oldest first.
+   *
+   * @return list<array<string, mixed>>
+   *   Metadata arrays.
+   */
+  private function refusedAuditRows(): array {
+    $result = $this->container->get('database')
       ->select('audit_chain_log', 'l')
       ->fields('l', ['metadata'])
       ->condition('l.operation', McpPrincipalContextFactory::AUDIT_OPERATION)
-      ->orderBy('l.id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertIsArray($row);
-    $metadata = $this->container->get('mcp_sentinel.audit_logger')
-      ->decodeMetadata((string) $row['metadata']);
-    $this->assertSame('refused', $metadata['reason'] ?? '');
+      ->orderBy('l.id', 'ASC')
+      ->execute();
+    $decoded = [];
+    $logger = $this->container->get('mcp_sentinel.audit_logger');
+    foreach ($result as $row) {
+      $decoded[] = $logger->decodeMetadata((string) $row->metadata);
+    }
+    return $decoded;
   }
 
 }
