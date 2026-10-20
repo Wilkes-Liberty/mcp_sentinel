@@ -26,8 +26,14 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
    * Writes the fake info.yml at runtime so phpunit's extension
    * scan (which keys modules by info.yml basename) does not
    * steal the mcp_sentinel_test namespace.
+   *
+   * @param \Drupal\Core\Extension\ModuleHandlerInterface $inner
+   *   The live handler. The stub is not a decorator; this is
+   *   only used to read the registered mcp_sentinel path.
    */
-  public function __construct() {
+  public function __construct(
+    private readonly ModuleHandlerInterface $inner,
+  ) {
     $file = (new \ReflectionClass(McpRoguePrincipalAuthExtension::class))->getFileName();
     $this->infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
     if (!is_file($this->infoPathname)) {
@@ -213,9 +219,7 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
    */
   private function fakeTestModule(): Extension {
     $root = DRUPAL_ROOT;
-    // The stub is not a decorator; the live handler still knows the
-    // registered mcp_sentinel path.
-    $relative = \Drupal::service('module_handler')->getModule('mcp_sentinel')->getPath()
+    $relative = $this->inner->getModule('mcp_sentinel')->getPath()
       . '/tests/modules/mcp_sentinel_rogue_auth/src/Service/mcp_sentinel_test.info.yml';
     if (!is_file($root . '/' . $relative)) {
       throw new \LogicException(sprintf(
