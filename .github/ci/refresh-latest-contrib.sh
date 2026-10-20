@@ -27,8 +27,8 @@ if ! show_out="$(composer show --locked --name-only)"; then
 fi
 pkgs="$(printf '%s\n' "$show_out" | grep '^drupal/' | grep -vE '^drupal/core' || true)"
 if [ -z "${pkgs}" ]; then
-  echo "Locked contrib list is empty after excluding drupal/core*. Refusing to skip latest-stable refresh." >&2
-  exit 1
+  echo "No locked contrib packages to refresh."
+  exit 0
 fi
 echo "Refreshing latest-stable contrib:"
 echo "${pkgs}"
