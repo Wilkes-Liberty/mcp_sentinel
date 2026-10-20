@@ -1339,6 +1339,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     steps:
       - name: Checkout the module as the project root
         uses: actions/checkout@v7
@@ -1465,7 +1466,7 @@ jobs:
           echo "custom symlink: $(readlink web/modules/custom/mcp_sentinel)"
 
       - name: PHPUnit — Kernel (drupal.org layout)
-        working-directory: ${{ runner.temp }}/drupal
+        timeout-minutes: 40
         env:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
@@ -1473,8 +1474,22 @@ jobs:
           MIN_TESTS: '400'
         run: |
           set -euo pipefail
+          # Run from the checkout so web/autoload.php, vendor/, and
+          # phpunit.xml live in one tree (gitlab_templates does this).
+          # A phpunit invoked from the composer temp dir with -c pointed
+          # at web/ hung for 90+ minutes; the contrib-layout Kernel suite
+          # on the same SHA finished in ~22.
           config="${GITHUB_WORKSPACE}/web/core/phpunit.xml.dist"
           module="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+          phpunit="${GITHUB_WORKSPACE}/vendor/bin/phpunit"
+
+          # The fixture that fatals on this layout. Run it first so the
+          # Extension assertion is visible without waiting for the rest.
+          echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
+          "${phpunit}" -c "${config}" \
+            --log-junit "${GITHUB_WORKSPACE}/junit-do-bypass.xml" \
+            "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
+
           suites=()
           for dir in "${module}"/tests/src/Kernel \
                      "${module}"/modules/*/tests/src/Kernel; do
@@ -1488,12 +1503,12 @@ jobs:
           for dir in "${suites[@]}"; do
             i=$((i + 1))
             echo "--- ${dir#"${module}/"}"
-            vendor/bin/phpunit -c "${config}" \
-              --log-junit "${PWD}/junit-do-${i}.xml" \
+            "${phpunit}" -c "${config}" \
+              --log-junit "${GITHUB_WORKSPACE}/junit-do-${i}.xml" \
               "${dir}"
           done
-          total="$(cat junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
-          echo "Collected ${total} Kernel tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
+          total="$(cat "${GITHUB_WORKSPACE}"/junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          echo "Collected ${total} Kernel tests across $((${#suites[@]} + 1)) invocations (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Kernel tests, below the floor of ${MIN_TESTS}."
             exit 1
@@ -1522,7 +1537,25 @@ jobs:
       - cspell
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+        if: always()
+
+      - name: Forbid hardcoded installer paths in tests
+        if: always()
+        run: |
+          set -euo pipefail
+          # A fixture that spells either installer path cannot see the
+          # other venue. Derive the path from the registered module.
+          # Runs even when a PHPUnit job already failed so the literal
+          # is visible on the same red run as the layout assertion.
+          if grep -R -n -E --binary-files=without-match \
+            'modules/(contrib|custom)/mcp_sentinel' tests/; then
+            echo "::error::tests/ hardcodes a modules/contrib or modules/custom mcp_sentinel path."
+            exit 1
+          fi
+
       - name: Require every test job to pass or be skipped
+        if: always()
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
@@ -1533,16 +1566,3 @@ jobs:
               *) echo "::error::A test job ended with '${result}'."; exit 1 ;;
             esac
           done
-
-      - uses: actions/checkout@v7
-
-      - name: Forbid hardcoded installer paths in tests
-        run: |
-          set -euo pipefail
-          # A fixture that spells either installer path cannot see the
-          # other venue. Derive the path from the registered module.
-          if grep -R -n -E --binary-files=without-match \
-            'modules/(contrib|custom)/mcp_sentinel' tests/; then
-            echo "::error::tests/ hardcodes a modules/contrib or modules/custom mcp_sentinel path."
-            exit 1
-          fi
