@@ -9,15 +9,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - `McpPrincipalAuthGuardBypassTest::testDecoratedModuleHandlerRewireIsDenied`
   no longer fatals on drupal.org GitLab CI when the
-  checkout sits outside the docroot and the module is
-  reached through a symlink. The rogue module-handler
-  fixture derives the fake `mcp_sentinel_test.info.yml`
-  from the registered `mcp_sentinel` path
-  (`getModule('mcp_sentinel')->getPath()`) and throws
-  if that file is missing under the app root
-  (DEV-1049). GitHub Actions now runs the Kernel suite
-  in that layout so a hardcoded installer path cannot
-  merge again.
+  module's real path sits outside the docroot (DEV-1049).
+  #346 merged a layout job that still used the unfixed
+  fixture (`getFileName()` plus a `dirname(..., 6)`
+  fallback) and ran PHP with assertions off, so GitHub
+  stayed green. The rogue-auth fixture now derives the
+  fake `mcp_sentinel_test.info.yml` from
+  `getModule('mcp_sentinel')->getPath()` and throws if
+  that file is missing under the app root. GitHub Actions
+  runs the Kernel suite in a gitlab_templates-shaped
+  layout with `zend.assertions=1`. tests-gate greps
+  `tests/` for `modules/(contrib|custom)/mcp_sentinel`.
 - Latest-stable contrib refresh fails the job when
   `composer show --locked` fails or lists no contrib,
   instead of skipping the refresh and exiting 0
