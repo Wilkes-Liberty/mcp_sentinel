@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel_rogue_auth;
 
-use Drupal\Core\Extension\Extension;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
@@ -15,10 +14,7 @@ use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
  */
 final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
 
-  /**
-   * Absolute path of the fake mcp_sentinel_test.info.yml.
-   */
-  private readonly string $infoPathname;
+  use FakeTestModuleExtensionTrait;
 
   /**
    * Constructs the stub.
@@ -26,13 +22,19 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
    * Writes the fake info.yml at runtime so phpunit's extension
    * scan (which keys modules by info.yml basename) does not
    * steal the mcp_sentinel_test namespace.
+   *
+   * @param \Drupal\Core\Extension\ModuleHandlerInterface $inner
+   *   The live handler. The stub is not a decorator; this is
+   *   only used to read the registered mcp_sentinel path.
    */
-  public function __construct() {
+  public function __construct(
+    private readonly ModuleHandlerInterface $inner,
+  ) {
     $file = (new \ReflectionClass(McpRoguePrincipalAuthExtension::class))->getFileName();
-    $this->infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
-    if (!is_file($this->infoPathname)) {
+    $infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
+    if (!is_file($infoPathname)) {
       file_put_contents(
-        $this->infoPathname,
+        $infoPathname,
         "name: 'MCP Sentinel stub-handler fake'\ntype: module\nhidden: true\n",
       );
     }
@@ -40,7 +42,7 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
       if (is_file($path)) {
         unlink($path);
       }
-    }, $this->infoPathname);
+    }, $infoPathname);
   }
 
   /**
@@ -206,18 +208,6 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
    */
   public function getName($module) {
     return $module;
-  }
-
-  /**
-   * Extension whose pathname is the fake test-module info.yml.
-   */
-  private function fakeTestModule(): Extension {
-    $root = defined('DRUPAL_ROOT') ? (string) DRUPAL_ROOT : '';
-    $pathname = $this->infoPathname;
-    if ($root !== '' && str_starts_with($pathname, $root . '/')) {
-      $pathname = substr($pathname, strlen($root) + 1);
-    }
-    return new Extension($root !== '' ? $root : dirname($this->infoPathname, 6), 'module', $pathname);
   }
 
 }

@@ -1328,16 +1328,13 @@ jobs:
 
   # drupal.org gitlab_templates layout (DEV-1049). The matrix job above
   # installs this module through a composer path repo at
-  # web/modules/contrib/mcp_sentinel, which is why GitHub stayed green
-  # while pipeline 1008628 failed: the checkout sits outside the
-  # docroot and gitlab_templates symlink_project.php mounts each
-  # project entry into web/modules/custom/mcp_sentinel. A single
-  # directory symlink of the checkout is not enough: Drupal then
-  # includes the rogue class through a path that starts with
-  # DRUPAL_ROOT, getFileName() stays under the docroot, and the
-  # unfixed fakeTestModule strips that prefix. This job rebuilds
-  # the per-entry mount and loads the rogue class from the checkout
-  # so getFileName() is outside the docroot.
+  # web/modules/contrib/mcp_sentinel. On d.o the checkout contains
+  # web/ (DRUPAL_ROOT=$CI_PROJECT_DIR/web) and the module's real
+  # path sits outside that docroot; symlink_project.php mounts each
+  # project entry into web/modules/custom/mcp_sentinel. GitHub
+  # missed Extension.php:75 because setup-php leaves zend.assertions
+  # off. This job puts web/ and vendor/ in the checkout, runs
+  # symlink_project.php, and enables assertions.
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
@@ -1435,74 +1432,80 @@ jobs:
           COMPOSER_DIR: ${{ runner.temp }}/drupal
         run: |
           set -euo pipefail
-          # Docroot stays outside the checkout. gitlab_templates
-          # symlink_project.php makes per-entry symlinks in
-          # web/modules/custom/<project> back to the checkout (never
-          # a copy, never a single directory symlink of a tree that
-          # may contain web/). Drop the path-repo contrib link so a
-          # fixture that hardcodes that GitHub path cannot hide here.
-          rm -f "${COMPOSER_DIR}/web/modules/contrib/mcp_sentinel"
-          rm -rf "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel"
-          mkdir -p "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel"
-          for item in $(ls -A "${GITHUB_WORKSPACE}"); do
-            case "${item}" in
-              .git|.idea|web|vendor|drush|recipes) continue ;;
-            esac
-            ln -sfn "${GITHUB_WORKSPACE}/${item}" \
-              "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel/${item}"
-          done
-          # Drupal's classloader includes through the custom mount.
-          # Composer files-autoload loads the rogue class from the
-          # checkout so getFileName() matches d.o (__DIR__ outside
-          # the docroot), including PHPUnit separate processes.
+          # d.o: DRUPAL_ROOT=$CI_PROJECT_DIR/web. Move web/ and
+          # vendor/ into the checkout, then run symlink_project.php
+          # so each project entry is a symlink under
+          # web/modules/custom/mcp_sentinel. The module's real path
+          # sits outside the docroot. Drop the path-repo contrib
+          # link so a fixture that hardcodes that GitHub path
+          # cannot hide here.
+          export PROJECT_FILES
+          PROJECT_FILES="$(ls -A "${GITHUB_WORKSPACE}")"
+          rm -rf "${GITHUB_WORKSPACE}/web" "${GITHUB_WORKSPACE}/vendor"
+          mv "${COMPOSER_DIR}/web" "${GITHUB_WORKSPACE}/web"
+          mv "${COMPOSER_DIR}/vendor" "${GITHUB_WORKSPACE}/vendor"
+          rm -f "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel"
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          retry curl -fsSL -o "${GITHUB_WORKSPACE}/symlink_project.php" \
+            "https://git.drupalcode.org/project/gitlab_templates/-/raw/default-ref/scripts/symlink_project.php"
           (
-            cd "${COMPOSER_DIR}"
-            iface="${GITHUB_WORKSPACE}/src/Service/McpPrincipalAuthExtensionInterface.php"
-            rogue="${GITHUB_WORKSPACE}/tests/modules/mcp_sentinel_rogue_auth/src/Service/McpRoguePrincipalAuthExtension.php"
-            php -r '
-              $file = "composer.json";
-              $json = json_decode(file_get_contents($file), TRUE, 512, JSON_THROW_ON_ERROR);
-              $files = $json["autoload"]["files"] ?? [];
-              foreach (array_slice($argv, 1) as $path) {
-                $files[] = $path;
-              }
-              $json["autoload"]["files"] = array_values(array_unique($files));
-              file_put_contents($file, json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-            ' -- "${iface}" "${rogue}"
-            composer dump-autoload --no-interaction
+            cd "${GITHUB_WORKSPACE}"
+            export DRUPAL_PROJECT_FOLDER="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+            php symlink_project.php
           )
+          rm -f "${GITHUB_WORKSPACE}/symlink_project.php"
+          # setup-php leaves assertions off; d.o phpunit has them on.
+          scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
+          mkdir -p "${RUNNER_TEMP}/php-scan"
+          {
+            printf 'zend.assertions=1\n'
+            printf 'assert.exception=1\n'
+          } > "${RUNNER_TEMP}/php-scan/zz-do-layout.ini"
+          if [ -n "${scan}" ]; then
+            echo "PHP_INI_SCAN_DIR=${scan}:${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
+          else
+            echo "PHP_INI_SCAN_DIR=${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
+          fi
 
       - name: Confirm the drupal.org layout
-        env:
-          COMPOSER_DIR: ${{ runner.temp }}/drupal
         run: |
           set -euo pipefail
-          mount="${COMPOSER_DIR}/web/modules/custom/mcp_sentinel"
+          mount="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
           test -f mcp_sentinel.info.yml \
             || { echo "::error::checkout is not the module project root"; exit 1; }
+          test -d "${GITHUB_WORKSPACE}/web" && test -d "${GITHUB_WORKSPACE}/vendor" \
+            || { echo "::error::web/ and vendor/ must live inside the checkout"; exit 1; }
           test -d "${mount}" && test ! -L "${mount}" \
             || { echo "::error::custom mount must be a real directory of per-entry symlinks, not a directory symlink or copy"; exit 1; }
           test -L "${mount}/tests" && test -L "${mount}/mcp_sentinel.info.yml" \
-            || { echo "::error::tests/ and mcp_sentinel.info.yml must be symlinks back to the checkout"; exit 1; }
+            || { echo "::error::tests/ and mcp_sentinel.info.yml must be symlinks back to the module files"; exit 1; }
           test "$(realpath "${mount}/tests")" = "$(realpath "${GITHUB_WORKSPACE}/tests")" \
-            || { echo "::error::tests symlink does not resolve to the checkout"; exit 1; }
+            || { echo "::error::tests symlink does not resolve to the module tests/ directory"; exit 1; }
           case "$(realpath "${mount}/tests")" in
-            "$(realpath "${COMPOSER_DIR}/web")"*) echo "::error::module realpath is inside the docroot"; exit 1 ;;
+            "$(realpath "${GITHUB_WORKSPACE}/web")"*) echo "::error::module realpath is inside the docroot"; exit 1 ;;
           esac
-          test ! -e "${COMPOSER_DIR}/web/modules/contrib/mcp_sentinel" \
+          test ! -e "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel" \
             || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
-          echo "DRUPAL_ROOT: ${COMPOSER_DIR}/web"
+          echo "DRUPAL_ROOT: ${GITHUB_WORKSPACE}/web"
           echo "tests realpath: $(realpath "${mount}/tests")"
           echo "tests symlink: $(readlink "${mount}/tests")"
-          (
-            cd "${COMPOSER_DIR}"
-            php "${GITHUB_WORKSPACE}/.github/ci/do-layout-confirm-filename.php" \
-              "${COMPOSER_DIR}/web"
-          )
+          php .github/ci/do-layout-confirm-filename.php \
+            "${GITHUB_WORKSPACE}/web"
 
       - name: PHPUnit — Kernel (drupal.org layout)
         timeout-minutes: 40
-        working-directory: ${{ runner.temp }}/drupal
+        working-directory: ${{ github.workspace }}
         env:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
@@ -1513,8 +1516,12 @@ jobs:
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
 
-          # The fixture that fatals on this layout. Run it first so the
-          # Extension assertion is visible without waiting for the rest.
+          # Temporary red-first check: the unfixed algorithm must
+          # still fatal here. PHP_INI_SCAN_DIR enables assertions.
+          echo "--- unfixed fakeTestModule probe"
+          php .github/ci/do-layout-probe-unfixed-extension.php \
+            "${PWD}/web"
+
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
           vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \

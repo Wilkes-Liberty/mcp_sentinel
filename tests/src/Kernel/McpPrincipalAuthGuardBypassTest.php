@@ -439,7 +439,9 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
     $container->register(
       'mcp_sentinel_bypass.stub_handler',
       StubOwningTestModuleHandler::class,
-    )->setPublic(TRUE);
+    )
+      ->setPublic(TRUE)
+      ->setArgument(0, new Reference('module_handler'));
     $rogue = new Reference('mcp_sentinel_bypass.rogue');
     $stub = new Reference('mcp_sentinel_bypass.stub_handler');
     $container->getDefinition('mcp_sentinel.principal_context_factory')
@@ -461,7 +463,9 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
     $container->register(
       'mcp_sentinel_bypass.stub_handler',
       StubOwningTestModuleHandler::class,
-    )->setPublic(TRUE);
+    )
+      ->setPublic(TRUE)
+      ->setArgument(0, new Reference('module_handler'));
     $owned = new Reference('mcp_sentinel_bypass.owned');
     $stub = new Reference('mcp_sentinel_bypass.stub_handler');
     $container->getDefinition('mcp_sentinel.principal_context_factory')
