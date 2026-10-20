@@ -214,12 +214,8 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   private function fakeTestModule(): Extension {
     $root = defined('DRUPAL_ROOT') ? (string) DRUPAL_ROOT : '';
     $pathname = $this->infoPathname;
-    $relative = 'modules/contrib/mcp_sentinel/tests/modules/mcp_sentinel_rogue_auth/src/Service/mcp_sentinel_test.info.yml';
     if ($root !== '' && str_starts_with($pathname, $root . '/')) {
       $pathname = substr($pathname, strlen($root) + 1);
-    }
-    elseif ($root !== '' && is_file($root . '/' . $relative)) {
-      $pathname = $relative;
     }
     return new Extension($root !== '' ? $root : dirname($this->infoPathname, 6), 'module', $pathname);
   }
