@@ -1457,8 +1457,18 @@ jobs:
           # the docroot), including PHPUnit separate processes.
           (
             cd "${COMPOSER_DIR}"
-            composer config autoload.files --json \
-              "[\"${GITHUB_WORKSPACE}/src/Service/McpPrincipalAuthExtensionInterface.php\",\"${GITHUB_WORKSPACE}/tests/modules/mcp_sentinel_rogue_auth/src/Service/McpRoguePrincipalAuthExtension.php\"]"
+            iface="${GITHUB_WORKSPACE}/src/Service/McpPrincipalAuthExtensionInterface.php"
+            rogue="${GITHUB_WORKSPACE}/tests/modules/mcp_sentinel_rogue_auth/src/Service/McpRoguePrincipalAuthExtension.php"
+            php -r '
+              $file = "composer.json";
+              $json = json_decode(file_get_contents($file), TRUE, 512, JSON_THROW_ON_ERROR);
+              $files = $json["autoload"]["files"] ?? [];
+              foreach (array_slice($argv, 1) as $path) {
+                $files[] = $path;
+              }
+              $json["autoload"]["files"] = array_values(array_unique($files));
+              file_put_contents($file, json_encode($json, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+            ' -- "${iface}" "${rogue}"
             composer dump-autoload --no-interaction
           )
 
