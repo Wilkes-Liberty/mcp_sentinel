@@ -17,10 +17,16 @@ if [ -n "${repo_cache}" ] && [ -d "${repo_cache}" ]; then
   rm -rf "${repo_cache}"
 fi
 
-pkgs="$(composer show --locked --name-only | grep '^drupal/' | grep -vE '^drupal/core' || true)"
+# Do not swallow a failed `composer show`. `|| true` here produced an
+# empty list, skipped the refresh, and exited 0 — GitHub then tested
+# pinned contrib while appearing to test latest-stable (DEV-1022).
+if ! pkgs="$(composer show --locked --name-only | grep '^drupal/' | grep -vE '^drupal/core')"; then
+  echo "Failed to list locked contrib for latest-stable refresh (composer show --locked failed, or no drupal/* packages remain after excluding drupal/core*)." >&2
+  exit 1
+fi
 if [ -z "${pkgs}" ]; then
-  echo "No locked contrib packages to refresh."
-  exit 0
+  echo "Locked contrib list is empty after excluding drupal/core*. Refusing to skip latest-stable refresh." >&2
+  exit 1
 fi
 echo "Refreshing latest-stable contrib:"
 echo "${pkgs}"

@@ -1,0 +1,20 @@
+name: Latest-stable contrib refresh
+
+# Dedicated fail-closed check for refresh-latest-contrib.sh. A swallowed
+# `composer show` (`|| true` + exit 0 on an empty list) must fail this
+# workflow, not skip the refresh while the suite stays green (DEV-1022).
+on:
+  pull_request: { branches: ['**'] }
+  push: { branches: ['1.x'] }
+
+permissions:
+  contents: read
+
+jobs:
+  fail-closed:
+    name: composer show failure fails the refresh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: composer show failure and empty list must fail the refresh
+        run: bash .github/ci/test-refresh-latest-contrib-fail-closed.sh
