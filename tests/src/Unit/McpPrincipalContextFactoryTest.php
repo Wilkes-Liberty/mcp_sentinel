@@ -22,6 +22,7 @@ use Drupal\mcp_sentinel_test_sib\SibPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -579,6 +580,63 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
       NsSpoofPrincipalAuthExtension::class,
       $childThenParent,
     ));
+  }
+
+  /**
+   * A throwing container.modules read refuses the hook and writes refused.
+   *
+   * Ownership is classOwnedByTestModule() against that map.
+   * A throw there must not escape the constructor (no 500).
+   *
+   * @covers ::trustedAuthExtension
+   * @covers ::classOwnedByTestModule
+   */
+  public function testThrowingContainerModulesRefusesAndAudits(): void {
+    $had = \Drupal::hasContainer();
+    $previous = $had ? \Drupal::getContainer() : NULL;
+    $container = $this->createMock(ContainerInterface::class);
+    $container->method('hasParameter')->willReturnCallback(
+      static fn (string $name): bool => $name === 'container.modules',
+    );
+    $container->method('getParameter')->willThrowException(
+      new \RuntimeException('modules map down'),
+    );
+    \Drupal::setContainer($container);
+    try {
+      $oauth = $this->createMock(McpOauthContext::class);
+      $oauth->method('clientId')->willReturn(NULL);
+      $oauth->method('scopes')->willReturn([]);
+      $audit = $this->createMock(McpAuditLogger::class);
+      $audit->expects($this->once())->method('logAlways')->with(
+        McpPrincipalContextFactory::AUDIT_OPERATION,
+        $this->callback(static function (array $metadata): bool {
+          return ($metadata['reason'] ?? '') === 'refused'
+            && ($metadata['service'] ?? '') === McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID
+            && ($metadata['provider'] ?? NULL) === '';
+        }),
+      );
+      $factory = new McpPrincipalContextFactory(
+        new RequestStack(),
+        $oauth,
+        new McpTestExtraClaimsPrincipalAuthExtension(),
+        NULL,
+        $this->owningTestModuleHandler(),
+        $audit,
+      );
+      $fallback = Request::create('/jsonapi/node/page', 'PATCH');
+      $fallback->attributes->set(McpPrincipalContext::FALLBACK_ATTRIBUTE, TRUE);
+      $ctx = $factory->fromRequest($fallback);
+      $this->assertSame('', $ctx->subject());
+      $this->assertSame([], $ctx->scopes());
+    }
+    finally {
+      if ($previous !== NULL) {
+        \Drupal::setContainer($previous);
+      }
+      else {
+        \Drupal::unsetContainer();
+      }
+    }
   }
 
   /**

@@ -120,20 +120,31 @@ final class McpPrincipalContextFactory {
     if ($extension === NULL) {
       return NULL;
     }
-    $modules = self::containerModules();
-    if ($modules !== []) {
-      $owned = isset($modules['mcp_sentinel_test'])
-        && self::classOwnedByTestModule($extension::class, $modules);
-      $provider = self::providerFromModuleMap($extension::class, $modules);
+    try {
+      $modules = self::containerModules();
+      if ($modules !== []) {
+        $owned = isset($modules['mcp_sentinel_test'])
+          && self::classOwnedByTestModule($extension::class, $modules);
+        $provider = self::providerFromModuleMap($extension::class, $modules);
+      }
+      else {
+        $owned = self::classOwnedByTestModule($extension::class, []);
+        $provider = $moduleHandler !== NULL
+          ? self::providerOf($extension, $moduleHandler)
+          : '';
+      }
+      if ($owned) {
+        return $extension;
+      }
     }
-    else {
-      $owned = self::classOwnedByTestModule($extension::class, []);
-      $provider = $moduleHandler !== NULL
-        ? self::providerOf($extension, $moduleHandler)
-        : '';
-    }
-    if ($owned) {
-      return $extension;
+    catch (\Throwable) {
+      self::recordRejection(
+        $auditLogger,
+        self::AUTH_EXTENSION_SERVICE_ID,
+        '',
+        'refused',
+      );
+      return NULL;
     }
     self::recordRejection(
       $auditLogger,
@@ -290,20 +301,15 @@ final class McpPrincipalContextFactory {
    *   The container.modules parameter, or an empty list.
    */
   private static function containerModules(): array {
-    try {
-      if (!\Drupal::hasContainer()) {
-        return [];
-      }
-      $container = \Drupal::getContainer();
-      if (!$container->hasParameter('container.modules')) {
-        return [];
-      }
-      $modules = $container->getParameter('container.modules');
-      return is_array($modules) ? $modules : [];
-    }
-    catch (\Throwable) {
+    if (!\Drupal::hasContainer()) {
       return [];
     }
+    $container = \Drupal::getContainer();
+    if (!$container->hasParameter('container.modules')) {
+      return [];
+    }
+    $modules = $container->getParameter('container.modules');
+    return is_array($modules) ? $modules : [];
   }
 
   /**
