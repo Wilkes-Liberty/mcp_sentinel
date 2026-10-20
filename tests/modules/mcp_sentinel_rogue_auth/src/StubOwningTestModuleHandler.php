@@ -65,6 +65,11 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   }
 
   /**
+   * Drupal 10 ModuleHandlerInterface extends DestructableInterface.
+   */
+  public function destruct(): void {}
+
+  /**
    * {@inheritdoc}
    */
   public function load($name) {
