@@ -1443,8 +1443,19 @@ jobs:
           # same place gitlab_templates puts composer vendor next to web/.
           ln -sfn "${COMPOSER_DIR}/vendor" "${GITHUB_WORKSPACE}/vendor"
           rm -f "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel"
-          mkdir -p "${GITHUB_WORKSPACE}/web/modules/custom"
-          ln -sfn "${GITHUB_WORKSPACE}" "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+          mkdir -p "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+          # One directory symlink to the checkout follows web/ and
+          # vendor/ forever (modules/custom/mcp_sentinel/web/modules/...).
+          # Link each project-root entry except those two so the mount
+          # is still the custom installer path and the files are the
+          # same inodes, without a recursive docroot.
+          for item in "${GITHUB_WORKSPACE}"/*; do
+            name=$(basename "${item}")
+            case "${name}" in
+              web|vendor) continue ;;
+            esac
+            ln -sfn "${item}" "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel/${name}"
+          done
 
       - name: Confirm the drupal.org layout
         run: |
@@ -1453,10 +1464,12 @@ jobs:
             || { echo "::error::checkout is not the module project root"; exit 1; }
           test -d web/core \
             || { echo "::error::web/ is not the Drupal docroot inside the checkout"; exit 1; }
-          test -L web/modules/custom/mcp_sentinel \
-            || { echo "::error::module is not symlinked at the custom installer path"; exit 1; }
-          test "$(realpath web/modules/custom/mcp_sentinel)" = "$(realpath "${GITHUB_WORKSPACE}")" \
-            || { echo "::error::custom symlink does not resolve to the checkout"; exit 1; }
+          test -f web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml \
+            || { echo "::error::module is not mounted at the custom installer path"; exit 1; }
+          test "$(realpath web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml)" = "$(realpath mcp_sentinel.info.yml)" \
+            || { echo "::error::custom mount does not resolve to the checkout files"; exit 1; }
+          test ! -e web/modules/custom/mcp_sentinel/web \
+            || { echo "::error::custom mount must not include web/ (recursive docroot)"; exit 1; }
           test ! -e web/modules/contrib/mcp_sentinel \
             || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
           test -f vendor/autoload.php \
