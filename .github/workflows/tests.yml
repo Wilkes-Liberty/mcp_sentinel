@@ -1471,6 +1471,19 @@ jobs:
             ' -- "${iface}" "${rogue}"
             composer dump-autoload --no-interaction
           )
+          # PHPUnit RunTestsInSeparateProcesses does not reliably
+          # inherit composer files-autoload. Prepend the checkout
+          # class in every PHP process on this job.
+          scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
+          mkdir -p "${RUNNER_TEMP}/php-scan"
+          printf 'auto_prepend_file=%s\n' \
+            "${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
+            > "${RUNNER_TEMP}/php-scan/zz-do-layout.ini"
+          if [ -n "${scan}" ]; then
+            echo "PHP_INI_SCAN_DIR=${scan}:${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
+          else
+            echo "PHP_INI_SCAN_DIR=${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
+          fi
 
       - name: Confirm the drupal.org layout
         env:
@@ -1515,6 +1528,10 @@ jobs:
 
           # The fixture that fatals on this layout. Run it first so the
           # Extension assertion is visible without waiting for the rest.
+          echo "--- unfixed fakeTestModule probe"
+          php "${GITHUB_WORKSPACE}/.github/ci/do-layout-probe-unfixed-extension.php" \
+            "${PWD}/web"
+
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
           vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \
