@@ -64,12 +64,6 @@ parameters:
       paths:
         - modules/mcp_sentinel_graphql/tests/src/Kernel/GraphqlGovernanceSubscriberTest.php
         - modules/mcp_sentinel_graphql/tests/src/Kernel/GraphqlEntryPointGuardTest.php
-    # The null-handler fallback and compile-audit flush read the live
-    # installed-module list / compiled parameter from \Drupal when the
-    # injected handler is missing. That is the fail-closed path.
-    -
-      identifier: globalDrupalDependencyInjection.useDependencyInjection
-      path: src/Service/McpPrincipalContextFactory.php
     # PHPUnit 10 marks TestCase::name() @internal. The bypass Kernel
     # must read the current method in setUp() so register() can apply
     # the attack before the container compiles. There is no public
@@ -118,6 +112,7 @@ parameters:
       paths:
         - mcp_sentinel.module
         - modules/*/*.module
+        - tests/modules/mcp_sentinel_rogue_auth/src/StubOwningTestModuleHandler.php
     # MCP Server's authorization-denied event is not in an MCP Server release
     # yet. Until it is, the subscriber is never called and the stream test
     # skips. Remove this when the supported MCP Server ships the event.

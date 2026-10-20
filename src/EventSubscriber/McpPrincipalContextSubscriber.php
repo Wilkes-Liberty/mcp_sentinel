@@ -39,9 +39,10 @@ final class McpPrincipalContextSubscriber implements EventSubscriberInterface {
    *   (`mcp_sentinel_test.principal_auth_extension`). The
    *   wired object is re-checked at deferClaimlessSeal().
    * @param \Drupal\Core\Extension\ModuleHandlerInterface|null $moduleHandler
-   *   Installed-module list. NULL uses the live handler
-   *   when Drupal is booted; if ownership still cannot
-   *   be proven the hook is refused.
+   *   Installed-module list. The live handler wins when
+   *   Drupal is booted. A different injected handler is
+   *   refused. NULL uses the live handler; if ownership
+   *   still cannot be proven the hook is refused.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger|null $auditLogger
    *   Writes a governance row when a hook is ignored. NULL
    *   skips the write; the hook is still ignored.

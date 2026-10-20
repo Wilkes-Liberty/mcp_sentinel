@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
+use Drupal\mcp_sentinel_rogue_auth\StubOwningTestModuleHandler;
 use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Spoof\SpoofedPrincipalAuthExtension;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
@@ -83,6 +84,7 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       'testArgumentRewireIsDenied' => 'rewire',
       'testSpoofedTestNamespaceClassIsDenied' => 'spoof',
       'testNullModuleHandlerRewireIsDenied' => 'null_handler',
+      'testStubModuleHandlerRewireIsDenied' => 'stub_handler',
       default => '',
     };
     parent::setUp();
@@ -117,6 +119,7 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       'rewire' => $this->registerRewire($container),
       'spoof' => $this->registerSpoof($container),
       'null_handler' => $this->registerNullHandler($container),
+      'stub_handler' => $this->registerStubHandler($container),
       default => NULL,
     };
   }
@@ -174,6 +177,14 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    * Rewiring module_handler to NULL still denies and writes refused.
    */
   public function testNullModuleHandlerRewireIsDenied(): void {
+    $this->assertStampedUnproxiedPatchDenied();
+    $this->assertRefusedAuditRow();
+  }
+
+  /**
+   * Rewiring the handler to a stub that owns the rogue path is denied.
+   */
+  public function testStubModuleHandlerRewireIsDenied(): void {
     $this->assertStampedUnproxiedPatchDenied();
     $this->assertRefusedAuditRow();
   }
@@ -346,6 +357,28 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
     $container->getDefinition('mcp_sentinel.principal_context_subscriber')
       ->setArgument(2, $rogue)
       ->setArgument(3, NULL);
+  }
+
+  /**
+   * Point factory and subscriber at a rogue id and a lying handler.
+   */
+  private function registerStubHandler(ContainerBuilder $container): void {
+    $container->register(
+      'mcp_sentinel_bypass.rogue',
+      McpRoguePrincipalAuthExtension::class,
+    )->setPublic(TRUE);
+    $container->register(
+      'mcp_sentinel_bypass.stub_handler',
+      StubOwningTestModuleHandler::class,
+    )->setPublic(TRUE);
+    $rogue = new Reference('mcp_sentinel_bypass.rogue');
+    $stub = new Reference('mcp_sentinel_bypass.stub_handler');
+    $container->getDefinition('mcp_sentinel.principal_context_factory')
+      ->setArgument(2, $rogue)
+      ->setArgument(4, $stub);
+    $container->getDefinition('mcp_sentinel.principal_context_subscriber')
+      ->setArgument(2, $rogue)
+      ->setArgument(3, $stub);
   }
 
   /**

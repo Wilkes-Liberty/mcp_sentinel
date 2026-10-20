@@ -12,6 +12,7 @@ use Drupal\mcp_sentinel\Service\McpPrincipalAuthExtensionInterface;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextFactory;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\mcp_sentinel_test\Service\McpTestExtraClaimsPrincipalAuthExtension;
 use Drupal\mcp_sentinel_test\Service\McpTestPrincipalAuthExtension;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -134,12 +135,11 @@ final class McpPrincipalContextSubscriberTest extends UnitTestCase {
     );
     $stack->push($bearer);
     $holder = new McpPrincipalContextHolder($stack);
-    $extension = $this->createMock(McpPrincipalAuthExtensionInterface::class);
-    $extension->expects($this->never())->method('deferClaimlessSeal');
     $subscriber = new McpPrincipalContextSubscriber(
       $this->factory($stack),
       $holder,
-      $extension,
+      new McpTestExtraClaimsPrincipalAuthExtension(),
+      $this->owningTestModuleHandler(),
     );
     $kernel = $this->createMock(HttpKernelInterface::class);
     $subscriber->onRequest(new RequestEvent(

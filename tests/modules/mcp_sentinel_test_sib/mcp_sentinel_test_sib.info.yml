@@ -1,0 +1,8 @@
+name: 'MCP Sentinel test-module sibling path'
+type: module
+description: 'Sibling directory of mcp_sentinel_test. Pins prefix-without-separator ownership. Test-only.'
+package: Testing
+core_version_requirement: ^10.6 || ^11.3
+dependencies:
+  - mcp_sentinel:mcp_sentinel
+hidden: true

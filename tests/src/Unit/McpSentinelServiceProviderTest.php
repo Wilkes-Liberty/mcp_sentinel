@@ -48,7 +48,10 @@ final class McpSentinelServiceProviderTest extends UnitTestCase {
     $this->assertFalse(
       $container->hasDefinition(McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID),
     );
-    $this->assertCompileRejectionRecorded($container);
+    $this->assertCompileRejectionRecorded($container, [
+      McpPrincipalContextFactory::AUTH_EXTENSION_LEGACY_ID,
+      McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
+    ]);
   }
 
   /**
@@ -222,17 +225,21 @@ final class McpSentinelServiceProviderTest extends UnitTestCase {
   }
 
   /**
-   * Compile-time removal wrote a refused parameter row.
+   * Compile-time removal wrote the exact refused service ids.
+   *
+   * @param \Drupal\Core\DependencyInjection\ContainerBuilder $container
+   *   Compiled container.
+   * @param list<string> $services
+   *   Expected service ids in order.
    */
-  private function assertCompileRejectionRecorded(ContainerBuilder $container): void {
+  private function assertCompileRejectionRecorded(
+    ContainerBuilder $container,
+    array $services = [McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID],
+  ): void {
     $this->assertTrue($container->hasParameter(McpPrincipalContextFactory::REJECTED_PARAMETER));
     $rows = $container->getParameter(McpPrincipalContextFactory::REJECTED_PARAMETER);
     $this->assertIsArray($rows);
-    $this->assertNotSame([], $rows);
-    $this->assertSame(
-      McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
-      $rows[array_key_last($rows)]['service'] ?? $rows[0]['service'] ?? '',
-    );
+    $this->assertSame($services, array_values(array_column($rows, 'service')));
   }
 
   /**
