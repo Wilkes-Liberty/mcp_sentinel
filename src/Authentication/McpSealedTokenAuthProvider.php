@@ -149,7 +149,7 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
     Request $request,
     array $claims,
     McpSealedTokenDenyReason $reason,
-  ): ?AccountInterface {
+  ): null {
     $this->tokenManager()->auditDenial($reason, [
       'jti' => (string) $claims['jti'],
       'uid' => (int) $claims['uid'],

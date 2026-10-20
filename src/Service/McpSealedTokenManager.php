@@ -564,7 +564,7 @@ final class McpSealedTokenManager {
    * @return null
    *   Always NULL so verify() stays fail-closed.
    */
-  private function deny(McpSealedTokenDenyReason $reason, array $context = []): ?array {
+  private function deny(McpSealedTokenDenyReason $reason, array $context = []): null {
     $this->auditDenial($reason, $context);
     return NULL;
   }
@@ -581,6 +581,7 @@ final class McpSealedTokenManager {
    *   Non-secret context. Never the bearer or signature.
    */
   public function auditDenial(McpSealedTokenDenyReason $reason, array $context = []): void {
+    $this->denialAuditor->record($reason, $context);
   }
 
   /**

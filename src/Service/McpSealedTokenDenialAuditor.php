@@ -15,7 +15,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
 /**
  * Writes one sealed-token denial to audit_chain, with bounded flood safety.
  *
- * Denials stay fail-closed: a write or dedup failure never becomes an
+ * Denials stay fail-closed: a write or dedupe failure never becomes an
  * allow. Repeat denials of the same reason, principal, and source
  * inside one time window share a single chain row. The window is
  * {@see self::DEFAULT_WINDOW} seconds unless
@@ -91,7 +91,7 @@ final class McpSealedTokenDenialAuditor {
     }
     catch (\Throwable $exception) {
       $this->logger->error(
-        'Sealed-token denial audit dedup failed with @class.',
+        'Sealed-token denial audit dedupe failed with @class.',
         ['@class' => $exception::class],
       );
     }
@@ -110,7 +110,7 @@ final class McpSealedTokenDenialAuditor {
     }
     catch (\Throwable $exception) {
       $this->logger->error(
-        'Sealed-token denial audit dedup failed with @class.',
+        'Sealed-token denial audit dedupe failed with @class.',
         ['@class' => $exception::class],
       );
     }
