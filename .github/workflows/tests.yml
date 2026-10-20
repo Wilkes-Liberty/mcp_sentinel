@@ -1457,9 +1457,12 @@ jobs:
           # getFileName() matches d.o.
           scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
           mkdir -p "${RUNNER_TEMP}/php-scan"
-          printf 'auto_prepend_file=%s\n' \
-            "${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
-            > "${RUNNER_TEMP}/php-scan/zz-do-layout.ini"
+          {
+            printf 'auto_prepend_file=%s\n' \
+              "${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php"
+            printf 'zend.assertions=1\n'
+            printf 'assert.exception=1\n'
+          } > "${RUNNER_TEMP}/php-scan/zz-do-layout.ini"
           if [ -n "${scan}" ]; then
             echo "PHP_INI_SCAN_DIR=${scan}:${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
           else
@@ -1510,12 +1513,14 @@ jobs:
           # The fixture that fatals on this layout. Run it first so the
           # Extension assertion is visible without waiting for the rest.
           echo "--- unfixed fakeTestModule probe"
-          php -d auto_prepend_file="${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
+          php -d zend.assertions=1 -d assert.exception=1 \
+            -d auto_prepend_file="${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
             "${GITHUB_WORKSPACE}/.github/ci/do-layout-probe-unfixed-extension.php" \
             "${PWD}/web"
 
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
-          php -d auto_prepend_file="${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
+          php -d zend.assertions=1 -d assert.exception=1 \
+            -d auto_prepend_file="${GITHUB_WORKSPACE}/.github/ci/do-layout-load-rogue-from-checkout.php" \
             vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \
             "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
