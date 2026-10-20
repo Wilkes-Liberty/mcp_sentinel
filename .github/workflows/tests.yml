@@ -1326,7 +1326,7 @@ jobs:
             || status=1
           exit "${status}"
 
-  # drupal.org gitlab_templates layout (DEV-1014). The matrix job above
+  # drupal.org gitlab_templates layout (DEV-1049). The matrix job above
   # installs this module through a composer path repo at
   # web/modules/contrib/mcp_sentinel, which is why GitHub stayed green
   # while pipeline 1008628 failed: the checkout is the project root,
@@ -1431,55 +1431,39 @@ jobs:
           COMPOSER_DIR: ${{ runner.temp }}/drupal
         run: |
           set -euo pipefail
-          # Checkout is the project root. Move the docroot inside it and
-          # mount the module at the custom installer path, the same shape
-          # gitlab_templates uses (CI_PROJECT_DIR/web, symlink under
-          # modules/custom). Drop the path-repo contrib link so a fixture
-          # that hardcodes that GitHub path cannot hide here.
-          rm -rf "${GITHUB_WORKSPACE}/web" "${GITHUB_WORKSPACE}/vendor"
-          mv "${COMPOSER_DIR}/web" "${GITHUB_WORKSPACE}/web"
-          ln -sfn "${GITHUB_WORKSPACE}/web" "${COMPOSER_DIR}/web"
-          # web/autoload.php requires ../vendor (the project root), the
-          # same place gitlab_templates puts composer vendor next to web/.
-          ln -sfn "${COMPOSER_DIR}/vendor" "${GITHUB_WORKSPACE}/vendor"
-          rm -f "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel"
-          mkdir -p "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
-          # One directory symlink to the checkout follows web/ and
-          # vendor/ forever (modules/custom/mcp_sentinel/web/modules/...).
-          # Link each project-root entry except those two so the mount
-          # is still the custom installer path and the files are the
-          # same inodes, without a recursive docroot.
-          for item in "${GITHUB_WORKSPACE}"/*; do
-            name=$(basename "${item}")
-            case "${name}" in
-              web|vendor) continue ;;
-            esac
-            ln -sfn "${item}" "${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel/${name}"
-          done
+          # Docroot stays outside the checkout. Symlink the project root
+          # into web/modules/custom (gitlab_templates / Security: from
+          # outside the docroot, never a copy). Drop the path-repo
+          # contrib link so a fixture that hardcodes that GitHub path
+          # cannot hide here. ReflectionClass::getFileName() then
+          # resolves to the checkout, which is not under DRUPAL_ROOT.
+          rm -f "${COMPOSER_DIR}/web/modules/contrib/mcp_sentinel"
+          mkdir -p "${COMPOSER_DIR}/web/modules/custom"
+          ln -sfn "${GITHUB_WORKSPACE}" "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel"
 
       - name: Confirm the drupal.org layout
+        env:
+          COMPOSER_DIR: ${{ runner.temp }}/drupal
         run: |
           set -euo pipefail
           test -f mcp_sentinel.info.yml \
             || { echo "::error::checkout is not the module project root"; exit 1; }
-          test -d web/core \
-            || { echo "::error::web/ is not the Drupal docroot inside the checkout"; exit 1; }
-          test -f web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml \
-            || { echo "::error::module is not mounted at the custom installer path"; exit 1; }
-          test "$(realpath web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml)" = "$(realpath mcp_sentinel.info.yml)" \
-            || { echo "::error::custom mount does not resolve to the checkout files"; exit 1; }
-          test ! -e web/modules/custom/mcp_sentinel/web \
-            || { echo "::error::custom mount must not include web/ (recursive docroot)"; exit 1; }
-          test ! -e web/modules/contrib/mcp_sentinel \
+          test -L "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel" \
+            || { echo "::error::module must be a directory symlink from the project root, not a copy"; exit 1; }
+          test "$(realpath "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel")" = "$(realpath "${GITHUB_WORKSPACE}")" \
+            || { echo "::error::custom symlink does not resolve to the checkout"; exit 1; }
+          case "$(realpath "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel")" in
+            "$(realpath "${COMPOSER_DIR}/web")"*) echo "::error::module realpath is inside the docroot"; exit 1 ;;
+          esac
+          test ! -e "${COMPOSER_DIR}/web/modules/contrib/mcp_sentinel" \
             || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
-          test -f vendor/autoload.php \
-            || { echo "::error::vendor/ is not at the project root next to web/"; exit 1; }
-          echo "DRUPAL_ROOT candidate: ${GITHUB_WORKSPACE}/web"
-          echo "module realpath: $(realpath web/modules/custom/mcp_sentinel)"
-          echo "custom symlink: $(readlink web/modules/custom/mcp_sentinel)"
+          echo "DRUPAL_ROOT: ${COMPOSER_DIR}/web"
+          echo "module realpath: $(realpath "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel")"
+          echo "custom symlink: $(readlink "${COMPOSER_DIR}/web/modules/custom/mcp_sentinel")"
 
       - name: PHPUnit — Kernel (drupal.org layout)
         timeout-minutes: 40
+        working-directory: ${{ runner.temp }}/drupal
         env:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
@@ -1487,20 +1471,14 @@ jobs:
           MIN_TESTS: '400'
         run: |
           set -euo pipefail
-          # Run from the checkout so web/autoload.php, vendor/, and
-          # phpunit.xml live in one tree (gitlab_templates does this).
-          # A phpunit invoked from the composer temp dir with -c pointed
-          # at web/ hung for 90+ minutes; the contrib-layout Kernel suite
-          # on the same SHA finished in ~22.
-          config="${GITHUB_WORKSPACE}/web/core/phpunit.xml.dist"
-          module="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
-          phpunit="${GITHUB_WORKSPACE}/vendor/bin/phpunit"
+          config="${PWD}/web/core/phpunit.xml.dist"
+          module="${PWD}/web/modules/custom/mcp_sentinel"
 
           # The fixture that fatals on this layout. Run it first so the
           # Extension assertion is visible without waiting for the rest.
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
-          "${phpunit}" -c "${config}" \
-            --log-junit "${GITHUB_WORKSPACE}/junit-do-bypass.xml" \
+          vendor/bin/phpunit -c "${config}" \
+            --log-junit "${PWD}/junit-do-bypass.xml" \
             "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
 
           suites=()
@@ -1516,11 +1494,11 @@ jobs:
           for dir in "${suites[@]}"; do
             i=$((i + 1))
             echo "--- ${dir#"${module}/"}"
-            "${phpunit}" -c "${config}" \
-              --log-junit "${GITHUB_WORKSPACE}/junit-do-${i}.xml" \
+            vendor/bin/phpunit -c "${config}" \
+              --log-junit "${PWD}/junit-do-${i}.xml" \
               "${dir}"
           done
-          total="$(cat "${GITHUB_WORKSPACE}"/junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          total="$(cat junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
           echo "Collected ${total} Kernel tests across $((${#suites[@]} + 1)) invocations (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Kernel tests, below the floor of ${MIN_TESTS}."
