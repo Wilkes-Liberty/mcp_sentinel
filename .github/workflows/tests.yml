@@ -1329,8 +1329,8 @@ jobs:
   # drupal.org gitlab_templates layout (DEV-1049). The matrix job above
   # installs this module through a composer path repo at
   # web/modules/contrib/mcp_sentinel, which is why GitHub stayed green
-  # while pipeline 1008628 failed: the checkout is the project root,
-  # Drupal's web/ lives inside it, and the module is reached through
+  # while pipeline 1008628 failed: the checkout sits outside the
+  # docroot and is reached through a directory symlink at
   # web/modules/custom/mcp_sentinel. This job rebuilds that shape and
   # runs the Kernel suite so a fixture that hardcodes the GitHub path
   # cannot merge.
