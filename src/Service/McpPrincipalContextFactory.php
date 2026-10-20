@@ -120,31 +120,20 @@ final class McpPrincipalContextFactory {
     if ($extension === NULL) {
       return NULL;
     }
-    try {
-      $modules = self::containerModules();
-      if ($modules !== []) {
-        $owned = isset($modules['mcp_sentinel_test'])
-          && self::classOwnedByTestModule($extension::class, $modules);
-        $provider = self::providerFromModuleMap($extension::class, $modules);
-      }
-      else {
-        $owned = self::classOwnedByTestModule($extension::class, []);
-        $provider = $moduleHandler !== NULL
-          ? self::providerOf($extension, $moduleHandler)
-          : '';
-      }
-      if ($owned) {
-        return $extension;
-      }
+    $modules = self::containerModules();
+    if ($modules !== []) {
+      $owned = isset($modules['mcp_sentinel_test'])
+        && self::classOwnedByTestModule($extension::class, $modules);
+      $provider = self::providerFromModuleMap($extension::class, $modules);
     }
-    catch (\Throwable) {
-      self::recordRejection(
-        $auditLogger,
-        self::AUTH_EXTENSION_SERVICE_ID,
-        '',
-        'refused',
-      );
-      return NULL;
+    else {
+      $owned = self::classOwnedByTestModule($extension::class, []);
+      $provider = $moduleHandler !== NULL
+        ? self::providerOf($extension, $moduleHandler)
+        : '';
+    }
+    if ($owned) {
+      return $extension;
     }
     self::recordRejection(
       $auditLogger,
