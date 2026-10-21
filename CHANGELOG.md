@@ -6,15 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-10-21
+
 ### Fixed
 - `McpPrincipalAuthGuardBypassTest::testDecoratedModuleHandlerRewireIsDenied`
   no longer fatals on drupal.org GitLab CI when the
   module's real path sits outside the docroot (DEV-1049).
-  #346 merged a layout job that still used the unfixed
-  fixture (`getFileName()` plus a `dirname(..., 6)`
-  fallback) and ran PHP with assertions off, so GitHub
-  stayed green. The rogue-auth fixture now derives the
-  fake `mcp_sentinel_test.info.yml` from
+  The rogue-auth fixture derives the fake
+  `mcp_sentinel_test.info.yml` from
   `getModule('mcp_sentinel')->getPath()` and throws if
   that file is missing under the app root. GitHub Actions
   runs the Kernel suite in a gitlab_templates-shaped
@@ -104,17 +103,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   duplicate path list is gone.
 
 ### Removed
-- Unused `McpSealedTokenManager::MAX_TTL`. Mint TTL is
-  clamped to `TTL_CHOICES` (`clampTtl()`); 86400 remains
+- Unused `McpSealedTokenManager::MAX_TTL` is gone. Mint TTL
+  is clamped to `TTL_CHOICES` (`clampTtl()`); 86400 remains
   the 24-hour choice, not a separate ceiling.
-- Unused alias `McpOperatorBinding::UID_UNIQUE_INDEX`
-  (same value as `McpOperatorBindingUidSchema::INDEX`,
+- Unused alias `McpOperatorBinding::UID_UNIQUE_INDEX` is
+  gone (same value as `McpOperatorBindingUidSchema::INDEX`,
   zero callers).
 - Unused `McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE` and
   the dispatcher short-circuit that skipped
-  `assertScopesAllowed()`. Nothing set the flag, so the
-  skip was permanently false. Scope checks stay
+  `assertScopesAllowed()` are gone. Nothing set the flag,
+  so the skip was permanently false. Scope checks stay
   fail-closed. `WEAKEN_SKIP_KILL` remains.
+
+### Upgrade
+- No database update. The last hook remains 10039.
+  Sites on 3.4.0 apply with `drush cr`, not `updatedb`.
+  Audit enabled modules for a
+  `mcp_sentinel.principal_auth_extension` service.
+  `McpSealedTokenManager` gained a
+  `McpSealedTokenDenialAuditor` argument. Until the
+  container is rebuilt, resolving the manager fails
+  with a TypeError.
 
 ## [3.4.0] - 2026-10-19
 
@@ -3585,7 +3594,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.1...1.x
+[3.4.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...3.4.1
 [3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
 [3.3.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...3.3.2
 [3.3.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...3.3.1
