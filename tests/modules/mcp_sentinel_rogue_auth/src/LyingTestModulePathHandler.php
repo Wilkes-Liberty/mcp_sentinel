@@ -6,7 +6,6 @@ namespace Drupal\mcp_sentinel_rogue_auth;
 
 use Drupal\Core\DestructableInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
-use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
 /**
  * Decorates @module_handler and lies about mcp_sentinel_test's path.
@@ -27,19 +26,14 @@ final class LyingTestModulePathHandler implements ModuleHandlerInterface {
   public function __construct(
     private readonly ModuleHandlerInterface $inner,
   ) {
-    $file = (new \ReflectionClass(McpRoguePrincipalAuthExtension::class))->getFileName();
-    $infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
-    if (!is_file($infoPathname)) {
-      file_put_contents(
-        $infoPathname,
-        "name: 'MCP Sentinel decorated-handler fake'\ntype: module\nhidden: true\n",
-      );
-    }
-    register_shutdown_function(static function (string $path): void {
-      if (is_file($path)) {
-        unlink($path);
-      }
-    }, $infoPathname);
+    $this->ensureFakeTestModuleInfo();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function innerModuleHandler(): ModuleHandlerInterface {
+    return $this->inner;
   }
 
   /**

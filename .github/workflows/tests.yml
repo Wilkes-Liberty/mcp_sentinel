@@ -1328,13 +1328,15 @@ jobs:
 
   # drupal.org gitlab_templates layout (DEV-1049). The matrix job above
   # installs this module through a composer path repo at
-  # web/modules/contrib/mcp_sentinel. On d.o the checkout contains
-  # web/ (DRUPAL_ROOT=$CI_PROJECT_DIR/web) and the module's real
-  # path sits outside that docroot; symlink_project.php mounts each
-  # project entry into web/modules/custom/mcp_sentinel. GitHub
-  # missed Extension.php:75 because setup-php leaves zend.assertions
-  # off. This job puts web/ and vendor/ in the checkout, runs
-  # symlink_project.php, and enables assertions.
+  # web/modules/contrib/mcp_sentinel. On d.o the checkout is the
+  # project root: expand_composer_json.php merges this module's
+  # composer.json with core-recommended, composer install writes
+  # web/ and vendor/ here (DRUPAL_ROOT=$CI_PROJECT_DIR/web), and
+  # symlink_project.php mounts each project entry into
+  # web/modules/custom/mcp_sentinel. The module's real path sits
+  # outside that docroot. GitHub missed Extension.php:75 because
+  # setup-php leaves zend.assertions off. This job runs those
+  # scripts in the checkout and enables assertions.
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
@@ -1361,90 +1363,21 @@ jobs:
             ${{ runner.os }}-php8.4-composer
             ${{ runner.os }}-composer-
 
-      - name: Scaffold a Drupal site
+      - name: Build Drupal the way gitlab_templates does
         env:
-          DRUPAL_CONSTRAINT: '^11'
-          COMPOSER_DIR: ${{ runner.temp }}/drupal
-        run: |
-          retry() {
-            rc=0
-            for n in 1 2 3; do
-              "$@" && return 0
-              rc=$?
-              if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
-                sleep "$((15 * n))"
-              fi
-            done
-            return "$rc"
-          }
-          scaffold() {
-            rm -rf "${COMPOSER_DIR}"
-            composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" "${COMPOSER_DIR}" \
-              --no-interaction --no-install --no-progress
-          }
-          retry scaffold
-          cd "${COMPOSER_DIR}"
-          composer config minimum-stability dev
-          composer config prefer-stable true
-          composer config --no-plugins allow-plugins.composer/installers true
-          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
-          composer config --no-plugins allow-plugins.drupal/core-project-message true
-          composer config --no-plugins allow-plugins.phpstan/extension-installer true
-          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
-          composer config repositories.mcp_sentinel path "${GITHUB_WORKSPACE}"
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
-
-      - name: Install dependencies
-        working-directory: ${{ runner.temp }}/drupal
-        env:
-          DRUPAL_CONSTRAINT: '^11'
-          PHPUNIT_CONSTRAINT: '^11.5'
-        run: |
-          retry() {
-            rc=0
-            for n in 1 2 3; do
-              "$@" && return 0
-              rc=$?
-              if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
-                sleep "$((15 * n))"
-              fi
-            done
-            return "$rc"
-          }
-          retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
-          retry composer require -W --dev --no-interaction --no-progress \
-            "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
-            "phpunit/phpunit:${PHPUNIT_CONSTRAINT}" \
-            "drush/drush:^13" \
-            "drupal/redirect:^1.10" "drupal/graphql_compose:^2.4" "drupal/mcp_server:^2.0@dev" \
-            "drupal/paragraphs:^1.18" "drupal/entity_reference_revisions:^1.11" \
-            "drupal/entity_usage:^2 || ^5" \
-            "drupal/content_lock:^3.0" \
-            "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
-          bash "${GITHUB_WORKSPACE}/.github/ci/refresh-latest-contrib.sh"
-
-      - name: Reshape into the drupal.org gitlab_templates layout
-        env:
-          COMPOSER_DIR: ${{ runner.temp }}/drupal
+          # Pin to gitlab_templates 1.17.3
+          # (3f225a00f6e6b68b10a5fa027e2637c4331a8db3), not default-ref.
+          # To bump: set GITLAB_TEMPLATES_REF to the new tag's
+          # commit SHA and replace both sha256 values below.
+          # Dependabot will not do this. drupal.org tracks main
+          # through .gitlab-ci.yml (_GITLAB_TEMPLATES_REF: main).
+          GITLAB_TEMPLATES_REF: '3f225a00f6e6b68b10a5fa027e2637c4331a8db3'
+          DRUPAL_CORE: '^11.3'
+          _WEB_ROOT: web
+          PROJECT_NAME: mcp_sentinel
+          IGNORE_PROJECT_DRUPAL_CORE_VERSION: '1'
         run: |
           set -euo pipefail
-          # d.o: DRUPAL_ROOT=$CI_PROJECT_DIR/web. Move web/ and
-          # vendor/ into the checkout, then run symlink_project.php
-          # so each project entry is a symlink under
-          # web/modules/custom/mcp_sentinel. The module's real path
-          # sits outside the docroot. Drop the path-repo contrib
-          # link so a fixture that hardcodes that GitHub path
-          # cannot hide here.
-          export PROJECT_FILES
-          PROJECT_FILES="$(ls -A "${GITHUB_WORKSPACE}")"
-          rm -rf "${GITHUB_WORKSPACE}/web" "${GITHUB_WORKSPACE}/vendor"
-          mv "${COMPOSER_DIR}/web" "${GITHUB_WORKSPACE}/web"
-          mv "${COMPOSER_DIR}/vendor" "${GITHUB_WORKSPACE}/vendor"
-          rm -f "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel"
           retry() {
             rc=0
             for n in 1 2 3; do
@@ -1457,14 +1390,37 @@ jobs:
             done
             return "$rc"
           }
-          retry curl -fsSL -o "${GITHUB_WORKSPACE}/symlink_project.php" \
-            "https://git.drupalcode.org/project/gitlab_templates/-/raw/default-ref/scripts/symlink_project.php"
-          (
-            cd "${GITHUB_WORKSPACE}"
-            export DRUPAL_PROJECT_FOLDER="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
-            php symlink_project.php
-          )
-          rm -f "${GITHUB_WORKSPACE}/symlink_project.php"
+          # Capture the project's own top-level entries before
+          # composer install writes web/ and vendor/.
+          export PROJECT_FILES
+          PROJECT_FILES="$(ls -A)"
+          retry curl -fsSL -o expand_composer_json.php \
+            "https://git.drupalcode.org/project/gitlab_templates/-/raw/${GITLAB_TEMPLATES_REF}/scripts/expand_composer_json.php"
+          retry curl -fsSL -o symlink_project.php \
+            "https://git.drupalcode.org/project/gitlab_templates/-/raw/${GITLAB_TEMPLATES_REF}/scripts/symlink_project.php"
+          # sha256 of the 1.17.3 / 3f225a00 scripts.
+          echo "9d799367345aee6a70f371f34490e0c8622d9e8e1c02d0a3726523c411b40866  expand_composer_json.php" | sha256sum -c -
+          echo "596c389bee74250ab11718b81be5118e281e3c453a98b0f43e61e067f783cbd9  symlink_project.php" | sha256sum -c -
+          cp -v composer.json composer.json.backup
+          php expand_composer_json.php
+          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          retry composer install --no-interaction --no-progress
+          # twig/twig <3.30: 3.30.0 compiles Drupal's swapped escape
+          # filter straight into EscaperRuntime::escape() and every
+          # rendered page 500s (twigphp/Twig#4952).
+          retry composer require -W --no-interaction --no-progress \
+            "twig/twig:<3.30.0"
+          # gitlab_templates require-drush: Kernel tests instantiate
+          # Drush command classes.
+          retry composer require --dev --update-with-all-dependencies \
+            --no-interaction --no-progress "drush/drush:^13"
+          rm -f expand_composer_json.php
+          export DRUPAL_PROJECT_FOLDER="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
+          php symlink_project.php
+          rm -f symlink_project.php
+          # Restore the module composer.json so the mount symlink
+          # stays a link to the project file.
+          mv -v composer.json.backup composer.json
           # setup-php leaves assertions off; d.o phpunit has them on.
           scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
           mkdir -p "${RUNNER_TEMP}/php-scan"
@@ -1500,8 +1456,6 @@ jobs:
           echo "DRUPAL_ROOT: ${GITHUB_WORKSPACE}/web"
           echo "tests realpath: $(realpath "${mount}/tests")"
           echo "tests symlink: $(readlink "${mount}/tests")"
-          php .github/ci/do-layout-confirm-filename.php \
-            "${GITHUB_WORKSPACE}/web"
 
       - name: PHPUnit — Kernel (drupal.org layout)
         timeout-minutes: 40
@@ -1510,20 +1464,18 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '400'
+          MIN_TESTS: '1150'
+          MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
 
-          # Temporary red-first check: the unfixed algorithm must
-          # still fatal here. PHP_INI_SCAN_DIR enables assertions.
-          echo "--- unfixed fakeTestModule probe"
-          php .github/ci/do-layout-probe-unfixed-extension.php \
-            "${PWD}/web"
-
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
-          vendor/bin/phpunit -c "${config}" \
+          test -f .github/ci/do-layout-assert-ini.php \
+            || { echo "::error::do-layout-assert-ini.php is missing"; exit 1; }
+          php -d auto_prepend_file="${PWD}/.github/ci/do-layout-assert-ini.php" \
+            vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \
             "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
 
@@ -1540,8 +1492,15 @@ jobs:
           for dir in "${suites[@]}"; do
             i=$((i + 1))
             echo "--- ${dir#"${module}/"}"
+            extra=()
+            # The dedicated bypass run is counted once. Do not
+            # collect the same file again from tests/src/Kernel.
+            if [ "${dir}" = "${module}/tests/src/Kernel" ]; then
+              extra=(--exclude-filter '/\\McpPrincipalAuthGuardBypassTest::/')
+            fi
             vendor/bin/phpunit -c "${config}" \
               --log-junit "${PWD}/junit-do-${i}.xml" \
+              "${extra[@]}" \
               "${dir}"
           done
           total="$(cat junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
