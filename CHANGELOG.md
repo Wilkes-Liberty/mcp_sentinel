@@ -6,20 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-10-21
+
 ### Fixed
 - `McpPrincipalAuthGuardBypassTest::testDecoratedModuleHandlerRewireIsDenied`
   no longer fatals on drupal.org GitLab CI when the
   module's real path sits outside the docroot (DEV-1049).
-  #346 merged a layout job that still used the unfixed
-  fixture (`getFileName()` plus a `dirname(..., 6)`
-  fallback) and ran PHP with assertions off, so GitHub
-  stayed green. The rogue-auth fixture now derives the
+  The shared `FakeTestModuleExtensionTrait` derives the
   fake `mcp_sentinel_test.info.yml` from
-  `getModule('mcp_sentinel')->getPath()` and throws if
-  that file is missing under the app root. GitHub Actions
-  runs the Kernel suite in a gitlab_templates-shaped
-  layout with `zend.assertions=1`. tests-gate greps
-  `tests/` for `modules/(contrib|custom)/mcp_sentinel`.
+  `getModule('mcp_sentinel')->getPath()` and throws a
+  `LogicException` if that file is missing under the
+  app root. GitHub Actions runs the Kernel suite in a
+  gitlab_templates-shaped layout with
+  `zend.assertions=1`. #346's first layout leg ran with
+  assertions off and stayed green on the broken fixture.
+  tests-gate greps `tests/` for
+  `modules/(contrib|custom)/mcp_sentinel`. The GitHub job
+  expands composer.json the way gitlab_templates does, and
+  the deny test asserts the live handler path before
+  refusing.
 - Latest-stable contrib refresh fails the job when
   `composer show --locked` fails or lists no contrib,
   instead of skipping the refresh and exiting 0
@@ -81,17 +86,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`refused`, or `claims_stripped` when extra keys are
   dropped). Compile-time refusals flush once per
   compiled parameter hash (state-keyed: once per
-  rebuild, not every request). A later compiler pass
-  with installed PHP can delete or forge
-  `container.modules` or the compile-refusal
-  parameter. Provider attribution uses the longest
-  path prefix.
+  rebuild, not every request). Provider attribution
+  uses the longest path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb`: there is no new update hook (last is
   10039). The interface is `@internal`. The
   kill-block reader seam is veto-only: a decorator
   may make a block unreadable, never expired. A NULL
   `block_until` read still blocks on re-issue.
+
+### Security
+- A later compiler pass with installed PHP can
+  silently forge `container.modules`. Runtime
+  ownership then treats the forged map as truth, so
+  no refusal row is written (DEV-1043).
+- A later compiler pass with installed PHP can delete
+  the compile-refusal parameter. The refused hook stays
+  removed, but `flushCompileRejections()` finds no
+  parameter and writes no refusal row (DEV-1043).
 
 ### Changed
 - GitHub Actions refreshes locked contrib to latest-stable
@@ -104,17 +116,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   duplicate path list is gone.
 
 ### Removed
-- Unused `McpSealedTokenManager::MAX_TTL`. Mint TTL is
-  clamped to `TTL_CHOICES` (`clampTtl()`); 86400 remains
+- Unused `McpSealedTokenManager::MAX_TTL` is gone. Mint TTL
+  is clamped to `TTL_CHOICES` (`clampTtl()`); 86400 remains
   the 24-hour choice, not a separate ceiling.
-- Unused alias `McpOperatorBinding::UID_UNIQUE_INDEX`
-  (same value as `McpOperatorBindingUidSchema::INDEX`,
+- Unused alias `McpOperatorBinding::UID_UNIQUE_INDEX` is
+  gone (same value as `McpOperatorBindingUidSchema::INDEX`,
   zero callers).
 - Unused `McpPrincipalContextGuard::WEAKEN_SKIP_SCOPE` and
   the dispatcher short-circuit that skipped
-  `assertScopesAllowed()`. Nothing set the flag, so the
-  skip was permanently false. Scope checks stay
+  `assertScopesAllowed()` are gone. Nothing set the flag,
+  so the skip was permanently false. Scope checks stay
   fail-closed. `WEAKEN_SKIP_KILL` remains.
+
+### Upgrade
+- No database update. The last hook remains 10039.
+  Sites on 3.4.0 apply with `drush cr`, not `updatedb`.
+  Audit enabled modules for a
+  `mcp_sentinel.principal_auth_extension` service.
+  `McpSealedTokenManager` gained a
+  `McpSealedTokenDenialAuditor` argument. Until the
+  container is rebuilt, resolving the manager fails
+  with a TypeError.
 
 ## [3.4.0] - 2026-10-19
 
@@ -3585,7 +3607,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.1...1.x
+[3.4.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...3.4.1
 [3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
 [3.3.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...3.3.2
 [3.3.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.0...3.3.1
