@@ -165,9 +165,9 @@ sources skip that scope check. JSON:API, GraphQL, and
   when extra keys are dropped). Compile-time refusals
   flush once per compiled parameter hash (state-keyed:
   once per rebuild, not every request). A later
-  compiler pass with installed PHP can delete or forge
-  `container.modules` or the compile-refusal
-  parameter. Provider attribution uses the longest
+  compiler pass with installed PHP can silently forge
+  `container.modules`; that case writes no refusal
+  audit row. Provider attribution uses the longest
   path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb` (last hook is 10039). Audit enabled

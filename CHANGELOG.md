@@ -12,13 +12,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `McpPrincipalAuthGuardBypassTest::testDecoratedModuleHandlerRewireIsDenied`
   no longer fatals on drupal.org GitLab CI when the
   module's real path sits outside the docroot (DEV-1049).
-  The rogue-auth fixture derives the fake
-  `mcp_sentinel_test.info.yml` from
-  `getModule('mcp_sentinel')->getPath()` and throws if
-  that file is missing under the app root. GitHub Actions
-  runs the Kernel suite in a gitlab_templates-shaped
-  layout with `zend.assertions=1`. tests-gate greps
-  `tests/` for `modules/(contrib|custom)/mcp_sentinel`.
+  The shared `FakeTestModuleExtensionTrait` derives the
+  fake `mcp_sentinel_test.info.yml` from
+  `getModule('mcp_sentinel')->getPath()` and throws a
+  `LogicException` if that file is missing under the
+  app root. GitHub Actions runs the Kernel suite in a
+  gitlab_templates-shaped layout with
+  `zend.assertions=1`. #346's first layout leg ran with
+  assertions off and stayed green on the broken fixture.
+  tests-gate greps `tests/` for
+  `modules/(contrib|custom)/mcp_sentinel`.
 - Latest-stable contrib refresh fails the job when
   `composer show --locked` fails or lists no contrib,
   instead of skipping the refresh and exiting 0
@@ -80,17 +83,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`refused`, or `claims_stripped` when extra keys are
   dropped). Compile-time refusals flush once per
   compiled parameter hash (state-keyed: once per
-  rebuild, not every request). A later compiler pass
-  with installed PHP can delete or forge
-  `container.modules` or the compile-refusal
-  parameter. Provider attribution uses the longest
-  path prefix.
+  rebuild, not every request). Provider attribution
+  uses the longest path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb`: there is no new update hook (last is
   10039). The interface is `@internal`. The
   kill-block reader seam is veto-only: a decorator
   may make a block unreadable, never expired. A NULL
   `block_until` read still blocks on re-issue.
+- A later compiler pass with installed PHP can
+  silently forge `container.modules`. Runtime
+  ownership then treats the forged map as truth, so
+  no refusal row is written (DEV-1043).
 
 ### Changed
 - GitHub Actions refreshes locked contrib to latest-stable
