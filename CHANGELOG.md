@@ -100,6 +100,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently forge `container.modules`. Runtime
   ownership then treats the forged map as truth, so
   no refusal row is written (DEV-1043).
+- A later compiler pass with installed PHP can delete
+  the compile-refusal parameter. The refused hook stays
+  removed, but `flushCompileRejections()` finds no
+  parameter and writes no refusal row (DEV-1043).
 
 ### Changed
 - GitHub Actions refreshes locked contrib to latest-stable
