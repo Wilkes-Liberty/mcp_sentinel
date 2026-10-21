@@ -47,6 +47,9 @@ final class LyingTestModulePathHandler implements ModuleHandlerInterface {
    * {@inheritdoc}
    */
   public function getModule($name) {
+    if ($name === 'mcp_sentinel_test') {
+      return $this->fakeTestModule();
+    }
     return $this->inner->getModule($name);
   }
 
