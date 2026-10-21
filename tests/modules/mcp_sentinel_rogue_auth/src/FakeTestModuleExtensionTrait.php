@@ -21,7 +21,7 @@ trait FakeTestModuleExtensionTrait {
   /**
    * Writes the fake info.yml next to the rogue class and registers cleanup.
    *
-   * phpunit keys modules by info.yml basename, so the file is
+   * PHPUnit keys modules by info.yml basename, so the file is
    * created at runtime rather than shipped in the fixture.
    */
   private function ensureFakeTestModuleInfo(): void {

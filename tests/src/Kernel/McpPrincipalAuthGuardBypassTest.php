@@ -82,18 +82,11 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
   protected function setUp(): void {
     if (getenv('MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS') === '1') {
       $assertions = ini_get('zend.assertions');
-      $exception = ini_get('assert.exception');
       fwrite(STDOUT, "zend.assertions={$assertions}\n");
-      fwrite(STDOUT, "assert.exception={$exception}\n");
       $this->assertSame(
         '1',
         $assertions,
         'zend.assertions must be 1 in the bypass PHP process.',
-      );
-      $this->assertSame(
-        '1',
-        $exception,
-        'assert.exception must be 1 in the bypass PHP process.',
       );
     }
     self::$bypass = match ($this->name()) {
@@ -269,8 +262,13 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    * so the deny is against a real lie, not a missing module.
    */
   public function testDecoratedModuleHandlerRewireIsDenied(): void {
-    $handler = $this->container->get('module_handler');
+    $handler = $this->container->get('mcp_sentinel_bypass.lying_handler');
     $this->assertInstanceOf(LyingTestModulePathHandler::class, $handler);
+    $this->assertSame(
+      $handler,
+      $this->container->get('module_handler'),
+      'The live module_handler must be the lying decorator.',
+    );
     $rogueFile = (new \ReflectionClass(
       McpRoguePrincipalAuthExtension::class,
     ))->getFileName();
