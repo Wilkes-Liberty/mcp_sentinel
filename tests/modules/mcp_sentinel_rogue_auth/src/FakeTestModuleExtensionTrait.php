@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_rogue_auth;
 
 use Drupal\Core\Extension\Extension;
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
 /**
  * Builds the fake mcp_sentinel_test Extension from the registered module.
- *
- * @property \Drupal\Core\Extension\ModuleHandlerInterface $inner
  */
 trait FakeTestModuleExtensionTrait {
+
+  /**
+   * Registered module handler used to resolve mcp_sentinel's path.
+   */
+  abstract protected function innerModuleHandler(): ModuleHandlerInterface;
 
   /**
    * Writes the fake info.yml next to the rogue class and registers cleanup.
@@ -42,7 +46,9 @@ trait FakeTestModuleExtensionTrait {
    */
   private function fakeTestModule(): Extension {
     $root = DRUPAL_ROOT;
-    $relative = $this->inner->getModule('mcp_sentinel')->getPath()
+    $relative = $this->innerModuleHandler()
+      ->getModule('mcp_sentinel')
+      ->getPath()
       . '/tests/modules/mcp_sentinel_rogue_auth/src/Service/'
       . 'mcp_sentinel_test.info.yml';
     if (!is_file($root . '/' . $relative)) {

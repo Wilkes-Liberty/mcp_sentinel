@@ -32,6 +32,13 @@ final class LyingTestModulePathHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
+  protected function innerModuleHandler(): ModuleHandlerInterface {
+    return $this->inner;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function moduleExists($module) {
     return $this->inner->moduleExists($module);
   }

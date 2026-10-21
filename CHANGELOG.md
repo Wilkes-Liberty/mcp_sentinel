@@ -8,7 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 - The GitHub d.o-layout job now expands `composer.json` and
-  mounts the module the way gitlab_templates does, and
+  mounts the module the way gitlab_templates does. The bypass
+  process asserts `zend.assertions=1`, and
   `testDecoratedModuleHandlerRewireIsDenied` asserts the
   live handler's `mcp_sentinel_test` path is the rogue
   fixture before the deny (DEV-1049).

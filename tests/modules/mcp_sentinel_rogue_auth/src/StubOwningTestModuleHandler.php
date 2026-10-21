@@ -31,6 +31,13 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * {@inheritdoc}
    */
+  protected function innerModuleHandler(): ModuleHandlerInterface {
+    return $this->inner;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
   public function moduleExists($module) {
     return $module === 'mcp_sentinel_test';
   }
