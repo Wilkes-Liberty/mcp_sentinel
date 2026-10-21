@@ -81,11 +81,9 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    */
   protected function setUp(): void {
     if (getenv('MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS') === '1') {
-      $assertions = ini_get('zend.assertions');
-      fwrite(STDOUT, "zend.assertions={$assertions}\n");
       $this->assertSame(
         '1',
-        $assertions,
+        ini_get('zend.assertions'),
         'zend.assertions must be 1 in the bypass PHP process.',
       );
     }

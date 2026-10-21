@@ -9,7 +9,7 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
 /**
- * Builds the fake mcp_sentinel_test Extension from the registered module.
+ * Writes and builds the fake mcp_sentinel_test Extension from the registered module.
  */
 trait FakeTestModuleExtensionTrait {
 

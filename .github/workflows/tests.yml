@@ -1367,6 +1367,10 @@ jobs:
         env:
           # Pin to gitlab_templates 1.17.3
           # (3f225a00f6e6b68b10a5fa027e2637c4331a8db3), not default-ref.
+          # To bump: set GITLAB_TEMPLATES_REF to the new tag's
+          # commit SHA and replace both sha256 values below.
+          # Dependabot will not do this. drupal.org tracks main
+          # through .gitlab-ci.yml (_GITLAB_TEMPLATES_REF: main).
           GITLAB_TEMPLATES_REF: '3f225a00f6e6b68b10a5fa027e2637c4331a8db3'
           DRUPAL_CORE: '^11.3'
           _WEB_ROOT: web
@@ -1460,7 +1464,7 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '400'
+          MIN_TESTS: '1150'
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
@@ -1492,7 +1496,7 @@ jobs:
             # The dedicated bypass run is counted once. Do not
             # collect the same file again from tests/src/Kernel.
             if [ "${dir}" = "${module}/tests/src/Kernel" ]; then
-              extra=(--exclude-filter McpPrincipalAuthGuardBypassTest)
+              extra=(--exclude-filter '/\\McpPrincipalAuthGuardBypassTest::/')
             fi
             vendor/bin/phpunit -c "${config}" \
               --log-junit "${PWD}/junit-do-${i}.xml" \
