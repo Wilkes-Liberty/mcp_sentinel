@@ -20,9 +20,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   runs the Kernel suite in a gitlab_templates-shaped
   layout with `zend.assertions=1`. tests-gate greps
   `tests/` for `modules/(contrib|custom)/mcp_sentinel`.
-  The GitHub job now expands composer.json the way
-  gitlab_templates does, and the deny test asserts the
-  live handler path before refusing.
 - Latest-stable contrib refresh fails the job when
   `composer show --locked` fails or lists no contrib,
   instead of skipping the refresh and exiting 0
