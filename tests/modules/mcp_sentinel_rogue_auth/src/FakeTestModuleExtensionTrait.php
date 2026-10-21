@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_rogue_auth;
 
 use Drupal\Core\Extension\Extension;
+use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
 /**
  * Builds the fake mcp_sentinel_test Extension from the registered module.
@@ -12,6 +13,29 @@ use Drupal\Core\Extension\Extension;
  * @property \Drupal\Core\Extension\ModuleHandlerInterface $inner
  */
 trait FakeTestModuleExtensionTrait {
+
+  /**
+   * Writes the fake info.yml next to the rogue class and registers cleanup.
+   *
+   * phpunit keys modules by info.yml basename, so the file is
+   * created at runtime rather than shipped in the fixture.
+   */
+  private function ensureFakeTestModuleInfo(): void {
+    $file = (new \ReflectionClass(McpRoguePrincipalAuthExtension::class))
+      ->getFileName();
+    $infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
+    if (!is_file($infoPathname)) {
+      file_put_contents(
+        $infoPathname,
+        "name: 'MCP Sentinel fake test module'\ntype: module\nhidden: true\n",
+      );
+    }
+    register_shutdown_function(static function (string $path): void {
+      if (is_file($path)) {
+        unlink($path);
+      }
+    }, $infoPathname);
+  }
 
   /**
    * Extension whose pathname is the fake test-module info.yml.

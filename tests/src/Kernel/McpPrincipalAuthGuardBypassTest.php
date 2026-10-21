@@ -248,8 +248,28 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
    *
    * The decorator is the live @module_handler. Ownership that
    * asks it admits the rewired rogue. container.modules does not.
+   * The positive control proves the live handler's
+   * mcp_sentinel_test path is the rogue fixture directory,
+   * so the deny is against a real lie, not a missing module.
    */
   public function testDecoratedModuleHandlerRewireIsDenied(): void {
+    $handler = $this->container->get('module_handler');
+    $this->assertInstanceOf(LyingTestModulePathHandler::class, $handler);
+    $rogueFile = (new \ReflectionClass(
+      McpRoguePrincipalAuthExtension::class,
+    ))->getFileName();
+    $this->assertIsString($rogueFile);
+    $rogueDir = realpath(dirname($rogueFile));
+    $reportedDir = realpath(
+      DRUPAL_ROOT . '/' . $handler->getModule('mcp_sentinel_test')->getPath(),
+    );
+    $this->assertNotFalse($rogueDir);
+    $this->assertNotFalse($reportedDir);
+    $this->assertSame(
+      $rogueDir,
+      $reportedDir,
+      'The live module handler must report mcp_sentinel_test at the rogue fixture directory.',
+    );
     $this->assertStampedUnproxiedPatchDenied();
     $this->assertRuntimeRefusedAudit('mcp_sentinel_rogue_auth');
   }

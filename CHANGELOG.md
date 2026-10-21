@@ -7,6 +7,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- The GitHub d.o-layout job now expands `composer.json` and
+  mounts the module the way gitlab_templates does, and
+  `testDecoratedModuleHandlerRewireIsDenied` asserts the
+  live handler's `mcp_sentinel_test` path is the rogue
+  fixture before the deny (DEV-1049).
 - `McpPrincipalAuthGuardBypassTest::testDecoratedModuleHandlerRewireIsDenied`
   no longer fatals on drupal.org GitLab CI when the
   module's real path sits outside the docroot (DEV-1049).

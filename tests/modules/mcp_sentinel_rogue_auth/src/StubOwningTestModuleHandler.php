@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel_rogue_auth;
 
 use Drupal\Core\Extension\ModuleHandlerInterface;
-use Drupal\mcp_sentinel_rogue_auth\Service\McpRoguePrincipalAuthExtension;
 
 /**
  * Reports mcp_sentinel_test at the rogue class directory.
@@ -19,10 +18,6 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   /**
    * Constructs the stub.
    *
-   * Writes the fake info.yml at runtime so phpunit's extension
-   * scan (which keys modules by info.yml basename) does not
-   * steal the mcp_sentinel_test namespace.
-   *
    * @param \Drupal\Core\Extension\ModuleHandlerInterface $inner
    *   The live handler. The stub is not a decorator; this is
    *   only used to read the registered mcp_sentinel path.
@@ -30,19 +25,7 @@ final class StubOwningTestModuleHandler implements ModuleHandlerInterface {
   public function __construct(
     private readonly ModuleHandlerInterface $inner,
   ) {
-    $file = (new \ReflectionClass(McpRoguePrincipalAuthExtension::class))->getFileName();
-    $infoPathname = dirname((string) $file) . '/mcp_sentinel_test.info.yml';
-    if (!is_file($infoPathname)) {
-      file_put_contents(
-        $infoPathname,
-        "name: 'MCP Sentinel stub-handler fake'\ntype: module\nhidden: true\n",
-      );
-    }
-    register_shutdown_function(static function (string $path): void {
-      if (is_file($path)) {
-        unlink($path);
-      }
-    }, $infoPathname);
+    $this->ensureFakeTestModuleInfo();
   }
 
   /**
