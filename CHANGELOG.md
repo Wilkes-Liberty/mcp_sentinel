@@ -21,7 +21,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `zend.assertions=1`. #346's first layout leg ran with
   assertions off and stayed green on the broken fixture.
   tests-gate greps `tests/` for
-  `modules/(contrib|custom)/mcp_sentinel`.
+  `modules/(contrib|custom)/mcp_sentinel`. The GitHub job
+  expands composer.json the way gitlab_templates does, and
+  the deny test asserts the live handler path before
+  refusing.
 - Latest-stable contrib refresh fails the job when
   `composer show --locked` fails or lists no contrib,
   instead of skipping the refresh and exiting 0
