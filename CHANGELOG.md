@@ -94,8 +94,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   kill-block reader seam is veto-only: a decorator
   may make a block unreadable, never expired. A NULL
   `block_until` read still blocks on re-issue.
-
-### Security
 - A later compiler pass with installed PHP can
   silently forge `container.modules`. Runtime
   ownership then treats the forged map as truth, so
