@@ -37,6 +37,30 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
   use McpSealedTokenDenialAuditTestTrait;
 
   /**
+   * {@inheritdoc}
+   */
+  protected static $modules = [
+    'system',
+    'user',
+    'field',
+    'filter',
+    'text',
+    'file',
+    'image',
+    'options',
+    'path_alias',
+    'serialization',
+    'jsonapi',
+    'tool',
+    'key',
+    'consumers',
+    'simple_oauth',
+    'encrypt',
+    'audit_chain',
+    'mcp_sentinel',
+  ];
+
+  /**
    * Test clock shared by the auditor under test.
    */
   private McpSealedTokenDenyAuditTestClock $clock;

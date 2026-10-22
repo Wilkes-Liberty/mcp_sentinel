@@ -42,6 +42,30 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
   use McpSealedTokenDenialAuditTestTrait;
 
   /**
+   * {@inheritdoc}
+   */
+  protected static $modules = [
+    'system',
+    'user',
+    'field',
+    'filter',
+    'text',
+    'file',
+    'image',
+    'options',
+    'path_alias',
+    'serialization',
+    'jsonapi',
+    'tool',
+    'key',
+    'consumers',
+    'simple_oauth',
+    'encrypt',
+    'audit_chain',
+    'mcp_sentinel',
+  ];
+
+  /**
    * Designated client used by most tests.
    */
   private const CLIENT_ID = 'mcp-agent-prod';

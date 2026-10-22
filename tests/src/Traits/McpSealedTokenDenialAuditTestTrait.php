@@ -14,32 +14,6 @@ trait McpSealedTokenDenialAuditTestTrait {
   use McpAuditSchemaTestTrait;
 
   /**
-   * Modules required by sealed-token denial audit kernel tests.
-   *
-   * @var string[]
-   */
-  protected static $modules = [
-    'system',
-    'user',
-    'field',
-    'filter',
-    'text',
-    'file',
-    'image',
-    'options',
-    'path_alias',
-    'serialization',
-    'jsonapi',
-    'tool',
-    'key',
-    'consumers',
-    'simple_oauth',
-    'encrypt',
-    'audit_chain',
-    'mcp_sentinel',
-  ];
-
-  /**
    * Installs schema and a default request for denial-audit tests.
    */
   protected function installSealedTokenDenialAudit(): void {
