@@ -26,7 +26,7 @@ use Symfony\Component\HttpFoundation\Request;
  *  - onOperation() must never fatal on the removed isMcpRequest().
  *  - onOperation() throws a GraphQL Error when the master switch is off.
  *
- * W1-T2 additions (G2 gap closure):
+ * Also covered:
  *  - Mutation blocked when allow_graphql_mutations = FALSE.
  *  - Query allowed when allow_read = TRUE.
  *  - Query blocked when allow_read = FALSE.

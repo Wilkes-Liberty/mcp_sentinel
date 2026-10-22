@@ -146,7 +146,7 @@ function mcp_sentinel_schema(): array {
   // not fit a utf8mb4 unique index. selector_key stores the full
   // iss|sub|actor, iss|sub, or tenant value.
   $schema['mcp_sentinel_kill_block'] = [
-    'description' => 'Durable agent kill-block registry (DEV-846).',
+    'description' => 'Durable agent kill-block registry.',
     'fields' => [
       'selector_hash' => [
         'type' => 'varchar',
@@ -284,7 +284,7 @@ function mcp_sentinel_schema(): array {
   // operator record. identity_id can be 770 characters (a Paladin
   // human key), so the unique index is a hash, matching kill_block.
   $schema['mcp_sentinel_operator_binding'] = [
-    'description' => 'Bound Paladin identities and Drupal uids for one operator (DEV-986).',
+    'description' => 'Bound Paladin identities and Drupal uids for one operator.',
     'fields' => [
       'identity_hash' => [
         'type' => 'varchar',
@@ -1895,7 +1895,7 @@ function mcp_sentinel_update_10036(): string {
   $messages[] = 'Drain or review the webhook queue before updb.';
 
   if (count($messages) === 1) {
-    return 'DEV-985 hold-queue and escalation columns already present. Drain or review the webhook queue before updb.';
+    return 'Hold-queue and escalation columns already present. Drain or review the webhook queue before updb.';
   }
   return implode(' ', $messages);
 }

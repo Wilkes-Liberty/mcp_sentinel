@@ -14,9 +14,9 @@ use Drupal\mcp_sentinel\Service\McpPrincipalKey;
  * as a separate parameter and must never read identity or tenant from
  * tool arguments.
  *
- * Grant tables (mcp_admin_grant and related) are superseded as an
- * identity source by this token-derived context. Retirement of those
- * tables is a later DEV-844 slice.
+ * Grant tables (mcp_admin_grant and related) are not an identity
+ * source; this token-derived context is. mcp_admin_grant remains
+ * live break-glass storage.
  */
 final readonly class McpPrincipalContext {
 
