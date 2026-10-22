@@ -17,8 +17,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * Denials stay fail-closed: a write or dedupe failure never becomes an
  * allow. Repeat denials of the same reason and principal inside
- * one time window share a single chain row. Site and path stay on
- * the row; they are not part of the key. The window is
+ * one time window share a single chain row. The row keeps
+ * the site and path of the first denial in the window.
+ * Neither is part of the key. The window is
  * {@see self::DEFAULT_WINDOW} seconds unless
  * mcp_sentinel.settings:sealed_token_deny_audit_window is a value in
  * 1..3600.
@@ -261,9 +262,10 @@ final class McpSealedTokenDenialAuditor {
   /**
    * Bucket key for reason + principal + window.
    *
-   * Random tokens do not get their own rows. Site and path stay
-   * on the chain row but are excluded from the key: both come
-   * from the request and are attacker-chosen.
+   * Random tokens do not get their own rows. The row keeps the
+   * site and path of the first denial in the window. Neither
+   * is part of the key: both come from the request and are
+   * attacker-chosen.
    *
    * @param \Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason $reason
    *   Enumerated denial reason.

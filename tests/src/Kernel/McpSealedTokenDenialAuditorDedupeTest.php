@@ -10,7 +10,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason;
 use Drupal\mcp_sentinel\Service\McpSealedTokenDenialAuditor;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
-use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpSealedTokenDenialAuditTestTrait;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -19,8 +19,9 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Sealed-token denial rows collapse per reason, principal, and window.
  *
- * Site and path stay on the chain row. They must not be part of the
- * dedupe key: both come from the request and are attacker-chosen.
+ * The row keeps the site and path of the first denial in the
+ * window. They must not be part of the dedupe key: both come
+ * from the request and are attacker-chosen.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpSealedTokenDenialAuditor
  *
@@ -33,31 +34,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[RunTestsInSeparateProcesses]
 final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
 
-  use McpAuditSchemaTestTrait;
-
-  /**
-   * {@inheritdoc}
-   */
-  protected static $modules = [
-    'system',
-    'user',
-    'field',
-    'filter',
-    'text',
-    'file',
-    'image',
-    'options',
-    'path_alias',
-    'serialization',
-    'jsonapi',
-    'tool',
-    'key',
-    'consumers',
-    'simple_oauth',
-    'encrypt',
-    'audit_chain',
-    'mcp_sentinel',
-  ];
+  use McpSealedTokenDenialAuditTestTrait;
 
   /**
    * Test clock shared by the auditor under test.
@@ -69,16 +46,7 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installEntitySchema('user');
-    $this->installSchema('user', ['users_data']);
-    $this->installEntitySchema('consumer');
-    $this->installEntitySchema('oauth2_token');
-    $this->installConfig(['mcp_sentinel', 'system']);
-    $this->installAuditChainSchema();
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_sealed_token']);
-    $this->pushRequestKeepingSession(
-      Request::create('https://sentinel.example/jsonapi/node/page'),
-    );
+    $this->installSealedTokenDenialAudit();
     $this->clock = new McpSealedTokenDenyAuditTestClock(
       $this->container->get('datetime.time')->getRequestTime(),
     );
@@ -95,7 +63,7 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $this->auditor($kv)->record(McpSealedTokenDenyReason::Revoked, [
       'uid' => 5,
     ]);
-    $this->assertCount(1, $this->rows());
+    $this->assertCount(1, $this->sealedTokenDenialRows());
   }
 
   /**
@@ -109,7 +77,7 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $auditor->record(McpSealedTokenDenyReason::HashMismatch, ['uid' => 5]);
     $this->assertSame(
       ['revoked', 'hash_mismatch'],
-      array_column($this->rows(), 'reason'),
+      array_column($this->sealedTokenDenialRows(), 'reason'),
     );
   }
 
@@ -122,7 +90,10 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $auditor = $this->auditor();
     $auditor->record(McpSealedTokenDenyReason::Revoked, ['uid' => 5]);
     $auditor->record(McpSealedTokenDenyReason::Revoked, ['uid' => 6]);
-    $this->assertSame([5, 6], array_column($this->rows(), 'uid'));
+    $this->assertSame(
+      [5, 6],
+      array_column($this->sealedTokenDenialRows(), 'uid'),
+    );
   }
 
   /**
@@ -138,8 +109,8 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $auditor->record(McpSealedTokenDenyReason::Revoked, ['uid' => 5]);
     $this->clock->now += 120;
     $auditor->record(McpSealedTokenDenyReason::Revoked, ['uid' => 5]);
-    $this->assertCount(1, $this->rows());
-    $this->assertSame(300, $this->rows()[0]['window_seconds']);
+    $this->assertCount(1, $this->sealedTokenDenialRows());
+    $this->assertSame(300, $this->sealedTokenDenialRows()[0]['window_seconds']);
   }
 
   /**
@@ -155,7 +126,7 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     ]);
     $this->assertSame(
       McpSealedTokenDenialAuditor::DEFAULT_WINDOW,
-      $this->rows()[0]['window_seconds'],
+      $this->sealedTokenDenialRows()[0]['window_seconds'],
     );
   }
 
@@ -168,7 +139,7 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $token = 'not-a-sealed-token-at-all';
     $manager = $this->container->get('mcp_sentinel.sealed_token_manager');
     $this->assertNull($manager->verify($token));
-    $prefix = $this->rows()[0]['token_hash_prefix'] ?? '';
+    $prefix = $this->sealedTokenDenialRows()[0]['token_hash_prefix'] ?? '';
     $this->assertSame(
       McpSealedTokenDenialAuditor::HASH_PREFIX_LENGTH,
       strlen($prefix),
@@ -185,10 +156,10 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $this->flood(
       static fn (int $i): string => 'https://sentinel.example/probe-' . $i,
     );
-    $rows = $this->rows();
+    $rows = $this->sealedTokenDenialRows();
     $this->assertCount(1, $rows);
-    $this->assertArrayHasKey('path', $rows[0]);
-    $this->assertArrayHasKey('site', $rows[0]);
+    $this->assertSame('/probe-0', $rows[0]['path'] ?? NULL);
+    $this->assertSame('sentinel.example', $rows[0]['site'] ?? NULL);
   }
 
   /**
@@ -200,10 +171,10 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
     $this->flood(static function (int $i): string {
       return 'https://h' . $i . '.sentinel.example/jsonapi/node/page';
     });
-    $rows = $this->rows();
+    $rows = $this->sealedTokenDenialRows();
     $this->assertCount(1, $rows);
-    $this->assertArrayHasKey('path', $rows[0]);
-    $this->assertArrayHasKey('site', $rows[0]);
+    $this->assertSame('/jsonapi/node/page', $rows[0]['path'] ?? NULL);
+    $this->assertSame('h0.sentinel.example', $rows[0]['site'] ?? NULL);
   }
 
   /**
@@ -227,7 +198,7 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
   /**
    * Builds an auditor on the test clock.
    *
-   * @param \Drupal\Core\KeyValueStore\KeyValueExpirableFactoryInterface $kv
+   * @param \Drupal\Core\KeyValueStore\KeyValueExpirableFactoryInterface|null $kv
    *   Store factory. NULL uses the container store.
    */
   private function auditor(
@@ -241,30 +212,6 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
       new TestLogger(),
       $kv ?? $this->container->get('keyvalue.expirable'),
     );
-  }
-
-  /**
-   * Sealed-token denied_access metadata rows, oldest first.
-   *
-   * @return list<array<string, mixed>>
-   *   Decoded metadata.
-   */
-  private function rows(): array {
-    $out = [];
-    $stored = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l', ['metadata'])
-      ->condition('l.operation', 'denied_access')
-      ->orderBy('l.id')
-      ->execute()
-      ->fetchCol();
-    foreach ($stored as $json) {
-      $meta = json_decode((string) $json, TRUE);
-      if (is_array($meta) && ($meta['tool'] ?? '') === 'sealed_token') {
-        $out[] = $meta;
-      }
-    }
-    return $out;
   }
 
 }

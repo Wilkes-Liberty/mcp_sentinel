@@ -41,11 +41,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   install is therefore unnecessary, but it is still
   correct and is kept so the test stays independent of
   the `audit_chain` version.
-- Sealed-token denials from a forged or unknown token
-  now collapse to one `denied_access` row per reason,
-  principal, and window, whatever the request host or
-  path (DEV-1040). Site and path stay on the row
-  metadata. They are no longer part of the dedupe key.
 
 ### Security
 - Sealed-token authentication denials now write a `denied_access`
@@ -59,7 +54,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stored. Repeat denials of the same reason and principal
   collapse to one row per 60-second window
   (`mcp_sentinel.settings:sealed_token_deny_audit_window`,
-  1..3600; invalid values use 60). A throwing audit write still
+  1..3600; invalid values use 60), whatever the request
+  host or path (DEV-1040). The row keeps the site and path
+  of the first denial in the window. A throwing audit write still
   denies; the failure is logged on `mcp_sentinel` with the
   exception class only. Apply with `drush cr` (last hook remains
   10039).
@@ -111,9 +108,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parameter and writes no refusal row (DEV-1043).
 - Sealed-token denial floods collapse to one
   `denied_access` row per reason, principal, and
-  window, so the Denied access storm alert (20 rows
-  / 300 s) does not see the suppressed volume
-  (DEV-1044).
+  window, so a count-based `denied_access` rule, such
+  as the README's Denied access storm example (20 in
+  300 s), sees one row per window (DEV-1044).
 
 ### Changed
 - GitHub Actions refreshes locked contrib to latest-stable

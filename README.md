@@ -1593,8 +1593,8 @@ carries jti (or a hash prefix), uid, client_id, site, and path —
 never the bearer. Repeat denials of the same reason and
 principal share one row per 60-second window
 (`mcp_sentinel.settings:sealed_token_deny_audit_window`).
-Site and path stay on the row; they are not part of the
-dedupe key.
+The row keeps the site and path of the first denial in
+the window.
 
 ## Companion Node.js Connector
 

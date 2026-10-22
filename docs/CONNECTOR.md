@@ -83,8 +83,8 @@ prerequisite pin for Path B, not a public HTTPS cut. Authentication
 denials write a `denied_access` audit row (`tool: sealed_token`) with
 an enumerated reason; the bearer is never stored. Repeat denials of
 the same reason and principal share one row per 60-second
-window. Site and path stay on the row; they are not part of
-the dedupe key.
+window. The row keeps the site and path of the first
+denial in the window.
 
 ### Access-token TTL
 

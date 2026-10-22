@@ -43,11 +43,10 @@ EOF
 # Sets out, err, and rc for the caller.
 run_refresh() {
   set +e
-  err_file="$(mktemp)"
+  err_file="$(mktemp "${tmp}/err.XXXXXX")"
   out="$(PATH="${tmp}:${PATH}" bash "${refresh}" 2>"${err_file}")"
   rc=$?
   err="$(cat "${err_file}")"
-  rm -f "${err_file}"
   set -e
   printf '%s\n' "${out}"
   printf '%s\n' "${err}" >&2

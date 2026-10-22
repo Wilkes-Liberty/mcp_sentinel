@@ -365,6 +365,14 @@ jobs:
             echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
             exit 1
           fi
+          # Losing the 8-test dedupe class would not trip the floor
+          # (1586-8=1578). Require those cases in the JUnit output.
+          dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-*.xml | wc -l | tr -d ' ')"
+          echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
+          if [ "${dedupe_ran}" -lt 8 ]; then
+            echo "::error::McpSealedTokenDenialAuditorDedupeTest collected ${dedupe_ran} cases, expected at least 8."
+            exit 1
+          fi
 
   # Functional (BrowserTestBase) suite on the ceiling leg only. The setup
   # steps deliberately mirror the matrix job above rather than sharing a
@@ -1510,6 +1518,14 @@ jobs:
           echo "Collected ${total} Kernel tests across $((${#suites[@]} + 1)) invocations (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Kernel tests, below the floor of ${MIN_TESTS}."
+            exit 1
+          fi
+          # Losing the 8-test dedupe class would not trip the floor
+          # (1202-8=1194). Require those cases in the JUnit output.
+          dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-do-*.xml | wc -l | tr -d ' ')"
+          echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
+          if [ "${dedupe_ran}" -lt 8 ]; then
+            echo "::error::McpSealedTokenDenialAuditorDedupeTest collected ${dedupe_ran} cases, expected at least 8."
             exit 1
           fi
 
