@@ -305,10 +305,10 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 928 collect today after #3624475. The floor sits just under that,
+          # 1586 collect after DEV-1040. The floor sits just under that,
           # so losing any one submodule suite — the smallest is 10 tests —
           # trips it.
-          MIN_TESTS: '920'
+          MIN_TESTS: '1577'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
@@ -1464,7 +1464,10 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '1150'
+          # 1202 Kernel tests after DEV-1040, including the dedicated
+          # bypass invocation. Floor sits 9 under that so losing a
+          # 10-test suite trips it.
+          MIN_TESTS: '1193'
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
