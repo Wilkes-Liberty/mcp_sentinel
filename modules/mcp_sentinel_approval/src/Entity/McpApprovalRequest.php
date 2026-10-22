@@ -18,9 +18,10 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
  * denies it; on approval the stored operation is replayed.
  *
  * Annotation rather than a #[ContentEntityType] attribute: attribute-based
- * entity types require Drupal 11.1, and on 10.6/11.0 an attribute yields no
- * entity type at all. See McpPolicyProfile for the full reasoning and the
- * condition for converting back.
+ * entity types require Drupal 11.1, and on 10.6 an attribute yields no
+ * entity type at all. Annotations still work on Drupal 12 (removed in 13).
+ * See McpPolicyProfile for the full reasoning and the condition for
+ * converting back.
  *
  * @ContentEntityType(
  *   id = "mcp_approval_request",

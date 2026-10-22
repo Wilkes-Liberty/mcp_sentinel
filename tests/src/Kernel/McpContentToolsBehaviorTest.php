@@ -9,6 +9,7 @@ use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\node\Entity\NodeType;
 use Drupal\taxonomy\Entity\Vocabulary;
@@ -90,7 +91,7 @@ final class McpContentToolsBehaviorTest extends KernelTestBase {
       $role->save();
     }
     else {
-      user_role_grant_permissions('mcp_api', ['access mcp sentinel context']);
+      McpRolePermissions::grant('mcp_api', ['access mcp sentinel context']);
     }
 
     // Enable role fallback governance.

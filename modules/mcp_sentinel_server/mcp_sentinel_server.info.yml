@@ -2,7 +2,7 @@ name: 'MCP Sentinel Server'
 type: module
 description: 'Registers MCP Sentinel Tool plugins with mcp_server and wires OAuth scopes.'
 package: 'AI / MCP'
-core_version_requirement: ^10.6 || ^11.3
+core_version_requirement: ^10.6 || ^11.3 || ^12
 
 # The extracted Bridge has its own 1.x version line. The protocol/API floor
 # belongs to MCP Server; do not compare Bridge versions against that floor.

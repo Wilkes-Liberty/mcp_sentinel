@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\Tests\BrowserTestBase;
 use Drupal\user\RoleInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -63,7 +64,7 @@ final class McpContextEndpointTest extends BrowserTestBase {
       FALSE,
     );
 
-    user_role_grant_permissions(
+    McpRolePermissions::grant(
       RoleInterface::ANONYMOUS_ID,
       ['access mcp sentinel context'],
     );

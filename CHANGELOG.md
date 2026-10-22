@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Drupal 12 is a declared core target (`^10.6 || ^11.3 || ^12`) on the
+  main module, the approval / GraphQL / server submodules, test
+  modules, and `composer.json`. The 10.6 and 11.3 floors are unchanged
+  ([#3628108](https://www.drupal.org/node/3628108)).
+
+### Changed
+- Install and tests grant role permissions through
+  `McpRolePermissions::grant()` instead of
+  `user_role_grant_permissions()`, which Drupal 11.5 deprecated
+  (removed in 13). The helper uses override-free role storage and
+  `grantPermission()` so the same path works on 10.6, 11.3, and 12.
+
 ## [3.4.1] - 2026-10-21
 
 ### Fixed

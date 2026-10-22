@@ -36,7 +36,19 @@ final class McpUninstallTest extends BrowserTestBase {
    */
   public function testUninstallRemovesMcpApiRole(): void {
     $storage = $this->container->get('entity_type.manager')->getStorage('user_role');
-    $this->assertNotNull($storage->load('mcp_api'), 'mcp_api role exists after install.');
+    $role = $storage->load('mcp_api');
+    $this->assertNotNull($role, 'mcp_api role exists after install.');
+    foreach ([
+      'access content',
+      'access user profiles',
+      'view media',
+      'access mcp sentinel context',
+    ] as $permission) {
+      $this->assertTrue(
+        $role->hasPermission($permission),
+        "mcp_api must receive '$permission' from hook_install().",
+      );
+    }
 
     $this->container->get('module_installer')->uninstall(['mcp_sentinel']);
 

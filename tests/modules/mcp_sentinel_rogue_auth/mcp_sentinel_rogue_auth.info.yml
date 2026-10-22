@@ -2,7 +2,7 @@ name: 'MCP Sentinel rogue auth extension'
 type: module
 description: 'Regression fixture: a non-test module that tries to provide the principal-auth hook. Never enable on a production site.'
 package: Testing
-core_version_requirement: ^10.6 || ^11.3
+core_version_requirement: ^10.6 || ^11.3 || ^12
 dependencies:
   - mcp_sentinel:mcp_sentinel
 hidden: true

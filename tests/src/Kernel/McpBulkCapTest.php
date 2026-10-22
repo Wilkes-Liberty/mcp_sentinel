@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Access\AccessResult;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -83,7 +84,7 @@ final class McpBulkCapTest extends KernelTestBase {
       $role->save();
     }
     // Grant administer nodes so entity->access('update') passes in tests.
-    user_role_grant_permissions('mcp_api', ['administer nodes', 'access mcp sentinel context']);
+    McpRolePermissions::grant('mcp_api', ['administer nodes', 'access mcp sentinel context']);
 
     // Enable role fallback so the test account triggers governance.
     // governed_roles already includes mcp_api from the default config install
