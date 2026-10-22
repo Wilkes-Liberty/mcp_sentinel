@@ -536,7 +536,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
   }
 
   /**
-   * Repeat denials of the same reason, principal, and source share one row.
+   * Repeat denials of the same reason and principal share one row.
    *
    * The window is 60 seconds by default
    * (mcp_sentinel.settings:sealed_token_deny_audit_window).

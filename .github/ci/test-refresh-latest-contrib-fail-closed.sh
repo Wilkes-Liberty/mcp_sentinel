@@ -29,6 +29,9 @@ if [ "${1-}" = "show" ]; then
     printf '%s\n' 'drupal/core' 'drupal/core-recommended' 'drupal/core-dev'
     exit 0
   fi
+  if [ "${COMPOSER_SHOW_MODE-}" = "partial" ]; then
+    printf '%s\n' 'drupal/audit_chain'
+  fi
   echo "forced composer show failure" >&2
   exit 42
 fi
@@ -37,13 +40,17 @@ EOF
   chmod +x "${tmp}/composer"
 }
 
-# Sets out and rc for the caller.
+# Sets out, err, and rc for the caller.
 run_refresh() {
   set +e
-  out="$(PATH="${tmp}:${PATH}" bash "${refresh}" 2>&1)"
+  err_file="$(mktemp)"
+  out="$(PATH="${tmp}:${PATH}" bash "${refresh}" 2>"${err_file}")"
   rc=$?
+  err="$(cat "${err_file}")"
+  rm -f "${err_file}"
   set -e
   printf '%s\n' "${out}"
+  printf '%s\n' "${err}" >&2
 }
 
 expect_fail_with_line() {
@@ -54,7 +61,7 @@ expect_fail_with_line() {
     echo "FAIL: ${label}: refresh-latest-contrib.sh exited 0" >&2
     exit 1
   fi
-  if ! printf '%s\n' "${out}" | grep -Fqx "${line}"; then
+  if ! printf '%s\n' "${err}" | grep -Fqx "${line}"; then
     echo "FAIL: ${label}: missing stderr line: ${line}" >&2
     exit 1
   fi
@@ -70,3 +77,7 @@ expect_fail_with_line "composer show failure" "${show_failed_line}"
 echo "== locked list is only drupal/core* =="
 export COMPOSER_SHOW_MODE=empty
 expect_fail_with_line "empty contrib list" "${empty_list_line}"
+
+echo "== composer show fails after printing contrib =="
+export COMPOSER_SHOW_MODE=partial
+expect_fail_with_line "partial composer show failure" "${show_failed_line}"

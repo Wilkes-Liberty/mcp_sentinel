@@ -227,8 +227,8 @@ final class McpSealedTokenDenialAuditorDedupeTest extends KernelTestBase {
   /**
    * Builds an auditor on the test clock.
    *
-   * @param \Drupal\Core\KeyValueStore\KeyValueExpirableFactoryInterface|null $kv
-   *   Store factory, or NULL to use the container store.
+   * @param \Drupal\Core\KeyValueStore\KeyValueExpirableFactoryInterface $kv
+   *   Store factory. NULL uses the container store.
    */
   private function auditor(
     ?KeyValueExpirableFactoryInterface $kv = NULL,

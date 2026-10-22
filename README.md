@@ -1590,9 +1590,11 @@ Mint and revoke already write `sealed_token_mint` /
 `audience_mismatch`, `consumer_missing`, `consumer_unpublished`,
 `owner_mismatch`, `account_missing`, `account_blocked`. The row
 carries jti (or a hash prefix), uid, client_id, site, and path —
-never the bearer. Repeat denials of the same reason, principal,
-and source share one row per 60-second window
+never the bearer. Repeat denials of the same reason and
+principal share one row per 60-second window
 (`mcp_sentinel.settings:sealed_token_deny_audit_window`).
+Site and path stay on the row; they are not part of the
+dedupe key.
 
 ## Companion Node.js Connector
 

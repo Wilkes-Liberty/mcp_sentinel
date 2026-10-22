@@ -16,8 +16,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * Writes one sealed-token denial to audit_chain, with bounded flood safety.
  *
  * Denials stay fail-closed: a write or dedupe failure never becomes an
- * allow. Repeat denials of the same reason, principal, and source
- * inside one time window share a single chain row. The window is
+ * allow. Repeat denials of the same reason and principal inside
+ * one time window share a single chain row. Site and path stay on
+ * the row; they are not part of the key. The window is
  * {@see self::DEFAULT_WINDOW} seconds unless
  * mcp_sentinel.settings:sealed_token_deny_audit_window is a value in
  * 1..3600.
@@ -258,29 +259,27 @@ final class McpSealedTokenDenialAuditor {
   }
 
   /**
-   * Bucket key for reason + principal + source + window.
+   * Bucket key for reason + principal + window.
    *
-   * Random tokens do not get their own rows: the flood case is many
-   * distinct bearers of the same reason from the same caller path.
+   * Random tokens do not get their own rows. Site and path stay
+   * on the chain row but are excluded from the key: both come
+   * from the request and are attacker-chosen.
    *
    * @param \Drupal\mcp_sentinel\Enum\McpSealedTokenDenyReason $reason
    *   Enumerated denial reason.
    * @param array<string, mixed> $metadata
-   *   Metadata used for principal and source.
+   *   Metadata used for the principal (uid, or '-' when absent).
    *
    * @return string
    *   Key-value key.
    */
   private function bucketKey(McpSealedTokenDenyReason $reason, array $metadata): string {
     $principal = isset($metadata['uid']) ? (string) (int) $metadata['uid'] : '-';
-    $source = (string) ($metadata['site'] ?? '-')
-      . '|'
-      . (string) ($metadata['path'] ?? '-');
     $window = $this->window();
     $bucket = intdiv($this->time->getRequestTime(), $window);
     return hash(
       'sha256',
-      $reason->value . "\0" . $principal . "\0" . $source . "\0" . (string) $bucket,
+      $reason->value . "\0" . $principal . "\0" . (string) $bucket,
     );
   }
 

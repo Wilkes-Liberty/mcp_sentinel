@@ -41,6 +41,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   install is therefore unnecessary, but it is still
   correct and is kept so the test stays independent of
   the `audit_chain` version.
+- Sealed-token denials from a forged or unknown token
+  now collapse to one `denied_access` row per reason,
+  principal, and window, whatever the request host or
+  path (DEV-1040). Site and path stay on the row
+  metadata. They are no longer part of the dedupe key.
 
 ### Security
 - Sealed-token authentication denials now write a `denied_access`
@@ -51,8 +56,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `owner_mismatch`, `account_missing`, `account_blocked`. Metadata
   is non-secret only (jti or a 12-hex token-hash prefix, uid,
   client_id, site, path). The bearer and signature are never
-  stored. Repeat denials of the same reason, principal, and
-  source collapse to one row per 60-second window
+  stored. Repeat denials of the same reason and principal
+  collapse to one row per 60-second window
   (`mcp_sentinel.settings:sealed_token_deny_audit_window`,
   1..3600; invalid values use 60). A throwing audit write still
   denies; the failure is logged on `mcp_sentinel` with the
@@ -95,7 +100,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   may make a block unreadable, never expired. A NULL
   `block_until` read still blocks on re-issue.
 
-### Security
+### Known issues
 - A later compiler pass with installed PHP can
   silently forge `container.modules`. Runtime
   ownership then treats the forged map as truth, so
@@ -104,6 +109,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the compile-refusal parameter. The refused hook stays
   removed, but `flushCompileRejections()` finds no
   parameter and writes no refusal row (DEV-1043).
+- Sealed-token denial floods collapse to one
+  `denied_access` row per reason, principal, and
+  window, so the Denied access storm alert (20 rows
+  / 300 s) does not see the suppressed volume
+  (DEV-1044).
 
 ### Changed
 - GitHub Actions refreshes locked contrib to latest-stable
