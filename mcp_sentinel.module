@@ -2,10 +2,11 @@
 
 /**
  * @file
- * MCP Sentinel companion module.
+ * MCP Sentinel governance module.
  *
- * Provides security presets, audit logging, content locks, and HMAC webhooks
- * for MCP-connected Drupal sites.
+ * Provides policy profiles, field redaction, DLP, tamper-evident audit
+ * logging, content locks, and HMAC webhooks for Drupal sites exposed to
+ * AI agents over MCP, JSON:API, and GraphQL.
  */
 
 use Drupal\mcp_sentinel\Controller\McpBannerController;
@@ -77,6 +78,8 @@ function mcp_sentinel_help(string $route_name, RouteMatchInterface $route_match)
       $output .= '<li>' . t('Policy profiles are configuration entities, created and edited from the settings page.') . '</li>';
       $output .= '<li>' . t('<a href=":dashboard">MCP Sentinel governance dashboard</a> — operations console at <code>/admin/reports/mcp-sentinel</code>, with tabs for the audit log, webhook deliveries, and (when enabled) approvals. Sealed tokens are minted at Configuration → MCP Sentinel → Sealed tokens.', [':dashboard' => $dashboard_url]) . '</li>';
       $output .= '<li>' . t('<a href=":audit">MCP Sentinel audit log</a> — browse, filter, and export governed-operation records.', [':audit' => $audit_url]) . '</li>';
+      // Stops have no admin UI; operators use Drush. See docs/kill-switch.md.
+      $output .= '<li>' . t('Agent kill-switch stops are issued from Drush only; there is no admin UI. See <code>docs/kill-switch.md</code>.') . '</li>';
       $output .= '</ul>';
 
       $output .= '<p>' . t('For full setup, the trust model in depth, and Drush commands, see the project <code>README.md</code>, <code>INSTALL.md</code>, and <code>API.md</code> shipped with the module.') . '</p>';

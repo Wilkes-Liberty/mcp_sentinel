@@ -27,7 +27,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 /**
  * Operator commands for the agent kill switch (DEV-986).
  *
- * No UI in this slice. Permission: administer agent kill switch.
+ * Drush-only; the dashboard is not kill ops. Permission:
+ * administer agent kill switch.
  *
  * Every command requires a Paladin access token (PALADIN_TOKEN or
  * stdin, never --token) and --operator=<Drupal account name>. The
@@ -549,6 +550,7 @@ final class McpKillSwitchCommands extends DrushCommands {
         return self::EXIT_FAILURE;
       }
       $row = $this->killSwitch->status($selectors[0]);
+      // No row means there is no kill-block; status: active is the idle state.
       if ($row === NULL) {
         $this->output()->writeln('status: active');
         return self::EXIT_SUCCESS;

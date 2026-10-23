@@ -201,7 +201,7 @@ final class McpWebhookQueueManager {
   /**
    * Re-enqueues pending rows whose next_attempt is now due.
    *
-   * This is the Fix-6 cron scan that replaces the RequeueException busy-loop.
+   * This is the cron scan that replaces the RequeueException busy-loop.
    * Instead of re-queuing a not-yet-due item immediately (causing every cron
    * run to pick it up and throw RequeueException until backoff elapses), the
    * worker now simply returns without re-queuing. This cron scan then picks up
@@ -494,9 +494,9 @@ final class McpWebhookQueueManager {
   /**
    * Builds a minimal fallback JSON envelope for legacy rows without a payload.
    *
-   * Pre-Fix-4 delivery rows do not have a stored payload. When such a row is
-   * replayed, this fallback envelope is sent instead of the original body.
-   * Receivers should verify the HMAC over this exact string.
+   * Legacy rows without stored payload use this envelope on replay
+   * instead of the original body. Receivers should verify the HMAC
+   * over this exact string.
    *
    * @param array<string, mixed> $row
    *   The delivery log row.
@@ -659,7 +659,7 @@ final class McpWebhookQueueManager {
   }
 
   /**
-   * Held delivery rows for the Drupal-side UI (DEV-925).
+   * Held delivery rows for Drush and the API; there is no admin UI.
    *
    * @return list<array<string, mixed>>
    *   Associative rows.
