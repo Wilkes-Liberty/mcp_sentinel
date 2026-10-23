@@ -83,10 +83,10 @@ them rather than replacing entity or field access.
   `[REDACTED]` so sensitive values never enter the audit trail.
 - **At-rest audit encryption** — optionally encrypt the audit `metadata` column
   via a drupal/encrypt Encryption Profile; reads decrypt transparently.
-- **SIEM streaming** — optionally emit each audit write to the
-  `audit_chain` logger channel as a structured JSON record
-  (`audit_chain_event`) for forwarding to a SIEM via Syslog or
-  Monolog.
+- **SIEM streaming** — optionally emit each successful audit write
+  as a structured JSON record (`audit_chain_event`) to syslog or
+  any other logger backend except Database Logging. Errors and
+  warnings stay on the `audit_chain` channel.
 - **DLP value-pattern redaction (opt-in)** — scan governed field values for PII
   patterns (email, US phone, SSN, credit card, plus custom patterns) and fully
   redact or partially mask matches. A pattern may declare a classification
