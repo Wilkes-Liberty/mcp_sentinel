@@ -327,10 +327,10 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 1586 collect after DEV-1040. The floor sits just under that,
-          # so losing any one submodule suite — the smallest is 10 tests —
-          # trips it.
-          MIN_TESTS: '1577'
+          # 1610 collect (latest 1.x / this PR matrix). The floor
+          # sits just under that, so losing any one submodule
+          # suite — the smallest is 10 tests — trips it.
+          MIN_TESTS: '1601'
         run: |
           set -euo pipefail
           rm -f junit-*.xml
@@ -389,7 +389,7 @@ jobs:
             exit 1
           fi
           # Losing the 8-test dedupe class would not trip the floor
-          # (1586-8=1578). Require those cases in the JUnit output.
+          # (1610-8=1602). Require those cases in the JUnit output.
           dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-*.xml | wc -l | tr -d ' ')"
           echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
           if [ "${dedupe_ran}" -lt 8 ]; then
