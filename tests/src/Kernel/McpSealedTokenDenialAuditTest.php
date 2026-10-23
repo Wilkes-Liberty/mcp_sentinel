@@ -14,7 +14,7 @@ use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpSealedTokenDenialAuditor;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
-use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpSealedTokenDenialAuditTestTrait;
 use Drupal\user\Entity\User;
 use Drupal\user\UserInterface;
 use Drupal\user\UserStorageInterface;
@@ -39,7 +39,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[RunTestsInSeparateProcesses]
 final class McpSealedTokenDenialAuditTest extends KernelTestBase {
 
-  use McpAuditSchemaTestTrait;
+  use McpSealedTokenDenialAuditTestTrait;
 
   /**
    * {@inheritdoc}
@@ -75,15 +75,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installEntitySchema('user');
-    $this->installSchema('user', ['users_data']);
-    $this->installEntitySchema('consumer');
-    $this->installEntitySchema('oauth2_token');
-    $this->installConfig(['mcp_sentinel', 'system']);
-    $this->installAuditChainSchema();
-    $this->installSchema('mcp_sentinel', ['mcp_sentinel_sealed_token']);
-    $request = Request::create('https://sentinel.example/jsonapi/node/page');
-    $this->pushRequestKeepingSession($request);
+    $this->installSealedTokenDenialAudit();
   }
 
   /**
@@ -536,7 +528,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
   }
 
   /**
-   * Repeat denials of the same reason, principal, and source share one row.
+   * Repeat denials of the same reason and principal share one row.
    *
    * The window is 60 seconds by default
    * (mcp_sentinel.settings:sealed_token_deny_audit_window).
@@ -569,10 +561,10 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
     $this->assertNull($manager->verify($token));
     $this->assertNull($manager->verify($token));
     $this->assertNull($manager->verify($token));
-    $this->assertCount(1, $this->sealedDenials());
+    $this->assertCount(1, $this->sealedTokenDenialRows());
     $clock->now += McpSealedTokenDenialAuditor::DEFAULT_WINDOW;
     $this->assertNull($manager->verify($token));
-    $this->assertCount(2, $this->sealedDenials());
+    $this->assertCount(2, $this->sealedTokenDenialRows());
   }
 
   /**
@@ -588,7 +580,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
         'signature' => 'deadbeef',
         'jti' => 'visible-jti',
       ]);
-    $rows = $this->sealedDenials();
+    $rows = $this->sealedTokenDenialRows();
     $this->assertCount(1, $rows);
     $encoded = json_encode($rows) ?: '';
     $this->assertStringNotContainsString($token, $encoded);
@@ -606,7 +598,7 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
     string $token,
     ?string $jti = NULL,
   ): void {
-    $rows = $this->sealedDenials();
+    $rows = $this->sealedTokenDenialRows();
     $this->assertCount(
       1,
       $rows,
@@ -630,30 +622,6 @@ final class McpSealedTokenDenialAuditTest extends KernelTestBase {
     $this->assertArrayNotHasKey('token', $meta);
     $this->assertArrayNotHasKey('signature', $meta);
     $this->assertArrayNotHasKey('sig', $meta);
-  }
-
-  /**
-   * Sealed-token denied_access metadata rows.
-   *
-   * @return list<array<string, mixed>>
-   *   Decoded metadata.
-   */
-  private function sealedDenials(): array {
-    $rows = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l', ['metadata'])
-      ->condition('l.operation', 'denied_access')
-      ->orderBy('l.id', 'ASC')
-      ->execute()
-      ->fetchCol();
-    $out = [];
-    foreach ($rows as $stored) {
-      $meta = json_decode((string) $stored, TRUE);
-      if (is_array($meta) && ($meta['tool'] ?? '') === 'sealed_token') {
-        $out[] = $meta;
-      }
-    }
-    return $out;
   }
 
   /**
