@@ -305,10 +305,10 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 928 collect today after #3624475. The floor sits just under that,
+          # 1586 collect after DEV-1040. The floor sits just under that,
           # so losing any one submodule suite — the smallest is 10 tests —
           # trips it.
-          MIN_TESTS: '920'
+          MIN_TESTS: '1577'
         run: |
           set -euo pipefail
           # One invocation per directory: PHPUnit 9.6 takes a *single*
@@ -363,6 +363,14 @@ jobs:
           echo "Collected ${total} tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
+            exit 1
+          fi
+          # Losing the 8-test dedupe class would not trip the floor
+          # (1586-8=1578). Require those cases in the JUnit output.
+          dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-*.xml | wc -l | tr -d ' ')"
+          echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
+          if [ "${dedupe_ran}" -lt 8 ]; then
+            echo "::error::McpSealedTokenDenialAuditorDedupeTest collected ${dedupe_ran} cases, expected at least 8."
             exit 1
           fi
 
@@ -1464,7 +1472,10 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '1150'
+          # 1202 Kernel tests after DEV-1040, including the dedicated
+          # bypass invocation. Floor sits 9 under that so losing a
+          # 10-test suite trips it.
+          MIN_TESTS: '1193'
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
@@ -1507,6 +1518,14 @@ jobs:
           echo "Collected ${total} Kernel tests across $((${#suites[@]} + 1)) invocations (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Kernel tests, below the floor of ${MIN_TESTS}."
+            exit 1
+          fi
+          # Losing the 8-test dedupe class would not trip the floor
+          # (1202-8=1194). Require those cases in the JUnit output.
+          dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-do-*.xml | wc -l | tr -d ' ')"
+          echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
+          if [ "${dedupe_ran}" -lt 8 ]; then
+            echo "::error::McpSealedTokenDenialAuditorDedupeTest collected ${dedupe_ran} cases, expected at least 8."
             exit 1
           fi
 
