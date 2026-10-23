@@ -334,13 +334,9 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(string $surfaceId, array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
-      // A NULL dispatcher is a cached container that was not rebuilt,
-      // not a missing caller token. Fail closed as missing_dispatcher.
-      throw new AccessDeniedHttpException(
-        $this->denyExplainer?->refuse(
-          McpPrincipalContextDeniedException::MISSING_DISPATCHER,
-        ) ?? McpDenyExplainer::CALLER_MESSAGE,
-      );
+      // Proof only: admit a missing dispatcher so the deny test
+      // can go red. Not for 1.x.
+      return;
     }
     try {
       // Sealed or deny-only audit context; never a live request rebuild.
