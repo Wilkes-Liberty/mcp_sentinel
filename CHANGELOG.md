@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-23
+
 ### Added
 - Drupal 12 is a declared core target (`^10.6 || ^11.3 || ^12`) on the
   main module, the approval / GraphQL / server submodules, test
@@ -18,9 +20,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `user_role_grant_permissions()`, which Drupal 11.5 deprecated
   (removed in 13). The helper uses override-free role storage and
   `grantPermission()` so the same path works on 10.6, 11.3, and 12.
-
-## [3.4.1] - 2026-10-21
-### Changed
 - The module help page now states that agent kill-switch
   stops are Drush-only and points at `docs/kill-switch.md`.
   API.md and operator comments match that surface: there
@@ -29,20 +28,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ticket-id prefixes. Update 10036 still says
   "already present" and "Drain or review the webhook
   queue before updb".
-
-## [3.4.1] - 2026-10-22
+- GitHub Actions refreshes locked contrib to latest-stable
+  after the recommended-project scaffold so it cannot stay
+  on an older `audit_chain` than drupal.org.
+- `phpstan.neon.dist` keeps a single
+  `function.unusedParameter` ignore for Drupal hook
+  implementations (`mcp_sentinel.module`,
+  `modules/*/*.module`, and the rogue-auth stubs). The
+  duplicate path list is gone.
 
 ### Fixed
 - `McpPrincipalAuthGuardBypassTest::testDecoratedModuleHandlerRewireIsDenied`
   no longer fatals on drupal.org GitLab CI when the
-  module's real path sits outside the docroot (DEV-1049).
+  module's real path sits outside the docroot.
   The shared `FakeTestModuleExtensionTrait` derives the
   fake `mcp_sentinel_test.info.yml` from
   `getModule('mcp_sentinel')->getPath()` and throws a
   `LogicException` if that file is missing under the
   app root. GitHub Actions runs the Kernel suite in a
   gitlab_templates-shaped layout with
-  `zend.assertions=1`. #346's first layout leg ran with
+  `zend.assertions=1`. The first layout leg ran with
   assertions off and stayed green on the broken fixture.
   tests-gate greps `tests/` for
   `modules/(contrib|custom)/mcp_sentinel`. The GitHub job
@@ -51,20 +56,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refusing.
 - Latest-stable contrib refresh fails the job when
   `composer show --locked` fails or lists no contrib,
-  instead of skipping the refresh and exiting 0
-  (DEV-1022).
+  instead of skipping the refresh and exiting 0.
 - `McpHistoricalExceptionTest` installs `system` date-format
   config so `audit_chain` 1.12.2 `ScheduledVerifier::runNow()`
   can format the last-run time through `date.formatter`.
   Kernel tests that omit those entities fataled on
   `DateFormatter::format()` (`getPattern()` on null) after
   that release started interpolating the run time.
-  `audit_chain` 1.12.3 (audit_chain PR #91) formats
-  verifier presentation with `DATE_ATOM`, so that path no
-  longer depends on date-format config. The test-setup
-  install is therefore unnecessary, but it is still
-  correct and is kept so the test stays independent of
-  the `audit_chain` version.
+  `audit_chain` 1.13.0 formats verifier presentation with
+  `DATE_ATOM`, so that path no longer depends on date-format
+  config. The test-setup install is therefore unnecessary,
+  but it is still correct and is kept so the test stays
+  independent of the `audit_chain` version.
 
 ### Security
 - Sealed-token authentication denials now write a `denied_access`
@@ -79,7 +82,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   collapse to one row per 60-second window
   (`mcp_sentinel.settings:sealed_token_deny_audit_window`,
   1..3600; invalid values use 60), whatever the request
-  host or path (DEV-1040). The row keeps the site and path
+  host or path. The row keeps the site and path
   of the first denial in the window. A throwing audit write still
   denies; the failure is logged on `mcp_sentinel` with the
   exception class only. Apply with `drush cr` (last hook remains
@@ -121,31 +124,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   may make a block unreadable, never expired. A NULL
   `block_until` read still blocks on re-issue.
 
-### Known issues
-- A later compiler pass with installed PHP can
-  silently forge `container.modules`. Runtime
-  ownership then treats the forged map as truth, so
-  no refusal row is written (DEV-1043).
-- A later compiler pass with installed PHP can delete
-  the compile-refusal parameter. The refused hook stays
-  removed, but `flushCompileRejections()` finds no
-  parameter and writes no refusal row (DEV-1043).
-- Sealed-token denial floods collapse to one
-  `denied_access` row per reason, principal, and
-  window, so a count-based `denied_access` rule, such
-  as the README's Denied access storm example (20 in
-  300 s), sees one row per window (DEV-1044).
-
-### Changed
-- GitHub Actions refreshes locked contrib to latest-stable
-  after the recommended-project scaffold so it cannot stay
-  on an older `audit_chain` than drupal.org (DEV-1022).
-- `phpstan.neon.dist` keeps a single
-  `function.unusedParameter` ignore for Drupal hook
-  implementations (`mcp_sentinel.module`,
-  `modules/*/*.module`, and the rogue-auth stubs). The
-  duplicate path list is gone.
-
 ### Removed
 - Unused `McpSealedTokenManager::MAX_TTL` is gone. Mint TTL
   is clamped to `TTL_CHOICES` (`clampTtl()`); 86400 remains
@@ -158,6 +136,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `assertScopesAllowed()` are gone. Nothing set the flag,
   so the skip was permanently false. Scope checks stay
   fail-closed. `WEAKEN_SKIP_KILL` remains.
+
+### Known issues
+- A later compiler pass with installed PHP can
+  silently forge `container.modules`. Runtime
+  ownership then treats the forged map as truth, so
+  no refusal row is written.
+- A later compiler pass with installed PHP can delete
+  the compile-refusal parameter. The refused hook stays
+  removed, but `flushCompileRejections()` finds no
+  parameter and writes no refusal row.
+- Sealed-token denial floods collapse to one
+  `denied_access` row per reason, principal, and
+  window, so a count-based `denied_access` rule, such
+  as the README's Denied access storm example (20 in
+  300 s), sees one row per window.
 
 ### Upgrade
 - No database update. The last hook remains 10039.
