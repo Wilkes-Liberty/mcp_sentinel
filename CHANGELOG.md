@@ -25,6 +25,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `graphql_operation_type` now has a dedicated deny explainer
   (unsupported GraphQL operation kind) instead of falling
   through to `unspecified`.
+### Fixed
+- `McpCoreCompatibilityTest` only reads this module's info.yml
+  files, `composer.json`, and PHP sources. On drupal.org GitLab
+  CI the checkout is also the Composer project root, so `web/`
+  is built inside it; walking three levels up from the test
+  file included core and contrib (pipelines 1012720, 1012775
+  on the 3.5.0 tag, and 1012776). The GitHub "PHPUnit —
+  Drupal.org layout" job now keeps that layout — expanded
+  `composer.json` at the project root, module `composer.json`
+  on the custom mount — and runs the Unit suite that would
+  have caught it. `McpSiemStreamingTest` spies on
+  `audit_chain.stream` for audit_chain 1.13.0 (1.12.x still
+  uses `logger.channel.audit_chain`).
 
 ## [3.5.0] - 2026-10-23
 
@@ -3651,7 +3664,7 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.1...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.0...1.x
 [3.4.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...3.4.1
 [3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
 [3.3.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...3.3.2
