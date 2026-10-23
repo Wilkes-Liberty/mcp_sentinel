@@ -38,12 +38,18 @@ final class McpUninstallTest extends BrowserTestBase {
     $storage = $this->container->get('entity_type.manager')->getStorage('user_role');
     $role = $storage->load('mcp_api');
     $this->assertNotNull($role, 'mcp_api role exists after install.');
-    foreach ([
+    // hook_install() also names 'view media'. That permission is defined by
+    // the Media module, which is not a hard dependency; Role save drops a
+    // permission that does not exist. Assert it only when Media is present.
+    $permissions = [
       'access content',
       'access user profiles',
-      'view media',
       'access mcp sentinel context',
-    ] as $permission) {
+    ];
+    if ($this->container->get('module_handler')->moduleExists('media')) {
+      $permissions[] = 'view media';
+    }
+    foreach ($permissions as $permission) {
       $this->assertTrue(
         $role->hasPermission($permission),
         "mcp_api must receive '$permission' from hook_install().",
