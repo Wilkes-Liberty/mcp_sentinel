@@ -576,6 +576,13 @@ final class McpDenyExplainer {
         $meta['principal_unverified'] = $e->reasonCode;
       }
     }
+    else {
+      // refuse() runs before a principal is sealed when the
+      // dispatcher service is missing. The row still names the
+      // principal slot so it is not mistaken for a verified denial.
+      $meta['principal_key'] = 'unverified';
+      $meta['human_key'] = 'unverified';
+    }
 
     // A queue worker has no request; never collapse those writes.
     if ($request === NULL) {

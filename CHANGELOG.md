@@ -21,7 +21,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   closed. Operators are told to wire the dispatcher and
   rebuild the container, not to issue a Paladin token
   (`missing_principal` is unchanged when the dispatcher is
-  present and no sealed principal exists).
+  present and no sealed principal exists). That row records
+  `principal_key` and `human_key` as `unverified` when no
+  principal is sealed yet.
 - `graphql_operation_type` now has a dedicated deny explainer
   (unsupported GraphQL operation kind) instead of falling
   through to `unspecified`.
