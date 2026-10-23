@@ -15,11 +15,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `user_role_grant_permissions()`. The GitHub Drupal.org-layout job
   now leaves that expanded composer.json in place and runs the
   Unit compatibility test.
-- `McpSiemStreamingTest` spies on `audit_chain.stream` as well as
-  `logger.channel.audit_chain`. audit_chain 1.13.0 stopped writing
-  successful `audit_chain_event` rows to Database Logging; the
-  stream uses a dedicated sink. Without that, GitHub's latest-stable
-  contrib refresh fails the emit cases with 0 SIEM records.
 
 ## [3.5.0] - 2026-10-23
 
