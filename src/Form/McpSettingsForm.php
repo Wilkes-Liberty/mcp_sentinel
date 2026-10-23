@@ -309,7 +309,7 @@ class McpSettingsForm extends ConfigFormBase {
     $form['audit']['siem_enabled'] = [
       '#type'          => 'checkbox',
       '#title'         => $this->t('Enable SIEM streaming'),
-      '#description'   => $this->t('When enabled, each successful audit write is emitted as a structured <code>audit_chain_event</code> record to syslog or any other logger backend except Database Logging. Errors and warnings still use the <code>audit_chain</code> channel. Audit Chain before 1.13.0 sent that record on the <code>audit_chain</code> logger channel, including Database Logging. Stored in <code>audit_chain.settings:stream_enabled</code> — not a local copy.'),
+      '#description'   => $this->t('When enabled, each audit write is also emitted to the <code>audit_chain</code> logger channel as a structured JSON record (<code>audit_chain_event</code>). Route this channel to syslog or Monolog to stream events to a SIEM without DB polling. Stored in <code>audit_chain.settings:stream_enabled</code> — not a local copy.'),
       '#default_value' => $chainConfig->get('stream_enabled') ?? FALSE,
       '#states'        => ['visible' => ['[name="audit_enabled"]' => ['checked' => TRUE]]],
     ];

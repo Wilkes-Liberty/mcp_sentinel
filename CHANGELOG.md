@@ -12,12 +12,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   messages, sealed-token mint-form description, and
   `NON_IDP_ISSUER` constant comment keep the sentence and drop
   `DEV-839` / `DEV-843`.
-- The SIEM streaming description matches Audit Chain 1.13.0.
-  Successful `audit_chain_event` records go to syslog and other
-  logger backends except Database Logging. Errors and warnings
-  stay on the `audit_chain` channel. Sites still on Audit Chain
-  before 1.13.0 keep the previous channel, including Database
-  Logging.
 
 ### Fixed
 - A NULL `mcp_sentinel.principal_context_dispatcher` on the

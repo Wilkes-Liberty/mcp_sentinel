@@ -12,12 +12,10 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
- * Kernel tests for SIEM streaming of audit_chain_event records.
+ * Kernel tests for SIEM streaming via logger.channel.audit_chain.
  *
- * Audit Chain 1.13.0 emits successful appends on audit_chain.stream so
- * they do not fan out to Database Logging. Earlier releases emit them on
- * logger.channel.audit_chain. The message is the stable sentinel string
- * audit_chain_event either way.
+ * The live stream is the audit_chain logger channel; the message is the
+ * stable sentinel string audit_chain_event.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
@@ -69,16 +67,12 @@ final class McpSiemStreamingTest extends KernelTestBase {
   }
 
   /**
-   * The operational audit channel is registered.
-   *
-   * Successful appends use audit_chain.stream when Audit Chain 1.13.0
-   * provides it. That service is absent before 1.13.0, and the emit tests
-   * spy on whichever sink this release actually writes.
+   * Live SIEM identity is logger.channel.audit_chain.
    */
-  public function testLiveSiemSinkIsRegistered(): void {
+  public function testLiveSiemChannelIsAuditChain(): void {
     $this->assertTrue(
       $this->container->has('logger.channel.audit_chain'),
-      'Errors and warnings use logger.channel.audit_chain.',
+      'SIEM streaming uses logger.channel.audit_chain.',
     );
   }
 
@@ -92,7 +86,8 @@ final class McpSiemStreamingTest extends KernelTestBase {
       ->set('stream_enabled', FALSE)
       ->save();
 
-    $spy = $this->spyOnSiemStream();
+    $spy = new TestLogger();
+    $this->container->set('logger.channel.audit_chain', $spy);
 
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
       'entity_type' => 'node',
@@ -120,7 +115,19 @@ final class McpSiemStreamingTest extends KernelTestBase {
       ->set('stream_enabled', TRUE)
       ->save();
 
-    $spy = $this->spyOnSiemStream();
+    $spy = new TestLogger();
+    $this->container->set('logger.channel.audit_chain', $spy);
+
+    // Force the audit logger to be rebuilt so it picks up the swapped-in spy.
+    // A config save can eagerly construct the audit logger (the config-save
+    // event subscriber depends on it), so resetting guarantees a fresh instance
+    // wired to the spy channel.
+    // Reset both: the stream is emitted by audit_chain.logger, which holds the
+    // logger channel injected at construction, and mcp_sentinel.audit_logger
+    // wraps it. Resetting only the outer one would leave the inner instance
+    // still wired to the real channel.
+    $this->container->set('audit_chain.logger', NULL);
+    $this->container->set('mcp_sentinel.audit_logger', NULL);
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
       'entity_type' => 'node',
       'bundle'      => 'article',
@@ -169,7 +176,16 @@ final class McpSiemStreamingTest extends KernelTestBase {
       ->set('stream_enabled', TRUE)
       ->save();
 
-    $spy = $this->spyOnSiemStream();
+    $spy = new TestLogger();
+    $this->container->set('logger.channel.audit_chain', $spy);
+
+    // Force a fresh audit logger wired to the spy (see the emit-on-write test).
+    // Reset both: the stream is emitted by audit_chain.logger, which holds the
+    // logger channel injected at construction, and mcp_sentinel.audit_logger
+    // wraps it. Resetting only the outer one would leave the inner instance
+    // still wired to the real channel.
+    $this->container->set('audit_chain.logger', NULL);
+    $this->container->set('mcp_sentinel.audit_logger', NULL);
     $logger = $this->container->get('mcp_sentinel.audit_logger');
     $db = $this->container->get('database');
 
@@ -216,36 +232,12 @@ final class McpSiemStreamingTest extends KernelTestBase {
       ->set('audit_enabled', FALSE)
       ->save();
 
-    $spy = $this->spyOnSiemStream();
+    $spy = new TestLogger();
+    $this->container->set('logger.channel.audit_chain', $spy);
 
     $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', ['id' => '1']);
 
     $this->assertCount(0, $spy->records, 'No SIEM record should be emitted when audit is disabled.');
-  }
-
-  /**
-   * Service id of the sink that receives audit_chain_event.
-   */
-  private function siemSinkId(): string {
-    return $this->container->has('audit_chain.stream')
-      ? 'audit_chain.stream'
-      : 'logger.channel.audit_chain';
-  }
-
-  /**
-   * Install a spy on the SIEM sink and rebuild the loggers that hold it.
-   *
-   * The chain logger captures the sink at construction. A config save can
-   * construct that logger (and the sentinel wrapper) before the spy is
-   * installed, so both are reset. Resetting only the wrapper would leave
-   * the inner logger on the real sink and the spy would stay empty.
-   */
-  private function spyOnSiemStream(): TestLogger {
-    $spy = new TestLogger();
-    $this->container->set($this->siemSinkId(), $spy);
-    $this->container->set('audit_chain.logger', NULL);
-    $this->container->set('mcp_sentinel.audit_logger', NULL);
-    return $spy;
   }
 
 }

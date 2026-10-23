@@ -595,36 +595,31 @@ column is encrypted; the canonical used for hashing is always plaintext.
 ## SIEM streaming
 
 When the *Enable SIEM streaming* checkbox is checked in the Audit Logging
-settings, each successful audit write is emitted as a structured JSON record
-(`audit_chain_event`) to syslog or any other logger backend except Database
-Logging. Recent log messages is not the destination. Errors and warnings
-still use the `audit_chain` logger channel and remain visible in Database
-Logging. Stored in `audit_chain.settings:stream_enabled` — not a local copy.
-The structured context array contains: `channel`, `operation`, `uid`,
-`entity_type`, `bundle`, `entity_id`, `timestamp`, and `row_hash` (which
-ties the SIEM record back to the hash-chain entry in the database).
+settings, each audit write is also emitted to the `audit_chain` logger channel
+as a structured JSON record (`audit_chain_event`). Route this channel to syslog
+or Monolog to stream events to a SIEM without DB polling. Stored in
+`audit_chain.settings:stream_enabled` — not a local copy. The structured
+context array contains: `operation`, `uid`, `entity_type`, `bundle`,
+`entity_id`, `timestamp`, and `row_hash` (which ties the SIEM record back to
+the hash-chain entry in the database).
 
-Audit Chain before 1.13.0 emitted that same record on the `audit_chain`
-logger channel, which included Database Logging.
-
-Enable the core Syslog module to forward the stream (no additional composer
-packages required). Audit Chain 1.13 and later attaches every logger backend
-except Database Logging, so syslog receives `audit_chain_event` without a
-separate channel route:
+To route this channel to a SIEM, enable syslog output via the **core Syslog
+module** (no additional composer packages required):
 
 ```yaml
 # Example: enable the Syslog module and configure the facility.
 drush en syslog -y
 ```
 
-With Syslog enabled, those records are written to the system log. A
-log-shipping agent (Filebeat, Fluentd, etc.) can then forward them to a
-SIEM.
+With Syslog enabled, all Drupal log channels (including `audit_chain`)
+are written to the system log; your log-shipping agent (Filebeat, Fluentd,
+etc.) can then forward them to your SIEM.
 
-For a dedicated file or a remote aggregator, use
-[`drupal/monolog`](https://www.drupal.org/project/monolog). A handler tagged
-`logger` receives `audit_chain_event`. A handler bound only to
-`logger.channel.audit_chain` still receives errors and warnings.
+For finer-grained control — e.g. writing only the audit channel to a dedicated
+file or sending it to a remote aggregator — use
+[`drupal/monolog`](https://www.drupal.org/project/monolog). Define a handler
+for the `audit_chain` channel in your `monolog.services.yml` and route
+it to syslog, Logstash, or any other Monolog handler.
 
 ## DLP value-pattern redaction (opt-in)
 
