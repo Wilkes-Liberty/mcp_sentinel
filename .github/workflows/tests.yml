@@ -1347,7 +1347,9 @@ jobs:
   # web/modules/custom/mcp_sentinel. The module's real path sits
   # outside that docroot. GitHub missed Extension.php:75 because
   # setup-php leaves zend.assertions off. This job runs those
-  # scripts in the checkout and enables assertions.
+  # scripts in the checkout and enables assertions. Unit tests
+  # run too: McpCoreCompatibilityTest walks the checkout and
+  # must see the expanded composer.json and web/.
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
@@ -1429,9 +1431,14 @@ jobs:
           export DRUPAL_PROJECT_FOLDER="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
           php symlink_project.php
           rm -f symlink_project.php
-          # Restore the module composer.json so the mount symlink
-          # stays a link to the project file.
-          mv -v composer.json.backup composer.json
+          # gitlab_templates leaves the expanded site composer.json
+          # at the checkout root and moves the original onto the
+          # custom mount (include.drupalci.main.yml). Restoring the
+          # original here hid McpCoreCompatibilityTest: the Unit
+          # suite was not run, and the working-tree composer.json
+          # still had require.drupal/core.
+          rm -f "${DRUPAL_PROJECT_FOLDER}/composer.json"
+          mv -v composer.json.backup "${DRUPAL_PROJECT_FOLDER}/composer.json"
           # setup-php leaves assertions off; d.o phpunit has them on.
           scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
           mkdir -p "${RUNNER_TEMP}/php-scan"
@@ -1464,9 +1471,65 @@ jobs:
           esac
           test ! -e "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel" \
             || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
+          php -r '
+            $json = json_decode((string) file_get_contents("composer.json"), TRUE);
+            if (!isset($json["extra"]["installer-paths"], $json["extra"]["drupal-scaffold"])) {
+              fwrite(STDERR, "::error::checkout composer.json is not the gitlab_templates site file\n");
+              exit(1);
+            }
+            if (isset($json["require"]["drupal/core"])) {
+              fwrite(STDERR, "::error::expanded composer.json still has require.drupal/core — IGNORE_PROJECT_DRUPAL_CORE_VERSION did not apply\n");
+              exit(1);
+            }
+          '
+          php -r '
+            $json = json_decode((string) file_get_contents($argv[1]), TRUE);
+            if (($json["require"]["drupal/core"] ?? "") === "") {
+              fwrite(STDERR, "::error::custom mount composer.json is not the shipped module file\n");
+              exit(1);
+            }
+          ' -- "${mount}/composer.json"
           echo "DRUPAL_ROOT: ${GITHUB_WORKSPACE}/web"
           echo "tests realpath: $(realpath "${mount}/tests")"
           echo "tests symlink: $(readlink "${mount}/tests")"
+
+      - name: PHPUnit — Unit (drupal.org layout)
+        timeout-minutes: 10
+        working-directory: ${{ github.workspace }}
+        env:
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+        run: |
+          set -euo pipefail
+          # This job used to run Kernel only. McpCoreCompatibilityTest
+          # walks the checkout; without Unit it could not see web/ or
+          # the expanded site composer.json.
+          config="${PWD}/web/core/phpunit.xml.dist"
+          module="${PWD}/web/modules/custom/mcp_sentinel"
+          suites=()
+          for dir in "${module}"/tests/src/Unit \
+                     "${module}"/modules/*/tests/src/Unit; do
+            [ -d "${dir}" ] && suites+=("${dir}")
+          done
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "::error::No Unit test directories found under ${module}."
+            exit 1
+          fi
+          i=0
+          for dir in "${suites[@]}"; do
+            i=$((i + 1))
+            echo "--- ${dir#"${module}/"}"
+            vendor/bin/phpunit -c "${config}" \
+              --log-junit "${PWD}/junit-do-unit-${i}.xml" \
+              "${dir}"
+          done
+          compat="$(cat junit-do-unit-*.xml | grep -ho 'classname="[^"]*McpCoreCompatibilityTest"' | wc -l | tr -d ' ')"
+          echo "Collected ${compat} McpCoreCompatibilityTest cases."
+          if [ "${compat}" -lt 3 ]; then
+            echo "::error::McpCoreCompatibilityTest collected ${compat} cases, expected at least 3."
+            exit 1
+          fi
 
       - name: PHPUnit — Kernel (drupal.org layout)
         timeout-minutes: 40

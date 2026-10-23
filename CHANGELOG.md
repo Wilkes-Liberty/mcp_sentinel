@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- `McpCoreCompatibilityTest` now scans only this project's shipped
+  files. On drupal.org, gitlab_templates builds Drupal under `web/`
+  inside the module checkout and rewrites the root `composer.json`,
+  so walking `dirname(__DIR__, 3)` picked up core info.yml files,
+  the expanded site composer.json, and contrib calls to
+  `user_role_grant_permissions()`. The GitHub Drupal.org-layout job
+  now leaves that expanded composer.json in place and runs the
+  Unit compatibility test.
+- `McpSiemStreamingTest` spies on `audit_chain.stream` as well as
+  `logger.channel.audit_chain`. audit_chain 1.13.0 stopped writing
+  successful `audit_chain_event` rows to Database Logging; the
+  stream uses a dedicated sink. Without that, GitHub's latest-stable
+  contrib refresh fails the emit cases with 0 SIEM records.
+
 ## [3.5.0] - 2026-10-23
 
 ### Added
