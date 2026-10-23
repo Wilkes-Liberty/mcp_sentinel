@@ -102,10 +102,11 @@ final class McpDenyExplainerTest extends UnitTestCase {
    */
   public function testMissingTenantClaimStaysDenied(): void {
     $explained = (new McpDenyExplainer())->explain(
-      'Network calls require a tenant claim on the validated token (DEV-839).',
+      'Network calls require a tenant claim on the validated token.',
     );
     $this->assertSame('missing_tenant_claim', $explained->ruleId);
     $this->assertFalse($explained->widenAppropriate);
+    $this->assertStringNotContainsString('DEV-', $explained->nextStep);
   }
 
   /**
@@ -146,7 +147,7 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $explainer->callerMessage());
     $this->assertStringNotContainsString('[rule:', $explainer->callerMessage());
     $annotated = $explainer->annotate(
-      'Network calls require a tenant claim on the validated token (DEV-839).',
+      'Network calls require a tenant claim on the validated token.',
     );
     $this->assertStringContainsString('[rule:missing_tenant_claim', $annotated);
     $this->assertNotSame($explainer->callerMessage(), $annotated);
@@ -171,6 +172,45 @@ final class McpDenyExplainerTest extends UnitTestCase {
       'deny_publish',
       $explainer->explain('publishing is not permitted for this agent')->ruleId,
     );
+  }
+
+  /**
+   * A NULL dispatcher is named separately from a missing caller token.
+   *
+   * @covers ::explain
+   */
+  public function testMissingDispatcherIsDistinctFromMissingPrincipal(): void {
+    $explainer = new McpDenyExplainer();
+    $dispatcher = $explainer->explain('missing_dispatcher');
+    $this->assertSame('missing_dispatcher', $dispatcher->ruleId);
+    $this->assertFalse($dispatcher->widenAppropriate);
+    $this->assertStringContainsString('dispatcher', $dispatcher->nextStep);
+    $this->assertStringContainsString('container', $dispatcher->nextStep);
+    $this->assertStringNotContainsString('Paladin', $dispatcher->nextStep);
+    $this->assertStringNotContainsString('DEV-', $dispatcher->nextStep);
+
+    $principal = $explainer->explain('missing_principal');
+    $this->assertSame('missing_principal', $principal->ruleId);
+    $this->assertFalse($principal->widenAppropriate);
+    $this->assertStringContainsString('Paladin', $principal->nextStep);
+    $this->assertStringNotContainsString('dispatcher', $principal->nextStep);
+  }
+
+  /**
+   * An unsupported GraphQL operation kind is named, not unspecified.
+   *
+   * @covers ::explain
+   */
+  public function testGraphqlOperationTypeIsNamed(): void {
+    $explained = (new McpDenyExplainer())->explain('graphql_operation_type');
+    $this->assertSame('graphql_operation_type', $explained->ruleId);
+    $this->assertSame(
+      'unsupported GraphQL operation kind',
+      $explained->ruleName,
+    );
+    $this->assertFalse($explained->widenAppropriate);
+    $this->assertStringContainsString('query', $explained->nextStep);
+    $this->assertStringNotContainsString('unspecified', $explained->format());
   }
 
 }

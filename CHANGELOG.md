@@ -6,6 +6,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Operator-facing deny copy no longer carries internal ticket
+  suffixes. The tenant-claim explainer, dispatcher exception
+  messages, sealed-token mint-form description, and
+  `NON_IDP_ISSUER` constant comment keep the sentence and drop
+  `DEV-839` / `DEV-843`.
+
+### Fixed
+- A NULL `mcp_sentinel.principal_context_dispatcher` on the
+  HTTP and GraphQL admit paths is now audited as
+  `missing_dispatcher`, matching governed tools. That path is
+  a cached container that was not rebuilt. It still fails
+  closed. Operators are told to wire the dispatcher and
+  rebuild the container, not to issue a Paladin token
+  (`missing_principal` is unchanged when the dispatcher is
+  present and no sealed principal exists).
+- `graphql_operation_type` now has a dedicated deny explainer
+  (unsupported GraphQL operation kind) instead of falling
+  through to `unspecified`.
+
 ## [3.5.0] - 2026-10-23
 
 ### Added
