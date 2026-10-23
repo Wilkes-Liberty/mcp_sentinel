@@ -126,10 +126,15 @@ jobs:
           # That equality is the whole point of this leg, and it is asserted by
           # the count floor in the PHPUnit step rather than trusted — a green
           # check has already twice meant "ran almost nothing" here.
+          # Drupal 10.6 / PHP 8.3 pins audit_chain 1.12.x so
+          # McpSiemStreamingTest's logger.channel.audit_chain
+          # fallback runs. Other legs refresh to latest-stable
+          # (1.13.0+). The module constraint stays ^1.0.1.
           - drupal: '10.6'
             constraint: '~10.6.0'
             php: '8.3'
             phpunit: '^9.6'
+            audit_chain: '~1.12.0'
           - drupal: '11.3'
             constraint: '~11.3.0'
             php: '8.3'
@@ -207,6 +212,7 @@ jobs:
         env:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
           PHPUNIT_VERSION: ${{ matrix.phpunit }}
+          AUDIT_CHAIN_CONSTRAINT: ${{ matrix.audit_chain }}
         run: |
           retry() {
             rc=0
@@ -252,11 +258,18 @@ jobs:
             "drupal/content_lock:^3.0" \
             "drupal/scheduler:^2.1" "drupal/scheduler_content_moderation_integration:^3.0"
           bash ../module/.github/ci/refresh-latest-contrib.sh
+          # Pin after refresh. Latest-stable would pull 1.13 and
+          # the 1.12.x SIEM fallback would never run on GitHub.
+          if [ -n "${AUDIT_CHAIN_CONSTRAINT:-}" ]; then
+            retry composer require -W --no-interaction --no-progress \
+              "drupal/audit_chain:${AUDIT_CHAIN_CONSTRAINT}"
+          fi
 
       - name: Assert the versions actually under test
         working-directory: drupal
         env:
           EXPECTED_DRUPAL: ${{ matrix.drupal }}
+          EXPECTED_AUDIT_CHAIN: ${{ matrix.audit_chain }}
         run: |
           set -euo pipefail
           # require the autoloader inline: php ignores auto_prepend_file for -r
@@ -270,6 +283,12 @@ jobs:
           echo "Drupal core: ${core}"
           chain="$(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/audit_chain");')"
           echo "drupal/audit_chain: ${chain}"
+          if [ -n "${EXPECTED_AUDIT_CHAIN:-}" ]; then
+            case "${chain}" in
+              1.12.*) ;;
+              *) echo "::error::This leg pins audit_chain ${EXPECTED_AUDIT_CHAIN} so the SIEM 1.12.x fallback runs; resolved ${chain}."; exit 1 ;;
+            esac
+          fi
           vendor/bin/phpunit --version
           vendor/bin/drush --version || true
 
@@ -1341,13 +1360,20 @@ jobs:
   # installs this module through a composer path repo at
   # web/modules/contrib/mcp_sentinel. On d.o the checkout is the
   # project root: expand_composer_json.php merges this module's
-  # composer.json with core-recommended, composer install writes
-  # web/ and vendor/ here (DRUPAL_ROOT=$CI_PROJECT_DIR/web), and
-  # symlink_project.php mounts each project entry into
-  # web/modules/custom/mcp_sentinel. The module's real path sits
-  # outside that docroot. GitHub missed Extension.php:75 because
+  # composer.json with core-recommended (and strips
+  # require.drupal/core when IGNORE_PROJECT_DRUPAL_CORE_VERSION=1),
+  # composer install writes web/ and vendor/ here
+  # (DRUPAL_ROOT=$CI_PROJECT_DIR/web), and symlink_project.php
+  # mounts each project entry into web/modules/custom/mcp_sentinel.
+  # The templates then move composer.json.backup onto that mount
+  # and leave the expanded file at the project root. The old
+  # GitHub layout job missed McpCoreCompatibilityTest because
+  # it ran Kernel tests only. The module's real path sits
+  # outside the docroot. GitHub missed Extension.php:75 because
   # setup-php leaves zend.assertions off. This job runs those
-  # scripts in the checkout and enables assertions.
+  # scripts in the checkout, keeps the expanded composer.json
+  # where d.o leaves it, runs Unit as well as Kernel, and
+  # enables assertions.
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
@@ -1429,9 +1455,15 @@ jobs:
           export DRUPAL_PROJECT_FOLDER="${GITHUB_WORKSPACE}/web/modules/custom/mcp_sentinel"
           php symlink_project.php
           rm -f symlink_project.php
-          # Restore the module composer.json so the mount symlink
-          # stays a link to the project file.
-          mv -v composer.json.backup composer.json
+          # Same restore as gitlab_templates: the expanded file
+          # stays at the project root, and the module file moves
+          # onto the custom mount. The old job missed the
+          # compatibility break because it ran Kernel tests only.
+          if [[ -f composer.json.backup ]]; then
+            echo "Restoring composer.json from backup onto the custom mount"
+            rm -v "${DRUPAL_PROJECT_FOLDER}/composer.json"
+            mv -v composer.json.backup "${DRUPAL_PROJECT_FOLDER}/composer.json"
+          fi
           # setup-php leaves assertions off; d.o phpunit has them on.
           scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
           mkdir -p "${RUNNER_TEMP}/php-scan"
@@ -1464,9 +1496,74 @@ jobs:
           esac
           test ! -e "${GITHUB_WORKSPACE}/web/modules/contrib/mcp_sentinel" \
             || { echo "::error::contrib path-repo link is still present — the GitHub layout would mask the d.o failure"; exit 1; }
+          # d.o leaves the expanded composer.json at the project
+          # root (no require.drupal/core) and the module file on
+          # the mount. The naive test walks the checkout, so this
+          # is the failure McpCoreCompatibilityTest hit on
+          # pipelines 1012720 and 1012776.
+          test ! -L composer.json \
+            || { echo "::error::project-root composer.json must be the expanded file, not a symlink"; exit 1; }
+          php -r '
+            $c = json_decode((string) file_get_contents("composer.json"), TRUE);
+            if (!is_array($c) || isset($c["require"]["drupal/core"])) {
+              fwrite(STDERR, "::error::project-root composer.json still has require[drupal/core]; d.o expand_composer_json strips it.\n");
+              exit(1);
+            }
+          '
+          test -f "${mount}/composer.json" && test ! -L "${mount}/composer.json" \
+            || { echo "::error::mount composer.json must be the restored module file, not a symlink to the expanded project-root file"; exit 1; }
+          php -r '
+            $c = json_decode((string) file_get_contents($argv[1]), TRUE);
+            if (!is_array($c) || !isset($c["require"]["drupal/core"])) {
+              fwrite(STDERR, "::error::custom mount composer.json is not the module file.\n");
+              exit(1);
+            }
+          ' "${mount}/composer.json"
+          test -f web/core/modules/announcements_feed/announcements_feed.info.yml \
+            || { echo "::error::d.o layout must build web/core inside the checkout so a naive scan would read core info.yml files"; exit 1; }
           echo "DRUPAL_ROOT: ${GITHUB_WORKSPACE}/web"
           echo "tests realpath: $(realpath "${mount}/tests")"
           echo "tests symlink: $(readlink "${mount}/tests")"
+          echo "project-root composer.json: expanded (no require.drupal/core)"
+          echo "mount composer.json: $(realpath "${mount}/composer.json")"
+
+      - name: PHPUnit — Unit (drupal.org layout)
+        working-directory: ${{ github.workspace }}
+        env:
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          # The matrix job collects 394 Unit tests. This layout
+          # job used to run Kernel only, so McpCoreCompatibilityTest
+          # never saw web/core inside the checkout. Floor sits 9
+          # under that count so losing the 12-test submodule
+          # Unit suite trips it.
+          MIN_TESTS: '385'
+        run: |
+          set -euo pipefail
+          config="${PWD}/web/core/phpunit.xml.dist"
+          module="${PWD}/web/modules/custom/mcp_sentinel"
+          suites=()
+          for dir in "${module}"/tests/src/Unit \
+                     "${module}"/modules/*/tests/src/Unit; do
+            [ -d "${dir}" ] && suites+=("${dir}")
+          done
+          if [ "${#suites[@]}" -eq 0 ]; then
+            echo "::error::No Unit test directories found under ${module}."
+            exit 1
+          fi
+          i=0
+          for dir in "${suites[@]}"; do
+            i=$((i + 1))
+            echo "--- ${dir#"${module}/"}"
+            vendor/bin/phpunit -c "${config}" \
+              --log-junit "${PWD}/junit-do-unit-${i}.xml" \
+              "${dir}"
+          done
+          total="$(cat junit-do-unit-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          echo "Collected ${total} Unit tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} Unit tests, below the floor of ${MIN_TESTS}."
+            exit 1
+          fi
 
       - name: PHPUnit — Kernel (drupal.org layout)
         timeout-minutes: 40
@@ -1475,10 +1572,11 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # 1202 Kernel tests after DEV-1040, including the dedicated
-          # bypass invocation. Floor sits 9 under that so losing a
-          # 10-test suite trips it.
-          MIN_TESTS: '1193'
+          # 1594 Kernel tests after the d.o-layout job started
+          # collecting the full tree, including the dedicated
+          # bypass invocation. Floor sits 9 under that so losing
+          # a 10-test suite trips it.
+          MIN_TESTS: '1585'
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
@@ -1566,7 +1664,11 @@ jobs:
           # other venue. Derive the path from the registered module.
           # Runs even when a PHPUnit job already failed so the literal
           # is visible on the same red run as the layout assertion.
+          # McpCoreCompatibilityTest is the exception: it names the
+          # gitlab_templates custom mount (and the contrib twin)
+          # because that layout is what it is testing.
           if grep -R -n -E --binary-files=without-match \
+            --exclude='McpCoreCompatibilityTest.php' \
             'modules/(contrib|custom)/mcp_sentinel' tests/; then
             echo "::error::tests/ hardcodes a modules/contrib or modules/custom mcp_sentinel path."
             exit 1

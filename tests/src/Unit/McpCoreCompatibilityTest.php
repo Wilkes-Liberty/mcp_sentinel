@@ -17,27 +17,45 @@ use PHPUnit\Framework\Attributes\Group;
  * Drupal 12 — hard dependencies still have to publish their own ^12
  * constraints before a next-major CI lane can resolve.
  *
+ * On GitHub's path-repo job the checkout is only this module. On
+ * drupal.org, Drupal is built into that same checkout (web/, vendor/),
+ * and gitlab_templates moves the module composer.json onto the custom
+ * mount. A walk of dirname(__DIR__, 3) therefore has to skip the
+ * built Drupal tree and read composer.json from that mount, or the
+ * suite starts scoring core and contrib.
+ *
  * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
 final class McpCoreCompatibilityTest extends UnitTestCase {
 
   /**
+   * Scratch directories this instance created.
+   *
+   * @var string[]
+   */
+  private array $scratchDirectories = [];
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    foreach ($this->scratchDirectories as $directory) {
+      $this->removeScratchDirectory($directory);
+    }
+    $this->scratchDirectories = [];
+    parent::tearDown();
+  }
+
+  /**
    * Every info.yml keeps the 10.6 and 11.3 floors and declares Drupal 12.
    */
   public function testInfoYmlDeclaresDrupal12WithoutDroppingFloors(): void {
-    $files = $this->infoYmlFiles();
+    $files = $this->infoYmlFiles($this->checkoutRoot());
     $this->assertNotEmpty($files, 'Expected at least one info.yml in the project.');
 
     foreach ($files as $path) {
-      $info = Yaml::decode((string) file_get_contents($path));
-      $this->assertIsArray($info, $path . ' must decode as YAML.');
-      $this->assertArrayHasKey('core_version_requirement', $info, $path);
-      $requirement = (string) $info['core_version_requirement'];
-      $relative = $this->relativePath($path);
-      $this->assertStringContainsString('^10.6', $requirement, $relative);
-      $this->assertStringContainsString('^11.3', $requirement, $relative);
-      $this->assertStringContainsString('^12', $requirement, $relative);
+      $this->assertSame([], $this->infoYmlConstraintMisses($path), $path);
     }
   }
 
@@ -45,37 +63,286 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    * Composer.json must resolve on Drupal 12 the same way info.yml does.
    */
   public function testComposerJsonDeclaresDrupal12WithoutDroppingFloors(): void {
-    $composer = json_decode((string) file_get_contents($this->moduleRoot() . '/composer.json'), TRUE);
-    $this->assertIsArray($composer);
-    $this->assertArrayHasKey('drupal/core', $composer['require']);
-    $constraint = (string) $composer['require']['drupal/core'];
-    $this->assertStringContainsString('^10.6', $constraint);
-    $this->assertStringContainsString('^11.3', $constraint);
-    $this->assertStringContainsString('^12', $constraint);
+    $path = $this->composerJsonPath($this->checkoutRoot());
+    $this->assertSame([], $this->composerConstraintMisses($path), $path);
   }
 
   /**
    * Production and tests must not call the Drupal 11.5-deprecated grant helper.
    */
   public function testDeprecatedRoleGrantHelperIsNotCalled(): void {
-    $hits = [];
-    $root = $this->moduleRoot();
-    $iterator = new \RecursiveIteratorIterator(
-      new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+    $hits = $this->deprecatedGrantHelperHits($this->checkoutRoot());
+    $this->assertSame([], $hits, 'The deprecated role grant helper must not be called; use McpRolePermissions::grant().');
+  }
+
+  /**
+   * A dropped floor, a missing core key, and a helper call still fail.
+   */
+  public function testDroppedFloorAndDeprecatedHelperAreDetected(): void {
+    $dir = $this->scratchDir();
+    file_put_contents(
+      $dir . '/bad.info.yml',
+      "name: bad\ncore_version_requirement: '^11.3 || ^12'\n",
     );
-    foreach ($iterator as $file) {
-      if (!$file->isFile()) {
-        continue;
+    file_put_contents(
+      $dir . '/composer.json',
+      json_encode([
+        'name' => 'drupal/mcp_sentinel',
+        'type' => 'drupal-module',
+        'require' => [
+          'drupal/core' => '^11.3 || ^12',
+        ],
+      ], JSON_THROW_ON_ERROR),
+    );
+    file_put_contents($dir . '/calls.php', "<?php\nuser_role_grant_permissions('x', []);\n");
+
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($dir . '/bad.info.yml'));
+    $this->assertNotSame([], $this->composerConstraintMisses($dir . '/composer.json'));
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($dir));
+  }
+
+  /**
+   * A Drupal tree built into the checkout is not this module.
+   */
+  public function testBuiltDrupalTreeInsideCheckoutIsNotScanned(): void {
+    $checkout = $this->scratchDir();
+    mkdir($checkout . '/src', 0777, TRUE);
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    file_put_contents($checkout . '/src/Ok.php', "<?php\n");
+    $this->plantCustomMount($checkout);
+
+    $core_info = $checkout . '/web/core/modules/system_stub';
+    mkdir($core_info, 0777, TRUE);
+    file_put_contents($core_info . '/system_stub.info.yml', "name: Stub\n");
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    mkdir($checkout . '/web/core/modules/user', 0777, TRUE);
+    file_put_contents(
+      $checkout . '/web/core/modules/user/user.module',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+
+    $files = $this->infoYmlFiles($checkout);
+    $this->assertCount(1, $files);
+    $this->assertSame(
+      'mcp_sentinel.info.yml',
+      $this->relativePath($files[0], $checkout),
+    );
+    $this->assertSame([], $this->deprecatedGrantHelperHits($checkout));
+  }
+
+  /**
+   * A root web/ that only plants Drupal.php is still this module.
+   */
+  public function testRootWebWithDrupalPhpIsStillScanned(): void {
+    $checkout = $this->scratchDir();
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    file_put_contents(
+      $checkout . '/web/core/bad.info.yml',
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    mkdir($checkout . '/web/core/modules/user', 0777, TRUE);
+    file_put_contents(
+      $checkout . '/web/core/modules/user/user.module',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+
+    $planted = $checkout . '/web/core/bad.info.yml';
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+  }
+
+  /**
+   * A nested web/ is still this module, even with a custom-looking mount.
+   */
+  public function testNestedWebIsStillScanned(): void {
+    $checkout = $this->scratchDir();
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $nested = $checkout . '/src/web';
+    mkdir($nested . '/core/lib', 0777, TRUE);
+    file_put_contents($nested . '/core/lib/Drupal.php', "<?php\n");
+    mkdir($nested . '/modules/custom/mcp_sentinel', 0777, TRUE);
+    symlink(
+      $checkout . '/mcp_sentinel.info.yml',
+      $nested . '/modules/custom/mcp_sentinel/mcp_sentinel.info.yml',
+    );
+    $planted = $nested . '/planted.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    file_put_contents(
+      $nested . '/calls.php',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+  }
+
+  /**
+   * Nested vendor/ and node_modules/ trees are still this module.
+   */
+  public function testNestedVendorAndNodeModulesAreStillScanned(): void {
+    $checkout = $this->scratchDir();
+    mkdir($checkout . '/src/vendor', 0777, TRUE);
+    file_put_contents(
+      $checkout . '/src/vendor/calls.php',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+    mkdir($checkout . '/tests/node_modules', 0777, TRUE);
+    $planted = $checkout . '/tests/node_modules/planted.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+  }
+
+  /**
+   * On d.o the module composer.json lives on the custom mount.
+   */
+  public function testModuleComposerJsonIsReadFromTheProjectMount(): void {
+    $checkout = $this->scratchDir();
+    file_put_contents(
+      $checkout . '/composer.json',
+      json_encode([
+        'name' => 'drupal/mcp_sentinel',
+        'type' => 'drupal-module',
+        'require-dev' => [
+          'drupal/core-recommended' => '^11',
+        ],
+      ], JSON_THROW_ON_ERROR),
+    );
+
+    $mount = $checkout . '/web/modules/custom/mcp_sentinel';
+    mkdir($mount, 0777, TRUE);
+    file_put_contents(
+      $mount . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $module_composer = json_encode([
+      'name' => 'drupal/mcp_sentinel',
+      'type' => 'drupal-module',
+      'require' => [
+        'drupal/core' => '^10.6 || ^11.3 || ^12',
+      ],
+    ], JSON_THROW_ON_ERROR);
+    file_put_contents($mount . '/composer.json', $module_composer);
+
+    $path = $this->composerJsonPath($checkout);
+    $this->assertSame([], $this->composerConstraintMisses($path));
+    $this->assertSame(
+      realpath($mount . '/composer.json'),
+      realpath($path),
+    );
+  }
+
+  /**
+   * Custom and contrib copies of this module cannot both be present.
+   */
+  public function testBothCustomAndContribMountsAreRejected(): void {
+    $checkout = $this->scratchDir();
+    $module_composer = json_encode([
+      'name' => 'drupal/mcp_sentinel',
+      'type' => 'drupal-module',
+      'require' => [
+        'drupal/core' => '^10.6 || ^11.3 || ^12',
+      ],
+    ], JSON_THROW_ON_ERROR);
+    foreach ([
+      $checkout . '/web/modules/custom/mcp_sentinel',
+      $checkout . '/web/modules/contrib/mcp_sentinel',
+    ] as $dir) {
+      mkdir($dir, 0777, TRUE);
+      file_put_contents($dir . '/mcp_sentinel.info.yml', "name: 'MCP Sentinel'\n");
+      file_put_contents($dir . '/composer.json', $module_composer);
+    }
+
+    $this->expectException(\RuntimeException::class);
+    $this->expectExceptionMessage('custom mount and a contrib copy');
+    $this->composerJsonPath($checkout);
+  }
+
+  /**
+   * Constraint misses for one info.yml, or an empty list when it holds.
+   *
+   * @param string $path
+   *   Absolute path to an info.yml file.
+   *
+   * @return string[]
+   *   Missing tokens.
+   */
+  private function infoYmlConstraintMisses(string $path): array {
+    $info = Yaml::decode((string) file_get_contents($path));
+    $this->assertIsArray($info, $path . ' must decode as YAML.');
+    if (!isset($info['core_version_requirement'])) {
+      return ['core_version_requirement'];
+    }
+    return $this->missingConstraintTokens((string) $info['core_version_requirement']);
+  }
+
+  /**
+   * Constraint misses for one composer.json, or an empty list when it holds.
+   *
+   * @param string $path
+   *   Absolute path to composer.json.
+   *
+   * @return string[]
+   *   Missing tokens.
+   */
+  private function composerConstraintMisses(string $path): array {
+    $composer = json_decode((string) file_get_contents($path), TRUE);
+    $this->assertIsArray($composer, $path . ' must decode as JSON.');
+    if (!isset($composer['require']['drupal/core'])) {
+      return ['drupal/core'];
+    }
+    return $this->missingConstraintTokens((string) $composer['require']['drupal/core']);
+  }
+
+  /**
+   * Tokens the Drupal 12 claim must keep.
+   *
+   * @param string $constraint
+   *   A composer or info.yml version constraint.
+   *
+   * @return string[]
+   *   Missing tokens.
+   */
+  private function missingConstraintTokens(string $constraint): array {
+    $missing = [];
+    foreach (['^10.6', '^11.3', '^12'] as $token) {
+      if (!str_contains($constraint, $token)) {
+        $missing[] = $token;
       }
-      $path = $file->getPathname();
-      if (str_contains($path, DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR)) {
-        continue;
-      }
-      if ($file->getFilename() === 'McpCoreCompatibilityTest.php') {
-        continue;
-      }
-      $extension = $file->getExtension();
-      if (!in_array($extension, ['php', 'module', 'install', 'inc'], TRUE)) {
+    }
+    return $missing;
+  }
+
+  /**
+   * Paths under $root that call the deprecated grant helper.
+   *
+   * @param string $root
+   *   Directory to walk.
+   *
+   * @return string[]
+   *   Paths relative to $root.
+   */
+  private function deprecatedGrantHelperHits(string $root): array {
+    $hits = [];
+    foreach ($this->phpFiles($root) as $path) {
+      if (basename($path) === 'McpCoreCompatibilityTest.php') {
         continue;
       }
       $contents = (string) file_get_contents($path);
@@ -83,49 +350,257 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       $code = preg_replace('!/\*.*?\*/!s', '', $contents) ?? $contents;
       $code = preg_replace('!//.*$!m', '', $code) ?? $code;
       if (preg_match('/\buser_role_grant_permissions\s*\(/', $code)) {
-        $hits[] = $this->relativePath($path);
+        $hits[] = $this->relativePath($path, $root);
       }
     }
-    $this->assertSame([], $hits, 'The deprecated role grant helper must not be called; use McpRolePermissions::grant().');
+    return $hits;
   }
 
   /**
-   * Every shipped and test info.yml under the module root.
+   * Every shipped and test info.yml under the module tree.
+   *
+   * @param string $root
+   *   Directory to walk.
    *
    * @return string[]
    *   Absolute paths.
    */
-  private function infoYmlFiles(): array {
+  private function infoYmlFiles(string $root): array {
     $files = [];
-    $root = $this->moduleRoot();
-    $iterator = new \RecursiveIteratorIterator(
-      new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-    );
-    foreach ($iterator as $file) {
-      if (!$file->isFile() || !str_ends_with($file->getFilename(), '.info.yml')) {
-        continue;
+    foreach ($this->projectFiles($root) as $file) {
+      if ($file->isFile() && str_ends_with($file->getFilename(), '.info.yml')) {
+        $files[] = $file->getPathname();
       }
-      if (str_contains($file->getPathname(), DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR)) {
-        continue;
-      }
-      $files[] = $file->getPathname();
     }
     sort($files);
     return $files;
   }
 
   /**
-   * Module root (three levels up from tests/src/Unit).
+   * PHP sources under the module tree (not core or contrib).
+   *
+   * @param string $root
+   *   Directory to walk.
+   *
+   * @return string[]
+   *   Absolute paths.
    */
-  private function moduleRoot(): string {
+  private function phpFiles(string $root): array {
+    $files = [];
+    foreach ($this->projectFiles($root) as $file) {
+      if (!$file->isFile()) {
+        continue;
+      }
+      if (in_array($file->getExtension(), ['php', 'module', 'install', 'inc'], TRUE)) {
+        $files[] = $file->getPathname();
+      }
+    }
+    return $files;
+  }
+
+  /**
+   * Files under $root, skipping checkout-root vendor and a d.o-built web/.
+   *
+   * @param string $root
+   *   Directory to walk.
+   *
+   * @return \Traversable<\SplFileInfo>
+   *   File entries.
+   */
+  private function projectFiles(string $root): \Traversable {
+    $iterator = new \RecursiveIteratorIterator(
+      new \RecursiveCallbackFilterIterator(
+        new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+        function (\SplFileInfo $current) use ($root): bool {
+          if (!$current->isDir()) {
+            return TRUE;
+          }
+          return !$this->shouldSkipDirectory($current->getPathname(), $root);
+        },
+      ),
+    );
+    foreach ($iterator as $file) {
+      yield $file;
+    }
+  }
+
+  /**
+   * Whether this directory is outside the module's own tree.
+   *
+   * @param string $path
+   *   Absolute directory path.
+   * @param string $root
+   *   Walk root.
+   *
+   * @return bool
+   *   TRUE to skip.
+   */
+  private function shouldSkipDirectory(string $path, string $root): bool {
+    $name = basename($path);
+    // Only the checkout-root copies are installer trees. A helper
+    // under src/vendor or an info.yml under tests/node_modules is ours.
+    if (in_array($name, ['vendor', 'node_modules', '.git'], TRUE) && dirname($path) === $root) {
+      return TRUE;
+    }
+    // d.o builds Drupal into the project checkout. That web/ directory
+    // is core and contrib, not mcp_sentinel, even though it sits next
+    // to mcp_sentinel.info.yml.
+    // Skip only the checkout's own web/, and only when the
+    // gitlab_templates custom mount is present and resolves here.
+    // A root web/ that merely contains core/lib/Drupal.php, or a
+    // nested web/, is still this tree.
+    if ($name === 'web' && dirname($path) === $root && $this->isBuiltDrupalWebRoot($path, $root)) {
+      return TRUE;
+    }
+    return FALSE;
+  }
+
+  /**
+   * Whether $web_dir is the d.o-built Drupal tree for this checkout.
+   *
+   * The gitlab_templates scripts write web/ next to the module and
+   * mount the project at web/modules/custom/mcp_sentinel. The
+   * mount's mcp_sentinel.info.yml must resolve to this checkout's
+   * file. A planted Drupal.php is not enough.
+   *
+   * @param string $web_dir
+   *   Candidate web/ path.
+   * @param string $root
+   *   Walk root (the git checkout).
+   *
+   * @return bool
+   *   TRUE when this is the built Drupal tree.
+   */
+  private function isBuiltDrupalWebRoot(string $web_dir, string $root): bool {
+    $mount_info = $web_dir . '/modules/custom/mcp_sentinel/mcp_sentinel.info.yml';
+    $checkout_info = $root . '/mcp_sentinel.info.yml';
+    if (!is_file($mount_info) || !is_file($checkout_info)) {
+      return FALSE;
+    }
+    $mount_real = realpath($mount_info);
+    $checkout_real = realpath($checkout_info);
+    return $mount_real !== FALSE && $mount_real === $checkout_real;
+  }
+
+  /**
+   * Path to this module's composer.json, not the expanded d.o file.
+   *
+   * The expand_composer_json.php script overwrites the checkout
+   * composer.json and strips require.drupal/core. gitlab_templates
+   * then moves the backup onto the custom mount. That mount file is
+   * the module.
+   *
+   * @param string $checkout
+   *   Git checkout (three levels up from tests/src/Unit).
+   *
+   * @return string
+   *   Absolute path.
+   */
+  private function composerJsonPath(string $checkout): string {
+    $mount = $this->projectMount($checkout);
+    if ($mount !== NULL && is_readable($mount . '/composer.json')) {
+      return $mount . '/composer.json';
+    }
+    return $checkout . '/composer.json';
+  }
+
+  /**
+   * The gitlab_templates mount of this project, when the d.o layout is in use.
+   *
+   * Prefer the custom mount. A contrib copy is the GitHub path-repo
+   * layout. Both at once is a mixed layout, not either venue.
+   *
+   * @param string $checkout
+   *   Git checkout.
+   *
+   * @return string|null
+   *   Absolute mount path, or NULL when this checkout is module-only.
+   */
+  private function projectMount(string $checkout): ?string {
+    $custom = $checkout . '/web/modules/custom/mcp_sentinel';
+    $contrib = $checkout . '/web/modules/contrib/mcp_sentinel';
+    $has_custom = is_file($custom . '/mcp_sentinel.info.yml');
+    $has_contrib = is_file($contrib . '/mcp_sentinel.info.yml');
+    if ($has_custom && $has_contrib) {
+      throw new \RuntimeException(
+        'Both the gitlab_templates custom mount and a contrib copy of this module exist. The custom mount must be the only copy.',
+      );
+    }
+    if ($has_custom) {
+      return $custom;
+    }
+    if ($has_contrib) {
+      return $contrib;
+    }
+    return NULL;
+  }
+
+  /**
+   * Git checkout. On d.o this also contains the built Drupal tree.
+   */
+  private function checkoutRoot(): string {
     return dirname(__DIR__, 3);
   }
 
   /**
-   * Path relative to the module root, for assertion messages.
+   * Path relative to $root, for assertion messages.
    */
-  private function relativePath(string $path): string {
-    return ltrim(substr($path, strlen($this->moduleRoot())), DIRECTORY_SEPARATOR);
+  private function relativePath(string $path, string $root): string {
+    return ltrim(substr($path, strlen($root)), DIRECTORY_SEPARATOR);
+  }
+
+  /**
+   * A throwaway directory this test removes in tearDown.
+   *
+   * @return string
+   *   Absolute path.
+   */
+  private function scratchDir(): string {
+    $dir = sys_get_temp_dir() . '/mcp-sentinel-compat-' . uniqid('', TRUE);
+    mkdir($dir, 0777, TRUE);
+    $this->scratchDirectories[] = $dir;
+    return $dir;
+  }
+
+  /**
+   * Point web/modules/custom/mcp_sentinel at this checkout.
+   *
+   * @param string $checkout
+   *   Git checkout.
+   */
+  private function plantCustomMount(string $checkout): void {
+    $mount = $checkout . '/web/modules/custom/mcp_sentinel';
+    mkdir($mount, 0777, TRUE);
+    $info = $checkout . '/mcp_sentinel.info.yml';
+    $link = $mount . '/mcp_sentinel.info.yml';
+    if (is_file($info) && !file_exists($link)) {
+      symlink($info, $link);
+    }
+  }
+
+  /**
+   * Delete one scratch directory created by scratchDir().
+   *
+   * File and directory symlinks are unlinked, not followed, so a
+   * mount that pointed outside the scratch tree cannot delete the
+   * checkout. Runs from tearDown, including when a test failed.
+   *
+   * @param string $path
+   *   Absolute path.
+   */
+  private function removeScratchDirectory(string $path): void {
+    if (is_link($path) || is_file($path)) {
+      unlink($path);
+      return;
+    }
+    if (!is_dir($path)) {
+      return;
+    }
+    $items = new \FilesystemIterator($path);
+    foreach ($items as $item) {
+      $this->removeScratchDirectory($item->getPathname());
+    }
+    rmdir($path);
   }
 
 }
