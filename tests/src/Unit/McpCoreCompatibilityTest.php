@@ -389,6 +389,62 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   }
 
   /**
+   * A built web/ is still scanned when ls-files exits non-zero.
+   *
+   * A fake git that names this checkout as toplevel would pass
+   * the pin. The exit-status check is then the only thing
+   * keeping the skip off.
+   */
+  public function testLsFilesFailureDoesNotSkipBuiltWeb(): void {
+    $checkout = $this->plantBuiltWebWithBadCoreInfo();
+    $script = $this->fakeGitArgParser() . <<<'SH'
+case "$cmd" in
+  rev-parse) printf '%s\n' "$root"; exit 0 ;;
+  ls-files) exit 1 ;;
+  *) exit 1 ;;
+esac
+SH;
+    $this->withFakeGit($script, function () use ($checkout): void {
+      $planted = $checkout . '/web/core/bad.info.yml';
+      $this->assertContains($planted, $this->infoYmlFiles($checkout));
+      $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    });
+  }
+
+  /**
+   * A built web/ is still scanned when --show-toplevel is empty.
+   *
+   * Exit 0 with no path makes realpath('') resolve to CWD. The
+   * test chdirs into the checkout so that fallback would match
+   * $root and skip this planted miss.
+   */
+  public function testEmptyGitToplevelDoesNotSkipBuiltWeb(): void {
+    $checkout = $this->plantBuiltWebWithBadCoreInfo();
+    $cwd = getcwd();
+    if (!is_string($cwd)) {
+      $this->fail('getcwd() must return the current directory.');
+    }
+    $script = $this->fakeGitArgParser() . <<<'SH'
+case "$cmd" in
+  rev-parse) exit 0 ;;
+  ls-files) exit 0 ;;
+  *) exit 1 ;;
+esac
+SH;
+    $this->withFakeGit($script, function () use ($checkout, $cwd): void {
+      $this->assertTrue(chdir($checkout));
+      try {
+        $planted = $checkout . '/web/core/bad.info.yml';
+        $this->assertContains($planted, $this->infoYmlFiles($checkout));
+        $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+      }
+      finally {
+        chdir($cwd);
+      }
+    });
+  }
+
+  /**
    * Nested vendor/ and node_modules/ trees are still this module.
    */
   public function testNestedVendorAndNodeModulesAreStillScanned(): void {
@@ -743,7 +799,8 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *
    * The git -C option walks up to a parent repo. An inherited
    * GIT_DIR can point at another tree. Either way, ls-files is
-   * not about this checkout.
+   * not about this checkout. A .git file that names a foreign
+   * repo is local tampering and cannot be committed.
    *
    * @param string $git
    *   Absolute git executable.
@@ -758,7 +815,12 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     if ($result === NULL || $result['status'] !== 0) {
       return FALSE;
     }
-    $toplevel = realpath(trim($result['stdout']));
+    // Empty stdout is success with no path. realpath('') is CWD.
+    $toplevel_raw = trim($result['stdout']);
+    if ($toplevel_raw === '') {
+      return FALSE;
+    }
+    $toplevel = realpath($toplevel_raw);
     $root_real = realpath($root);
     return $toplevel !== FALSE && $root_real !== FALSE && $toplevel === $root_real;
   }
@@ -893,6 +955,60 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       }
     }
     return $env;
+  }
+
+  /**
+   * POSIX shim prefix that strips git -C/-c and leaves $root and $cmd.
+   *
+   * The helper invokes git as `git -C $root -c safe.directory=$root
+   * <args>`. The fake binary has to ignore those flags.
+   *
+   * @return string
+   *   Shell fragment.
+   */
+  private function fakeGitArgParser(): string {
+    return <<<'SH'
+root=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -C) shift; root=$1; shift ;;
+    -c) shift; shift ;;
+    *) break ;;
+  esac
+done
+cmd="${1:-}"
+shift || true
+
+SH;
+  }
+
+  /**
+   * Run $callback with a fake git first on PATH.
+   *
+   * @param string $script
+   *   Body of the git shim after the shebang.
+   * @param callable $callback
+   *   Test body.
+   */
+  private function withFakeGit(string $script, callable $callback): void {
+    $bin = $this->scratchDir() . '/bin';
+    mkdir($bin, 0777, TRUE);
+    $git = $bin . '/git';
+    file_put_contents($git, "#!/bin/sh\n" . $script);
+    chmod($git, 0755);
+    $previous_path = getenv('PATH');
+    $prefix = $bin;
+    if (is_string($previous_path) && $previous_path !== '') {
+      $prefix .= PATH_SEPARATOR . $previous_path;
+    }
+    putenv('PATH=' . $prefix);
+    try {
+      $this->assertSame($git, $this->gitExecutable());
+      $callback();
+    }
+    finally {
+      $this->restoreEnvironmentVariable('PATH', $previous_path);
+    }
   }
 
   /**

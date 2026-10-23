@@ -53,6 +53,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checkout. The d.o-layout job runs Unit as www-data
   after chown so that git guard still answers. The
   `[3.5.0]` compare link is restored.
+- Drupal.org-layout floors are 395 Unit / 1197 Kernel
+  against 404 / 1206 (nine under). The root `web/`
+  skip is refused when `ls-files` exits non-zero or
+  `--show-toplevel` is empty.
 
 ## [3.5.0] - 2026-10-23
 
