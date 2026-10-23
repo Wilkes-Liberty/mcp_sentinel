@@ -21,13 +21,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   closed. Operators are told to wire the dispatcher and
   rebuild the container, not to issue a Paladin token
   (`missing_principal` is unchanged when the dispatcher is
-  present and no sealed principal exists). That row records
-  `principal_key` and `human_key` as `unverified` when no
-  principal is sealed yet.
+  present and no sealed principal exists).
+- `McpDenyExplainer::refuse()` stamps `principal_key` and
+  `human_key` as `unverified` on every `denied_access` row it
+  writes when the holder is missing or has no sealed context.
+  `missing_dispatcher` is one of those rows, not the only
+  one. A sealed context whose `principalKey()` / `humanKey()`
+  throw gets the same stamp plus `principal_unverified` from
+  the key exception. Dispatcher `logDenial()` and kill-switch
+  `writeDenialAudit()` still overwrite both keys to
+  `unverified` when a carried queue principal is present
+  (`principal_unverified` is `carried_queue_key`).
+  `denialAuditMetadata()` still stamps them when
+  `fromClaims()` throws (`principal_unverified` plus
+  `unverified_reason`).
 - `graphql_operation_type` now has a dedicated deny explainer
   (unsupported GraphQL operation kind) instead of falling
   through to `unspecified`.
-### Fixed
 - `McpCoreCompatibilityTest` only reads this module's info.yml
   files, `composer.json`, and PHP sources. On drupal.org GitLab
   CI the checkout is also the Composer project root, so `web/`
