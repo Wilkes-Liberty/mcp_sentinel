@@ -33,7 +33,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   /**
    * Top-level names that are the built site, not this project.
    *
-   * web/ is the gitlab_templates docroot. vendor/ is Composer.
+   * The gitlab_templates docroot is web/. vendor/ is Composer.
    * The others are CI or editor leftovers that can sit in the
    * checkout on d.o.
    */
@@ -216,11 +216,11 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   /**
    * The module composer.json, not gitlab_templates' expanded site file.
    *
-   * expand_composer_json.php merges this package with core-recommended
-   * and, when IGNORE_PROJECT_DRUPAL_CORE_VERSION is set, unsets
-   * require.drupal/core. The working-tree composer.json at the checkout
-   * root is then the site file. The committed document is the shipped
-   * one.
+   * The expand_composer_json.php script merges this package with
+   * core-recommended and, when IGNORE_PROJECT_DRUPAL_CORE_VERSION
+   * is set, unsets require.drupal/core. The working-tree
+   * composer.json at the checkout root is then the site file.
+   * The committed document is the shipped one.
    *
    * @return array<string, mixed>
    *   Decoded composer.json.
@@ -263,7 +263,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   /**
    * The committed composer.json, used when the working tree was expanded.
    *
-   * composer.json.backup is the pre-expand copy. gitlab_templates
+   * The pre-expand copy is composer.json.backup. gitlab_templates
    * moves that file onto the custom mount before phpunit runs, so
    * the backup is usually gone by the time this test starts. The
    * git index is the shipped file either way.
@@ -283,7 +283,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   }
 
   /**
-   * composer.json as committed in this checkout.
+   * The composer.json as committed in this checkout.
    *
    * @return array<string, mixed>
    *   Decoded composer.json.
