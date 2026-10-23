@@ -113,6 +113,9 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    *
    * @throws \Symfony\Component\HttpKernel\Exception\BadRequestHttpException
    *   When the requested page[limit] exceeds the profile cap.
+   * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+   *   When the dispatcher is missing or the principal gate refuses
+   *   the call.
    */
   public function onRequest(RequestEvent $event): void {
     if (!$event->isMainRequest()) {
@@ -319,7 +322,7 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
   }
 
   /**
-   * Refuses a governed call that has no verified principal, tenant, or scope.
+   * Refuses a governed call missing dispatcher, principal, tenant, or scope.
    *
    * @param string $surfaceId
    *   Surface name recorded on the denial row.
@@ -331,9 +334,12 @@ final class McpJsonApiPageLimitSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(string $surfaceId, array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
+      // A NULL dispatcher is a cached container that was not rebuilt,
+      // not a missing caller token. Fail closed as missing_dispatcher.
       throw new AccessDeniedHttpException(
-        $this->denyExplainer?->refuse('missing_principal')
-          ?? McpDenyExplainer::CALLER_MESSAGE,
+        $this->denyExplainer?->refuse(
+          McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
     try {

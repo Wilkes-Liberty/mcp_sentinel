@@ -75,6 +75,8 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->assertSession()->fieldExists('client_id');
     $this->assertSession()->pageTextContains('mcp-agent-prod');
     $this->assertSession()->fieldExists('tenant');
+    $this->assertSession()->pageTextContains('Paladin is the sole issuer');
+    $this->assertSession()->pageTextNotContains('DEV-843');
     $this->submitForm([
       'client_id' => 'mcp-agent-prod',
       'tenant' => 'tenant-a',

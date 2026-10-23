@@ -315,14 +315,14 @@ final class McpPrincipalContextDispatcher {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::NON_IDP_ISSUER,
-        'Paladin is the sole issuer for governed tools (DEV-843).',
+        'Paladin is the sole issuer for governed tools.',
       );
     }
     if ($ctx->isNetwork() && $ctx->tenant() === '') {
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_TENANT_CLAIM,
-        'Network calls require a tenant claim on the validated token (DEV-839).',
+        'Network calls require a tenant claim on the validated token.',
       );
     }
     try {

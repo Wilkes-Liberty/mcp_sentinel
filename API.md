@@ -137,8 +137,18 @@ empty argument list and the surface's required OAuth scope
 (`mcp_read` / `mcp_write`, any-of on the GraphQL HTTP seam) before
 their own gates. GraphQL queries and subscriptions require
 `mcp_read`; mutations require `mcp_write`; any other operation type
-is refused. A Paladin or sealed-token context that omits every
-required name, including a token that lists no scopes, is refused
+is refused (`graphql_operation_type` on the `denied_access` row,
+not `unspecified`). When
+`mcp_sentinel.principal_context_dispatcher` is NULL (a cached
+container that was not rebuilt), JSON:API, GraphQL, and
+`/drupal-mcp/context` fail closed and write `denied_access` with
+`reason` / `rule` `missing_dispatcher`, matching governed tools.
+The caller still sees only `MCP access is denied.` That is an
+audit-reason change: operators parsing `denied_access` metadata
+must treat that path as `missing_dispatcher`, not
+`missing_principal` (a missing caller token). A Paladin or
+sealed-token context that omits every required name, including a
+token that lists no scopes, is refused
 (`required_scope_missing`). Role-fallback and kernel fixture
 sources skip that scope check. JSON:API, GraphQL, and
 `/drupal-mcp/context` require a verified principal on the ready
@@ -615,6 +625,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.whoami_recorder` | `McpWhoamiRecorder` | last `/drupal-mcp/readiness`, context, or governance-status signal (no secrets) |
 | `mcp_sentinel.sealed_token_manager` | `McpSealedTokenManager` | mint / verify / revoke short-lived client-bound sealed tokens; secret is copy-once. `verify()` denials write `denied_access` (`tool: sealed_token`) with a reason from `McpSealedTokenDenyReason`. Repeat denials of the same reason and principal share one row per `sealed_token_deny_audit_window` seconds (default 60). The row keeps the site and path of the first denial in the window. The bearer is never stored. |
 | `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and returns `CALLER_MESSAGE` |
+| `mcp_sentinel.principal_context_dispatcher` | `McpPrincipalContextDispatcher` | seals and admits a verified principal. A NULL service on the JSON:API / GraphQL / `/drupal-mcp/context` admit paths is audited as `missing_dispatcher` (not `missing_principal`). Caller-facing copy stays `MCP access is denied.` |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |

@@ -6,11 +6,14 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Controller\McpContextController;
+use Drupal\mcp_sentinel\EventSubscriber\McpJsonApiPageLimitSubscriber;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -118,6 +121,121 @@ final class McpPrincipalSurfaceGuardTest extends KernelTestBase {
     $this->assertSame('context', $this->lastDenialMetadata()['tool']);
     $this->assertSame('missing_principal', $this->lastDenialMetadata()['reason']);
     $this->assertStringContainsString('[rule:', (string) ($this->lastDenialMetadata()['explain'] ?? ''));
+  }
+
+  /**
+   * A NULL dispatcher is audited as missing_dispatcher on context and HTTP.
+   *
+   * Role fallback still makes the surface ready. The fail-closed
+   * reason must not be missing_principal: that tells operators to
+   * mint a token when the container was not rebuilt. The controller
+   * property is readonly; the NULL path is reached through a
+   * container whose dispatcher service resolves to NULL.
+   */
+  public function testDeniesWhenDispatcherMissing(): void {
+    $this->switchToGovernedUser();
+    $this->dropStampedPrincipal();
+    $before = $this->deniedAccessCount();
+
+    $container = $this->containerWithNullDispatcher();
+    $response = McpContextController::create($container)->context();
+    $this->assertSame(403, $response->getStatusCode());
+    $payload = json_decode((string) $response->getContent(), TRUE);
+    $this->assertIsArray($payload);
+    $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
+    $this->assertArrayNotHasKey('reason', $payload);
+    $this->assertStringNotContainsString(
+      'missing_dispatcher',
+      (string) $response->getContent(),
+    );
+    $this->assertStringNotContainsString(
+      'missing_principal',
+      (string) $response->getContent(),
+    );
+    $this->assertSame($before + 1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame(
+      McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+      $meta['reason'],
+    );
+    $this->assertSame(
+      McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+      $meta['rule'],
+    );
+    $this->assertStringContainsString(
+      'dispatcher',
+      (string) ($meta['explain'] ?? ''),
+    );
+
+    $subscriber = new McpJsonApiPageLimitSubscriber(
+      $this->container->get('mcp_sentinel.access_checker'),
+      $this->container->get('mcp_sentinel.governance_readiness'),
+      $this->container->get('current_user'),
+      $this->container->get('mcp_sentinel.rate_limiter'),
+      $this->container->get('mcp_sentinel.read_budgets'),
+      $this->container->get('mcp_sentinel.audit_logger'),
+      $this->container->has('mcp_sentinel.classification')
+        ? $this->container->get('mcp_sentinel.classification')
+        : NULL,
+      NULL,
+      $this->container->get('mcp_sentinel.deny_explainer'),
+    );
+    foreach (['/jsonapi/node/article', '/graphql'] as $path) {
+      $event = $this->requestEvent($path);
+      // refuse() names the surface from the current request path.
+      $this->pushRequestKeepingSession($event->getRequest());
+      $beforePath = $this->deniedAccessCount();
+      try {
+        $subscriber->onRequest($event);
+        $this->fail($path . ' must refuse when the dispatcher is missing.');
+      }
+      catch (AccessDeniedHttpException $e) {
+        $this->assertSame('MCP access is denied.', $e->getMessage());
+        $this->assertStringNotContainsString(
+          'missing_dispatcher',
+          $e->getMessage(),
+        );
+        $this->assertStringNotContainsString(
+          'missing_principal',
+          $e->getMessage(),
+        );
+      }
+      $this->assertSame($beforePath + 1, $this->deniedAccessCount(), $path);
+      $pathMeta = $this->lastDenialMetadata();
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+        $pathMeta['reason'],
+        $path,
+      );
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+        $pathMeta['rule'],
+        $path,
+      );
+    }
+  }
+
+  /**
+   * Container whose principal-context dispatcher service is NULL.
+   *
+   * Models a cached container that was not rebuilt. has() stays
+   * TRUE so create() takes the get() branch and receives NULL.
+   */
+  private function containerWithNullDispatcher(): ContainerInterface {
+    $inner = $this->container;
+    $container = $this->createMock(ContainerInterface::class);
+    $container->method('has')->willReturnCallback(
+      static fn (string $id): bool => $inner->has($id),
+    );
+    $container->method('get')->willReturnCallback(
+      static function (string $id) use ($inner): ?object {
+        if ($id === 'mcp_sentinel.principal_context_dispatcher') {
+          return NULL;
+        }
+        return $inner->get($id);
+      },
+    );
+    return $container;
   }
 
   /**

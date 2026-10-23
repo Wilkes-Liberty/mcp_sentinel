@@ -106,7 +106,7 @@ final class McpDenyExplainer {
         'missing_tenant_claim',
         'tenant claim missing',
         FALSE,
-        'Issue the agent token with a tenant claim (DEV-839). Never pass tenant as a tool argument.',
+        'Issue the agent token with a tenant claim. Never pass tenant as a tool argument.',
         'Stay denied.',
       );
     }
@@ -116,7 +116,7 @@ final class McpDenyExplainer {
         'missing_dispatcher',
         'principal dispatcher missing',
         FALSE,
-        'Wire mcp_sentinel.principal_context_dispatcher. A missing dispatcher fails closed.',
+        'Wire mcp_sentinel.principal_context_dispatcher and rebuild the container. A missing dispatcher is a stale cached container, not a missing caller token.',
         'Stay denied.',
       );
     }
@@ -378,6 +378,16 @@ final class McpDenyExplainer {
         'Human review only.',
       );
     }
+    // Named so operators do not get the unspecified fallback.
+    if (str_contains($reason, 'graphql_operation_type')) {
+      return new McpDenyExplanation(
+        'graphql_operation_type',
+        'unsupported GraphQL operation kind',
+        FALSE,
+        'Use query, mutation, or subscription. Other GraphQL operation kinds stay denied.',
+        'Stay denied.',
+      );
+    }
 
     return new McpDenyExplanation(
       'unspecified',
@@ -565,6 +575,13 @@ final class McpDenyExplainer {
         $meta['human_key'] = 'unverified';
         $meta['principal_unverified'] = $e->reasonCode;
       }
+    }
+    else {
+      // refuse() runs before a principal is sealed when the
+      // dispatcher service is missing. The row still names the
+      // principal slot so it is not mistaken for a verified denial.
+      $meta['principal_key'] = 'unverified';
+      $meta['human_key'] = 'unverified';
     }
 
     // A queue worker has no request; never collapse those writes.

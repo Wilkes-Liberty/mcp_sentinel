@@ -256,7 +256,46 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
     $meta = $this->lastDenialMetadata();
     $this->assertSame('graphql', $meta['tool']);
     $this->assertSame('graphql_operation_type', $meta['reason']);
-    $this->assertStringContainsString('[rule:', (string) ($meta['explain'] ?? ''));
+    $this->assertSame('graphql_operation_type', $meta['rule']);
+    $this->assertStringContainsString(
+      '[rule:graphql_operation_type',
+      (string) ($meta['explain'] ?? ''),
+    );
+  }
+
+  /**
+   * A NULL dispatcher is audited as missing_dispatcher, not missing_principal.
+   *
+   * @covers ::onOperation
+   */
+  public function testDeniesWhenDispatcherMissing(): void {
+    $this->pushEntryPointRequest($this->verifiedEntryPointClaims(), '/graphql');
+    $before = $this->deniedAccessCount();
+    try {
+      $this->subscriber(FALSE)->onOperation($this->makeEvent('query'));
+      $this->fail('A missing dispatcher must fail closed.');
+    }
+    catch (Error $e) {
+      $this->assertCallerHidesRule(
+        $e->getMessage(),
+        McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+      );
+    }
+    $this->assertSurfaceDenialRow(
+      $before,
+      'graphql',
+      McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+      FALSE,
+    );
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame(
+      McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+      $meta['rule'],
+    );
+    $this->assertStringNotContainsString(
+      'missing_principal',
+      (string) ($meta['reason'] ?? ''),
+    );
   }
 
   /**
@@ -286,8 +325,14 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
 
   /**
    * Returns a fresh subscriber from real container services.
+   *
+   * @param bool $withDispatcher
+   *   FALSE leaves the dispatcher NULL so the cached-container
+   *   fail-closed path can be asserted.
    */
-  private function subscriber(): GraphqlGovernanceSubscriber {
+  private function subscriber(
+    bool $withDispatcher = TRUE,
+  ): GraphqlGovernanceSubscriber {
     return new GraphqlGovernanceSubscriber(
       $this->container->get('mcp_sentinel.audit_logger'),
       $this->container->get('config.factory'),
@@ -296,7 +341,9 @@ final class GraphqlEntryPointGuardTest extends KernelTestBase {
       $this->container->get('mcp_sentinel.access_checker'),
       NULL,
       $this->container->get('request_stack'),
-      $this->container->get('mcp_sentinel.principal_context_dispatcher'),
+      $withDispatcher
+        ? $this->container->get('mcp_sentinel.principal_context_dispatcher')
+        : NULL,
       $this->container->get('mcp_sentinel.deny_explainer'),
     );
   }

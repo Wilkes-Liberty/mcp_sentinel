@@ -262,11 +262,15 @@ class McpContextController extends ControllerBase {
   }
 
   /**
-   * Returns 403 when the caller has no verified principal or tenant.
+   * Returns 403 when the dispatcher is missing or the caller is unverified.
    */
   private function principalDenial(): ?JsonResponse {
     if ($this->principalDispatcher === NULL) {
-      $this->denyExplainer?->refuse('missing_principal');
+      // A NULL dispatcher is a cached container that was not rebuilt,
+      // not a missing caller token. Fail closed as missing_dispatcher.
+      $this->denyExplainer?->refuse(
+        McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+      );
       return $this->genericDenyResponse(403);
     }
     try {

@@ -112,7 +112,7 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
   }
 
   /**
-   * Refuses an operation that has no verified principal, tenant, or scope.
+   * Refuses an operation that has no dispatcher, principal, tenant, or scope.
    *
    * @param list<string> $requiredScopes
    *   Any-of OAuth scopes the sealed token must carry. Queries and
@@ -123,9 +123,12 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
    */
   private function requirePrincipal(array $requiredScopes = []): void {
     if ($this->principalDispatcher === NULL) {
+      // A NULL dispatcher is a cached container that was not rebuilt,
+      // not a missing caller token. Fail closed as missing_dispatcher.
       throw new Error(
-        $this->denyExplainer?->refuse('missing_principal')
-          ?? McpDenyExplainer::CALLER_MESSAGE,
+        $this->denyExplainer?->refuse(
+          McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+        ) ?? McpDenyExplainer::CALLER_MESSAGE,
       );
     }
     try {
@@ -200,6 +203,8 @@ final class GraphqlGovernanceSubscriber implements EventSubscriberInterface {
         break;
 
       default:
+        // Unknown operation kinds fail closed with a named rule so the
+        // explainer does not fall through to unspecified.
         throw new Error(
           $this->denyExplainer?->refuse('graphql_operation_type')
             ?? McpDenyExplainer::CALLER_MESSAGE,
