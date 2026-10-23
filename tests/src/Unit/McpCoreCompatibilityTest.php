@@ -887,9 +887,6 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    */
   private function environmentWithoutGitVariables(): array {
     $env = getenv();
-    if (!is_array($env)) {
-      $env = [];
-    }
     foreach (array_keys($env) as $key) {
       if (str_starts_with((string) $key, 'GIT_')) {
         unset($env[$key]);
