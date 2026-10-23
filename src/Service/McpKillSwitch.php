@@ -671,7 +671,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   }
 
   /**
-   * Active kill-block rows for the Drupal-side UI (DEV-925).
+   * Active kill-block rows for Drush and the API; there is no admin UI.
    *
    * @return list<array<string, mixed>>
    *   Associative rows that currently refuse.

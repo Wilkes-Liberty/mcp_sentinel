@@ -378,9 +378,9 @@ scope is still stopped. Escalation notifies once per batch.
 then 10037, then 10038 so the pre-upgrade max delivery id is
 recorded and the unused `released` column is dropped. Every
 keyless row stays stopped while any stop is active, including
-rows queued after 10038. The Drupal-side kill-block UI
-(DEV-925) reads freeze state through `listActiveBlocks()` and held
-items through `listHeld()`.
+rows queued after 10038. `listActiveBlocks()` and
+`listHeld()` expose freeze state and held items to Drush
+and the API; there is no admin UI.
 
 `$governanceExfiltrationGuard` measures the
 Read or Explain payload again after the untrusted-read marker is added, and
