@@ -415,8 +415,8 @@ SH;
    * A built web/ is still scanned when --show-toplevel is empty.
    *
    * Exit 0 with no path makes realpath('') resolve to CWD. The
-   * test chdirs into the checkout so that fallback would match
-   * $root and skip this planted miss.
+   * test changes directory into the checkout so that fallback
+   * would match $root and skip this planted miss.
    */
   public function testEmptyGitToplevelDoesNotSkipBuiltWeb(): void {
     $checkout = $this->plantBuiltWebWithBadCoreInfo();
