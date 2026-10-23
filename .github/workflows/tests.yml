@@ -333,6 +333,7 @@ jobs:
           MIN_TESTS: '1577'
         run: |
           set -euo pipefail
+          rm -f junit-*.xml
           # One invocation per directory: PHPUnit 9.6 takes a *single*
           # <directory|file> argument, while 10+ accept a list. Passing both
           # paths did not error on 9.6 — it ran tests/src/Unit, ignored
@@ -555,6 +556,7 @@ jobs:
           MIN_TESTS: '66'
         run: |
           set -euo pipefail
+          rm -f junit-Functional.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-Functional.xml" \
@@ -724,6 +726,7 @@ jobs:
           MIN_TESTS: '11'
         run: |
           set -euo pipefail
+          rm -f junit-Functional-pgsql-draft.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-Functional-pgsql-draft.xml" \
@@ -882,6 +885,7 @@ jobs:
           MIN_TESTS: '4'
         run: |
           set -euo pipefail
+          rm -f junit-Functional-d10-draft.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-Functional-d10-draft.xml" \
@@ -1531,14 +1535,15 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # The matrix job collects 394 Unit tests. This layout
+          # The matrix job collects 396 Unit tests. This layout
           # job used to run Kernel only, so McpCoreCompatibilityTest
           # never saw web/core inside the checkout. Floor sits 9
           # under that count so losing the 12-test submodule
           # Unit suite trips it.
-          MIN_TESTS: '385'
+          MIN_TESTS: '387'
         run: |
           set -euo pipefail
+          rm -f junit-unit-do-*.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
           suites=()
@@ -1555,10 +1560,10 @@ jobs:
             i=$((i + 1))
             echo "--- ${dir#"${module}/"}"
             vendor/bin/phpunit -c "${config}" \
-              --log-junit "${PWD}/junit-do-unit-${i}.xml" \
+              --log-junit "${PWD}/junit-unit-do-${i}.xml" \
               "${dir}"
           done
-          total="$(cat junit-do-unit-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          total="$(cat junit-unit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
           echo "Collected ${total} Unit tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Unit tests, below the floor of ${MIN_TESTS}."
@@ -1572,14 +1577,16 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # 1594 Kernel tests after the d.o-layout job started
-          # collecting the full tree, including the dedicated
-          # bypass invocation. Floor sits 9 under that so losing
-          # a 10-test suite trips it.
-          MIN_TESTS: '1585'
+          # 1204 Kernel tests, including the dedicated bypass
+          # invocation. The old junit-do-*.xml glob also ate the
+          # Unit logs (junit-do-unit-*.xml) and reported 1594.
+          # Floor sits 9 under the true Kernel count so losing a
+          # 10-test suite trips it.
+          MIN_TESTS: '1195'
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
+          rm -f junit-do-*.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
 
@@ -1622,7 +1629,7 @@ jobs:
             exit 1
           fi
           # Losing the 8-test dedupe class would not trip the floor
-          # (1202-8=1194). Require those cases in the JUnit output.
+          # (1204-8=1196). Require those cases in the JUnit output.
           dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-do-*.xml | wc -l | tr -d ' ')"
           echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
           if [ "${dedupe_ran}" -lt 8 ]; then
@@ -1664,12 +1671,21 @@ jobs:
           # other venue. Derive the path from the registered module.
           # Runs even when a PHPUnit job already failed so the literal
           # is visible on the same red run as the layout assertion.
-          # McpCoreCompatibilityTest is the exception: it names the
-          # gitlab_templates custom mount (and the contrib twin)
-          # because that layout is what it is testing.
-          if grep -R -n -E --binary-files=without-match \
-            --exclude='McpCoreCompatibilityTest.php' \
-            'modules/(contrib|custom)/mcp_sentinel' tests/; then
+          # Only tests/src/Unit/McpCoreCompatibilityTest.php may
+          # name the gitlab_templates custom mount (and the contrib
+          # twin); that layout is what it is testing. Basename
+          # excludes would also spare a copy under modules/*/tests.
+          paths=(tests)
+          for dir in modules/*/tests; do
+            [ -d "${dir}" ] && paths+=("${dir}")
+          done
+          hits="$(grep -R -n -E --binary-files=without-match \
+            'modules/(contrib|custom)/mcp_sentinel' "${paths[@]}" || true)"
+          hits="$(printf '%s\n' "${hits}" | grep -v \
+            '^tests/src/Unit/McpCoreCompatibilityTest.php:' || true)"
+          hits="$(printf '%s\n' "${hits}" | sed '/^$/d')"
+          if [ -n "${hits}" ]; then
+            printf '%s\n' "${hits}"
             echo "::error::tests/ hardcodes a modules/contrib or modules/custom mcp_sentinel path."
             exit 1
           fi

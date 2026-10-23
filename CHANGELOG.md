@@ -19,6 +19,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   have caught it. `McpSiemStreamingTest` spies on
   `audit_chain.stream` for audit_chain 1.13.0 (1.12.x still
   uses `logger.channel.audit_chain`).
+- The Drupal.org-layout Kernel floor was counting Unit
+  JUnit files (`junit-do-unit-*.xml` matched
+  `junit-do-*.xml`). Unit logs use a distinct prefix; the
+  Kernel floor is 1195 against the true Kernel count.
+  `McpCoreCompatibilityTest` skips `web/` only when git
+  does not track it and the custom mount resolves to this
+  checkout.
 
 ## [3.5.0] - 2026-10-23
 
@@ -3646,6 +3653,7 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
 [Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.0...1.x
+[3.5.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.1...3.5.0
 [3.4.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...3.4.1
 [3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
 [3.3.2]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.1...3.3.2

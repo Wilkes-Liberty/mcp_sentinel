@@ -21,8 +21,9 @@ use PHPUnit\Framework\Attributes\Group;
  * drupal.org, Drupal is built into that same checkout (web/, vendor/),
  * and gitlab_templates moves the module composer.json onto the custom
  * mount. A walk of dirname(__DIR__, 3) therefore has to skip the
- * built Drupal tree and read composer.json from that mount, or the
- * suite starts scoring core and contrib.
+ * built Drupal tree — and only when git does not track web/ and
+ * the mount resolves to this checkout — and read composer.json
+ * from that mount, or the suite starts scoring core and contrib.
  *
  * @group mcp_sentinel
  */
@@ -124,6 +125,11 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       $checkout . '/web/core/modules/user/user.module',
       "<?php\nuser_role_grant_permissions('x', []);\n",
     );
+    // web/ is the d.o build: present on disk, not tracked.
+    $this->initGitCheckout($checkout, [
+      'mcp_sentinel.info.yml',
+      'src',
+    ]);
 
     $files = $this->infoYmlFiles($checkout);
     $this->assertCount(1, $files);
@@ -187,6 +193,70 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     $this->assertContains($planted, $this->infoYmlFiles($checkout));
     $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
     $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+  }
+
+  /**
+   * A mount that only copies info.yml is not the d.o symlink mount.
+   *
+   * The web/ tree is untracked, so the git guard would allow a
+   * skip. The copy has a different realpath than the checkout
+   * file; if that comparison is removed, this web/ is skipped
+   * and the planted miss is invisible.
+   */
+  public function testCopiedMountInfoYmlDoesNotSkipWeb(): void {
+    $checkout = $this->scratchDir();
+    $info = "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n";
+    file_put_contents($checkout . '/mcp_sentinel.info.yml', $info);
+    $this->initGitCheckout($checkout, ['mcp_sentinel.info.yml']);
+
+    $mount = $checkout . '/web/modules/custom/mcp_sentinel';
+    mkdir($mount, 0777, TRUE);
+    file_put_contents($mount . '/mcp_sentinel.info.yml', $info);
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    $planted = $checkout . '/web/core/bad.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+
+    $this->assertNotSame(
+      realpath($checkout . '/mcp_sentinel.info.yml'),
+      realpath($mount . '/mcp_sentinel.info.yml'),
+    );
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+  }
+
+  /**
+   * A committed symlink under web/ is this repo, not the d.o build.
+   */
+  public function testTrackedWebMountDoesNotSkipWeb(): void {
+    $checkout = $this->scratchDir();
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $this->plantCustomMount($checkout);
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    $planted = $checkout . '/web/core/bad.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    $this->initGitCheckout($checkout, [
+      'mcp_sentinel.info.yml',
+      'web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml',
+      'web/core/bad.info.yml',
+    ]);
+
+    $this->assertSame(
+      realpath($checkout . '/mcp_sentinel.info.yml'),
+      realpath($checkout . '/web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml'),
+    );
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
   }
 
   /**
@@ -445,11 +515,17 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     // d.o builds Drupal into the project checkout. That web/ directory
     // is core and contrib, not mcp_sentinel, even though it sits next
     // to mcp_sentinel.info.yml.
-    // Skip only the checkout's own web/, and only when the
-    // gitlab_templates custom mount is present and resolves here.
-    // A root web/ that merely contains core/lib/Drupal.php, or a
-    // nested web/, is still this tree.
-    if ($name === 'web' && dirname($path) === $root && $this->isBuiltDrupalWebRoot($path, $root)) {
+    // Skip only the checkout's own web/, and only when git does
+    // not track it (the d.o build is untracked) and the
+    // gitlab_templates custom mount resolves here. A committed
+    // symlink under web/, a root web/ that merely contains
+    // core/lib/Drupal.php, or a nested web/, is still this tree.
+    if (
+      $name === 'web'
+      && dirname($path) === $root
+      && $this->webDirectoryIsUntracked($root)
+      && $this->isBuiltDrupalWebRoot($path, $root)
+    ) {
       return TRUE;
     }
     return FALSE;
@@ -480,6 +556,142 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     $mount_real = realpath($mount_info);
     $checkout_real = realpath($checkout_info);
     return $mount_real !== FALSE && $mount_real === $checkout_real;
+  }
+
+  /**
+   * Whether git tracks nothing under $root/web.
+   *
+   * The d.o build writes web/ beside the module; those files are
+   * not in the project tree. A committed path under web/ is this
+   * repo. If git cannot be asked, do not skip (fail closed).
+   *
+   * @param string $root
+   *   Walk root.
+   *
+   * @return bool
+   *   TRUE only when git answers and lists no tracked web/ paths.
+   */
+  private function webDirectoryIsUntracked(string $root): bool {
+    $tracked = $this->gitLsFiles($root, 'web');
+    return $tracked !== NULL && $tracked === [];
+  }
+
+  /**
+   * Paths git tracks under $path, or NULL when git cannot answer.
+   *
+   * @param string $root
+   *   Repository root.
+   * @param string $path
+   *   Path relative to $root.
+   *
+   * @return string[]|null
+   *   Tracked paths, or NULL when git is missing or $root is not a
+   *   repository.
+   */
+  private function gitLsFiles(string $root, string $path): ?array {
+    $git = $this->gitExecutable();
+    if ($git === NULL) {
+      return NULL;
+    }
+    $result = $this->runGitCommand($git, $root, ['ls-files', '-z', '--', $path]);
+    if ($result === NULL || $result['status'] !== 0) {
+      return NULL;
+    }
+    if ($result['stdout'] === '') {
+      return [];
+    }
+    return array_values(array_filter(explode("\0", $result['stdout'])));
+  }
+
+  /**
+   * Absolute path to git, or NULL when it is not on PATH.
+   *
+   * @return string|null
+   *   Executable path.
+   */
+  private function gitExecutable(): ?string {
+    $paths = getenv('PATH');
+    if (!is_string($paths) || $paths === '') {
+      return NULL;
+    }
+    foreach (explode(PATH_SEPARATOR, $paths) as $dir) {
+      $candidate = $dir . DIRECTORY_SEPARATOR . 'git';
+      if (is_executable($candidate)) {
+        return $candidate;
+      }
+    }
+    return NULL;
+  }
+
+  /**
+   * Turn $checkout into a git repo and commit the listed paths.
+   *
+   * @param string $checkout
+   *   Scratch checkout.
+   * @param string[] $paths
+   *   Paths relative to $checkout.
+   */
+  private function initGitCheckout(string $checkout, array $paths): void {
+    $git = $this->gitExecutable();
+    $this->assertNotNull($git, 'git must be on PATH for checkout fixtures.');
+    $this->runGit($checkout, ['init']);
+    $this->runGit($checkout, ['config', 'user.name', 'compat-test']);
+    $this->runGit($checkout, ['config', 'user.email', 'compat-test@example.com']);
+    $this->runGit($checkout, ['config', 'commit.gpgsign', 'false']);
+    $this->runGit($checkout, array_merge(['add', '--'], $paths));
+    $this->runGit($checkout, ['commit', '-m', 'fixture']);
+  }
+
+  /**
+   * Run git in $root and fail the test if it exits non-zero.
+   *
+   * @param string $root
+   *   Working tree.
+   * @param string[] $args
+   *   Arguments after git -C $root.
+   */
+  private function runGit(string $root, array $args): void {
+    $git = $this->gitExecutable();
+    $this->assertNotNull($git, 'git must be on PATH for checkout fixtures.');
+    $result = $this->runGitCommand($git, $root, $args);
+    $this->assertNotNull($result, 'git could not be started.');
+    $this->assertSame(0, $result['status'], $result['stderr']);
+  }
+
+  /**
+   * Invoke git -C $root without a shell.
+   *
+   * @param string $git
+   *   Absolute git executable.
+   * @param string $root
+   *   Working tree.
+   * @param string[] $args
+   *   Arguments after git -C $root.
+   *
+   * @return array{status: int, stdout: string, stderr: string}|null
+   *   Captured streams, or NULL if the process could not start.
+   */
+  private function runGitCommand(string $git, string $root, array $args): ?array {
+    $cmd = array_merge([$git, '-C', $root], $args);
+    $pipes = [];
+    $proc = proc_open($cmd, [
+      0 => ['pipe', 'r'],
+      1 => ['pipe', 'w'],
+      2 => ['pipe', 'w'],
+    ], $pipes);
+    if (!is_resource($proc)) {
+      return NULL;
+    }
+    fclose($pipes[0]);
+    $stdout = (string) stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    $stderr = (string) stream_get_contents($pipes[2]);
+    fclose($pipes[2]);
+    return [
+      'status' => proc_close($proc),
+      'stdout' => $stdout,
+      'stderr' => $stderr,
+    ];
   }
 
   /**
