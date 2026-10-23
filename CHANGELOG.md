@@ -27,7 +27,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `graphql_operation_type` now has a dedicated deny explainer
   (unsupported GraphQL operation kind) instead of falling
   through to `unspecified`.
-### Fixed
 - `McpCoreCompatibilityTest` only reads this module's info.yml
   files, `composer.json`, and PHP sources. On drupal.org GitLab
   CI the checkout is also the Composer project root, so `web/`
@@ -54,9 +53,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   after chown so that git guard still answers. The
   `[3.5.0]` compare link is restored.
 - Drupal.org-layout floors are 395 Unit / 1197 Kernel
-  against 404 / 1206 (nine under). The root `web/`
-  skip is refused when `ls-files` exits non-zero or
-  `--show-toplevel` is empty.
+  against 404 / 1206 (nine under). The main-matrix
+  floor is 1601 against 1610. A self-test pins the
+  existing `ls-files` non-zero refusal; an empty
+  `--show-toplevel` now refuses as well.
 
 ## [3.5.0] - 2026-10-23
 
