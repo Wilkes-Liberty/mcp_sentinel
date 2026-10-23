@@ -171,6 +171,10 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
 
   /**
    * A nested web/ is still this module, even with a custom-looking mount.
+   *
+   * The checkout is a real git repo and src/web is untracked with a
+   * resolving mount. If the skip is applied at any depth, this
+   * planted miss is invisible.
    */
   public function testNestedWebIsStillScanned(): void {
     $checkout = $this->scratchDir();
@@ -178,6 +182,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       $checkout . '/mcp_sentinel.info.yml',
       "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
     );
+    $this->initGitCheckout($checkout, ['mcp_sentinel.info.yml']);
     $nested = $checkout . '/src/web';
     mkdir($nested . '/core/lib', 0777, TRUE);
     file_put_contents($nested . '/core/lib/Drupal.php', "<?php\n");
@@ -306,6 +311,81 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     $planted = $checkout . '/web/core/bad.info.yml';
     $this->assertContains($planted, $this->infoYmlFiles($checkout));
     $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+  }
+
+  /**
+   * A non-repo nested in a parent git checkout is not that parent.
+   *
+   * Git -C walks up. Without a toplevel pin, ls-files answers
+   * from the parent (no tracked web/) and this planted miss is
+   * skipped.
+   */
+  public function testNestedNonRepoInsideParentGitDoesNotSkipWeb(): void {
+    $parent = $this->scratchDir();
+    file_put_contents($parent . '/README', "parent\n");
+    $this->initGitCheckout($parent, ['README']);
+    $checkout = $parent . '/module';
+    mkdir($checkout, 0777, TRUE);
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $this->plantCustomMount($checkout);
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    $planted = $checkout . '/web/core/bad.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+
+    $this->assertDirectoryDoesNotExist($checkout . '/.git');
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+  }
+
+  /**
+   * An inherited GIT_DIR cannot make a tracked web/ look untracked.
+   *
+   * GIT_WORK_TREE is set to this checkout so --show-toplevel still
+   * names $root; only stripping GIT_* keeps ls-files on this repo.
+   */
+  public function testInheritedGitDirDoesNotSkipTrackedWeb(): void {
+    $foreign = $this->scratchDir();
+    file_put_contents($foreign . '/README', "foreign\n");
+    $this->initGitCheckout($foreign, ['README']);
+
+    $checkout = $this->scratchDir();
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $this->plantCustomMount($checkout);
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    $planted = $checkout . '/web/core/bad.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    $this->initGitCheckout($checkout, [
+      'mcp_sentinel.info.yml',
+      'web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml',
+      'web/core/bad.info.yml',
+    ]);
+
+    $previous_git_dir = getenv('GIT_DIR');
+    $previous_work_tree = getenv('GIT_WORK_TREE');
+    putenv('GIT_DIR=' . $foreign . '/.git');
+    putenv('GIT_WORK_TREE=' . $checkout);
+    try {
+      $this->assertContains($planted, $this->infoYmlFiles($checkout));
+      $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    }
+    finally {
+      $this->restoreEnvironmentVariable('GIT_DIR', $previous_git_dir);
+      $this->restoreEnvironmentVariable('GIT_WORK_TREE', $previous_work_tree);
+    }
   }
 
   /**
@@ -613,8 +693,9 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *
    * The d.o build writes web/ beside the module; those files are
    * not in the project tree. A committed path under web/ is this
-   * repo. If git cannot be asked — missing binary, no .git, or
-   * a non-zero ls-files — do not skip (fail closed).
+   * repo. If git cannot be asked — missing binary, no .git, a
+   * toplevel that is not $root, or a non-zero ls-files — do not
+   * skip (fail closed).
    *
    * @param string $root
    *   Walk root.
@@ -644,6 +725,9 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     if ($git === NULL) {
       return NULL;
     }
+    if (!$this->gitToplevelIs($git, $root)) {
+      return NULL;
+    }
     $result = $this->runGitCommand($git, $root, ['ls-files', '-z', '--', $path]);
     if ($result === NULL || $result['status'] !== 0) {
       return NULL;
@@ -652,6 +736,31 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       return [];
     }
     return array_values(array_filter(explode("\0", $result['stdout'])));
+  }
+
+  /**
+   * Whether git's toplevel for $root is $root itself.
+   *
+   * The git -C option walks up to a parent repo. An inherited
+   * GIT_DIR can point at another tree. Either way, ls-files is
+   * not about this checkout.
+   *
+   * @param string $git
+   *   Absolute git executable.
+   * @param string $root
+   *   Walk root.
+   *
+   * @return bool
+   *   TRUE when --show-toplevel realpath equals $root.
+   */
+  private function gitToplevelIs(string $git, string $root): bool {
+    $result = $this->runGitCommand($git, $root, ['rev-parse', '--show-toplevel']);
+    if ($result === NULL || $result['status'] !== 0) {
+      return FALSE;
+    }
+    $toplevel = realpath(trim($result['stdout']));
+    $root_real = realpath($root);
+    return $toplevel !== FALSE && $root_real !== FALSE && $toplevel === $root_real;
   }
 
   /**
@@ -712,12 +821,15 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   /**
    * Invoke git -C $root without a shell.
    *
-   * The safe.directory setting is $root so ls-files still
-   * answers when the process user is not the directory owner.
-   * d.o phpunit is www-data; gitlab_templates runs chown on
-   * the checkout first, so owner matches there. This keeps
-   * the same answer if that chown is skipped or a helper
-   * clone stays root-owned.
+   * Every GIT_* variable is stripped so an inherited GIT_DIR
+   * cannot retarget the repo. The safe.directory setting is
+   * $root so ls-files still answers when the process user is
+   * not the directory owner. d.o phpunit is www-data;
+   * gitlab_templates runs chown on the checkout first, so
+   * owner matches there. This keeps the same answer if that
+   * chown is skipped or a helper clone stays root-owned.
+   * Stderr is a file so a full stdout pipe cannot deadlock
+   * against an unread stderr pipe.
    *
    * @param string $git
    *   Absolute git executable.
@@ -730,29 +842,76 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *   Captured streams, or NULL if the process could not start.
    */
   private function runGitCommand(string $git, string $root, array $args): ?array {
+    $stderr_file = tempnam(sys_get_temp_dir(), 'mcp-git-err-');
+    if ($stderr_file === FALSE) {
+      return NULL;
+    }
     $cmd = array_merge(
       [$git, '-C', $root, '-c', 'safe.directory=' . $root],
       $args,
     );
     $pipes = [];
-    $proc = proc_open($cmd, [
-      0 => ['pipe', 'r'],
-      1 => ['pipe', 'w'],
-      2 => ['pipe', 'w'],
-    ], $pipes);
+    $proc = proc_open(
+      $cmd,
+      [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['file', $stderr_file, 'w'],
+      ],
+      $pipes,
+      $root,
+      $this->environmentWithoutGitVariables(),
+    );
     if (!is_resource($proc)) {
+      unlink($stderr_file);
       return NULL;
     }
     fclose($pipes[0]);
     $stdout = (string) stream_get_contents($pipes[1]);
     fclose($pipes[1]);
-    $stderr = (string) stream_get_contents($pipes[2]);
-    fclose($pipes[2]);
+    $status = proc_close($proc);
+    $stderr = (string) file_get_contents($stderr_file);
+    unlink($stderr_file);
     return [
-      'status' => proc_close($proc),
+      'status' => $status,
       'stdout' => $stdout,
       'stderr' => $stderr,
     ];
+  }
+
+  /**
+   * Process environment with every GIT_* variable removed.
+   *
+   * @return array<string, string>
+   *   Environment for proc_open.
+   */
+  private function environmentWithoutGitVariables(): array {
+    $env = getenv();
+    if (!is_array($env)) {
+      $env = [];
+    }
+    foreach (array_keys($env) as $key) {
+      if (str_starts_with((string) $key, 'GIT_')) {
+        unset($env[$key]);
+      }
+    }
+    return $env;
+  }
+
+  /**
+   * Restore one environment variable after a putenv test.
+   *
+   * @param string $name
+   *   Variable name.
+   * @param string|false $previous
+   *   Prior value, or FALSE when it was unset.
+   */
+  private function restoreEnvironmentVariable(string $name, string|false $previous): void {
+    if (is_string($previous)) {
+      putenv($name . '=' . $previous);
+      return;
+    }
+    putenv($name);
   }
 
   /**

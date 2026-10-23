@@ -1609,12 +1609,12 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # The matrix job collects 396 Unit tests. This layout
+          # The matrix job collects 400 Unit tests. This layout
           # job used to run Kernel only, so McpCoreCompatibilityTest
           # never saw web/core inside the checkout. Floor sits 9
-          # under that count so losing the 12-test submodule
+          # under that count so losing the 12-test approval
           # Unit suite trips it.
-          MIN_TESTS: '387'
+          MIN_TESTS: '391'
         run: |
           set -euo pipefail
           sudo -u www-data -H -E rm -f junit-unit-do-*.xml

@@ -21,11 +21,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   uses `logger.channel.audit_chain`).
 - The Drupal.org-layout Kernel floor was counting Unit
   JUnit files (`junit-do-unit-*.xml` matched
-  `junit-do-*.xml`). Unit logs use a distinct prefix; the
-  Kernel floor is 1195 against the true Kernel count.
+  `junit-do-*.xml`). Unit logs use a distinct prefix;
+  counting steps clear stale JUnit first; the Kernel
+  floor is 1195 against the true Kernel count.
+  tests-gate allowlists only
+  `tests/src/Unit/McpCoreCompatibilityTest.php` and
+  also scans `modules/*/tests`.
   `McpCoreCompatibilityTest` skips `web/` only when git
   does not track it and the custom mount resolves to this
-  checkout.
+  checkout. The d.o-layout job runs Unit as www-data
+  after chown so that git guard still answers. The
+  `[3.5.0]` compare link is restored.
 
 ## [3.5.0] - 2026-10-23
 
