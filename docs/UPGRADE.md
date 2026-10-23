@@ -9,7 +9,7 @@ see `CONNECTOR.md`.
 `McpSealedTokenManager::verify()` and
 `McpSealedTokenAuthProvider::authenticate()` write a
 `denied_access` row (`tool: sealed_token`) on every denial.
-Repeat denials of the same reason, principal, and source share
+Repeat denials of the same reason and principal share
 one row per 60-second window (`sealed_token_deny_audit_window`
 on `mcp_sentinel.settings`; 1..3600, default 60). Rebuild
 caches (`drush cr`). No `updatedb`; 10039 is unchanged.
