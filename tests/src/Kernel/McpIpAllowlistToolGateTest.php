@@ -10,6 +10,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\mcp_sentinel\Controller\McpContextController;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -88,7 +89,7 @@ final class McpIpAllowlistToolGateTest extends KernelTestBase {
       $role->save();
     }
     else {
-      user_role_grant_permissions('mcp_api', ['access mcp sentinel context']);
+      McpRolePermissions::grant('mcp_api', ['access mcp sentinel context']);
     }
 
     // Enable role fallback and mark mcp_api as governed.

@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Access\AccessResult;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
@@ -104,10 +105,10 @@ final class McpWorkflowTransitionToolTest extends KernelTestBase {
       $role->save();
     }
     else {
-      user_role_grant_permissions('mcp_api', ['access mcp sentinel context']);
+      McpRolePermissions::grant('mcp_api', ['access mcp sentinel context']);
     }
     // Grant node-update so core access passes.
-    user_role_grant_permissions('mcp_api', [
+    McpRolePermissions::grant('mcp_api', [
       'administer nodes',
       'use editorial transition publish',
       'use editorial transition create_new_draft',

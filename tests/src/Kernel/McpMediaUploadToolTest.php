@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Access\AccessResult;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\media\MediaTypeInterface;
@@ -91,10 +92,10 @@ final class McpMediaUploadToolTest extends KernelTestBase {
       $role->save();
     }
     else {
-      user_role_grant_permissions('mcp_api', ['access mcp sentinel context']);
+      McpRolePermissions::grant('mcp_api', ['access mcp sentinel context']);
     }
     // Grant media creation so core access passes.
-    user_role_grant_permissions('mcp_api', ['create media']);
+    McpRolePermissions::grant('mcp_api', ['create media']);
 
     // Enable role fallback governance.
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')

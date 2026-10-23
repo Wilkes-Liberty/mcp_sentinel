@@ -84,8 +84,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor of each declared range, plus the ceiling
-          # (^10.6 || ^11.3).
+          # The floor of each declared range, plus the D11 ceiling
+          # (^10.6 || ^11.3 || ^12). Drupal 12 is declared but is not a
+          # required matrix leg yet: several hard dependencies still omit
+          # ^12, so a D12 scaffold cannot resolve. The drupal.org
+          # OPT_IN_TEST_NEXT_MAJOR job is the next-major signal (manual).
           #
           # Support the oldest branch upstream still supports, not the one we
           # happen to run: orgs upgrade slowly and a narrow floor discourages

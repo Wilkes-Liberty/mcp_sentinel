@@ -20,8 +20,10 @@ use Drupal\mcp_sentinel\McpPolicyProfileInterface;
  * which reads both, so the annotation keeps working there.
  *
  * Revisit when the floor reaches 11.1: annotations are deprecated in Drupal 11
- * and removed in Drupal 12, so this converts back once 10.6/11.0 are out of
- * core_version_requirement — not before.
+ * and removed in Drupal 13 (they still work on 12). Convert to a
+ * #[ConfigEntityType] attribute, keeping the annotation until 10.6 is out of
+ * core_version_requirement — not before. Adding only the attribute would
+ * hide the entity type on 10.6.
  *
  * @ConfigEntityType(
  *   id = "mcp_policy_profile",

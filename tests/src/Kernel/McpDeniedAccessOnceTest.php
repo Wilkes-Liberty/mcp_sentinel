@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -100,7 +101,7 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
     if (!Role::load('mcp_api')) {
       Role::create(['id' => 'mcp_api', 'label' => 'MCP API'])->save();
     }
-    user_role_grant_permissions('mcp_api', [
+    McpRolePermissions::grant('mcp_api', [
       'access content',
       'access user profiles',
       'administer nodes',

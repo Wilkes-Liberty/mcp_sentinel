@@ -5,6 +5,7 @@
  * Install, update, and uninstall functions for MCP Sentinel.
  */
 
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
@@ -380,7 +381,9 @@ function mcp_sentinel_schema(): array {
 function mcp_sentinel_install(): void {
   if (!\Drupal::entityTypeManager()->getStorage('user_role')->load('mcp_api')) {
     Role::create(['id' => 'mcp_api', 'label' => 'MCP API', 'weight' => 10])->save();
-    user_role_grant_permissions('mcp_api', [
+    // grantPermission() exists on 10.6 / 11.3 / 12; the plural helper
+    // and user_role_grant_permissions() do not (see McpRolePermissions).
+    McpRolePermissions::grant('mcp_api', [
       'access content',
       'access user profiles',
       'view media',

@@ -259,7 +259,7 @@ is not jailbreak detection. Prompt text in a result does not change policy.
 
 ## Requirements
 
-- Drupal 10.6+ or 11.3+
+- Drupal 10.6+, 11.3+, or 12
 - **PHP 8.2+.** The base module and approval services support PHP 8.2.
   Optional MCP transport modules also inherit their transport dependencies'
   PHP requirements; MCP Server currently requires PHP 8.3.

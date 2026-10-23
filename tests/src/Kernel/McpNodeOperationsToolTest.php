@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Core\Access\AccessResult;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
@@ -86,9 +87,9 @@ final class McpNodeOperationsToolTest extends KernelTestBase {
       $role->save();
     }
     else {
-      user_role_grant_permissions('mcp_api', ['access mcp sentinel context']);
+      McpRolePermissions::grant('mcp_api', ['access mcp sentinel context']);
     }
-    user_role_grant_permissions('mcp_api', ['administer nodes']);
+    McpRolePermissions::grant('mcp_api', ['administer nodes']);
 
     // Enable role fallback governance.
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')

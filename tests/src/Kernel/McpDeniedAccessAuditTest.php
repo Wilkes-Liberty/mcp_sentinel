@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\user\UserInterface;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\McpRolePermissions;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -88,7 +89,7 @@ final class McpDeniedAccessAuditTest extends KernelTestBase {
     }
     // Grant administer nodes so entity->access() checks pass in tests that
     // need them to succeed; denial tests override this via policy.
-    user_role_grant_permissions('mcp_api', ['administer nodes']);
+    McpRolePermissions::grant('mcp_api', ['administer nodes']);
 
     // Enable role fallback and mark mcp_api as governed.
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')

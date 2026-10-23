@@ -3,7 +3,7 @@ type: module
 description: 'Persisted queryId plugin for GraphQL functional coverage.'
 package: Testing
 hidden: true
-core_version_requirement: ^10.6 || ^11.3
+core_version_requirement: ^10.6 || ^11.3 || ^12
 dependencies:
   - graphql:graphql
   - mcp_sentinel_graphql:mcp_sentinel_graphql
