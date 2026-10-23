@@ -25,6 +25,12 @@ use PHPUnit\Framework\Attributes\Group;
  * the mount resolves to this checkout — and read composer.json
  * from that mount, or the suite starts scoring core and contrib.
  *
+ * The d.o phpunit job runs as www-data after a chown of the
+ * checkout. Git is in that image; if it cannot answer, the skip
+ * stays off (fail closed). Git is invoked with safe.directory
+ * set to the walk root so an ownership mismatch cannot turn the
+ * skip off and walk core again.
+ *
  * @group mcp_sentinel
  */
 #[Group('mcp_sentinel')]
@@ -255,6 +261,49 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       realpath($checkout . '/mcp_sentinel.info.yml'),
       realpath($checkout . '/web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml'),
     );
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+  }
+
+  /**
+   * A built web/ is still scanned when git is not on PATH.
+   *
+   * The php-8.3-ubuntu-apache image installs git. If that binary
+   * is missing, ls-files cannot answer and the skip must stay
+   * off — the core/contrib walk that failed pipelines 1012720,
+   * 1012776, and 1012775.
+   */
+  public function testMissingGitBinaryDoesNotSkipBuiltWeb(): void {
+    $checkout = $this->plantBuiltWebWithBadCoreInfo();
+    $previous_path = getenv('PATH');
+    putenv('PATH=/nonexistent-mcp-sentinel-compat-git');
+    try {
+      $this->assertNull($this->gitExecutable());
+      $planted = $checkout . '/web/core/bad.info.yml';
+      $this->assertContains($planted, $this->infoYmlFiles($checkout));
+      $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    }
+    finally {
+      if (is_string($previous_path)) {
+        putenv('PATH=' . $previous_path);
+      }
+      else {
+        putenv('PATH');
+      }
+    }
+  }
+
+  /**
+   * A built web/ is still scanned when the checkout has no .git.
+   *
+   * The phpunit job's helper clone leaves .git; composer
+   * artifacts exclude it. If that metadata is absent, do not
+   * skip.
+   */
+  public function testCheckoutWithoutGitMetadataDoesNotSkipBuiltWeb(): void {
+    $checkout = $this->plantBuiltWebWithBadCoreInfo();
+    $this->assertDirectoryDoesNotExist($checkout . '/.git');
+    $planted = $checkout . '/web/core/bad.info.yml';
     $this->assertContains($planted, $this->infoYmlFiles($checkout));
     $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
   }
@@ -519,7 +568,8 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     // not track it (the d.o build is untracked) and the
     // gitlab_templates custom mount resolves here. A committed
     // symlink under web/, a root web/ that merely contains
-    // core/lib/Drupal.php, or a nested web/, is still this tree.
+    // core/lib/Drupal.php, a nested web/, or a tree git cannot
+    // describe, is still this tree.
     if (
       $name === 'web'
       && dirname($path) === $root
@@ -563,7 +613,8 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *
    * The d.o build writes web/ beside the module; those files are
    * not in the project tree. A committed path under web/ is this
-   * repo. If git cannot be asked, do not skip (fail closed).
+   * repo. If git cannot be asked — missing binary, no .git, or
+   * a non-zero ls-files — do not skip (fail closed).
    *
    * @param string $root
    *   Walk root.
@@ -661,6 +712,13 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   /**
    * Invoke git -C $root without a shell.
    *
+   * The safe.directory setting is $root so ls-files still
+   * answers when the process user is not the directory owner.
+   * d.o phpunit is www-data; gitlab_templates runs chown on
+   * the checkout first, so owner matches there. This keeps
+   * the same answer if that chown is skipped or a helper
+   * clone stays root-owned.
+   *
    * @param string $git
    *   Absolute git executable.
    * @param string $root
@@ -672,7 +730,10 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *   Captured streams, or NULL if the process could not start.
    */
   private function runGitCommand(string $git, string $root, array $args): ?array {
-    $cmd = array_merge([$git, '-C', $root], $args);
+    $cmd = array_merge(
+      [$git, '-C', $root, '-c', 'safe.directory=' . $root],
+      $args,
+    );
     $pipes = [];
     $proc = proc_open($cmd, [
       0 => ['pipe', 'r'],
@@ -772,6 +833,28 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     mkdir($dir, 0777, TRUE);
     $this->scratchDirectories[] = $dir;
     return $dir;
+  }
+
+  /**
+   * Built Drupal web/ with a resolving mount and a planted core miss.
+   *
+   * @return string
+   *   Scratch checkout. web/ is on disk; git is not initialized.
+   */
+  private function plantBuiltWebWithBadCoreInfo(): string {
+    $checkout = $this->scratchDir();
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $this->plantCustomMount($checkout);
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    file_put_contents(
+      $checkout . '/web/core/bad.info.yml',
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    return $checkout;
   }
 
   /**

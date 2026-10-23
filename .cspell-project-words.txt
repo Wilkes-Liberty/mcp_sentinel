@@ -50,6 +50,7 @@ filebeat
 footgun
 gatechange
 gethostbynamel
+gpgsign
 highcharts
 hmac
 hostnames

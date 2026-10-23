@@ -1378,6 +1378,16 @@ jobs:
   # scripts in the checkout, keeps the expanded composer.json
   # where d.o leaves it, runs Unit as well as Kernel, and
   # enables assertions.
+  #
+  # phpunit on d.o is `sudo -u www-data -H -E` after
+  # `chown -R www-data:www-data $CI_PROJECT_DIR` (gitlab_templates
+  # .setup-webserver). The helper clone leaves .git; composer
+  # artifacts exclude it. The php-8.3-ubuntu-apache image
+  # installs git. After that chown the process user owns the
+  # repo, so the phpunit job does not set safe.directory (the
+  # Drupal CMS job does). This job repeats the chown and the
+  # www-data user so McpCoreCompatibilityTest asks git the
+  # same way d.o does.
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
@@ -1531,6 +1541,70 @@ jobs:
           echo "project-root composer.json: expanded (no require.drupal/core)"
           echo "mount composer.json: $(realpath "${mount}/composer.json")"
 
+      - name: Match d.o phpunit ownership
+        run: |
+          set -euo pipefail
+          # Evidence (gitlab_templates main + job 13051645 raw log):
+          # image registry.gitlab.com/drupal-infrastructure/drupalci/drupalci-environments/php-8.3-ubuntu-apache:production
+          # helper: "Initialized empty Git repository in /builds/project/mcp_sentinel/.git/"
+          # script: chown -R www-data:www-data $CI_PROJECT_DIR
+          # script: sudo -u www-data -H -E php web/core/scripts/run-tests.sh ...
+          # Image runDeps include git and sudo. phpunit does not
+          # run `git config safe.directory`. Before chown, www-data
+          # vs the helper-clone owner is a dubious-ownership miss.
+          workspace="${GITHUB_WORKSPACE}"
+          echo "checkout owner before chown: $(stat -c '%U:%G' "${workspace}")"
+          echo ".git owner before chown: $(stat -c '%U:%G' "${workspace}/.git")"
+          echo "runner: $(id)"
+          echo "www-data: $(id www-data)"
+          command -v git
+          git --version
+
+          # GHA keeps /home/runner/work/<repo> at 0700. www-data
+          # cannot even enter the workspace until those parents
+          # are traversable. d.o's /builds/project is 0755.
+          ancestor="$(dirname "${workspace}")"
+          while [ "${ancestor}" != "/" ] && [ -n "${ancestor}" ]; do
+            sudo chmod a+x "${ancestor}" || true
+            ancestor="$(dirname "${ancestor}")"
+          done
+
+          before_err="$(mktemp)"
+          if sudo -u www-data -H -E git -C "${workspace}" ls-files -- web \
+            > /tmp/git-ls-before.out 2>"${before_err}"; then
+            echo "git as www-data before chown: succeeded"
+            tr '\0' '\n' < /tmp/git-ls-before.out || true
+          else
+            echo "git as www-data before chown: failed (expected on a stock runner)"
+            cat "${before_err}"
+            if ! grep -qiE 'dubious ownership|safe\.directory' "${before_err}"; then
+              echo "::warning::www-data git failed before chown, but not with dubious ownership"
+            fi
+          fi
+
+          sudo mkdir -p /var/www
+          sudo chown www-data:www-data /var/www
+          sudo chown -R www-data:www-data "${workspace}"
+
+          echo "checkout owner after chown: $(stat -c '%U:%G' "${workspace}")"
+          echo ".git owner after chown: $(stat -c '%U:%G' "${workspace}/.git")"
+
+          if ! sudo -u www-data -H -E git -C "${workspace}" ls-files -z -- web \
+            > /tmp/git-ls-after.out 2>/tmp/git-ls-after.err; then
+            echo "::error::git as www-data after chown cannot answer; fail-closed would walk web/core again (pipelines 1012720/1012776/1012775)"
+            cat /tmp/git-ls-after.err
+            exit 1
+          fi
+          if [ -s /tmp/git-ls-after.out ]; then
+            echo "::error::git tracks paths under web/; the d.o skip must not fire"
+            tr '\0' '\n' < /tmp/git-ls-after.out
+            exit 1
+          fi
+          echo "git as www-data after chown: empty ls-files for web/"
+          mount_info="${workspace}/web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml"
+          test "$(sudo -u www-data -H -E realpath "${mount_info}")" = "$(sudo -u www-data -H -E realpath "${workspace}/mcp_sentinel.info.yml")" \
+            || { echo "::error::mount info.yml does not resolve to this checkout as www-data"; exit 1; }
+
       - name: PHPUnit — Unit (drupal.org layout)
         working-directory: ${{ github.workspace }}
         env:
@@ -1543,7 +1617,7 @@ jobs:
           MIN_TESTS: '387'
         run: |
           set -euo pipefail
-          rm -f junit-unit-do-*.xml
+          sudo -u www-data -H -E rm -f junit-unit-do-*.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
           suites=()
@@ -1559,14 +1633,20 @@ jobs:
           for dir in "${suites[@]}"; do
             i=$((i + 1))
             echo "--- ${dir#"${module}/"}"
-            vendor/bin/phpunit -c "${config}" \
+            sudo -u www-data -H -E vendor/bin/phpunit -c "${config}" \
               --log-junit "${PWD}/junit-unit-do-${i}.xml" \
               "${dir}"
           done
-          total="$(cat junit-unit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          total="$(sudo cat junit-unit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
           echo "Collected ${total} Unit tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Unit tests, below the floor of ${MIN_TESTS}."
+            exit 1
+          fi
+          compat_ran="$(sudo grep -ho 'classname="[^"]*McpCoreCompatibilityTest"' junit-unit-do-*.xml | wc -l | tr -d ' ')"
+          echo "Collected ${compat_ran} McpCoreCompatibilityTest cases as www-data."
+          if [ "${compat_ran}" -lt 1 ]; then
+            echo "::error::McpCoreCompatibilityTest did not run under the www-data d.o-layout path."
             exit 1
           fi
 
@@ -1586,14 +1666,14 @@ jobs:
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
-          rm -f junit-do-*.xml
+          sudo -u www-data -H -E rm -f junit-do-*.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
 
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
           test -f .github/ci/do-layout-assert-ini.php \
             || { echo "::error::do-layout-assert-ini.php is missing"; exit 1; }
-          php -d auto_prepend_file="${PWD}/.github/ci/do-layout-assert-ini.php" \
+          sudo -u www-data -H -E php -d auto_prepend_file="${PWD}/.github/ci/do-layout-assert-ini.php" \
             vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \
             "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
@@ -1617,12 +1697,12 @@ jobs:
             if [ "${dir}" = "${module}/tests/src/Kernel" ]; then
               extra=(--exclude-filter '/\\McpPrincipalAuthGuardBypassTest::/')
             fi
-            vendor/bin/phpunit -c "${config}" \
+            sudo -u www-data -H -E vendor/bin/phpunit -c "${config}" \
               --log-junit "${PWD}/junit-do-${i}.xml" \
               "${extra[@]}" \
               "${dir}"
           done
-          total="$(cat junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
+          total="$(sudo cat junit-do-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
           echo "Collected ${total} Kernel tests across $((${#suites[@]} + 1)) invocations (floor ${MIN_TESTS})."
           if [ "${total}" -lt "${MIN_TESTS}" ]; then
             echo "::error::Collected only ${total} Kernel tests, below the floor of ${MIN_TESTS}."
@@ -1630,12 +1710,16 @@ jobs:
           fi
           # Losing the 8-test dedupe class would not trip the floor
           # (1204-8=1196). Require those cases in the JUnit output.
-          dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-do-*.xml | wc -l | tr -d ' ')"
+          dedupe_ran="$(sudo grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-do-*.xml | wc -l | tr -d ' ')"
           echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
           if [ "${dedupe_ran}" -lt 8 ]; then
             echo "::error::McpSealedTokenDenialAuditorDedupeTest collected ${dedupe_ran} cases, expected at least 8."
             exit 1
           fi
+
+      - name: Restore runner ownership
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "${GITHUB_WORKSPACE}"
 
   # The single required check for the suite (#255). A matrix job skipped by a
   # job-level `if:` reports under its unexpanded name, so the per-leg PHPUnit
