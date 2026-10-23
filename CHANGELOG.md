@@ -16,7 +16,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "already present" and "Drain or review the webhook
   queue before updb".
 
-## [3.4.1] - 2026-10-21
 ## [3.4.1] - 2026-10-22
 
 ### Fixed
