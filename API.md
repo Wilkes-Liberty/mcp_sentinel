@@ -146,7 +146,23 @@ container that was not rebuilt), JSON:API, GraphQL, and
 The caller still sees only `MCP access is denied.` That is an
 audit-reason change: operators parsing `denied_access` metadata
 must treat that path as `missing_dispatcher`, not
-`missing_principal` (a missing caller token). A Paladin or
+`missing_principal` (a missing caller token).
+`McpDenyExplainer::refuse()` stamps `principal_key` and
+`human_key` as `unverified` on every `denied_access` row it
+writes when the holder is missing or has no sealed context.
+That includes the NULL-dispatcher path on JSON:API, GraphQL,
+and `/drupal-mcp/context`, and every other `refuse()` write
+that runs before a principal is sealed. It is not limited to
+`missing_dispatcher`. When a sealed context is present and
+`principalKey()` / `humanKey()` throw, the same keys are
+`unverified` and `principal_unverified` carries the
+key-exception reason. Dispatcher `logDenial()` and
+kill-switch `writeDenialAudit()` also stamp both keys
+`unverified` when a carried queue principal is present
+(`principal_unverified` is `carried_queue_key`).
+`denialAuditMetadata()` stamps them when `fromClaims()`
+throws (`principal_unverified` plus `unverified_reason`).
+A Paladin or
 sealed-token context that omits every required name, including a
 token that lists no scopes, is refused
 (`required_scope_missing`). Role-fallback and kernel fixture
@@ -624,7 +640,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.admin_status` | `McpAdminStatus` | admin status strip: MCP on/off, designated clients, readiness, last whoami |
 | `mcp_sentinel.whoami_recorder` | `McpWhoamiRecorder` | last `/drupal-mcp/readiness`, context, or governance-status signal (no secrets) |
 | `mcp_sentinel.sealed_token_manager` | `McpSealedTokenManager` | mint / verify / revoke short-lived client-bound sealed tokens; secret is copy-once. `verify()` denials write `denied_access` (`tool: sealed_token`) with a reason from `McpSealedTokenDenyReason`. Repeat denials of the same reason and principal share one row per `sealed_token_deny_audit_window` seconds (default 60). The row keeps the site and path of the first denial in the window. The bearer is never stored. |
-| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and returns `CALLER_MESSAGE` |
+| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and a `denied_access` row, returns `CALLER_MESSAGE`, and stamps `principal_key` / `human_key` `unverified` when the holder is missing or has no sealed context (or when key derivation throws; that case also sets `principal_unverified`) |
 | `mcp_sentinel.principal_context_dispatcher` | `McpPrincipalContextDispatcher` | seals and admits a verified principal. A NULL service on the JSON:API / GraphQL / `/drupal-mcp/context` admit paths is audited as `missing_dispatcher` (not `missing_principal`). Caller-facing copy stays `MCP access is denied.` |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |

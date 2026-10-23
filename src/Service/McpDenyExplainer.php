@@ -514,6 +514,12 @@ final class McpDenyExplainer {
    * AccessResult construction must still return forbidden when the chain
    * is not installed (kernel tests without the audit schema).
    *
+   * principal_key and human_key come from the sealed context when
+   * the holder has one that can derive them. They are stamped
+   * unverified when the holder is missing, has no sealed context,
+   * or principalKey() / humanKey() throw. The last case also sets
+   * principal_unverified to the key-exception reason.
+   *
    * @param string $reason
    *   Original deny reason. Must not contain secrets.
    * @param string $explain
@@ -577,9 +583,10 @@ final class McpDenyExplainer {
       }
     }
     else {
-      // refuse() runs before a principal is sealed when the
-      // dispatcher service is missing. The row still names the
-      // principal slot so it is not mistaken for a verified denial.
+      // Holder is missing or has no sealed context. Every
+      // refuse() denied_access row written in that state stamps
+      // both keys unverified. missing_dispatcher is one of
+      // those rows, not the only one.
       $meta['principal_key'] = 'unverified';
       $meta['human_key'] = 'unverified';
     }
