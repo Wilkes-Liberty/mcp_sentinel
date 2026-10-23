@@ -725,8 +725,9 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     if ($git === NULL) {
       return NULL;
     }
-    // DELIBERATE MUTATION: skip the toplevel pin so a parent
-    // repo or inherited GIT_DIR can answer for this checkout.
+    if (!$this->gitToplevelIs($git, $root)) {
+      return NULL;
+    }
     $result = $this->runGitCommand($git, $root, ['ls-files', '-z', '--', $path]);
     if ($result === NULL || $result['status'] !== 0) {
       return NULL;
@@ -885,9 +886,13 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *   Environment for proc_open.
    */
   private function environmentWithoutGitVariables(): array {
-    // DELIBERATE MUTATION: keep inherited GIT_* so GIT_DIR can
-    // retarget ls-files away from this checkout.
-    return getenv();
+    $env = getenv();
+    foreach (array_keys($env) as $key) {
+      if (str_starts_with((string) $key, 'GIT_')) {
+        unset($env[$key]);
+      }
+    }
+    return $env;
   }
 
   /**
