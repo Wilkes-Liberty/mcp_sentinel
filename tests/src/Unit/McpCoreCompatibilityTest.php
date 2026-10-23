@@ -30,6 +30,24 @@ use PHPUnit\Framework\Attributes\Group;
 final class McpCoreCompatibilityTest extends UnitTestCase {
 
   /**
+   * Scratch directories this instance created.
+   *
+   * @var string[]
+   */
+  private array $scratchDirectories = [];
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    foreach ($this->scratchDirectories as $directory) {
+      $this->removeScratchDirectory($directory);
+    }
+    $this->scratchDirectories = [];
+    parent::tearDown();
+  }
+
+  /**
    * Every info.yml keeps the 10.6 and 11.3 floors and declares Drupal 12.
    */
   public function testInfoYmlDeclaresDrupal12WithoutDroppingFloors(): void {
@@ -94,6 +112,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
     );
     file_put_contents($checkout . '/src/Ok.php', "<?php\n");
+    $this->plantCustomMount($checkout);
 
     $core_info = $checkout . '/web/core/modules/system_stub';
     mkdir($core_info, 0777, TRUE);
@@ -116,6 +135,82 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   }
 
   /**
+   * A root web/ that only plants Drupal.php is still this module.
+   */
+  public function testRootWebWithDrupalPhpIsStillScanned(): void {
+    $checkout = $this->scratchDir();
+    mkdir($checkout . '/web/core/lib', 0777, TRUE);
+    file_put_contents($checkout . '/web/core/lib/Drupal.php', "<?php\n");
+    file_put_contents(
+      $checkout . '/web/core/bad.info.yml',
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    mkdir($checkout . '/web/core/modules/user', 0777, TRUE);
+    file_put_contents(
+      $checkout . '/web/core/modules/user/user.module',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+
+    $planted = $checkout . '/web/core/bad.info.yml';
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+  }
+
+  /**
+   * A nested web/ is still this module, even with a custom-looking mount.
+   */
+  public function testNestedWebIsStillScanned(): void {
+    $checkout = $this->scratchDir();
+    file_put_contents(
+      $checkout . '/mcp_sentinel.info.yml',
+      "name: 'MCP Sentinel'\ncore_version_requirement: '^10.6 || ^11.3 || ^12'\n",
+    );
+    $nested = $checkout . '/src/web';
+    mkdir($nested . '/core/lib', 0777, TRUE);
+    file_put_contents($nested . '/core/lib/Drupal.php', "<?php\n");
+    mkdir($nested . '/modules/custom/mcp_sentinel', 0777, TRUE);
+    symlink(
+      $checkout . '/mcp_sentinel.info.yml',
+      $nested . '/modules/custom/mcp_sentinel/mcp_sentinel.info.yml',
+    );
+    $planted = $nested . '/planted.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+    file_put_contents(
+      $nested . '/calls.php',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+    $this->assertNotSame([], $this->infoYmlConstraintMisses($planted));
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+  }
+
+  /**
+   * Nested vendor/ and node_modules/ trees are still this module.
+   */
+  public function testNestedVendorAndNodeModulesAreStillScanned(): void {
+    $checkout = $this->scratchDir();
+    mkdir($checkout . '/src/vendor', 0777, TRUE);
+    file_put_contents(
+      $checkout . '/src/vendor/calls.php',
+      "<?php\nuser_role_grant_permissions('x', []);\n",
+    );
+    mkdir($checkout . '/tests/node_modules', 0777, TRUE);
+    $planted = $checkout . '/tests/node_modules/planted.info.yml';
+    file_put_contents(
+      $planted,
+      "name: planted\ncore_version_requirement: '^11.3 || ^12'\n",
+    );
+
+    $this->assertNotSame([], $this->deprecatedGrantHelperHits($checkout));
+    $this->assertContains($planted, $this->infoYmlFiles($checkout));
+  }
+
+  /**
    * On d.o the module composer.json lives on the custom mount.
    */
   public function testModuleComposerJsonIsReadFromTheProjectMount(): void {
@@ -131,10 +226,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       ], JSON_THROW_ON_ERROR),
     );
 
-    // Build the mount path in parts so tests-gate does not treat
-    // this fixture as a hardcoded installer path.
-    $bucket = 'custom';
-    $mount = $checkout . '/web/modules/' . $bucket . '/mcp_sentinel';
+    $mount = $checkout . '/web/modules/custom/mcp_sentinel';
     mkdir($mount, 0777, TRUE);
     file_put_contents(
       $mount . '/mcp_sentinel.info.yml',
@@ -155,6 +247,32 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
       realpath($mount . '/composer.json'),
       realpath($path),
     );
+  }
+
+  /**
+   * Custom and contrib copies of this module cannot both be present.
+   */
+  public function testBothCustomAndContribMountsAreRejected(): void {
+    $checkout = $this->scratchDir();
+    $module_composer = json_encode([
+      'name' => 'drupal/mcp_sentinel',
+      'type' => 'drupal-module',
+      'require' => [
+        'drupal/core' => '^10.6 || ^11.3 || ^12',
+      ],
+    ], JSON_THROW_ON_ERROR);
+    foreach ([
+      $checkout . '/web/modules/custom/mcp_sentinel',
+      $checkout . '/web/modules/contrib/mcp_sentinel',
+    ] as $dir) {
+      mkdir($dir, 0777, TRUE);
+      file_put_contents($dir . '/mcp_sentinel.info.yml', "name: 'MCP Sentinel'\n");
+      file_put_contents($dir . '/composer.json', $module_composer);
+    }
+
+    $this->expectException(\RuntimeException::class);
+    $this->expectExceptionMessage('custom mount and a contrib copy');
+    $this->composerJsonPath($checkout);
   }
 
   /**
@@ -281,7 +399,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   }
 
   /**
-   * Files under $root, skipping vendor and a built Drupal web/ tree.
+   * Files under $root, skipping checkout-root vendor and a d.o-built web/.
    *
    * @param string $root
    *   Directory to walk.
@@ -319,31 +437,49 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    */
   private function shouldSkipDirectory(string $path, string $root): bool {
     $name = basename($path);
-    if (in_array($name, ['vendor', 'node_modules', '.git'], TRUE)) {
+    // Only the checkout-root copies are installer trees. A helper
+    // under src/vendor or an info.yml under tests/node_modules is ours.
+    if (in_array($name, ['vendor', 'node_modules', '.git'], TRUE) && dirname($path) === $root) {
       return TRUE;
     }
     // d.o builds Drupal into the project checkout. That web/ directory
     // is core and contrib, not mcp_sentinel, even though it sits next
     // to mcp_sentinel.info.yml.
-    // Only the checkout's own web/ is the built Drupal tree. A nested
-    // web/ under src or tests is this module's, if one ever appears.
-    if ($name === 'web' && dirname($path) === $root && $this->isBuiltDrupalWebRoot($path)) {
+    // Skip only the checkout's own web/, and only when the
+    // gitlab_templates custom mount is present and resolves here.
+    // A root web/ that merely contains core/lib/Drupal.php, or a
+    // nested web/, is still this tree.
+    if ($name === 'web' && dirname($path) === $root && $this->isBuiltDrupalWebRoot($path, $root)) {
       return TRUE;
     }
     return FALSE;
   }
 
   /**
-   * Whether $web_dir is a built Drupal tree (has core's Drupal.php).
+   * Whether $web_dir is the d.o-built Drupal tree for this checkout.
+   *
+   * The gitlab_templates scripts write web/ next to the module and
+   * mount the project at web/modules/custom/mcp_sentinel. The
+   * mount's mcp_sentinel.info.yml must resolve to this checkout's
+   * file. A planted Drupal.php is not enough.
    *
    * @param string $web_dir
    *   Candidate web/ path.
+   * @param string $root
+   *   Walk root (the git checkout).
    *
    * @return bool
    *   TRUE when this is the built Drupal tree.
    */
-  private function isBuiltDrupalWebRoot(string $web_dir): bool {
-    return is_file($web_dir . '/core/lib/Drupal.php');
+  private function isBuiltDrupalWebRoot(string $web_dir, string $root): bool {
+    $mount_info = $web_dir . '/modules/custom/mcp_sentinel/mcp_sentinel.info.yml';
+    $checkout_info = $root . '/mcp_sentinel.info.yml';
+    if (!is_file($mount_info) || !is_file($checkout_info)) {
+      return FALSE;
+    }
+    $mount_real = realpath($mount_info);
+    $checkout_real = realpath($checkout_info);
+    return $mount_real !== FALSE && $mount_real === $checkout_real;
   }
 
   /**
@@ -371,6 +507,9 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   /**
    * The gitlab_templates mount of this project, when the d.o layout is in use.
    *
+   * Prefer the custom mount. A contrib copy is the GitHub path-repo
+   * layout. Both at once is a mixed layout, not either venue.
+   *
    * @param string $checkout
    *   Git checkout.
    *
@@ -378,11 +517,20 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
    *   Absolute mount path, or NULL when this checkout is module-only.
    */
   private function projectMount(string $checkout): ?string {
-    $pattern = $checkout . '/web/modules/*/*';
-    foreach (glob($pattern) ?: [] as $candidate) {
-      if (is_file($candidate . '/mcp_sentinel.info.yml')) {
-        return $candidate;
-      }
+    $custom = $checkout . '/web/modules/custom/mcp_sentinel';
+    $contrib = $checkout . '/web/modules/contrib/mcp_sentinel';
+    $has_custom = is_file($custom . '/mcp_sentinel.info.yml');
+    $has_contrib = is_file($contrib . '/mcp_sentinel.info.yml');
+    if ($has_custom && $has_contrib) {
+      throw new \RuntimeException(
+        'Both the gitlab_templates custom mount and a contrib copy of this module exist. The custom mount must be the only copy.',
+      );
+    }
+    if ($has_custom) {
+      return $custom;
+    }
+    if ($has_contrib) {
+      return $contrib;
     }
     return NULL;
   }
@@ -402,12 +550,57 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
   }
 
   /**
-   * A throwaway directory torn down by the runner's temp cleanup.
+   * A throwaway directory this test removes in tearDown.
+   *
+   * @return string
+   *   Absolute path.
    */
   private function scratchDir(): string {
     $dir = sys_get_temp_dir() . '/mcp-sentinel-compat-' . uniqid('', TRUE);
     mkdir($dir, 0777, TRUE);
+    $this->scratchDirectories[] = $dir;
     return $dir;
+  }
+
+  /**
+   * Point web/modules/custom/mcp_sentinel at this checkout.
+   *
+   * @param string $checkout
+   *   Git checkout.
+   */
+  private function plantCustomMount(string $checkout): void {
+    $mount = $checkout . '/web/modules/custom/mcp_sentinel';
+    mkdir($mount, 0777, TRUE);
+    $info = $checkout . '/mcp_sentinel.info.yml';
+    $link = $mount . '/mcp_sentinel.info.yml';
+    if (is_file($info) && !file_exists($link)) {
+      symlink($info, $link);
+    }
+  }
+
+  /**
+   * Delete one scratch directory created by scratchDir().
+   *
+   * File and directory symlinks are unlinked, not followed, so a
+   * mount that pointed outside the scratch tree cannot delete the
+   * checkout. Runs from tearDown, including when a test failed.
+   *
+   * @param string $path
+   *   Absolute path.
+   */
+  private function removeScratchDirectory(string $path): void {
+    if (is_link($path) || is_file($path)) {
+      unlink($path);
+      return;
+    }
+    if (!is_dir($path)) {
+      return;
+    }
+    $items = new \FilesystemIterator($path);
+    foreach ($items as $item) {
+      $this->removeScratchDirectory($item->getPathname());
+    }
+    rmdir($path);
   }
 
 }

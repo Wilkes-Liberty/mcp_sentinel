@@ -69,13 +69,47 @@ final class McpSiemStreamingTest extends KernelTestBase {
   }
 
   /**
-   * Live SIEM identity is the chain's stream channel.
+   * Live SIEM records land on the chain's stream channel.
+   *
+   * Audit Chain 1.13.0 must emit on audit_chain.stream. Presence of
+   * that service is not enough — a 1.13.0 build that still writes
+   * logger.channel.audit_chain fails this test.
    */
   public function testLiveSiemChannelIsAuditChain(): void {
-    $this->assertTrue(
-      $this->container->has($this->siemChannelId()),
-      'SIEM streaming uses the audit_chain stream channel.',
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
+      ->save();
+
+    $expected = $this->siemChannelId();
+    $expected_spy = new TestLogger();
+    $other_spies = [];
+    foreach (['audit_chain.stream', 'logger.channel.audit_chain'] as $id) {
+      if ($id === $expected || !$this->container->has($id)) {
+        continue;
+      }
+      $other_spies[$id] = new TestLogger();
+      $this->container->set($id, $other_spies[$id]);
+    }
+    $this->installSiemSpy($expected_spy);
+
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
+      'entity_type' => 'node',
+      'bundle'      => 'article',
+      'id'          => '1',
+    ]);
+
+    $this->assertCount(
+      1,
+      $expected_spy->records,
+      'SIEM stream must emit on ' . $expected . '.',
     );
+    foreach ($other_spies as $id => $spy) {
+      $this->assertCount(
+        0,
+        $spy->records,
+        'SIEM stream must not emit on ' . $id . '.',
+      );
+    }
   }
 
   /**
