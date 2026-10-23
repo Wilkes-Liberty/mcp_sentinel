@@ -399,7 +399,7 @@ final class McpCoreCompatibilityTest extends UnitTestCase {
     $checkout = $this->plantBuiltWebWithBadCoreInfo();
     $script = $this->fakeGitArgParser() . <<<'SH'
 case "$cmd" in
-  rev-parse) printf '%s\n' "$root"; exit 0 ;;
+  rev-parse) printf '%s\n' "$(pwd)"; exit 0 ;;
   ls-files) exit 1 ;;
   *) exit 1 ;;
 esac
