@@ -53,6 +53,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checkout. The d.o-layout job runs Unit as www-data
   after chown so that git guard still answers. The
   `[3.5.0]` compare link is restored.
+- The Drupal.org-layout GitHub job lost its job
+  environment on ubuntu-26.04: that image's sudo ignores
+  `-E`, so `sudo -u www-data -H -E` ran PHPUnit without
+  `PHP_INI_SCAN_DIR` and the zend.assertions guard
+  failed closed. The job now passes the variables that
+  process needs through `env` instead of relying on
+  `-E`. The guard, the count floors, and the git
+  ownership checks are unchanged.
 
 ## [3.5.0] - 2026-10-23
 
