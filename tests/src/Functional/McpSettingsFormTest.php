@@ -484,7 +484,8 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $meta = $this->latestWebhookEventFilterAudit();
     $this->assertSame('siem', $meta['endpoint_id']);
     $this->assertSame('added', $meta['change']);
-    $this->assertSame([], $meta['from']);
+    $this->assertArrayHasKey('from', $meta);
+    $this->assertNull($meta['from'], 'Added endpoints did not exist; from must not be [].');
     $this->assertSame(['mcp.entity.presave'], $meta['to']);
   }
 
@@ -530,7 +531,8 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->assertSame('siem', $meta['endpoint_id']);
     $this->assertSame('removed', $meta['change']);
     $this->assertSame(['mcp.entity.delete'], $meta['from']);
-    $this->assertSame([], $meta['to']);
+    $this->assertArrayHasKey('to', $meta);
+    $this->assertNull($meta['to'], 'Removed endpoints are gone; to must not be [].');
   }
 
   /**

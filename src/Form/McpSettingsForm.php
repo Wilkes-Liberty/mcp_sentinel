@@ -1387,6 +1387,8 @@ class McpSettingsForm extends ConfigFormBase {
     // A settings-form filter change is accountable. drush cset, config
     // import, and recipe apply of the same key do not write this row.
     // Human settings saves skip the governed config_save subscriber.
+    // An empty filter still means "all events"; a missing endpoint is
+    // added or removed, not rewritten as [].
     $filterAudits = [];
     $endpointIds = array_unique(array_merge(
       array_keys($previousEventsById),
@@ -1469,9 +1471,8 @@ class McpSettingsForm extends ConfigFormBase {
   /**
    * Builds a webhook_event_filter audit payload, or NULL when unchanged.
    *
-   * An empty events list means "all events". A missing endpoint is also
-   * represented as [] if we only store from/to, so add/remove must name
-   * the change.
+   * An empty events list means "all events". A missing endpoint is
+   * added or removed, so that side is null — not [].
    *
    * @param string $endpointId
    *   Endpoint machine ID.
@@ -1480,7 +1481,7 @@ class McpSettingsForm extends ConfigFormBase {
    * @param array<string, string[]> $savedById
    *   Submitted filters keyed by id.
    *
-   * @return array{endpoint_id: string, change: string, from: string[], to: string[]}|null
+   * @return array{endpoint_id: string, change: string, from: list<string>|null, to: list<string>|null}|null
    *   Audit metadata, or NULL when the endpoint filter did not change.
    */
   private function webhookEventFilterAudit(
@@ -1490,33 +1491,34 @@ class McpSettingsForm extends ConfigFormBase {
   ): ?array {
     $had = array_key_exists($endpointId, $previousById);
     $has = array_key_exists($endpointId, $savedById);
-    if (!$had && $has) {
-      // New endpoint. from [] is not "was receiving everything".
+    if (!$had) {
+      if (!$has) {
+        return NULL;
+      }
       return [
         'endpoint_id' => $endpointId,
         'change' => 'added',
-        'from' => [],
+        'from' => NULL,
         'to' => $savedById[$endpointId],
       ];
     }
-    if ($had && !$has) {
-      // Removed endpoint. to [] is not "now receives everything".
+    if (!$has) {
       return [
         'endpoint_id' => $endpointId,
         'change' => 'removed',
         'from' => $previousById[$endpointId],
-        'to' => [],
+        'to' => NULL,
       ];
     }
-    if ($had && $has && $previousById[$endpointId] !== $savedById[$endpointId]) {
-      return [
-        'endpoint_id' => $endpointId,
-        'change' => 'changed',
-        'from' => $previousById[$endpointId],
-        'to' => $savedById[$endpointId],
-      ];
+    if ($previousById[$endpointId] === $savedById[$endpointId]) {
+      return NULL;
     }
-    return NULL;
+    return [
+      'endpoint_id' => $endpointId,
+      'change' => 'changed',
+      'from' => $previousById[$endpointId],
+      'to' => $savedById[$endpointId],
+    ];
   }
 
   /**

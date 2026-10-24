@@ -15,9 +15,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mcp.entity.presave`. A settings-form save that persists
   an event-filter add, remove, or change writes a
   `webhook_event_filter` audit row (`change`: `added`,
-  `removed`, or `changed`). `drush cset`, config import, and
-  recipe apply of the same key do not. The retired name is
-  never rewritten on an unrelated save.
+  `removed`, or `changed`). A missing endpoint is not
+  logged as an empty filter. `drush cset`, config import,
+  and recipe apply of the same key do not. The retired
+  name is never rewritten on an unrelated save.
   Sites that still have `mcp.entity.save` stored must replace
   it before any other settings can be saved; delivery stays
   empty until they do. There is no update hook and no
