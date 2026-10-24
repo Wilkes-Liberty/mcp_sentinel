@@ -850,9 +850,9 @@ class McpSettingsForm extends ConfigFormBase {
         // Only three names are ever queued. List them so an operator does
         // not type a name that never fires (mcp.entity.save is not one).
         '#description' => $this->t('Live names: <code>mcp.entity.presave</code> (entity write, before commit), <code>mcp.entity.delete</code>, and <code>mcp.anomaly.alert</code>. Leave empty to receive every event. A stored <code>mcp.entity.save</code> filter is shown as stored; type <code>mcp.entity.presave</code> to receive entity writes.'),
-        // PROOF WEAKEN: rewrite on display so an unrelated save persists
-        // mcp.entity.presave. Not kept.
-        '#default_value' => implode("\n", $this->rewriteRetiredWebhookEventNames((array) ($ep['events'] ?? []))),
+        // Show the stored name, including a retired mcp.entity.save filter.
+        // Rewriting it here would persist on any later save.
+        '#default_value' => implode("\n", (array) ($ep['events'] ?? [])),
         '#rows' => 3,
       ];
       $form['webhooks']['endpoints'][$i]['enabled'] = [
@@ -1129,6 +1129,20 @@ class McpSettingsForm extends ConfigFormBase {
           ['@n' => $i + 1, '@key' => $secret],
         ));
       }
+      // mcp.entity.save was never queued. Do not rewrite it to presave:
+      // that would start entity-write deliveries nobody chose. The
+      // operator must type the live name.
+      $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
+      if (in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $events, TRUE)) {
+        $form_state->setErrorByName(
+          "webhooks][endpoints][$i][events]",
+          $this->t('Endpoint %endpoint still filters on @retired, which is never dispatched. Type @live (entity write, before commit) to receive entity writes.', [
+            '%endpoint' => $id !== '' ? $id : $this->t('endpoint @n', ['@n' => $i + 1]),
+            '@retired' => self::RETIRED_WEBHOOK_EVENT_SAVE,
+            '@live' => self::LIVE_WEBHOOK_EVENT_PRESAVE,
+          ]),
+        );
+      }
     }
   }
 
@@ -1345,7 +1359,7 @@ class McpSettingsForm extends ConfigFormBase {
       }
     }
     $webhook_endpoints = [];
-    $filterAudits = [];
+    $savedEventsById = [];
     foreach ((array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []) as $ep) {
       // Skip the editor's Add/Remove button values (non-array siblings).
       if (!is_array($ep)) {
@@ -1356,10 +1370,7 @@ class McpSettingsForm extends ConfigFormBase {
       if ($id === '' && $url === '') {
         continue;
       }
-      // PROOF WEAKEN: rewrite the retired name on every save.
-      $events = $this->rewriteRetiredWebhookEventNames(
-        $split((string) ($ep['events'] ?? '')),
-      );
+      $events = $split((string) ($ep['events'] ?? ''));
       $webhook_endpoints[] = [
         'id'             => $id,
         'label'          => trim((string) ($ep['label'] ?? '')),
@@ -1369,17 +1380,26 @@ class McpSettingsForm extends ConfigFormBase {
         'enabled'        => (bool) ($ep['enabled'] ?? FALSE),
         'allow_internal' => (bool) ($ep['allow_internal'] ?? FALSE),
       ];
-      // The operator removed the retired name (typed presave, another
-      // live name, or empty = all). That starts deliveries the ghost
-      // filter never made. Record it after the config write lands.
-      $previous = $previousEventsById[$id] ?? [];
-      if ($id !== ''
-        && in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $previous, TRUE)
-        && !in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $events, TRUE)) {
+      if ($id !== '') {
+        $savedEventsById[$id] = $events;
+      }
+    }
+    // Any persisted filter change is accountable, not only leaving the
+    // retired name. Human settings saves skip the governed config_save
+    // subscriber, so this uses the same logger.
+    $filterAudits = [];
+    $endpointIds = array_unique(array_merge(
+      array_keys($previousEventsById),
+      array_keys($savedEventsById),
+    ));
+    foreach ($endpointIds as $endpointId) {
+      $from = $previousEventsById[$endpointId] ?? [];
+      $to = $savedEventsById[$endpointId] ?? [];
+      if ($from !== $to) {
         $filterAudits[] = [
-          'endpoint_id' => $id,
-          'from' => self::RETIRED_WEBHOOK_EVENT_SAVE,
-          'to' => $events,
+          'endpoint_id' => $endpointId,
+          'from' => $from,
+          'to' => $to,
         ];
       }
     }
@@ -1425,8 +1445,8 @@ class McpSettingsForm extends ConfigFormBase {
       ])
       ->save();
 
-    // logAlways: starting outbound delivery is accountable even when
-    // audit_enabled is off.
+    // logAlways: a filter change is accountable even when audit_enabled
+    // is off. Human settings saves skip the governed config_save listener.
     foreach ($filterAudits as $audit) {
       $this->auditLogger->logAlways('webhook_event_filter', $audit);
     }
@@ -1445,28 +1465,6 @@ class McpSettingsForm extends ConfigFormBase {
    */
   private function splitWebhookEventNames(string $value): array {
     return array_values(array_filter(array_map('trim', explode("\n", $value))));
-  }
-
-  /**
-   * PROOF WEAKEN: silent rewrite. Not kept.
-   *
-   * @param string[] $events
-   *   Event names from config or the textarea.
-   *
-   * @return string[]
-   *   The same list, with mcp.entity.save rewritten.
-   */
-  private function rewriteRetiredWebhookEventNames(array $events): array {
-    $rewritten = [];
-    foreach ($events as $name) {
-      if ($name === self::RETIRED_WEBHOOK_EVENT_SAVE) {
-        $name = self::LIVE_WEBHOOK_EVENT_PRESAVE;
-      }
-      if ($name !== '' && !in_array($name, $rewritten, TRUE)) {
-        $rewritten[] = $name;
-      }
-    }
-    return $rewritten;
   }
 
   /**

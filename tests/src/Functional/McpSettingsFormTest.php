@@ -424,7 +424,61 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $meta = \Drupal::service('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
     $this->assertSame('siem', $meta['endpoint_id']);
-    $this->assertSame('mcp.entity.save', $meta['from']);
+    $this->assertSame(['mcp.entity.save'], $meta['from']);
+    $this->assertSame(['mcp.entity.presave'], $meta['to']);
+  }
+
+  /**
+   * A stored or typed mcp.entity.save filter blocks the settings save.
+   */
+  public function testRetiredSaveEventNameRejectedOnSettingsSave(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => 'mcp.entity.save',
+    ], 'Save configuration');
+    $this->assertSession()->pageTextContains('Endpoint siem still filters on mcp.entity.save');
+    $this->assertSession()->pageTextContains('Type mcp.entity.presave');
+    $this->assertSame(
+      ['mcp.entity.save'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+  }
+
+  /**
+   * Any persisted event-filter change writes a webhook_event_filter row.
+   */
+  public function testWebhookEventFilterChangeWritesAuditRow(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [[
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => '',
+        'events' => ['mcp.entity.delete'],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      ])->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => 'mcp.entity.presave',
+    ], 'Save configuration');
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+    $row = \Drupal::database()->select('audit_chain_log', 'l')
+      ->fields('l', ['operation', 'metadata'])
+      ->condition('l.operation', 'webhook_event_filter')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row, 'A persisted filter change must write webhook_event_filter.');
+    $meta = \Drupal::service('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame('siem', $meta['endpoint_id']);
+    $this->assertSame(['mcp.entity.delete'], $meta['from']);
     $this->assertSame(['mcp.entity.presave'], $meta['to']);
   }
 
