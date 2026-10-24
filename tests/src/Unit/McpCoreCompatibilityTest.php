@@ -785,7 +785,7 @@ SH;
       return NULL;
     }
     $result = $this->runGitCommand($git, $root, ['ls-files', '-z', '--', $path]);
-    if ($result === NULL || $result['status'] !== 0) {
+    if ($result === NULL) {
       return NULL;
     }
     if ($result['stdout'] === '') {
