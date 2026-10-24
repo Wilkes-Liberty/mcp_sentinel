@@ -9,9 +9,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - The webhook event-filter field, schema, and README now name
   the three live events (`mcp.entity.presave`,
-  `mcp.entity.delete`, `mcp.anomaly.alert`). Saving settings
-  rewrites a stored `mcp.entity.save` filter to
-  `mcp.entity.presave`. That name was never dispatched.
+  `mcp.entity.delete`, `mcp.anomaly.alert`). A stored
+  `mcp.entity.save` filter is shown as stored and refused on
+  save until the operator types `mcp.entity.presave`. That
+  typed change writes a `webhook_event_filter` audit row.
+  The retired name is never rewritten on an unrelated save.
 - Operator-facing deny copy no longer carries internal ticket
   suffixes. The tenant-claim explainer, dispatcher exception
   messages, sealed-token mint-form description, and

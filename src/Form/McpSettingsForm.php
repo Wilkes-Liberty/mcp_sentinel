@@ -13,6 +13,7 @@ use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
@@ -28,6 +29,20 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 class McpSettingsForm extends ConfigFormBase {
 
   use McpListEditorTrait;
+
+  /**
+   * Retired filter name that nothing in production dispatches.
+   *
+   * Historical tests stored this. The live entity-write event is
+   * mcp.entity.presave. Do not rewrite it on save: that would start
+   * outbound delivery nobody chose.
+   */
+  private const RETIRED_WEBHOOK_EVENT_SAVE = 'mcp.entity.save';
+
+  /**
+   * Live entity-write webhook event (before commit).
+   */
+  private const LIVE_WEBHOOK_EVENT_PRESAVE = 'mcp.entity.presave';
 
   /**
    * The entity type manager.
@@ -60,6 +75,11 @@ class McpSettingsForm extends ConfigFormBase {
   protected ?McpClassificationResolver $classification = NULL;
 
   /**
+   * Audit logger for an operator-typed webhook filter change.
+   */
+  protected McpAuditLogger $auditLogger;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
@@ -74,6 +94,7 @@ class McpSettingsForm extends ConfigFormBase {
     $instance->classification = $container->has('mcp_sentinel.classification')
       ? $container->get('mcp_sentinel.classification')
       : NULL;
+    $instance->auditLogger = $container->get('mcp_sentinel.audit_logger');
     return $instance;
   }
 
@@ -828,10 +849,10 @@ class McpSettingsForm extends ConfigFormBase {
         '#title' => $this->t('Event filter (one per line; empty = all events)'),
         // Only three names are ever queued. List them so an operator does
         // not type a name that never fires (mcp.entity.save is not one).
-        '#description' => $this->t('Live names: <code>mcp.entity.presave</code> (entity write, before commit), <code>mcp.entity.delete</code>, and <code>mcp.anomaly.alert</code>. Leave empty to receive every event.'),
-        // Show the live name when stored config still has the retired
-        // mcp.entity.save filter. Persist happens on submit, not here.
-        '#default_value' => implode("\n", $this->rewriteRetiredWebhookEventNames((array) ($ep['events'] ?? []))),
+        '#description' => $this->t('Live names: <code>mcp.entity.presave</code> (entity write, before commit), <code>mcp.entity.delete</code>, and <code>mcp.anomaly.alert</code>. Leave empty to receive every event. A stored <code>mcp.entity.save</code> filter is shown as stored; type <code>mcp.entity.presave</code> to receive entity writes.'),
+        // Show the stored name, including a retired mcp.entity.save filter.
+        // Rewriting it here would persist on any later save.
+        '#default_value' => implode("\n", (array) ($ep['events'] ?? [])),
         '#rows' => 3,
       ];
       $form['webhooks']['endpoints'][$i]['enabled'] = [
@@ -1108,6 +1129,20 @@ class McpSettingsForm extends ConfigFormBase {
           ['@n' => $i + 1, '@key' => $secret],
         ));
       }
+      // mcp.entity.save was never queued. Do not rewrite it to presave:
+      // that would start entity-write deliveries nobody chose. The
+      // operator must type the live name.
+      $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
+      if (in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $events, TRUE)) {
+        $form_state->setErrorByName(
+          "webhooks][endpoints][$i][events]",
+          $this->t('Endpoint %endpoint still filters on @retired, which is never dispatched. Type @live (entity write, before commit) to receive entity writes.', [
+            '%endpoint' => $id !== '' ? $id : $this->t('endpoint @n', ['@n' => $i + 1]),
+            '@retired' => self::RETIRED_WEBHOOK_EVENT_SAVE,
+            '@live' => self::LIVE_WEBHOOK_EVENT_PRESAVE,
+          ]),
+        );
+      }
     }
   }
 
@@ -1217,7 +1252,7 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
       ->save();
 
-    $split = static fn (string $v): array => array_values(array_filter(array_map('trim', explode("\n", $v))));
+    $split = fn (string $v): array => $this->splitWebhookEventNames($v);
 
     // Assemble the DLP patterns sequence-of-maps from the row editor, dropping
     // rows that lack a label or pattern.
@@ -1315,8 +1350,16 @@ class McpSettingsForm extends ConfigFormBase {
     }
 
     // Serialize the webhook endpoint slots into the config sequence, dropping
-    // entirely blank slots.
+    // entirely blank slots. mcp.entity.save is refused in validateForm();
+    // submit stores exactly what the operator typed.
+    $previousEventsById = [];
+    foreach ((array) ($this->config('mcp_sentinel.settings')->get('webhook_endpoints') ?? []) as $stored) {
+      if (is_array($stored) && ($stored['id'] ?? '') !== '') {
+        $previousEventsById[(string) $stored['id']] = (array) ($stored['events'] ?? []);
+      }
+    }
     $webhook_endpoints = [];
+    $filterAudits = [];
     foreach ((array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []) as $ep) {
       // Skip the editor's Add/Remove button values (non-array siblings).
       if (!is_array($ep)) {
@@ -1327,19 +1370,29 @@ class McpSettingsForm extends ConfigFormBase {
       if ($id === '' && $url === '') {
         continue;
       }
+      $events = $split((string) ($ep['events'] ?? ''));
       $webhook_endpoints[] = [
         'id'             => $id,
         'label'          => trim((string) ($ep['label'] ?? '')),
         'url'            => $url,
         'secret_key'     => trim((string) ($ep['secret_key'] ?? '')),
-        // Rewrite mcp.entity.save to mcp.entity.presave. That ghost name
-        // was never dispatched; leave every other typed name alone.
-        'events'         => $this->rewriteRetiredWebhookEventNames(
-          $split((string) ($ep['events'] ?? '')),
-        ),
+        'events'         => $events,
         'enabled'        => (bool) ($ep['enabled'] ?? FALSE),
         'allow_internal' => (bool) ($ep['allow_internal'] ?? FALSE),
       ];
+      // The operator removed the retired name (typed presave, another
+      // live name, or empty = all). That starts deliveries the ghost
+      // filter never made. Record it after the config write lands.
+      $previous = $previousEventsById[$id] ?? [];
+      if ($id !== ''
+        && in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $previous, TRUE)
+        && !in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $events, TRUE)) {
+        $filterAudits[] = [
+          'endpoint_id' => $id,
+          'from' => self::RETIRED_WEBHOOK_EVENT_SAVE,
+          'to' => $events,
+        ];
+      }
     }
 
     // An empty textarea clears to [] (falls back to default patterns at runtime
@@ -1383,37 +1436,26 @@ class McpSettingsForm extends ConfigFormBase {
       ])
       ->save();
 
+    // logAlways: starting outbound delivery is accountable even when
+    // audit_enabled is off.
+    foreach ($filterAudits as $audit) {
+      $this->auditLogger->logAlways('webhook_event_filter', $audit);
+    }
+
     parent::submitForm($form, $form_state);
   }
 
   /**
-   * Replaces the retired mcp.entity.save filter with mcp.entity.presave.
+   * Splits a textarea of webhook event names into a list.
    *
-   * Nothing in production dispatches mcp.entity.save. The live entity-write
-   * event is mcp.entity.presave (before commit). Operators who copied the
-   * old test name, or typed save instead of presave, would otherwise keep
-   * a filter that never matches. Other names stay as typed — this is not
-   * an allowlist, and there is no enqueue-time alias.
-   *
-   * @param string[] $events
-   *   Event names from config or the textarea.
+   * @param string $value
+   *   One name per line.
    *
    * @return string[]
-   *   The same list, with mcp.entity.save rewritten and duplicates dropped.
+   *   Trimmed non-empty names, order preserved.
    */
-  private function rewriteRetiredWebhookEventNames(array $events): array {
-    $rewritten = [];
-    foreach ($events as $name) {
-      // mcp.entity.save was never queued. Map it to the live presave name
-      // so a stored or typed filter actually matches entity writes.
-      if ($name === 'mcp.entity.save') {
-        $name = 'mcp.entity.presave';
-      }
-      if ($name !== '' && !in_array($name, $rewritten, TRUE)) {
-        $rewritten[] = $name;
-      }
-    }
-    return $rewritten;
+  private function splitWebhookEventNames(string $value): array {
+    return array_values(array_filter(array_map('trim', explode("\n", $value))));
   }
 
   /**

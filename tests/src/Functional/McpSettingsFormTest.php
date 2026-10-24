@@ -355,13 +355,83 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
-   * A stored mcp.entity.save filter is rewritten to mcp.entity.presave.
+   * A stored mcp.entity.save filter is shown as stored.
    *
-   * That name was never dispatched. Saving settings must not keep a
-   * filter that silently matches nothing. This is a rewrite, not an
-   * enqueue-time alias.
+   * Rewriting the textarea would persist on any later save and start
+   * entity-write deliveries nobody chose.
    */
-  public function testRetiredSaveEventNameRewrittenOnSettingsSave(): void {
+  public function testRetiredSaveEventNameDisplayedAsStored(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->assertSession()->fieldValueEquals(
+      'webhooks[endpoints][0][events]',
+      'mcp.entity.save',
+    );
+  }
+
+  /**
+   * An unrelated settings save must not rewrite a retired event filter.
+   *
+   * Changing the broadcast message is enough: if the form maps
+   * mcp.entity.save to mcp.entity.presave, this assertion fails.
+   */
+  public function testUnrelatedSaveDoesNotRewriteRetiredWebhookEvent(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'dashboard_broadcast_message' => 'Unrelated operator note',
+    ], 'Save configuration');
+    $this->assertSession()->pageTextContains('Endpoint siem still filters on mcp.entity.save');
+    $this->assertSession()->pageTextContains('Type mcp.entity.presave');
+    $this->assertSame(
+      ['mcp.entity.save'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+    $this->assertSame(
+      '',
+      (string) (\Drupal::config('mcp_sentinel.settings')->get('dashboard_broadcast')['message'] ?? ''),
+    );
+  }
+
+  /**
+   * Typing the live name persists the filter and writes an audit row.
+   */
+  public function testTypingLiveWebhookEventNameIsAudited(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => 'mcp.entity.presave',
+    ], 'Save configuration');
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+    $this->assertSame(
+      ['mcp.entity.presave'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+
+    $db = \Drupal::database();
+    $this->assertTrue($db->schema()->tableExists('audit_chain_log'));
+    $row = $db->select('audit_chain_log', 'l')
+      ->fields('l', ['operation', 'metadata'])
+      ->condition('l.operation', 'webhook_event_filter')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row, 'Typing the live name must write webhook_event_filter.');
+    $meta = \Drupal::service('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame('siem', $meta['endpoint_id']);
+    $this->assertSame('mcp.entity.save', $meta['from']);
+    $this->assertSame(['mcp.entity.presave'], $meta['to']);
+  }
+
+  /**
+   * Seeds one endpoint whose filter is the retired mcp.entity.save name.
+   */
+  private function seedRetiredSaveWebhookEndpoint(): void {
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
       ->set('webhook_endpoints', [[
         'id' => 'siem',
@@ -372,30 +442,12 @@ final class McpSettingsFormTest extends BrowserTestBase {
         'enabled' => TRUE,
         'allow_internal' => FALSE,
       ],
-      ])->save();
-    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
-    $this->drupalGet('/admin/config/services/mcp-sentinel');
-    // The textarea already shows the live name before the operator saves.
-    $this->assertSession()->fieldValueEquals(
-      'webhooks[endpoints][0][events]',
-      'mcp.entity.presave',
-    );
-    // Re-type the retired name so submit, not only the displayed default,
-    // has to rewrite it. An empty save after the display rewrite would
-    // persist mcp.entity.presave without hitting the ghost-name branch.
-    $this->submitForm([
-      'webhooks[endpoints][0][events]' => 'mcp.entity.save',
-    ], 'Save configuration');
-    $this->assertSame([[
-      'id' => 'siem',
-      'label' => 'SIEM',
-      'url' => 'https://siem.example.com/hook',
-      'secret_key' => '',
-      'events' => ['mcp.entity.presave'],
-      'enabled' => TRUE,
-      'allow_internal' => FALSE,
-    ],
-    ], \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints'));
+      ])
+      ->set('dashboard_broadcast', [
+        'message' => '',
+        'severity' => 'info',
+      ])
+      ->save();
   }
 
 }
