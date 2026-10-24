@@ -815,12 +815,7 @@ SH;
     if ($result === NULL || $result['status'] !== 0) {
       return FALSE;
     }
-    // Empty stdout is success with no path. realpath('') is CWD.
-    $toplevel_raw = trim($result['stdout']);
-    if ($toplevel_raw === '') {
-      return FALSE;
-    }
-    $toplevel = realpath($toplevel_raw);
+    $toplevel = realpath(trim($result['stdout']));
     $root_real = realpath($root);
     return $toplevel !== FALSE && $root_real !== FALSE && $toplevel === $root_real;
   }
