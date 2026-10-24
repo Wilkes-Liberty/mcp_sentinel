@@ -12,9 +12,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `mcp.entity.delete`, `mcp.anomaly.alert`). A stored or
   typed `mcp.entity.save` filter is shown as stored and
   refused on save until the operator types
-  `mcp.entity.presave`. Any persisted event-filter change
-  writes a `webhook_event_filter` audit row. The retired
-  name is never rewritten on an unrelated save.
+  `mcp.entity.presave`. A settings-form save that persists
+  an event-filter add, remove, or change writes a
+  `webhook_event_filter` audit row (`change`: `added`,
+  `removed`, or `changed`). `drush cset`, config import, and
+  recipe apply of the same key do not. The retired name is
+  never rewritten on an unrelated save.
   Sites that still have `mcp.entity.save` stored must replace
   it before any other settings can be saved; delivery stays
   empty until they do. There is no update hook and no

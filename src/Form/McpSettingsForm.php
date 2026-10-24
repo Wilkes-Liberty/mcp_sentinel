@@ -11,9 +11,9 @@ use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
-use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpDlp;
 use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
 use Drupal\mcp_sentinel\Service\McpRoleAssertions;
@@ -1384,23 +1384,22 @@ class McpSettingsForm extends ConfigFormBase {
         $savedEventsById[$id] = $events;
       }
     }
-    // Any persisted filter change is accountable, not only leaving the
-    // retired name. Human settings saves skip the governed config_save
-    // subscriber, so this uses the same logger.
+    // A settings-form filter change is accountable. drush cset, config
+    // import, and recipe apply of the same key do not write this row.
+    // Human settings saves skip the governed config_save subscriber.
     $filterAudits = [];
     $endpointIds = array_unique(array_merge(
       array_keys($previousEventsById),
       array_keys($savedEventsById),
     ));
     foreach ($endpointIds as $endpointId) {
-      $from = $previousEventsById[$endpointId] ?? [];
-      $to = $savedEventsById[$endpointId] ?? [];
-      if ($from !== $to) {
-        $filterAudits[] = [
-          'endpoint_id' => $endpointId,
-          'from' => $from,
-          'to' => $to,
-        ];
+      $audit = $this->webhookEventFilterAudit(
+        $endpointId,
+        $previousEventsById,
+        $savedEventsById,
+      );
+      if ($audit !== NULL) {
+        $filterAudits[] = $audit;
       }
     }
 
@@ -1465,6 +1464,59 @@ class McpSettingsForm extends ConfigFormBase {
    */
   private function splitWebhookEventNames(string $value): array {
     return array_values(array_filter(array_map('trim', explode("\n", $value))));
+  }
+
+  /**
+   * Builds a webhook_event_filter audit payload, or NULL when unchanged.
+   *
+   * An empty events list means "all events". A missing endpoint is also
+   * represented as [] if we only store from/to, so add/remove must name
+   * the change.
+   *
+   * @param string $endpointId
+   *   Endpoint machine ID.
+   * @param array<string, string[]> $previousById
+   *   Stored filters keyed by id.
+   * @param array<string, string[]> $savedById
+   *   Submitted filters keyed by id.
+   *
+   * @return array{endpoint_id: string, change: string, from: string[], to: string[]}|null
+   *   Audit metadata, or NULL when the endpoint filter did not change.
+   */
+  private function webhookEventFilterAudit(
+    string $endpointId,
+    array $previousById,
+    array $savedById,
+  ): ?array {
+    $had = array_key_exists($endpointId, $previousById);
+    $has = array_key_exists($endpointId, $savedById);
+    if (!$had && $has) {
+      // New endpoint. from [] is not "was receiving everything".
+      return [
+        'endpoint_id' => $endpointId,
+        'change' => 'added',
+        'from' => [],
+        'to' => $savedById[$endpointId],
+      ];
+    }
+    if ($had && !$has) {
+      // Removed endpoint. to [] is not "now receives everything".
+      return [
+        'endpoint_id' => $endpointId,
+        'change' => 'removed',
+        'from' => $previousById[$endpointId],
+        'to' => [],
+      ];
+    }
+    if ($had && $has && $previousById[$endpointId] !== $savedById[$endpointId]) {
+      return [
+        'endpoint_id' => $endpointId,
+        'change' => 'changed',
+        'from' => $previousById[$endpointId],
+        'to' => $savedById[$endpointId],
+      ];
+    }
+    return NULL;
   }
 
   /**

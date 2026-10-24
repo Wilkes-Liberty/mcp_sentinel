@@ -411,19 +411,9 @@ final class McpSettingsFormTest extends BrowserTestBase {
       \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
     );
 
-    $db = \Drupal::database();
-    $this->assertTrue($db->schema()->tableExists('audit_chain_log'));
-    $row = $db->select('audit_chain_log', 'l')
-      ->fields('l', ['operation', 'metadata'])
-      ->condition('l.operation', 'webhook_event_filter')
-      ->orderBy('l.id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertNotFalse($row, 'Typing the live name must write webhook_event_filter.');
-    $meta = \Drupal::service('mcp_sentinel.audit_logger')
-      ->decodeMetadata((string) $row['metadata']);
+    $meta = $this->latestWebhookEventFilterAudit();
     $this->assertSame('siem', $meta['endpoint_id']);
+    $this->assertSame('changed', $meta['change']);
     $this->assertSame(['mcp.entity.save'], $meta['from']);
     $this->assertSame(['mcp.entity.presave'], $meta['to']);
   }
@@ -447,7 +437,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
-   * Any persisted event-filter change writes a webhook_event_filter row.
+   * A settings-form filter change writes a webhook_event_filter row.
    */
   public function testWebhookEventFilterChangeWritesAuditRow(): void {
     \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
@@ -467,19 +457,101 @@ final class McpSettingsFormTest extends BrowserTestBase {
       'webhooks[endpoints][0][events]' => 'mcp.entity.presave',
     ], 'Save configuration');
     $this->assertSession()->pageTextContains('The configuration options have been saved.');
-    $row = \Drupal::database()->select('audit_chain_log', 'l')
+    $meta = $this->latestWebhookEventFilterAudit();
+    $this->assertSame('siem', $meta['endpoint_id']);
+    $this->assertSame('changed', $meta['change']);
+    $this->assertSame(['mcp.entity.delete'], $meta['from']);
+    $this->assertSame(['mcp.entity.presave'], $meta['to']);
+  }
+
+  /**
+   * Adding an endpoint writes change=added, not an empty-filter from.
+   */
+  public function testAddingWebhookEndpointWritesAddedFilterAudit(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [])
+      ->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'webhooks[endpoints][0][id]' => 'siem',
+      'webhooks[endpoints][0][label]' => 'SIEM',
+      'webhooks[endpoints][0][url]' => 'https://siem.example.com/hook',
+      'webhooks[endpoints][0][events]' => 'mcp.entity.presave',
+      'webhooks[endpoints][0][enabled]' => 1,
+    ], 'Save configuration');
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+    $meta = $this->latestWebhookEventFilterAudit();
+    $this->assertSame('siem', $meta['endpoint_id']);
+    $this->assertSame('added', $meta['change']);
+    $this->assertSame([], $meta['from']);
+    $this->assertSame(['mcp.entity.presave'], $meta['to']);
+  }
+
+  /**
+   * Removing an endpoint writes change=removed, not an empty-filter to.
+   */
+  public function testRemovingWebhookEndpointWritesRemovedFilterAudit(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'siem',
+          'label' => 'SIEM',
+          'url' => 'https://siem.example.com/hook',
+          'secret_key' => '',
+          'events' => ['mcp.entity.delete'],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+        [
+          'id' => 'soc',
+          'label' => 'SOC',
+          'url' => 'https://soc.example.com/hook',
+          'secret_key' => '',
+          'events' => ['mcp.anomaly.alert'],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])
+      ->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([], 'Remove endpoint 1');
+    $this->submitForm([], 'Save configuration');
+    $this->assertSession()->pageTextContains('The configuration options have been saved.');
+    $this->assertSame(
+      ['soc'],
+      array_column(
+        \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints'),
+        'id',
+      ),
+    );
+    $meta = $this->latestWebhookEventFilterAudit();
+    $this->assertSame('siem', $meta['endpoint_id']);
+    $this->assertSame('removed', $meta['change']);
+    $this->assertSame(['mcp.entity.delete'], $meta['from']);
+    $this->assertSame([], $meta['to']);
+  }
+
+  /**
+   * Latest webhook_event_filter metadata, or fail if none.
+   *
+   * @return array<string, mixed>
+   *   Decoded metadata.
+   */
+  private function latestWebhookEventFilterAudit(): array {
+    $db = \Drupal::database();
+    $this->assertTrue($db->schema()->tableExists('audit_chain_log'));
+    $row = $db->select('audit_chain_log', 'l')
       ->fields('l', ['operation', 'metadata'])
       ->condition('l.operation', 'webhook_event_filter')
       ->orderBy('l.id', 'DESC')
       ->range(0, 1)
       ->execute()
       ->fetchAssoc();
-    $this->assertNotFalse($row, 'A persisted filter change must write webhook_event_filter.');
-    $meta = \Drupal::service('mcp_sentinel.audit_logger')
+    $this->assertNotFalse($row, 'A webhook_event_filter audit row must exist.');
+    return \Drupal::service('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
-    $this->assertSame('siem', $meta['endpoint_id']);
-    $this->assertSame(['mcp.entity.delete'], $meta['from']);
-    $this->assertSame(['mcp.entity.presave'], $meta['to']);
   }
 
   /**

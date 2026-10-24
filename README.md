@@ -1150,7 +1150,7 @@ form. Each endpoint is its own add/remove row (use **Add endpoint** /
 | **Label** | Human-readable name. |
 | **URL** | HTTPS endpoint (plain HTTP is rejected). |
 | **Signing secret** | A [Key](https://www.drupal.org/project/key) entity holding the HMAC secret. Use a File or Environment key provider so the value never lands in exported config. |
-| **Event filter** | One event name per line; leave empty to receive all events. Live names: `mcp.entity.presave` (entity write, before commit), `mcp.entity.delete`, and `mcp.anomaly.alert`. A stored or typed `mcp.entity.save` filter is shown as stored and refused on save; type `mcp.entity.presave` instead. Any persisted filter change writes an audit row. |
+| **Event filter** | One event name per line; leave empty to receive all events. Live names: `mcp.entity.presave` (entity write, before commit), `mcp.entity.delete`, and `mcp.anomaly.alert`. A stored or typed `mcp.entity.save` filter is shown as stored and refused on save; type `mcp.entity.presave` instead. A settings-form save that adds, removes, or changes a filter writes a `webhook_event_filter` audit row. `drush cset`, config import, and recipe apply do not. |
 | **Enabled** | Toggles delivery without deleting the endpoint. |
 
 ### Request headers and signatures
