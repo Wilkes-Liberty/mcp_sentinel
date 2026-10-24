@@ -30,6 +30,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `DEV-839` / `DEV-843`.
 
 ### Fixed
+- The Drupal.org-layout GitHub job lost its job
+  environment on ubuntu-26.04: that image's sudo ignores
+  `-E`, so `sudo -u www-data -H -E` ran PHPUnit without
+  `PHP_INI_SCAN_DIR` and the zend.assertions guard
+  failed closed. The job now passes the variables that
+  process needs through `env` instead of relying on
+  `-E`. The guard, the count floors, and the git
+  ownership checks are unchanged.
 - A NULL `mcp_sentinel.principal_context_dispatcher` on the
   HTTP and GraphQL admit paths is now audited as
   `missing_dispatcher`, matching governed tools. That path is
