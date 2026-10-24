@@ -174,6 +174,11 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->assertSession()->pageTextContains('MCP Access');
     $this->assertSession()->pageTextContains('OAuth agent channel');
     $this->assertSession()->pageTextContains('Audit Logging');
+    // The event-filter field names the three events that actually enqueue.
+    $this->assertSession()->pageTextContains('mcp.entity.presave');
+    $this->assertSession()->pageTextContains('mcp.entity.delete');
+    $this->assertSession()->pageTextContains('mcp.anomaly.alert');
+    $this->assertSession()->pageTextContains('entity write, before commit');
     // Operator broadcast field exists.
     $this->assertSession()->fieldExists('dashboard_broadcast_message');
     // Save with no edits; assert the stored list shapes are byte-identical.
@@ -203,7 +208,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
         'label' => 'SIEM',
         'url' => 'https://siem.example.com/hook',
         'secret_key' => 'wh_key',
-        'events' => ['mcp.entity.save'],
+        'events' => ['mcp.entity.presave'],
         'enabled' => TRUE,
         'allow_internal' => FALSE,
       ],
@@ -217,7 +222,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
       'label' => 'SIEM',
       'url' => 'https://siem.example.com/hook',
       'secret_key' => 'wh_key',
-      'events' => ['mcp.entity.save'],
+      'events' => ['mcp.entity.presave'],
       'enabled' => TRUE,
       'allow_internal' => FALSE,
     ],
@@ -294,7 +299,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
         'label' => 'SIEM',
         'url' => 'https://siem.example.com/hook',
         'secret_key' => '',
-        'events' => ['mcp.entity.save'],
+        'events' => ['mcp.entity.presave'],
         'enabled' => TRUE,
         'allow_internal' => FALSE,
       ],
@@ -318,7 +323,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
         'label' => 'SIEM',
         'url' => 'https://siem.example.com/hook',
         'secret_key' => '',
-        'events' => ['mcp.entity.save'],
+        'events' => ['mcp.entity.presave'],
         'enabled' => TRUE,
         'allow_internal' => FALSE,
       ],
@@ -343,6 +348,50 @@ final class McpSettingsFormTest extends BrowserTestBase {
       'url' => 'https://soc.example.com/hook',
       'secret_key' => '',
       'events' => ['mcp.entity.delete'],
+      'enabled' => TRUE,
+      'allow_internal' => FALSE,
+    ],
+    ], \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints'));
+  }
+
+  /**
+   * A stored mcp.entity.save filter is rewritten to mcp.entity.presave.
+   *
+   * That name was never dispatched. Saving settings must not keep a
+   * filter that silently matches nothing. This is a rewrite, not an
+   * enqueue-time alias.
+   */
+  public function testRetiredSaveEventNameRewrittenOnSettingsSave(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [[
+        'id' => 'siem',
+        'label' => 'SIEM',
+        'url' => 'https://siem.example.com/hook',
+        'secret_key' => '',
+        'events' => ['mcp.entity.save'],
+        'enabled' => TRUE,
+        'allow_internal' => FALSE,
+      ],
+      ])->save();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    // The textarea already shows the live name before the operator saves.
+    $this->assertSession()->fieldValueEquals(
+      'webhooks[endpoints][0][events]',
+      'mcp.entity.presave',
+    );
+    // Re-type the retired name so submit, not only the displayed default,
+    // has to rewrite it. An empty save after the display rewrite would
+    // persist mcp.entity.presave without hitting the ghost-name branch.
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => 'mcp.entity.save',
+    ], 'Save configuration');
+    $this->assertSame([[
+      'id' => 'siem',
+      'label' => 'SIEM',
+      'url' => 'https://siem.example.com/hook',
+      'secret_key' => '',
+      'events' => ['mcp.entity.presave'],
       'enabled' => TRUE,
       'allow_internal' => FALSE,
     ],

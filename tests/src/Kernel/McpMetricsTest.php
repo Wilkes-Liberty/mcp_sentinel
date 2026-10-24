@@ -85,12 +85,14 @@ class McpMetricsTest extends KernelTestBase {
 
   /**
    * Seeds one webhook_delivery row.
+   *
+   * Uses a live event name. mcp.entity.save was never dispatched.
    */
   private function seedDelivery(string $status, int $created, string $endpoint = 'siem'): void {
     \Drupal::database()->insert('mcp_sentinel_webhook_delivery')
       ->fields([
         'endpoint_id'  => $endpoint,
-        'event_name'   => 'mcp.entity.save',
+        'event_name'   => 'mcp.entity.presave',
         'payload_hash' => str_repeat('a', 64),
         'payload'      => '{}',
         'status'       => $status,
