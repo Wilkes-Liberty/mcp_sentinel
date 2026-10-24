@@ -826,7 +826,12 @@ class McpSettingsForm extends ConfigFormBase {
       $form['webhooks']['endpoints'][$i]['events'] = [
         '#type' => 'textarea',
         '#title' => $this->t('Event filter (one per line; empty = all events)'),
-        '#default_value' => implode("\n", (array) ($ep['events'] ?? [])),
+        // Only three names are ever queued. List them so an operator does
+        // not type a name that never fires (mcp.entity.save is not one).
+        '#description' => $this->t('Live names: <code>mcp.entity.presave</code> (entity write, before commit), <code>mcp.entity.delete</code>, and <code>mcp.anomaly.alert</code>. Leave empty to receive every event.'),
+        // Show the live name when stored config still has the retired
+        // mcp.entity.save filter. Persist happens on submit, not here.
+        '#default_value' => implode("\n", $this->rewriteRetiredWebhookEventNames((array) ($ep['events'] ?? []))),
         '#rows' => 3,
       ];
       $form['webhooks']['endpoints'][$i]['enabled'] = [
@@ -1327,7 +1332,11 @@ class McpSettingsForm extends ConfigFormBase {
         'label'          => trim((string) ($ep['label'] ?? '')),
         'url'            => $url,
         'secret_key'     => trim((string) ($ep['secret_key'] ?? '')),
-        'events'         => $split((string) ($ep['events'] ?? '')),
+        // Rewrite mcp.entity.save to mcp.entity.presave. That ghost name
+        // was never dispatched; leave every other typed name alone.
+        'events'         => $this->rewriteRetiredWebhookEventNames(
+          $split((string) ($ep['events'] ?? '')),
+        ),
         'enabled'        => (bool) ($ep['enabled'] ?? FALSE),
         'allow_internal' => (bool) ($ep['allow_internal'] ?? FALSE),
       ];
@@ -1375,6 +1384,36 @@ class McpSettingsForm extends ConfigFormBase {
       ->save();
 
     parent::submitForm($form, $form_state);
+  }
+
+  /**
+   * Replaces the retired mcp.entity.save filter with mcp.entity.presave.
+   *
+   * Nothing in production dispatches mcp.entity.save. The live entity-write
+   * event is mcp.entity.presave (before commit). Operators who copied the
+   * old test name, or typed save instead of presave, would otherwise keep
+   * a filter that never matches. Other names stay as typed — this is not
+   * an allowlist, and there is no enqueue-time alias.
+   *
+   * @param string[] $events
+   *   Event names from config or the textarea.
+   *
+   * @return string[]
+   *   The same list, with mcp.entity.save rewritten and duplicates dropped.
+   */
+  private function rewriteRetiredWebhookEventNames(array $events): array {
+    $rewritten = [];
+    foreach ($events as $name) {
+      // mcp.entity.save was never queued. Map it to the live presave name
+      // so a stored or typed filter actually matches entity writes.
+      if ($name === 'mcp.entity.save') {
+        $name = 'mcp.entity.presave';
+      }
+      if ($name !== '' && !in_array($name, $rewritten, TRUE)) {
+        $rewritten[] = $name;
+      }
+    }
+    return $rewritten;
   }
 
   /**
