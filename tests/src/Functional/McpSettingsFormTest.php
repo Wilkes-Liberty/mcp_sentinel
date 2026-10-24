@@ -380,7 +380,12 @@ final class McpSettingsFormTest extends BrowserTestBase {
       'webhooks[endpoints][0][events]',
       'mcp.entity.presave',
     );
-    $this->submitForm([], 'Save configuration');
+    // Re-type the retired name so submit, not only the displayed default,
+    // has to rewrite it. An empty save after the display rewrite would
+    // persist mcp.entity.presave without hitting the ghost-name branch.
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => 'mcp.entity.save',
+    ], 'Save configuration');
     $this->assertSame([[
       'id' => 'siem',
       'label' => 'SIEM',
@@ -391,15 +396,6 @@ final class McpSettingsFormTest extends BrowserTestBase {
       'allow_internal' => FALSE,
     ],
     ], \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints'));
-
-    // Typing the retired name on the next save must rewrite as well.
-    $this->submitForm([
-      'webhooks[endpoints][0][events]' => 'mcp.entity.save',
-    ], 'Save configuration');
-    $this->assertSame(
-      ['mcp.entity.presave'],
-      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
-    );
   }
 
 }
