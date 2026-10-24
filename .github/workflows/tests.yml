@@ -1484,18 +1484,9 @@ jobs:
             rm -v "${DRUPAL_PROJECT_FOLDER}/composer.json"
             mv -v composer.json.backup "${DRUPAL_PROJECT_FOLDER}/composer.json"
           fi
-          # setup-php leaves assertions off; d.o phpunit has them on.
-          scan="${PHP_INI_SCAN_DIR:-$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;')}"
-          mkdir -p "${RUNNER_TEMP}/php-scan"
-          {
-            printf 'zend.assertions=1\n'
-            printf 'assert.exception=1\n'
-          } > "${RUNNER_TEMP}/php-scan/zz-do-layout.ini"
-          if [ -n "${scan}" ]; then
-            echo "PHP_INI_SCAN_DIR=${scan}:${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
-          else
-            echo "PHP_INI_SCAN_DIR=${RUNNER_TEMP}/php-scan" >> "${GITHUB_ENV}"
-          fi
+          # PROOF ONLY: drop the scan-dir ini so www-data php
+          # keeps setup-php's zend.assertions=-1. Not for 1.x.
+          echo "PROOF: skipped zz-do-layout.ini so the zend.assertions guard must fail"
 
       - name: Confirm the drupal.org layout
         run: |
