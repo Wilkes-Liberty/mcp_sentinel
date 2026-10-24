@@ -11,6 +11,7 @@ use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\mcp_sentinel\Enum\McpEvidenceState;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpClassificationResolver;
 use Drupal\mcp_sentinel\Service\McpConfigSecretRedactor;
 use Drupal\mcp_sentinel\Service\McpDlp;
@@ -28,6 +29,20 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 class McpSettingsForm extends ConfigFormBase {
 
   use McpListEditorTrait;
+
+  /**
+   * Retired filter name that nothing in production dispatches.
+   *
+   * Historical tests stored this. The live entity-write event is
+   * mcp.entity.presave. Do not rewrite it on save: that would start
+   * outbound delivery nobody chose.
+   */
+  private const RETIRED_WEBHOOK_EVENT_SAVE = 'mcp.entity.save';
+
+  /**
+   * Live entity-write webhook event (before commit).
+   */
+  private const LIVE_WEBHOOK_EVENT_PRESAVE = 'mcp.entity.presave';
 
   /**
    * The entity type manager.
@@ -60,6 +75,11 @@ class McpSettingsForm extends ConfigFormBase {
   protected ?McpClassificationResolver $classification = NULL;
 
   /**
+   * Audit logger for an operator-typed webhook filter change.
+   */
+  protected McpAuditLogger $auditLogger;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
@@ -74,6 +94,7 @@ class McpSettingsForm extends ConfigFormBase {
     $instance->classification = $container->has('mcp_sentinel.classification')
       ? $container->get('mcp_sentinel.classification')
       : NULL;
+    $instance->auditLogger = $container->get('mcp_sentinel.audit_logger');
     return $instance;
   }
 
@@ -826,6 +847,11 @@ class McpSettingsForm extends ConfigFormBase {
       $form['webhooks']['endpoints'][$i]['events'] = [
         '#type' => 'textarea',
         '#title' => $this->t('Event filter (one per line; empty = all events)'),
+        // Only three names are ever queued. List them so an operator does
+        // not type a name that never fires (mcp.entity.save is not one).
+        '#description' => $this->t('Live names: <code>mcp.entity.presave</code> (entity write, before commit), <code>mcp.entity.delete</code>, and <code>mcp.anomaly.alert</code>. Leave empty to receive every event. A stored <code>mcp.entity.save</code> filter is shown as stored; type <code>mcp.entity.presave</code> to receive entity writes.'),
+        // Show the stored name, including a retired mcp.entity.save filter.
+        // Rewriting it here would persist on any later save.
         '#default_value' => implode("\n", (array) ($ep['events'] ?? [])),
         '#rows' => 3,
       ];
@@ -1103,6 +1129,20 @@ class McpSettingsForm extends ConfigFormBase {
           ['@n' => $i + 1, '@key' => $secret],
         ));
       }
+      // mcp.entity.save was never queued. Do not rewrite it to presave:
+      // that would start entity-write deliveries nobody chose. The
+      // operator must type the live name.
+      $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
+      if (in_array(self::RETIRED_WEBHOOK_EVENT_SAVE, $events, TRUE)) {
+        $form_state->setErrorByName(
+          "webhooks][endpoints][$i][events]",
+          $this->t('Endpoint %endpoint still filters on @retired, which is never dispatched. Type @live (entity write, before commit) to receive entity writes.', [
+            '%endpoint' => $id !== '' ? $id : $this->t('endpoint @n', ['@n' => $i + 1]),
+            '@retired' => self::RETIRED_WEBHOOK_EVENT_SAVE,
+            '@live' => self::LIVE_WEBHOOK_EVENT_PRESAVE,
+          ]),
+        );
+      }
     }
   }
 
@@ -1212,7 +1252,7 @@ class McpSettingsForm extends ConfigFormBase {
       ->set('encryption_profile', (string) ($form_state->getValue('audit_encryption_profile') ?? ''))
       ->save();
 
-    $split = static fn (string $v): array => array_values(array_filter(array_map('trim', explode("\n", $v))));
+    $split = fn (string $v): array => $this->splitWebhookEventNames($v);
 
     // Assemble the DLP patterns sequence-of-maps from the row editor, dropping
     // rows that lack a label or pattern.
@@ -1310,8 +1350,16 @@ class McpSettingsForm extends ConfigFormBase {
     }
 
     // Serialize the webhook endpoint slots into the config sequence, dropping
-    // entirely blank slots.
+    // entirely blank slots. mcp.entity.save is refused in validateForm();
+    // submit stores exactly what the operator typed.
+    $previousEventsById = [];
+    foreach ((array) ($this->config('mcp_sentinel.settings')->get('webhook_endpoints') ?? []) as $stored) {
+      if (is_array($stored) && ($stored['id'] ?? '') !== '') {
+        $previousEventsById[(string) $stored['id']] = (array) ($stored['events'] ?? []);
+      }
+    }
     $webhook_endpoints = [];
+    $savedEventsById = [];
     foreach ((array) ($form_state->getValue(['webhooks', 'endpoints']) ?? []) as $ep) {
       // Skip the editor's Add/Remove button values (non-array siblings).
       if (!is_array($ep)) {
@@ -1322,15 +1370,39 @@ class McpSettingsForm extends ConfigFormBase {
       if ($id === '' && $url === '') {
         continue;
       }
+      $events = $split((string) ($ep['events'] ?? ''));
       $webhook_endpoints[] = [
         'id'             => $id,
         'label'          => trim((string) ($ep['label'] ?? '')),
         'url'            => $url,
         'secret_key'     => trim((string) ($ep['secret_key'] ?? '')),
-        'events'         => $split((string) ($ep['events'] ?? '')),
+        'events'         => $events,
         'enabled'        => (bool) ($ep['enabled'] ?? FALSE),
         'allow_internal' => (bool) ($ep['allow_internal'] ?? FALSE),
       ];
+      if ($id !== '') {
+        $savedEventsById[$id] = $events;
+      }
+    }
+    // A settings-form filter change is accountable. drush cset, config
+    // import, and recipe apply of the same key do not write this row.
+    // Human settings saves skip the governed config_save subscriber.
+    // An empty filter still means "all events"; a missing endpoint is
+    // added or removed, not rewritten as [].
+    $filterAudits = [];
+    $endpointIds = array_unique(array_merge(
+      array_keys($previousEventsById),
+      array_keys($savedEventsById),
+    ));
+    foreach ($endpointIds as $endpointId) {
+      $audit = $this->webhookEventFilterAudit(
+        $endpointId,
+        $previousEventsById,
+        $savedEventsById,
+      );
+      if ($audit !== NULL) {
+        $filterAudits[] = $audit;
+      }
     }
 
     // An empty textarea clears to [] (falls back to default patterns at runtime
@@ -1374,7 +1446,79 @@ class McpSettingsForm extends ConfigFormBase {
       ])
       ->save();
 
+    // logAlways: a filter change is accountable even when audit_enabled
+    // is off. Human settings saves skip the governed config_save listener.
+    foreach ($filterAudits as $audit) {
+      $this->auditLogger->logAlways('webhook_event_filter', $audit);
+    }
+
     parent::submitForm($form, $form_state);
+  }
+
+  /**
+   * Splits a textarea of webhook event names into a list.
+   *
+   * @param string $value
+   *   One name per line.
+   *
+   * @return string[]
+   *   Trimmed non-empty names, order preserved.
+   */
+  private function splitWebhookEventNames(string $value): array {
+    return array_values(array_filter(array_map('trim', explode("\n", $value))));
+  }
+
+  /**
+   * Builds a webhook_event_filter audit payload, or NULL when unchanged.
+   *
+   * An empty events list means "all events". A missing endpoint is
+   * added or removed, so that side is null — not [].
+   *
+   * @param string $endpointId
+   *   Endpoint machine ID.
+   * @param array<string, string[]> $previousById
+   *   Stored filters keyed by id.
+   * @param array<string, string[]> $savedById
+   *   Submitted filters keyed by id.
+   *
+   * @return array{endpoint_id: string, change: string, from: list<string>|null, to: list<string>|null}|null
+   *   Audit metadata, or NULL when the endpoint filter did not change.
+   */
+  private function webhookEventFilterAudit(
+    string $endpointId,
+    array $previousById,
+    array $savedById,
+  ): ?array {
+    $had = array_key_exists($endpointId, $previousById);
+    $has = array_key_exists($endpointId, $savedById);
+    if (!$had) {
+      if (!$has) {
+        return NULL;
+      }
+      return [
+        'endpoint_id' => $endpointId,
+        'change' => 'added',
+        'from' => NULL,
+        'to' => $savedById[$endpointId],
+      ];
+    }
+    if (!$has) {
+      return [
+        'endpoint_id' => $endpointId,
+        'change' => 'removed',
+        'from' => $previousById[$endpointId],
+        'to' => NULL,
+      ];
+    }
+    if ($previousById[$endpointId] === $savedById[$endpointId]) {
+      return NULL;
+    }
+    return [
+      'endpoint_id' => $endpointId,
+      'change' => 'changed',
+      'from' => $previousById[$endpointId],
+      'to' => $savedById[$endpointId],
+    ];
   }
 
   /**
