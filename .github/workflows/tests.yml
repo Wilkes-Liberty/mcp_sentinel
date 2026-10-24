@@ -1388,6 +1388,12 @@ jobs:
   # Drupal CMS job does). This job repeats the chown and the
   # www-data user so McpCoreCompatibilityTest asks git the
   # same way d.o does.
+  #
+  # Do not copy `-E` onto GitHub. ubuntu-latest is 26.04;
+  # that image's sudo ignores it and the www-data process
+  # loses PHP_INI_SCAN_DIR, SIMPLETEST_DB, and
+  # MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS (run 40077021782).
+  # as-www-data.sh hands those through env(1) instead.
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
@@ -1544,6 +1550,9 @@ jobs:
       - name: Match d.o phpunit ownership
         run: |
           set -euo pipefail
+          as_www_data() {
+            bash "${GITHUB_WORKSPACE}/.github/ci/as-www-data.sh" "$@"
+          }
           # Evidence (gitlab_templates main + job 13051645 raw log):
           # image registry.gitlab.com/drupal-infrastructure/drupalci/drupalci-environments/php-8.3-ubuntu-apache:production
           # helper: "Initialized empty Git repository in /builds/project/mcp_sentinel/.git/"
@@ -1552,6 +1561,9 @@ jobs:
           # Image runDeps include git and sudo. phpunit does not
           # run `git config safe.directory`. Before chown, www-data
           # vs the helper-clone owner is a dubious-ownership miss.
+          # GitHub cannot use that -E: ubuntu-26.04 sudo ignores
+          # it. as_www_data is the same user/home, with the job
+          # env passed through env(1).
           workspace="${GITHUB_WORKSPACE}"
           echo "checkout owner before chown: $(stat -c '%U:%G' "${workspace}")"
           echo ".git owner before chown: $(stat -c '%U:%G' "${workspace}/.git")"
@@ -1570,7 +1582,7 @@ jobs:
           done
 
           before_err="$(mktemp)"
-          if sudo -u www-data -H -E git -C "${workspace}" ls-files -- web \
+          if as_www_data git -C "${workspace}" ls-files -- web \
             > /tmp/git-ls-before.out 2>"${before_err}"; then
             echo "git as www-data before chown: succeeded"
             tr '\0' '\n' < /tmp/git-ls-before.out || true
@@ -1589,7 +1601,7 @@ jobs:
           echo "checkout owner after chown: $(stat -c '%U:%G' "${workspace}")"
           echo ".git owner after chown: $(stat -c '%U:%G' "${workspace}/.git")"
 
-          if ! sudo -u www-data -H -E git -C "${workspace}" ls-files -z -- web \
+          if ! as_www_data git -C "${workspace}" ls-files -z -- web \
             > /tmp/git-ls-after.out 2>/tmp/git-ls-after.err; then
             echo "::error::git as www-data after chown cannot answer; fail-closed would walk web/core again (pipelines 1012720/1012776/1012775)"
             cat /tmp/git-ls-after.err
@@ -1602,8 +1614,16 @@ jobs:
           fi
           echo "git as www-data after chown: empty ls-files for web/"
           mount_info="${workspace}/web/modules/custom/mcp_sentinel/mcp_sentinel.info.yml"
-          test "$(sudo -u www-data -H -E realpath "${mount_info}")" = "$(sudo -u www-data -H -E realpath "${workspace}/mcp_sentinel.info.yml")" \
+          test "$(as_www_data realpath "${mount_info}")" = "$(as_www_data realpath "${workspace}/mcp_sentinel.info.yml")" \
             || { echo "::error::mount info.yml does not resolve to this checkout as www-data"; exit 1; }
+          # Same checks the Kernel bypass prepends. php -r
+          # ignores auto_prepend_file, so run the file. Fail
+          # here so a dropped scan dir does not wait for that
+          # step — and so Unit cannot go green on the wrong
+          # php.ini.
+          test -f "${workspace}/.github/ci/do-layout-assert-ini.php" \
+            || { echo "::error::do-layout-assert-ini.php is missing"; exit 1; }
+          as_www_data php -f "${workspace}/.github/ci/do-layout-assert-ini.php"
 
       - name: PHPUnit — Unit (drupal.org layout)
         working-directory: ${{ github.workspace }}
@@ -1617,7 +1637,10 @@ jobs:
           MIN_TESTS: '391'
         run: |
           set -euo pipefail
-          sudo -u www-data -H -E rm -f junit-unit-do-*.xml
+          as_www_data() {
+            bash "${GITHUB_WORKSPACE}/.github/ci/as-www-data.sh" "$@"
+          }
+          as_www_data rm -f junit-unit-do-*.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
           suites=()
@@ -1633,7 +1656,7 @@ jobs:
           for dir in "${suites[@]}"; do
             i=$((i + 1))
             echo "--- ${dir#"${module}/"}"
-            sudo -u www-data -H -E vendor/bin/phpunit -c "${config}" \
+            as_www_data vendor/bin/phpunit -c "${config}" \
               --log-junit "${PWD}/junit-unit-do-${i}.xml" \
               "${dir}"
           done
@@ -1666,14 +1689,17 @@ jobs:
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
-          sudo -u www-data -H -E rm -f junit-do-*.xml
+          as_www_data() {
+            bash "${GITHUB_WORKSPACE}/.github/ci/as-www-data.sh" "$@"
+          }
+          as_www_data rm -f junit-do-*.xml
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/custom/mcp_sentinel"
 
           echo "--- tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
           test -f .github/ci/do-layout-assert-ini.php \
             || { echo "::error::do-layout-assert-ini.php is missing"; exit 1; }
-          sudo -u www-data -H -E php -d auto_prepend_file="${PWD}/.github/ci/do-layout-assert-ini.php" \
+          as_www_data php -d auto_prepend_file="${PWD}/.github/ci/do-layout-assert-ini.php" \
             vendor/bin/phpunit -c "${config}" \
             --log-junit "${PWD}/junit-do-bypass.xml" \
             "${module}/tests/src/Kernel/McpPrincipalAuthGuardBypassTest.php"
@@ -1697,7 +1723,7 @@ jobs:
             if [ "${dir}" = "${module}/tests/src/Kernel" ]; then
               extra=(--exclude-filter '/\\McpPrincipalAuthGuardBypassTest::/')
             fi
-            sudo -u www-data -H -E vendor/bin/phpunit -c "${config}" \
+            as_www_data vendor/bin/phpunit -c "${config}" \
               --log-junit "${PWD}/junit-do-${i}.xml" \
               "${extra[@]}" \
               "${dir}"
