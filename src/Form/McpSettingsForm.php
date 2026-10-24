@@ -1471,8 +1471,9 @@ class McpSettingsForm extends ConfigFormBase {
   /**
    * Builds a webhook_event_filter audit payload, or NULL when unchanged.
    *
-   * An empty events list means "all events". A missing endpoint is
-   * added or removed, so that side is null — not [].
+   * Weakened for red proof: a missing endpoint defaults to []. The
+   * added and removed tests fail because [] means "all events" and
+   * there is no change field.
    *
    * @param string $endpointId
    *   Endpoint machine ID.
@@ -1481,7 +1482,7 @@ class McpSettingsForm extends ConfigFormBase {
    * @param array<string, string[]> $savedById
    *   Submitted filters keyed by id.
    *
-   * @return array{endpoint_id: string, change: string, from: list<string>|null, to: list<string>|null}|null
+   * @return array{endpoint_id: string, from: list<string>, to: list<string>}|null
    *   Audit metadata, or NULL when the endpoint filter did not change.
    */
   private function webhookEventFilterAudit(
@@ -1489,35 +1490,15 @@ class McpSettingsForm extends ConfigFormBase {
     array $previousById,
     array $savedById,
   ): ?array {
-    $had = array_key_exists($endpointId, $previousById);
-    $has = array_key_exists($endpointId, $savedById);
-    if (!$had) {
-      if (!$has) {
-        return NULL;
-      }
-      return [
-        'endpoint_id' => $endpointId,
-        'change' => 'added',
-        'from' => NULL,
-        'to' => $savedById[$endpointId],
-      ];
-    }
-    if (!$has) {
-      return [
-        'endpoint_id' => $endpointId,
-        'change' => 'removed',
-        'from' => $previousById[$endpointId],
-        'to' => NULL,
-      ];
-    }
-    if ($previousById[$endpointId] === $savedById[$endpointId]) {
+    $from = $previousById[$endpointId] ?? [];
+    $to = $savedById[$endpointId] ?? [];
+    if ($from === $to) {
       return NULL;
     }
     return [
       'endpoint_id' => $endpointId,
-      'change' => 'changed',
-      'from' => $previousById[$endpointId],
-      'to' => $savedById[$endpointId],
+      'from' => $from,
+      'to' => $to,
     ];
   }
 
