@@ -76,9 +76,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   uses `logger.channel.audit_chain`).
 - The Drupal.org-layout Kernel floor was counting Unit
   JUnit files (`junit-do-unit-*.xml` matched
-  `junit-do-*.xml`). Unit logs use a distinct prefix;
-  counting steps clear stale JUnit first; the Kernel
-  floor is 1195 against the true Kernel count.
+  `junit-do-*.xml`). Unit logs use a distinct prefix
+  and counting steps clear stale JUnit first.
   tests-gate allowlists only
   `tests/src/Unit/McpCoreCompatibilityTest.php` and
   also scans `modules/*/tests`.
@@ -87,6 +86,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   checkout. The d.o-layout job runs Unit as www-data
   after chown so that git guard still answers. The
   `[3.5.0]` compare link is restored.
+- Drupal.org-layout floors are 395 Unit / 1197 Kernel
+  against 404 / 1206 (nine under). The main-matrix
+  floor is 1601 against 1610. A self-test pins the
+  existing `ls-files` non-zero refusal; an empty
+  `--show-toplevel` now refuses as well.
 
 ## [3.5.0] - 2026-10-23
 

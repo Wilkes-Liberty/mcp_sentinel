@@ -327,10 +327,10 @@ jobs:
           # A dropped suite must fail the build, not pass quietly. See the count
           # guard below.
           #
-          # 1586 collect after DEV-1040. The floor sits just under that,
-          # so losing any one submodule suite — the smallest is 10 tests —
-          # trips it.
-          MIN_TESTS: '1577'
+          # 1610 collect (latest 1.x / this PR matrix). The floor
+          # sits just under that, so losing any one submodule
+          # suite — the smallest is 10 tests — trips it.
+          MIN_TESTS: '1601'
         run: |
           set -euo pipefail
           rm -f junit-*.xml
@@ -389,7 +389,7 @@ jobs:
             exit 1
           fi
           # Losing the 8-test dedupe class would not trip the floor
-          # (1586-8=1578). Require those cases in the JUnit output.
+          # (1610-8=1602). Require those cases in the JUnit output.
           dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-*.xml | wc -l | tr -d ' ')"
           echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
           if [ "${dedupe_ran}" -lt 8 ]; then
@@ -1629,12 +1629,14 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # The matrix job collects 400 Unit tests. This layout
-          # job used to run Kernel only, so McpCoreCompatibilityTest
-          # never saw web/core inside the checkout. Floor sits 9
-          # under that count so losing the 12-test approval
-          # Unit suite trips it.
-          MIN_TESTS: '391'
+          # 404 Unit tests (402 on 1.x tip cd68e06 / #360,
+          # plus two git-guard self-tests). This layout job
+          # used to run Kernel only, so
+          # McpCoreCompatibilityTest never saw web/core
+          # inside the checkout. Floor sits 9 under that
+          # count so losing the 12-test approval Unit
+          # suite trips it.
+          MIN_TESTS: '395'
         run: |
           set -euo pipefail
           as_www_data() {
@@ -1680,12 +1682,12 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # 1204 Kernel tests, including the dedicated bypass
+          # 1206 Kernel tests, including the dedicated bypass
           # invocation. The old junit-do-*.xml glob also ate the
           # Unit logs (junit-do-unit-*.xml) and reported 1594.
           # Floor sits 9 under the true Kernel count so losing a
           # 10-test suite trips it.
-          MIN_TESTS: '1195'
+          MIN_TESTS: '1197'
           MCP_SENTINEL_REQUIRE_ZEND_ASSERTIONS: '1'
         run: |
           set -euo pipefail
@@ -1735,7 +1737,7 @@ jobs:
             exit 1
           fi
           # Losing the 8-test dedupe class would not trip the floor
-          # (1204-8=1196). Require those cases in the JUnit output.
+          # (1206-8=1198). Require those cases in the JUnit output.
           dedupe_ran="$(sudo grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-do-*.xml | wc -l | tr -d ' ')"
           echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
           if [ "${dedupe_ran}" -lt 8 ]; then
