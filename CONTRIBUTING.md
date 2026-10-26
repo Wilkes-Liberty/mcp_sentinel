@@ -5,20 +5,20 @@ bug reports, patches, docs, and test coverage.
 
 ## Where development happens
 
-- **Primary repository (issues + pull requests):**
+- **Code and pull requests:**
   [github.com/Wilkes-Liberty/mcp_sentinel](https://github.com/Wilkes-Liberty/mcp_sentinel)
 - **Mirror:** [git.drupalcode.org/project/mcp_sentinel](https://git.drupalcode.org/project/mcp_sentinel)
 - **Releases:** [drupal.org/project/mcp_sentinel](https://www.drupal.org/project/mcp_sentinel)
   (installable with Composer)
 
-Open issues and pull requests on GitHub. The drupalcode.org repository is a mirror
-that carries release branches and tags so `packages.drupal.org` can build the
-Composer package; you do not need to interact with it to contribute.
+Module bugs and feature requests use the [Drupal.org issue queue](https://www.drupal.org/project/issues/mcp_sentinel).
+GitHub carries code, pull requests, and GitHub-specific workflow issues.
+Keep the Drupal.org issue as the canonical record for module behavior; do not
+duplicate it as a second GitHub issue.
 
 ## Where to file things
 
-- **Bugs and feature requests:** GitHub issues on the primary repository (preferred)
-  or the [drupal.org issue queue](https://www.drupal.org/project/issues/mcp_sentinel).
+- **Bugs and feature requests:** the [drupal.org issue queue](https://www.drupal.org/project/issues/mcp_sentinel).
 - **Security vulnerabilities:** see [SECURITY.md](SECURITY.md) — never in a
   public issue.
 
@@ -34,7 +34,7 @@ Composer package; you do not need to interact with it to contribute.
 1. Fork and branch off `1.x`.
 2. Make your change, following Drupal coding standards (see below).
 3. Add or update tests for any behavior change.
-4. Add an entry under `## [Unreleased]` in `CHANGELOG.md` for anything users
+4. Add a unique `changelog.d/<issue>-<slug>.md` fragment for anything users
    would notice. The `CHANGELOG updated` CI check is opt-in: apply the
    `changelog` label to PRs whose changes belong in the release notes and it
    enforces the entry (Dependabot PRs are exempt).
@@ -91,7 +91,7 @@ declares, so removing one breaks the scripts that pass it.
 
 ## Documentation
 
-Update `README.md`, `CHANGELOG.md` (under `[Unreleased]`), and the docs in
+Update `README.md`, a unique `changelog.d/` fragment, and the docs in
 `docs/` for any user-facing change. Keep operator-facing copy plain and
 specific — lead with the concrete behavior, not with how impressive the
 mechanism is.
@@ -101,3 +101,8 @@ mechanism is.
 By contributing, you agree that your contributions are licensed under the
 [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 license that covers the project.
+
+## Changelog fragments
+
+Follow [the changelog workflow](.github/CHANGELOG.md) for independent PR notes
+and lossless release compilation. Existing opt-in entry policy is unchanged.
