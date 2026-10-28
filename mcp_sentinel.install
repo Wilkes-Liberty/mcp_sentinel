@@ -5,7 +5,9 @@
  * Install, update, and uninstall functions for MCP Sentinel.
  */
 
+use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 use Drupal\mcp_sentinel\McpRolePermissions;
+use Drupal\mcp_sentinel\McpStatusReportOverlap;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpFloodKey;
 use Drupal\mcp_sentinel\Service\McpOperatorBindingUidSchema;
@@ -424,6 +426,12 @@ function mcp_sentinel_install(): void {
  * the warning is accurate, and links to the settings form so the operator can
  * fix it. It only runs in the 'runtime' phase (status report); install does not
  * need it because a fresh install ships sensible defaults.
+ *
+ * When that WARNING names the same gap as the source-contract ERROR
+ * (agent_scopes_missing or active_profile_missing), the Status report keeps
+ * both severities on the one ERROR row instead of repeating the gap. Distinct
+ * gaps stay two rows. What is reported does not change; only the overlap is
+ * presented once.
  */
 function mcp_sentinel_requirements(string $phase): array {
   $requirements = [];
@@ -485,12 +493,21 @@ function mcp_sentinel_requirements(string $phase): array {
   // server/OAuth/audit/tool registration or designated identity wiring is
   // absent. Reuse the typed evaluator so the status report, readiness endpoint,
   // Tool base, and API subscribers cannot drift into conflicting answers.
+  // Keep the typed reason so the WARNING block below can fold the same gap
+  // onto this ERROR row instead of emitting a second requirement key.
+  $contract_reason = NULL;
   if (\Drupal::hasService('mcp_sentinel.governance_readiness')) {
     /** @var \Drupal\mcp_sentinel\Service\McpGovernanceReadiness $readiness */
     $readiness = \Drupal::service('mcp_sentinel.governance_readiness');
     $contract = $readiness->contractStatus();
     if (!$contract->isReady()) {
-      $reason = $contract->reason()->value;
+      $contract_reason = $contract->reason();
+      // denied() always pairs not-ready with a reason; contractStatus()
+      // never returns not-applicable. Keep the ERROR row even if that
+      // contract is ever broken — the status report must not fatal.
+      $reason = $contract_reason instanceof McpGovernanceReadinessReason
+        ? $contract_reason->value
+        : 'not_ready';
       $requirements['mcp_sentinel_contract_not_ready'] = [
         'title' => t('MCP Sentinel: source-governance contract not ready'),
         'value' => t('Not ready (@reason)', ['@reason' => $reason]),
@@ -685,13 +702,56 @@ function mcp_sentinel_requirements(string $phase): array {
     return $requirements;
   }
 
-  // Build an actionable description listing exactly which precondition failed.
-  $reasons = [];
+  // Split each WARNING reason: fold it into the contract ERROR when that
+  // ERROR already names the same gap, otherwise keep it on the legacy
+  // WARNING row. One problem stays one row; two problems stay two rows.
+  // Drupal paints a requirement from a single severity, so a folded row
+  // stays REQUIREMENT_ERROR and names WARNING in value and description.
+  $channel_item = t('No request can be recognised as a governed agent request: <code>agent_scopes</code> and <code>agent_oauth_clients</code> are both empty, and the local-dev role fallback is not usable. Configure <code>agent_scopes</code> (e.g. <code>mcp_read</code>, <code>mcp_write</code>) and/or <code>agent_oauth_clients</code>.');
+  $profile_item = t('No policy profile exists, so even a governed request resolves to no policy and no read/write/delete gate is applied. Create at least one policy profile.');
+  $overlapping = [];
+  $remaining = [];
   if (!$can_be_governed) {
-    $reasons[] = t('No request can be recognised as a governed agent request: <code>agent_scopes</code> and <code>agent_oauth_clients</code> are both empty, and the local-dev role fallback is not usable. Configure <code>agent_scopes</code> (e.g. <code>mcp_read</code>, <code>mcp_write</code>) and/or <code>agent_oauth_clients</code>.');
+    if (McpStatusReportOverlap::coversChannel($contract_reason)) {
+      $overlapping[] = $channel_item;
+    }
+    else {
+      $remaining[] = $channel_item;
+    }
   }
   if (!$has_profile) {
-    $reasons[] = t('No policy profile exists, so even a governed request resolves to no policy and no read/write/delete gate is applied. Create at least one policy profile.');
+    if (McpStatusReportOverlap::coversProfile($contract_reason)) {
+      $overlapping[] = $profile_item;
+    }
+    else {
+      $remaining[] = $profile_item;
+    }
+  }
+
+  if (
+    $overlapping !== []
+    && $contract_reason instanceof McpGovernanceReadinessReason
+    && isset($requirements['mcp_sentinel_contract_not_ready'])
+  ) {
+    $contract_row = &$requirements['mcp_sentinel_contract_not_ready'];
+    $contract_row['value'] = t(
+      'ERROR: Not ready (@reason). WARNING: Enabled but not governing',
+      ['@reason' => $contract_reason->value],
+    );
+    // Keep the original contract copy (fail-closed product paths) and
+    // append the WARNING items (fail-open ungoverned traffic) so both
+    // signals stay operator-visible on this one ERROR row.
+    $contract_description = (string) $contract_row['description'];
+    $contract_row['description'] = [
+      '#theme' => 'item_list',
+      '#items' => $overlapping,
+      '#prefix' => '<p>' . t('ERROR (source-governance contract) and WARNING (not governing) describe the same gap, so they share this row. The row is ERROR so it cannot sit as warning-only.') . '</p><p>' . $contract_description . '</p>',
+    ];
+    unset($contract_row);
+  }
+
+  if ($remaining === []) {
+    return $requirements;
   }
 
   $requirements['mcp_sentinel_not_governing'] = [
@@ -700,7 +760,7 @@ function mcp_sentinel_requirements(string $phase): array {
     'severity' => REQUIREMENT_WARNING,
     'description' => [
       '#theme' => 'item_list',
-      '#items' => $reasons,
+      '#items' => $remaining,
       '#prefix' => '<p>' . t('MCP Sentinel is enabled but cannot govern any request, so it is failing open silently. Fix one or more of the following, then review the <a href=":url">MCP Sentinel settings</a>:', [
         ':url' => Url::fromRoute('mcp_sentinel.settings')->toString(),
       ]) . '</p>',
