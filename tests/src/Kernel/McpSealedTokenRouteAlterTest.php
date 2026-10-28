@@ -73,4 +73,30 @@ final class McpSealedTokenRouteAlterTest extends KernelTestBase {
     $this->assertSame(['oauth2'], $collection->get('vendor.other.api')->getOption('_auth'));
   }
 
+  /**
+   * Reveal GET is a prompt; only POST consumes, and only with a CSRF token.
+   */
+  public function testRevealPostRequiresCsrfToken(): void {
+    $provider = $this->container->get('router.route_provider');
+
+    $get = $provider->getRouteByName('mcp_sentinel.sealed_token_reveal');
+    $this->assertContains('GET', $get->getMethods());
+    $this->assertNotContains('POST', $get->getMethods());
+    $this->assertNull($get->getRequirement('_csrf_token'));
+    $this->assertSame(
+      '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::revealPrompt',
+      $get->getDefault('_controller'),
+    );
+
+    $post = $provider->getRouteByName('mcp_sentinel.sealed_token_reveal_post');
+    $this->assertContains('POST', $post->getMethods());
+    $this->assertNotContains('GET', $post->getMethods());
+    $this->assertSame('TRUE', $post->getRequirement('_csrf_token'));
+    $this->assertSame(
+      '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::reveal',
+      $post->getDefault('_controller'),
+    );
+    $this->assertSame($get->getPath(), $post->getPath());
+  }
+
 }

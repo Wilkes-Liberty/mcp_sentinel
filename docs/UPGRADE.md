@@ -4,6 +4,17 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Sealed-token reveal is POST with a CSRF token
+
+`GET /admin/config/services/mcp-sentinel/tokens/reveal` no longer
+shows or consumes the copy-once secret. After mint, that GET is a
+prompt. Showing the bearer is `POST` on the same path and requires
+Drupal's `_csrf_token` query parameter. A missing or bad token is
+403 and reveals nothing. Operators who bookmarked the GET URL, or
+scripts that fetched it, must use the **Show sealed token** button
+(or POST with a valid token) instead. Rebuild caches (`drush cr`)
+so the split GET/POST routes load. No `updatedb`.
+
 ## Sealed-token authentication denials are written to audit_chain
 
 `McpSealedTokenManager::verify()` and

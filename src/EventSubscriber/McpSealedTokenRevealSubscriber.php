@@ -15,28 +15,34 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * FinishResponseSubscriber then replaces Cache-Control on cacheable HTML,
  * including this admin page, with no-cache, must-revalidate. It does not
  * keep a header the controller already set. This listener runs after that
- * subscriber and restores private, no-store on the reveal route only.
+ * subscriber and restores private, no-store on the reveal routes only.
  */
 final class McpSealedTokenRevealSubscriber implements EventSubscriberInterface {
 
   /**
-   * Route whose response must not be stored.
+   * Routes whose responses must not be stored (GET prompt and POST reveal).
+   *
+   * Both share the reveal path. The GET page says whether a secret is
+   * waiting; the POST page carries the plaintext. Neither may be cached.
    */
-  private const ROUTE = 'mcp_sentinel.sealed_token_reveal';
+  private const ROUTES = [
+    'mcp_sentinel.sealed_token_reveal',
+    'mcp_sentinel.sealed_token_reveal_post',
+  ];
 
   /**
    * {@inheritdoc}
    */
   public static function getSubscribedEvents(): array {
     // FinishResponseSubscriber::onRespond is priority 0. The governed
-    // response subscriber is -50 and does not touch this admin route.
+    // response subscriber is -50 and does not touch these admin routes.
     return [
       KernelEvents::RESPONSE => ['onResponse', -20],
     ];
   }
 
   /**
-   * Sets Cache-Control: private, no-store on the reveal route.
+   * Sets Cache-Control: private, no-store on the reveal routes.
    *
    * @param \Symfony\Component\HttpKernel\Event\ResponseEvent $event
    *   The response event.
@@ -45,7 +51,9 @@ final class McpSealedTokenRevealSubscriber implements EventSubscriberInterface {
     if (!$event->isMainRequest()) {
       return;
     }
-    if ($event->getRequest()->attributes->get('_route') !== self::ROUTE) {
+    $route = $event->getRequest()->attributes->get('_route');
+    // Only the prompt and the consume response get private, no-store.
+    if (!in_array($route, self::ROUTES, TRUE)) {
       return;
     }
     $event->getResponse()->headers->set('Cache-Control', 'private, no-store');
