@@ -283,17 +283,6 @@ final class McpWebhookQueueManager {
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
     $count = 0;
     foreach ($rows as $row) {
-      $eventName = McpStoredValue::string($row->event_name ?? NULL);
-      if (!McpWebhookEvents::isLive($eventName)) {
-        // A stored unknown name is not delivered. Mark failed so cron
-        // does not keep selecting it.
-        $this->refuseStoredEventName(
-          McpStoredValue::int($row->id ?? NULL),
-          $eventName,
-          self::SURFACE_REQUEUE,
-        );
-        continue;
-      }
       $endpoint = $this->findEndpoint(McpStoredValue::string($row->endpoint_id ?? NULL));
       if ($endpoint === NULL) {
         continue;
@@ -402,13 +391,6 @@ final class McpWebhookQueueManager {
       return FALSE;
     }
     if (in_array(McpStoredValue::rowString($row, 'status'), [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
-      return FALSE;
-    }
-    $eventName = McpStoredValue::rowString($row, 'event_name');
-    if (!McpWebhookEvents::isLive($eventName)) {
-      // Leave the stored status alone: a sent row must not become
-      // failed because someone asked to replay it.
-      $this->auditRefusedEventName($eventName, self::SURFACE_REPLAY);
       return FALSE;
     }
     $endpoint = $this->findEndpoint(McpStoredValue::rowString($row, 'endpoint_id'));

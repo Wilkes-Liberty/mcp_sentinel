@@ -371,23 +371,6 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    // A row inserted by import or hand can carry an unknown name.
-    // Do not POST it. The row is the source of truth; the item is
-    // the fallback for a legacy empty column.
-    $eventName = McpStoredValue::string($row['event_name'] ?? '');
-    if ($eventName === '') {
-      $eventName = McpStoredValue::string($item['event_name'] ?? '');
-    }
-    if (!McpWebhookEvents::isLive($eventName)) {
-      $this->webhookQueue->auditRefusedEventName(
-        $eventName,
-        McpWebhookQueueManager::SURFACE_WORKER,
-      );
-      $this->updateRow($deliveryId, 'failed', NULL,
-        'Unknown webhook event name refused.', $attempts);
-      return;
-    }
-
     // A row whose next_attempt has not yet arrived is not-yet-due; return
     // without re-queuing. The hook_cron scan re-enqueues when due so there is
     // no busy-loop from RequeueException.
