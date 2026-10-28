@@ -228,28 +228,9 @@ final class McpPrincipalKey {
    *   is iss|sub|actor. Otherwise the input only.
    */
   public static function enforcementAliases(string $principalKey): array {
-    if ($principalKey === '') {
-      return [];
-    }
-    if (!mb_check_encoding($principalKey, 'UTF-8')
-      || substr_count($principalKey, self::SEPARATOR) !== 2) {
-      return [$principalKey];
-    }
-    [$iss, $sub, $actor] = explode(self::SEPARATOR, $principalKey, 3);
-    $canonicalActor = self::canonicalActActor($actor);
-    $canonical = $iss . self::SEPARATOR . $sub . self::SEPARATOR . $canonicalActor;
-    $aliases = [$canonical];
-    if (self::actorHasActPrefix($canonicalActor)) {
-      $remainder = substr($canonicalActor, strlen(self::ACT_PREFIX));
-      if ($remainder !== '') {
-        $aliases[] = $iss . self::SEPARATOR . $sub . self::SEPARATOR . $remainder;
-      }
-    }
-    elseif ($canonicalActor !== '') {
-      $aliases[] = $iss . self::SEPARATOR . $sub . self::SEPARATOR
-        . self::ACT_PREFIX . $canonicalActor;
-    }
-    return array_values(array_unique($aliases));
+    // RED PROOF: identity-only. Dual-match is disabled so the
+    // upgrade-time fail-open is visible in CI. Do not merge.
+    return $principalKey === '' ? [] : [$principalKey];
   }
 
   /**
