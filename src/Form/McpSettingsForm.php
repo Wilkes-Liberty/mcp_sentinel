@@ -839,7 +839,7 @@ class McpSettingsForm extends ConfigFormBase {
         // Only the LIVE allowlist is ever queued. Unknown names are
         // refused on save so a typo cannot persist as a silent miss.
         '#description' => $this->t(
-          'Live names only: <code>@presave</code> (entity write, before commit), <code>@delete</code>, and <code>@alert</code>. Leave empty to receive every live event. Unknown names are refused on save and never dispatched. A stored <code>@retired</code> filter is shown as stored; type <code>@presave</code> to receive entity writes.',
+          'Live names only: <code>@presave</code> (entity write, before commit), <code>@delete</code>, and <code>@alert</code>. Leave empty to receive every live event. Unknown names are refused on save, and <code>dispatch()</code> / <code>enqueueForEvent()</code> refuse them too. A stored <code>@retired</code> filter is shown as stored; type <code>@presave</code> to receive entity writes.',
           [
             '@presave' => McpWebhookEvents::ENTITY_PRESAVE,
             '@delete' => McpWebhookEvents::ENTITY_DELETE,
@@ -1129,6 +1129,14 @@ class McpSettingsForm extends ConfigFormBase {
       // Names that are not in LIVE never fire. Do not rewrite a retired
       // mcp.entity.save filter to presave: that would start entity-write
       // deliveries nobody chose. The operator must type a live name.
+      //
+      // Disabled endpoints are validated too. A disabled row is still
+      // exported config and can be re-enabled; leaving an unknown name
+      // there would be a stored lie. Enqueue already refuses unknown
+      // names, so this does not widen delivery. A rejected save is a
+      // validation error, not a persisted change, so it is not a
+      // webhook_event_filter audit row — that operation is for
+      // successful filter changes only.
       $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
       $endpointLabel = $id !== '' ? $id : $this->t('endpoint @n', ['@n' => $i + 1]);
       foreach ($events as $eventName) {

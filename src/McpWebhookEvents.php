@@ -10,6 +10,10 @@ namespace Drupal\mcp_sentinel;
  * Only these three names are ever queued (entity presave, entity delete,
  * anomaly alert). The settings form and both enqueue paths read this
  * list so a typo cannot persist as a filter or leave the process.
+ *
+ * Kept as a final class rather than a backed enum in src/Enum/: that
+ * directory holds closed variant sets, and this allowlist still needs
+ * a retired historical name plus overlapping LIVE and ENTITY lists.
  */
 final class McpWebhookEvents {
 
@@ -38,6 +42,19 @@ final class McpWebhookEvents {
   public const RETIRED_ENTITY_SAVE = 'mcp.entity.save';
 
   /**
+   * Event names that carry an EntityInterface (dispatch() only).
+   *
+   * An empty list refuses every name (fail closed). LIVE is this list
+   * plus the anomaly alert.
+   *
+   * @var list<string>
+   */
+  public const ENTITY = [
+    self::ENTITY_PRESAVE,
+    self::ENTITY_DELETE,
+  ];
+
+  /**
    * The only event names that may be stored on a filter or enqueued.
    *
    * Empty filter still means "all of these", not an open string. An
@@ -46,8 +63,7 @@ final class McpWebhookEvents {
    * @var list<string>
    */
   public const LIVE = [
-    self::ENTITY_PRESAVE,
-    self::ENTITY_DELETE,
+    ...self::ENTITY,
     self::ANOMALY_ALERT,
   ];
 
@@ -65,6 +81,23 @@ final class McpWebhookEvents {
    */
   public static function isLive(string $name): bool {
     return in_array($name, self::LIVE, TRUE);
+  }
+
+  /**
+   * Whether $name is an entity event that dispatch() may fire.
+   *
+   * mcp.anomaly.alert is live and may be enqueued, but it is not an
+   * entity event. dispatch() takes an EntityInterface and must not
+   * fire an entity-shaped event under the alert name.
+   *
+   * @param string $name
+   *   Candidate event name.
+   *
+   * @return bool
+   *   TRUE only when $name is in ENTITY.
+   */
+  public static function isEntityEvent(string $name): bool {
+    return in_array($name, self::ENTITY, TRUE);
   }
 
 }

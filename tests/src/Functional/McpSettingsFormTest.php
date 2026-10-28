@@ -450,6 +450,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
       'webhooks[endpoints][0][events]' => "mcp.entity.update\nMCP.ENTITY.PRESAVE",
     ], 'Save configuration');
     $this->assertSession()->pageTextContains('Endpoint siem filters on mcp.entity.update');
+    $this->assertSession()->pageTextContains('Endpoint siem filters on MCP.ENTITY.PRESAVE');
     $this->assertSession()->pageTextContains('which is not a live webhook event');
     $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
     $this->assertSame(

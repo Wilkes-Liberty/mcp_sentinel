@@ -12,7 +12,9 @@ use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -31,6 +33,8 @@ use Symfony\Component\HttpFoundation\Request;
  */
 #[RunTestsInSeparateProcesses]
 final class McpWebhookWorkerTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -66,6 +70,7 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       'mcp_sentinel_webhook_delivery',
       'mcp_sentinel_kill_block',
     ]);
+    $this->installAuditChainSchema();
     $this->installConfig(['mcp_sentinel']);
   }
 
@@ -133,6 +138,60 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       $this->fail('Dispatcher holder is not McpPrincipalContextHolder.');
     }
     return $holder;
+  }
+
+  /**
+   * An unknown stored event_name is not delivered.
+   *
+   * Fails when only the worker allowlist check is removed.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerRefusesUnknownEventName(): void {
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id'  => 'ep1',
+        'event_name'   => 'mcp.not.a.live.event',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload'      => '{}',
+        'status'       => 'pending',
+        'attempts'     => 0,
+        'created'      => \Drupal::time()->getRequestTime(),
+      ])->execute();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200, [], 'ok')], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.not.a.live.event',
+      'payload' => '{}',
+    ]);
+    $row = $this->loadRow($id);
+    $this->assertSame('failed', $row['status']);
+    $this->assertStringContainsString(
+      'Unknown webhook event name refused.',
+      (string) $row['last_response_body'],
+    );
+    $this->assertCount(0, $history, 'Unknown event names must not be POSTed.');
+    $audit = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['operation', 'metadata'])
+      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($audit, 'A webhook_event_refused audit row must exist.');
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $audit['metadata']);
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_WORKER, $meta['surface']);
+    $this->assertArrayNotHasKey('payload', $meta);
   }
 
   /**

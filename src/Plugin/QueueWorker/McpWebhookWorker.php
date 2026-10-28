@@ -11,6 +11,7 @@ use Drupal\Core\Queue\Attribute\QueueWorker;
 use Drupal\Core\Queue\QueueWorkerBase;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\key\KeyRepositoryInterface;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Drupal\mcp_sentinel\Service\McpJobScopeHandle;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
@@ -367,6 +368,23 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $attempts = McpStoredValue::int($row['attempts'] ?? 0);
     if ($attempts >= self::MAX_ATTEMPTS) {
       $this->updateRow($deliveryId, 'failed', NULL, 'Max attempts reached.', $attempts);
+      return;
+    }
+
+    // A row inserted by import or hand can carry an unknown name.
+    // Do not POST it. The row is the source of truth; the item is
+    // the fallback for a legacy empty column.
+    $eventName = McpStoredValue::string($row['event_name'] ?? '');
+    if ($eventName === '') {
+      $eventName = McpStoredValue::string($item['event_name'] ?? '');
+    }
+    if (!McpWebhookEvents::isLive($eventName)) {
+      $this->webhookQueue->auditRefusedEventName(
+        $eventName,
+        McpWebhookQueueManager::SURFACE_WORKER,
+      );
+      $this->updateRow($deliveryId, 'failed', NULL,
+        'Unknown webhook event name refused.', $attempts);
       return;
     }
 

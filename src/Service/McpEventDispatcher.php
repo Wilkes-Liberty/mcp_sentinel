@@ -56,23 +56,30 @@ class McpEventDispatcher {
   /**
    * Dispatches an MCP entity event and queues webhooks for matching endpoints.
    *
-   * Unknown names return without firing. A live name always fires the
-   * in-process event; the webhook enqueue only runs when at least one
-   * endpoint is configured (the queue manager applies the per-event and
-   * enabled-flag filtering). The payload carries a stable, serializable
-   * snapshot of the entity rather than the entity object, so the queued
-   * item stays valid even if the entity later changes or is deleted.
+   * Unknown names and non-entity names return without firing. An entity
+   * name always fires the in-process event; the webhook enqueue only
+   * runs when at least one endpoint is configured (the queue manager
+   * applies the per-event and enabled-flag filtering). The payload
+   * carries a stable, serializable snapshot of the entity rather than
+   * the entity object, so the queued item stays valid even if the
+   * entity later changes or is deleted.
    *
    * @param string $eventName
-   *   A live MCP event identifier (see McpWebhookEvents::LIVE). Unknown
-   *   names return without firing or queuing.
+   *   An entity MCP event identifier (see McpWebhookEvents::ENTITY).
+   *   Unknown names and mcp.anomaly.alert return without firing or
+   *   queuing and write a webhook_event_refused audit row.
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The entity the event concerns.
    */
   public function dispatch(string $eventName, EntityInterface $entity): void {
-    // Empty-filter endpoints receive every dispatched name. An unknown
-    // name is not a live event, so it must not fire in-process or enqueue.
-    if (!McpWebhookEvents::isLive($eventName)) {
+    // dispatch() builds an entity payload. Only entity names may fire
+    // here; the alert name is live for enqueueForEvent() but not for
+    // this path. A refusal is audited and never queues.
+    if (!McpWebhookEvents::isEntityEvent($eventName)) {
+      $this->webhookQueueManager->auditRefusedEventName(
+        $eventName,
+        McpWebhookQueueManager::SURFACE_DISPATCH,
+      );
       return;
     }
     $this->eventDispatcher->dispatch(new McpEntityEvent($entity, $eventName), $eventName);
