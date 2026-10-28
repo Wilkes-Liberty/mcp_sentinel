@@ -75,7 +75,7 @@ class McpEventDispatcher {
     // dispatch() builds an entity payload. Only entity names may fire
     // here; the alert name is live for enqueueForEvent() but not for
     // this path. A refusal is audited and never queues.
-    if (!McpWebhookEvents::isEntityEvent($eventName)) {
+    if (!McpWebhookEvents::isLive($eventName)) {
       $this->webhookQueueManager->auditRefusedEventName(
         $eventName,
         McpWebhookQueueManager::SURFACE_DISPATCH,
