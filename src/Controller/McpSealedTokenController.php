@@ -148,9 +148,9 @@ final class McpSealedTokenController extends ControllerBase {
     $build['reveal'] = [
       '#type' => 'inline_template',
       '#template' => '<form method="post" action="{{ action }}">'
-      . '<input type="submit" class="button button--primary" '
-      . 'value="{{ label }}" />'
-      . '</form>',
+        . '<input type="submit" class="button button--primary" '
+        . 'value="{{ label }}" />'
+        . '</form>',
       '#context' => [
         'action' => $action,
         'label' => $this->t('Show sealed token'),
@@ -286,12 +286,7 @@ final class McpSealedTokenController extends ControllerBase {
    * @param mixed $issued
    *   Tempstore payload, or NULL when the key is gone.
    *
-   * @return array{
-   *   token: string,
-   *   jti?: mixed,
-   *   client_id?: mixed,
-   *   ttl?: mixed
-   * }|null
+   * @return array{token: string}|null
    *   The payload, or NULL when there is nothing to show.
    */
   private function issuedPayload(mixed $issued): ?array {
@@ -301,7 +296,13 @@ final class McpSealedTokenController extends ControllerBase {
       || $issued['token'] === '') {
       return NULL;
     }
-    return $issued;
+    // Rebuild so the return is a string-token shape, not mixed-key tempstore.
+    return [
+      'token' => $issued['token'],
+      'jti' => $issued['jti'] ?? '',
+      'client_id' => $issued['client_id'] ?? '',
+      'ttl' => $issued['ttl'] ?? 0,
+    ];
   }
 
   /**
