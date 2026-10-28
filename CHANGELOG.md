@@ -3720,8 +3720,7 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.1...1.x
-[3.5.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.0...3.5.1
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.0...1.x
 [3.5.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.1...3.5.0
 [3.4.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...3.4.1
 [3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
