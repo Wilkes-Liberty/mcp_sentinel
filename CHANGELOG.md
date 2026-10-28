@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-10-28
+
 ### Changed
 - The webhook event-filter field, schema, and README now name
   the three live events (`mcp.entity.presave`,
@@ -28,6 +30,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   messages, sealed-token mint-form description, and
   `NON_IDP_ISSUER` constant comment keep the sentence and drop
   `DEV-839` / `DEV-843`.
+- Use independent changelog fragments for pull requests and the shared validator for lossless release preparation.
 
 ### Fixed
 - The Drupal.org-layout GitHub job lost its job
