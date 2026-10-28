@@ -6,7 +6,6 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Behat\Mink\Driver\BrowserKitDriver;
 use Drupal\consumers\Entity\Consumer;
-use Drupal\Core\Url;
 use Drupal\Tests\BrowserTestBase;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -140,7 +139,7 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->assertSession()->pageTextNotContains('Copy this token now');
     $this->assertRevealAuditCount(0);
     // A present but invalid token is the same deny: 403, secret untouched.
-    $this->postRevealPath(FALSE, 'not-a-csrf-token');
+    $this->postRevealPath('not-a-csrf-token');
     $this->assertSession()->statusCodeEquals(403);
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertRevealAuditCount(0);
@@ -157,14 +156,20 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
   public function testPostWithCsrfTokenRevealsOnce(): void {
     $this->mintDesignatedToken();
     $this->assertRevealAuditCount(0);
+    // The Show button action already has the browser-session CSRF
+    // token. Url::fromRoute() here signs a different session seed.
+    $action = $this->assertSession()
+      ->elementExists('css', 'form[method="post"]')
+      ->getAttribute('action');
+    $this->assertNotEmpty($action);
     $this->submitForm([], 'Show sealed token');
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('Copy this token now');
     $this->assertSession()->pageTextContains('mcs1.');
     $this->assertRevealAuditCount(1);
     $this->assertRevealAuditHasNoBearer();
-    // A second CSRF-valid POST must not echo the consumed secret.
-    $this->postRevealPath(TRUE);
+    // Same CSRF query string after consume: gone page, no bearer.
+    $this->postRevealUrl($action);
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('no longer shown');
     $this->assertSession()->pageTextNotContains('mcs1.');
@@ -214,34 +219,31 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
    * Uses the Mink BrowserKit client so the logged-in session is kept and
    * assertSession() reads this POST. A missing or bad token must 403.
    *
-   * @param bool $withCsrf
-   *   TRUE to send the route's valid CSRF token.
    * @param string|null $tokenOverride
    *   Explicit token query value when testing a bad token.
    */
-  private function postRevealPath(
-    bool $withCsrf = FALSE,
-    ?string $tokenOverride = NULL,
-  ): void {
-    if ($withCsrf && $tokenOverride === NULL) {
-      // Same token Url::fromRoute() puts on the Show button action.
-      $url = Url::fromRoute('mcp_sentinel.sealed_token_reveal_post')
-        ->setAbsolute()
-        ->toString();
+  private function postRevealPath(?string $tokenOverride = NULL): void {
+    $options = ['absolute' => TRUE];
+    if ($tokenOverride !== NULL) {
+      $options['query']['token'] = $tokenOverride;
     }
-    else {
-      $options = ['absolute' => TRUE];
-      if ($tokenOverride !== NULL) {
-        $options['query']['token'] = $tokenOverride;
-      }
-      $url = $this->buildUrl(
-        '/admin/config/services/mcp-sentinel/tokens/reveal',
-        $options,
-      );
-    }
+    $this->postRevealUrl($this->buildUrl(
+      '/admin/config/services/mcp-sentinel/tokens/reveal',
+      $options,
+    ));
+  }
+
+  /**
+   * POSTs an already-built reveal URL through the BrowserKit client.
+   *
+   * @param string $url
+   *   Absolute or root-relative URL, including any CSRF query string.
+   */
+  private function postRevealUrl(string $url): void {
     $driver = $this->getSession()->getDriver();
     $this->assertInstanceOf(BrowserKitDriver::class, $driver);
-    $driver->getClient()->request('POST', $url);
+    // getAbsoluteUrl() keeps a relative ?token= query on the host.
+    $driver->getClient()->request('POST', $this->getAbsoluteUrl($url));
   }
 
   /**
