@@ -199,10 +199,7 @@ final class McpWebhookQueueManager {
     // caller typo must not queue a name that nothing in production
     // produces. Fail closed: no delivery row, no queue item, audit
     // the refused name (no payload).
-    if (!McpWebhookEvents::isLive($eventName)) {
-      $this->auditRefusedEventName($eventName, self::SURFACE_ENQUEUE);
-      return;
-    }
+    // RED PROOF: enqueue guard removed.
     $endpoints = (array) $this->configFactory
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');
