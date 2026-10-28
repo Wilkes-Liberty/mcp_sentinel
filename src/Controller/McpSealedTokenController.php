@@ -186,16 +186,15 @@ final class McpSealedTokenController extends ControllerBase {
     // Never store the bearer. jti and client_id are enough to pair this
     // row with the earlier sealed_token_mint entry.
     $this->auditLogger->log('sealed_token_reveal', [
-      'jti' => (string) ($issued['jti'] ?? ''),
-      'client_id' => (string) ($issued['client_id'] ?? ''),
-      'ttl' => (int) ($issued['ttl'] ?? 0),
+      'jti' => $issued['jti'],
+      'client_id' => $issued['client_id'],
+      'ttl' => $issued['ttl'],
     ]);
 
-    $ttl = (int) ($issued['ttl'] ?? 0);
     $build['warning'] = [
       '#markup' => '<p><strong>' . $this->t('Copy this token now. It will not be shown again.') . '</strong> ' . $this->t('TTL: @ttl seconds. Client: @client. Leave this page and the secret is gone from the admin UI.', [
-        '@ttl' => $ttl,
-        '@client' => (string) ($issued['client_id'] ?? ''),
+        '@ttl' => $issued['ttl'],
+        '@client' => $issued['client_id'],
       ]) . '</p>',
     ];
     $build['token'] = [
@@ -286,7 +285,7 @@ final class McpSealedTokenController extends ControllerBase {
    * @param mixed $issued
    *   Tempstore payload, or NULL when the key is gone.
    *
-   * @return array{token: string}|null
+   * @return array{token: string, jti: string, client_id: string, ttl: int}|null
    *   The payload, or NULL when there is nothing to show.
    */
   private function issuedPayload(mixed $issued): ?array {
@@ -296,12 +295,15 @@ final class McpSealedTokenController extends ControllerBase {
       || $issued['token'] === '') {
       return NULL;
     }
-    // Rebuild so the return is a string-token shape, not mixed-key tempstore.
+    // Rebuild with typed keys. A mixed tempstore bag is not this shape.
+    $jti = $issued['jti'] ?? '';
+    $clientId = $issued['client_id'] ?? '';
+    $ttl = $issued['ttl'] ?? 0;
     return [
       'token' => $issued['token'],
-      'jti' => $issued['jti'] ?? '',
-      'client_id' => $issued['client_id'] ?? '',
-      'ttl' => $issued['ttl'] ?? 0,
+      'jti' => is_string($jti) ? $jti : '',
+      'client_id' => is_string($clientId) ? $clientId : '',
+      'ttl' => is_numeric($ttl) ? (int) $ttl : 0,
     ];
   }
 
