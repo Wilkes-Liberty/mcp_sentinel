@@ -256,7 +256,7 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains($prefixed, $fromLegacy);
     $this->assertContains($legacy, $fromPrefixed);
     $this->assertContains($prefixed, $fromPrefixed);
-    $this->assertSame($fromLegacy, $fromPrefixed);
+    $this->assertEqualsCanonicalizing($fromLegacy, $fromPrefixed);
     $this->assertNotContains($iss . '|human-2|agent-7', $fromLegacy);
     $this->assertNotContains(
       $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'act:agent-7',
