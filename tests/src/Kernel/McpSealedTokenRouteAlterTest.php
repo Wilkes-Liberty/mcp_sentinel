@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Component\Serialization\Yaml;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -75,28 +76,32 @@ final class McpSealedTokenRouteAlterTest extends KernelTestBase {
 
   /**
    * Reveal GET is a prompt; only POST consumes, and only with a CSRF token.
+   *
+   * Reads the shipped YAML. Asking the live route provider rebuilds
+   * JSON:API and needs field_item:image, which this kernel set does
+   * not install.
    */
   public function testRevealPostRequiresCsrfToken(): void {
-    $provider = $this->container->get('router.route_provider');
+    $filename = dirname(__DIR__, 3) . '/mcp_sentinel.routing.yml';
+    $routes = Yaml::decode((string) file_get_contents($filename));
+    $this->assertIsArray($routes);
 
-    $get = $provider->getRouteByName('mcp_sentinel.sealed_token_reveal');
-    $this->assertContains('GET', $get->getMethods());
-    $this->assertNotContains('POST', $get->getMethods());
-    $this->assertNull($get->getRequirement('_csrf_token'));
+    $get = $routes['mcp_sentinel.sealed_token_reveal'];
+    $this->assertSame(['GET'], $get['methods']);
+    $this->assertArrayNotHasKey('_csrf_token', $get['requirements'] ?? []);
     $this->assertSame(
       '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::revealPrompt',
-      $get->getDefault('_controller'),
+      $get['defaults']['_controller'],
     );
 
-    $post = $provider->getRouteByName('mcp_sentinel.sealed_token_reveal_post');
-    $this->assertContains('POST', $post->getMethods());
-    $this->assertNotContains('GET', $post->getMethods());
-    $this->assertSame('TRUE', $post->getRequirement('_csrf_token'));
+    $post = $routes['mcp_sentinel.sealed_token_reveal_post'];
+    $this->assertSame(['POST'], $post['methods']);
+    $this->assertSame('TRUE', $post['requirements']['_csrf_token']);
     $this->assertSame(
       '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::reveal',
-      $post->getDefault('_controller'),
+      $post['defaults']['_controller'],
     );
-    $this->assertSame($get->getPath(), $post->getPath());
+    $this->assertSame($get['path'], $post['path']);
   }
 
 }
