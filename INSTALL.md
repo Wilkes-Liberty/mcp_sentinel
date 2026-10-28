@@ -149,9 +149,13 @@ connector is documented separately in `docs/CONNECTOR.md`.
 > Missing server/bridge/OAuth/audit wiring, empty scopes, absent or disabled
 > Tool registrations, an undesignated/disabled Consumer, blocked owner, or no
 > applicable active role-bound profile produces a stable not-ready reason and
-> refuses the governed path. `contract_ready` means only that this local
-> configuration and availability contract is complete; it does not claim
-> policy effectiveness, verified evidence, or overall security posture.
+> refuses the governed path. On the Status report, when that contract ERROR
+> already names the same gap as the "not governing" WARNING
+> (`agent_scopes_missing` or `active_profile_missing`), both severities share
+> that one ERROR row; distinct gaps stay two rows. `contract_ready` means only
+> that this local configuration and availability contract is complete; it
+> does not claim policy effectiveness, verified evidence, or overall security
+> posture.
 
 > **Agent discovery.** Once the agent channel is wired, agents can introspect
 > your content model before acting via the governed context endpoint
