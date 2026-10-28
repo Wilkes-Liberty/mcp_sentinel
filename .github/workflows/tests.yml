@@ -329,7 +329,7 @@ jobs:
           #
           # 1610 collect (latest 1.x / this PR matrix). The floor
           # sits just under that, so losing any one submodule
-          # suite — the smallest is 10 tests — trips it.
+          # suite — the smallest is 12 tests — trips it.
           MIN_TESTS: '1601'
         run: |
           set -euo pipefail
