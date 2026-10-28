@@ -91,7 +91,93 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains('nbsp-only-sub', $names);
     $this->assertContains('part-too-long-iss', $names);
     $this->assertContains('part-too-long-actor', $names);
+    $this->assertContains('azp-equals-act-sub-denied', $names);
+    $this->assertContains('act-sub-namespaced-apart-from-azp', $names);
+    $this->assertContains('azp-with-act-prefix-denied', $names);
     $this->assertSame($names, array_unique($names));
+  }
+
+  /**
+   * Tokens with azp=X and act.sub=X must not share a principal key.
+   *
+   * The actor slot used to copy either claim as a raw string, so a
+   * delegated token with act.sub=X shared kill, webhook, and audit
+   * identity with a non-delegated token whose azp was X.
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpAndActSubDoNotShareTheActorNamespace(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $azpOnly = McpPrincipalKey::fromClaims([
+      'iss' => $iss,
+      'sub' => 'human-1',
+      'azp' => 'shared-x',
+    ]);
+    $delegated = McpPrincipalKey::fromClaims([
+      'iss' => $iss,
+      'sub' => 'human-1',
+      'azp' => 'other-client',
+      'act' => ['sub' => 'shared-x'],
+    ]);
+    $this->assertSame(
+      $iss . '|human-1|shared-x',
+      $azpOnly['principalKey'],
+    );
+    $this->assertSame(
+      $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'shared-x',
+      $delegated['principalKey'],
+    );
+    $this->assertNotSame(
+      $azpOnly['principalKey'],
+      $delegated['principalKey'],
+      'act.sub=X must not compose the same principal as azp=X.',
+    );
+    $this->assertSame($azpOnly['humanKey'], $delegated['humanKey']);
+  }
+
+  /**
+   * A token that sets azp and act.sub to the same value is a spoof.
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpEqualToActSubFailsClosed(): void {
+    try {
+      McpPrincipalKey::fromClaims([
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'shared-x',
+        'act' => ['sub' => 'shared-x'],
+      ]);
+      $this->fail('azp=X with act.sub=X must not compose a principal key.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(
+        McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+        $e->reasonCode,
+      );
+    }
+  }
+
+  /**
+   * An azp that already uses the act.sub prefix cannot occupy that namespace.
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpUsingActPrefixFailsClosed(): void {
+    try {
+      McpPrincipalKey::fromClaims([
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => McpPrincipalKey::ACT_PREFIX . 'forged',
+      ]);
+      $this->fail('azp must not use the act.sub actor prefix.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(
+        McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+        $e->reasonCode,
+      );
+    }
   }
 
   /**
@@ -127,7 +213,9 @@ final class McpPrincipalKeyTest extends UnitTestCase {
       McpPrincipalKey::formatHuman($ctx),
     );
     $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-1',
+      'https://idp.example/realms/agents|human-1|'
+      . McpPrincipalKey::ACT_PREFIX
+      . 'agent-1',
       $ctx->principalKey(),
     );
   }

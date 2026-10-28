@@ -329,6 +329,17 @@ final class McpPrincipalContextDispatcher {
       McpPrincipalKey::fromClaims($ctx->keyClaims());
     }
     catch (McpPrincipalKeyException $e) {
+      // A spoofed actor is still a missing principal to the
+      // caller (same generic refusal as a kill). The audit row
+      // names actor_claim_collision.
+      if ($e->reasonCode === McpPrincipalKeyException::ACTOR_CLAIM_COLLISION) {
+        $this->deny(
+          $toolId,
+          McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+          self::GENERIC_REFUSAL,
+          McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+        );
+      }
       $this->deny(
         $toolId,
         McpPrincipalContextDeniedException::MISSING_PRINCIPAL,

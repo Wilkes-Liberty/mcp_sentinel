@@ -4,6 +4,37 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Principal-key actor slot no longer mixes azp and act.sub
+
+`McpPrincipalKey::fromClaims()` keeps non-delegated keys as
+`iss|sub|azp` (no prefix). A delegated actor is stored as
+`act:` plus top-level `act.sub`, so `azp=X` and `act.sub=X` cannot
+share a kill-switch row, webhook hold, carried job key, or audit
+`principal_key`. Tokens whose `azp` equals `act.sub`, or whose `azp`
+already starts with `act:`, fail closed. Dispatch writes
+`denied_access` with reason `actor_claim_collision`; the caller still
+sees the generic missing-principal refusal.
+
+No `updatedb`. Rebuild caches (`drush cr`). Policy profiles and
+designated-client matching still use the OAuth `client_id` / `azp`
+allowlist, not this actor slot. Request-rate flood keys still use the
+server-resolved uid. The language-neutral vectors in
+`tests/fixtures/principal-key-vectors.json` now expect the `act:`
+prefix on delegated keys; a JS twin of `fromClaims()` must match.
+
+**Upgrade:** re-issue kill-switch stops and any operator-supplied
+`--principal-key` that targeted a delegated `act.sub` under the old
+unprefixed form (`iss|sub|<act.sub>`). Existing non-delegated
+`iss|sub|<azp>` keys keep matching. Held webhook rows that stored a
+delegated principal_key in the old form will not match the new
+`act:` actor; release or re-queue those rows as an operator after
+confirming the new key.
+
+**Rollback:** revert the module and rebuild caches. Kill-switch
+rows and webhook keys written with the `act:` prefix after this
+change will not match the old unprefixed lookup. Re-issue those
+delegated stops against the unprefixed `iss|sub|<act.sub>` form.
+
 ## Sealed-token authentication denials are written to audit_chain
 
 `McpSealedTokenManager::verify()` and

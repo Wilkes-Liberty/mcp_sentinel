@@ -142,6 +142,33 @@ final class McpVerifiedOauthClaimsTest extends UnitTestCase {
   }
 
   /**
+   * A colliding azp / act.sub is still stamped so dispatch can audit it.
+   *
+   * Returning NULL here would look like a missing token and lose the
+   * actor_claim_collision reason on the denied_access row.
+   *
+   * @covers ::attributeFor
+   */
+  public function testCollidingActorClaimsArePublishedForDenial(): void {
+    $published = McpVerifiedOauthClaims::attributeFor([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-9',
+      'azp' => 'shared-x',
+      'tenant' => 'tenant-9',
+      'act' => ['sub' => 'shared-x'],
+      'scope' => 'mcp_read',
+    ], '');
+    $this->assertSame([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-9',
+      'tenant' => 'tenant-9',
+      'azp' => 'shared-x',
+      'act' => ['sub' => 'shared-x'],
+      'scopes' => ['mcp_read'],
+    ], $published);
+  }
+
+  /**
    * The token audience supplies the client id when azp is absent.
    *
    * @covers ::attributeFor

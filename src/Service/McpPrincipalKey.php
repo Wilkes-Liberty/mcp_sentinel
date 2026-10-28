@@ -12,15 +12,22 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  *
  * Principal is iss|sub|actor. Human is iss|sub.
  *
- * Actor is the top-level act.sub when a delegation claim is present
- * (RFC 8693 current actor; nested act entries are prior actors and
- * do not change the key), otherwise azp. client_id is never an actor.
- * Only act.sub is read — never act.subject — so actChain() and the
- * key agree.
+ * Actor is namespaced by claim. A delegated token uses
+ * ACT_PREFIX plus the top-level act.sub (RFC 8693 current
+ * actor; nested act entries are prior actors and do not
+ * change the key). A non-delegated token uses azp as-is so
+ * stored iss|sub|azp keys stay valid. client_id is never an
+ * actor. Only act.sub is read — never act.subject — so
+ * actChain() and the key agree.
  *
- * Each part is capped at MAX_PART_LENGTH (256) characters. Unicode
- * whitespace-only parts (including NBSP), control characters, invalid
- * UTF-8, and '|' are rejected.
+ * azp and act.sub are different identities. If they are
+ * equal, or if azp already starts with ACT_PREFIX, the key
+ * is refused (actor_claim_collision) so one claim cannot
+ * occupy the other's kill, webhook, or audit slot.
+ *
+ * Each part is capped at MAX_PART_LENGTH (256) characters.
+ * Unicode whitespace-only parts (including NBSP), control
+ * characters, invalid UTF-8, and '|' are rejected.
  *
  * Language-neutral vectors: tests/fixtures/principal-key-vectors.json.
  * The Node connector tests a JS twin against the same file.
@@ -36,6 +43,14 @@ final class McpPrincipalKey {
    * Maximum Unicode characters per iss, sub, or actor part.
    */
   public const MAX_PART_LENGTH = 256;
+
+  /**
+   * Prefix on a delegated actor so act.sub cannot occupy an azp slot.
+   *
+   * Non-delegated keys keep the raw azp value. This prefix is not a
+   * JWT claim; it is only the stored/looked-up actor part.
+   */
+  public const ACT_PREFIX = 'act:';
 
   /**
    * Path of the shared vector file, relative to the module root.
@@ -108,7 +123,8 @@ final class McpPrincipalKey {
    *   Both keys when the claims are complete and separator-safe.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
-   *   Missing or invalid iss, sub, azp, or act.sub.
+   *   Missing or invalid iss, sub, azp, or act.sub, or an actor
+   *   claim collision.
    */
   public static function fromClaims(array $claims): array {
     $iss = self::requirePart($claims, 'iss', McpPrincipalKeyException::MISSING_ISS);
@@ -126,13 +142,26 @@ final class McpPrincipalKey {
   /**
    * Resolves the actor or fails closed.
    *
+   * Delegated actors are prefixed. azp stays unprefixed so existing
+   * non-delegated principal keys, kill-switch rows, and webhook
+   * buckets keep matching. A token whose act.sub equals azp, or
+   * whose azp already starts with ACT_PREFIX, is refused.
+   *
    * @param array<string, mixed> $claims
    *   Validated token claims.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
-   *   Missing act.sub or azp.
+   *   Missing act.sub or azp, or an actor claim collision.
    */
   private static function actorFromClaims(array $claims): string {
+    $azp = $claims['azp'] ?? NULL;
+    $azp = is_string($azp) ? $azp : '';
+    if ($azp !== '' && str_starts_with($azp, self::ACT_PREFIX)) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+        'Authorized-party (azp) must not use the act.sub actor prefix.',
+      );
+    }
     if (array_key_exists('act', $claims) && $claims['act'] !== NULL) {
       $actor = self::topLevelActSub($claims['act']);
       if ($actor === '') {
@@ -141,7 +170,16 @@ final class McpPrincipalKey {
           'A delegation (act) claim requires a top-level act.sub.',
         );
       }
-      return $actor;
+      // Reject the raw claim before prefixing so whitespace-only
+      // act.sub cannot hide behind ACT_PREFIX.
+      self::assertSafePart($actor);
+      if ($azp !== '' && $actor === $azp) {
+        throw new McpPrincipalKeyException(
+          McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+          'act.sub must not equal azp; the actor slot is namespaced.',
+        );
+      }
+      return self::ACT_PREFIX . $actor;
     }
     return self::requirePart($claims, 'azp', McpPrincipalKeyException::MISSING_AZP);
   }

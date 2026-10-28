@@ -222,15 +222,24 @@ invocation has no bearer and stays on the profile SQL guard. Other
 during a denial still raises
 `McpPrincipalContextDeniedException`; it does not become an uncaught
 500. `principalKey()` is
-`iss|sub|actor` (actor = top-level `act.sub` per RFC 8693, else
-`azp`; never `client_id` or `act.subject`); `humanKey()` is
-`iss|sub`. Missing iss/sub/azp/`act.sub`, a `|`, Unicode
-whitespace-only parts (including NBSP), control characters, invalid
-UTF-8, or a part longer than 256 characters, fails closed. Import
-`mcp_sentinel.principal_key::fromClaims()` from rate limits,
-budgets, and kill. Shared vectors:
+`iss|sub|actor`. Actor is namespaced by claim: a delegated token
+stores `act:` plus the top-level `act.sub` (RFC 8693 current actor);
+a non-delegated token stores `azp` as-is so existing `iss|sub|azp`
+keys stay valid. `client_id` and `act.subject` are never the actor.
+`azp` and `act.sub` are different identities. If they are equal, or
+if `azp` already starts with `act:`, `fromClaims()` fails closed
+(`actor_claim_collision`) and dispatch writes a `denied_access` row
+with that reason. The caller still sees the generic missing-principal
+refusal. `humanKey()` is `iss|sub`. Missing iss/sub/azp/`act.sub`, a
+`|`, Unicode whitespace-only parts (including NBSP), control
+characters, invalid UTF-8, or a part longer than 256 characters, also
+fails closed. Import `mcp_sentinel.principal_key::fromClaims()` from
+rate limits, budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json` (the Node connector will
-test a JS twin against the same file).
+test a JS twin against the same file). Policy lookup and designated
+client match use the OAuth `client_id` / `azp` allowlist, not the
+actor slot, so a spoofed `act.sub` cannot become a designated client.
+Request-rate flood keys still use the server-resolved uid.
 Tools must never read identity or tenant from arguments. The guard
 scans the exact `doExecute()` / handler argument array
 (`getExecutableValues()`), not a raw HTTP body. Reserved keys

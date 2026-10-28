@@ -64,8 +64,14 @@ final class McpVerifiedOauthClaims {
     try {
       McpPrincipalKey::fromClaims($out);
     }
-    catch (McpPrincipalKeyException) {
-      return NULL;
+    catch (McpPrincipalKeyException $e) {
+      // Incomplete or separator-unsafe claims must not stamp a
+      // Paladin map (that would hide Simple OAuth). A complete
+      // colliding azp / act.sub still stamps so dispatch can
+      // refuse with an audited actor_claim_collision row.
+      if ($e->reasonCode !== McpPrincipalKeyException::ACTOR_CLAIM_COLLISION) {
+        return NULL;
+      }
     }
 
     $scopes = self::scopeNames($claims);

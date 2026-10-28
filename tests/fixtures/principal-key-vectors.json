@@ -24,7 +24,7 @@
       }
     },
     "expected": {
-      "principalKey": "https://idp.example/realms/agents|human-1|agent-1",
+      "principalKey": "https://idp.example/realms/agents|human-1|act:agent-1",
       "humanKey": "https://idp.example/realms/agents|human-1"
     }
   },
@@ -43,8 +43,51 @@
       }
     },
     "expected": {
-      "principalKey": "https://idp.example/realms/agents|human-1|A",
+      "principalKey": "https://idp.example/realms/agents|human-1|act:A",
       "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "azp-equals-act-sub-denied",
+    "doc": "azp and act.sub share one actor slot unless the spoof is refused. Same-token azp=X and act.sub=X must fail closed.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "shared-x",
+      "act": {
+        "sub": "shared-x"
+      }
+    },
+    "expected": {
+      "error": "actor_claim_collision"
+    }
+  },
+  {
+    "name": "act-sub-namespaced-apart-from-azp",
+    "doc": "Delegated actor is prefixed so act.sub=X cannot occupy the azp=X principal. Cross-token azp=X (no act) stays iss|sub|X.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "shared-x",
+      "act": {
+        "sub": "shared-x-delegated"
+      }
+    },
+    "expected": {
+      "principalKey": "https://idp.example/realms/agents|human-1|act:shared-x-delegated",
+      "humanKey": "https://idp.example/realms/agents|human-1"
+    }
+  },
+  {
+    "name": "azp-with-act-prefix-denied",
+    "doc": "An azp that already starts with the act.sub prefix would collide with a namespaced actor.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "act:forged"
+    },
+    "expected": {
+      "error": "actor_claim_collision"
     }
   },
   {

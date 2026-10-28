@@ -33,6 +33,11 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const MISSING_ACT_SUB = 'missing_act_sub';
 
   /**
+   * The act.sub claim equals azp, or azp already uses the act prefix.
+   */
+  public const ACTOR_CLAIM_COLLISION = 'actor_claim_collision';
+
+  /**
    * A '|' in iss, sub, or actor would make the key forgeable.
    */
   public const INVALID_SEPARATOR = 'invalid_separator';

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpKillEnforcerInterface;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
@@ -238,6 +239,58 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       }
     }
     $job->end($handle);
+  }
+
+  /**
+   * A token with azp=X and act.sub=X is refused and audited.
+   *
+   * The caller sees the generic missing-principal refusal so a spoof
+   * is not a distinct agent-facing signal. The denied_access row
+   * names actor_claim_collision.
+   *
+   * @covers ::assertDispatchAllowed
+   */
+  public function testAzpEqualToActSubIsDeniedAndAudited(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'shared-x',
+      'act' => ['sub' => 'shared-x'],
+      'tenant' => 'tenant-a',
+    ]);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $collision = McpPrincipalKeyException::ACTOR_CLAIM_COLLISION;
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      'denied_access',
+      $this->callback(static function (array $meta) use ($collision): bool {
+        return ($meta['reason'] ?? '') === $collision
+          && ($meta['principal_key'] ?? '') === 'unverified'
+          && ($meta['human_key'] ?? '') === 'unverified'
+          && ($meta['principal_unverified'] ?? '') === $collision
+          && ($meta['rule'] ?? '') === $collision
+          && !str_contains((string) ($meta['explain'] ?? ''), 'secret');
+      }),
+    );
+    $dispatcher = $this->dispatcher($stack, $holder, $audit);
+    try {
+      $dispatcher->admit(['note' => 'ok'], 'tool-a');
+      $this->fail('azp=X with act.sub=X must be denied.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertSame(
+        McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+        $e->getMessage(),
+      );
+    }
   }
 
   /**

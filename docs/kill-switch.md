@@ -21,8 +21,12 @@ A stop targets one of three things:
 | Tenant-wide | `--tenant=TENANT` | Every agent whose token carries that tenant. |
 
 The keys use the same format the module uses everywhere else. `iss` is the
-token issuer. `sub` is the person. `actor` is the agent: the token's
-top-level `act.sub`, or `azp` when there is no `act.sub`.
+token issuer. `sub` is the person. `actor` is the agent: `act:` plus the
+token's top-level `act.sub` when a delegation claim is present, or `azp`
+when there is no `act.sub`. A token whose `azp` equals `act.sub` is
+refused (`actor_claim_collision`) and never shares that slot. Non-delegated
+stops (`iss|sub|azp`) are unchanged. Re-issue any stop that targeted a
+delegated `act.sub` under the old unprefixed form.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the

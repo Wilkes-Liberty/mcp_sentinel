@@ -170,6 +170,21 @@ final class McpDenyExplainer {
         'Stay denied.',
       );
     }
+    // Checked before "verified principal": the generic caller
+    // refusal is appended to the collision seed and would
+    // otherwise fold this into missing_principal.
+    if (str_contains($reason, 'actor_claim_collision')) {
+      return new McpDenyExplanation(
+        'actor_claim_collision',
+        'actor claim collision',
+        FALSE,
+        'Mint a token whose azp and top-level act.sub are '
+        . 'distinct. act.sub is stored with an act: prefix so '
+        . 'it cannot occupy an azp principal key, kill-switch '
+        . 'row, or webhook bucket.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'missing_principal')
       || str_contains($reason, 'verified principal')) {
       return new McpDenyExplanation(

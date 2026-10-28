@@ -78,6 +78,25 @@ final class McpOauthVerifiedClaimsTest extends UnitTestCase {
   }
 
   /**
+   * Designation matches client_id / azp, never the actor slot.
+   *
+   * An act.sub equal to a designated client id must not admit the
+   * caller as that client (policy, readiness, sealed-token mint).
+   */
+  public function testDelegationClaimDoesNotDesignateTheClient(): void {
+    $request = Request::create('/mcp');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'client_id' => 'other-machine',
+      'azp' => 'other-machine',
+      'act' => ['sub' => 'machine-one'],
+      'scope' => 'mcp_read',
+    ]);
+    $ctx = $this->context($request);
+    $this->assertSame('other-machine', $ctx->clientId());
+    $this->assertFalse($ctx->isDesignatedAgentClient());
+  }
+
+  /**
    * A replaced attribute or subrequest cannot widen the main request's grant.
    */
   public function testVerifiedAuthorityCannotChangeWithinRequest(): void {
