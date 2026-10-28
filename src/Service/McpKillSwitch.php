@@ -2392,13 +2392,19 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   /**
    * Lookup hashes for the three key kinds.
    *
+   * A principal-key lookup includes the actor-slot twin so a
+   * legacy iss|sub|X stop still matches iss|sub|act:X (and the
+   * reverse). That pairing is fail-closed and over-inclusive.
+   *
    * @return list<string>
    *   Hashes to query.
    */
   private function lookupHashes(string $principalKey, string $humanKey, string $tenant): array {
     $hashes = [];
     if ($principalKey !== '') {
-      $hashes[] = (new McpKillSelector(McpKillSelectorType::PrincipalKey, $principalKey))->hash();
+      foreach (McpKillSelector::principalKeyLookupHashes($principalKey) as $hash) {
+        $hashes[] = $hash;
+      }
     }
     if ($humanKey !== '') {
       $hashes[] = (new McpKillSelector(McpKillSelectorType::HumanKey, $humanKey))->hash();

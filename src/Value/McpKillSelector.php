@@ -58,6 +58,27 @@ final readonly class McpKillSelector {
   }
 
   /**
+   * Kill-registry hashes for a principal key and its transition twin.
+   *
+   * Aliases that cannot be stored (empty or longer than the
+   * column) are omitted; they cannot match a row.
+   *
+   * @return list<string>
+   *   Hashes to query.
+   */
+  public static function principalKeyLookupHashes(string $principalKey): array {
+    $hashes = [];
+    foreach (McpPrincipalKey::enforcementAliases($principalKey) as $alias) {
+      try {
+        $hashes[] = (new self(McpKillSelectorType::PrincipalKey, $alias))->hash();
+      }
+      catch (McpKillSwitchException) {
+      }
+    }
+    return $hashes;
+  }
+
+  /**
    * Principal-key selector (iss|sub|actor).
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException

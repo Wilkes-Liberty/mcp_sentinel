@@ -33,7 +33,7 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const MISSING_ACT_SUB = 'missing_act_sub';
 
   /**
-   * The act.sub claim equals azp, or azp already uses the act prefix.
+   * Authorized-party (azp) already uses the delegated actor prefix.
    */
   public const ACTOR_CLAIM_COLLISION = 'actor_claim_collision';
 

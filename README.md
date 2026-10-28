@@ -52,8 +52,11 @@ including nested maps, case variants, format characters, and
 look-alike keys. The shared principal key is `iss|sub|actor`. A
 delegated actor is `act:` plus top-level `act.sub`; otherwise the
 actor is `azp` as-is.
-`azp` equal to `act.sub`, or an `azp` that already starts with `act:`,
-fails closed (`actor_claim_collision`) and is audited. Missing parts,
+An `azp` that already starts with `act:` (any case) fails closed
+(`actor_claim_collision`) and is audited. Kill-switch matching and
+webhook holds treat `iss|sub|X` and `iss|sub|act:X` as aliases of
+the same stop so a pre-upgrade delegated stop stays in force.
+Missing parts,
 Unicode whitespace-only values, invalid UTF-8, or a `|` also fail
 closed. The human key is `iss|sub`. Import
 `mcp_sentinel.principal_key` (`fromClaims()`) for rate limits,

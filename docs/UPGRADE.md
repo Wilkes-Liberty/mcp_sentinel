@@ -8,32 +8,48 @@ see `CONNECTOR.md`.
 
 `McpPrincipalKey::fromClaims()` keeps non-delegated keys as
 `iss|sub|azp` (no prefix). A delegated actor is stored as
-`act:` plus top-level `act.sub`, so `azp=X` and `act.sub=X` cannot
-share a kill-switch row, webhook hold, carried job key, or audit
-`principal_key`. Tokens whose `azp` equals `act.sub`, or whose `azp`
-already starts with `act:`, fail closed. Dispatch writes
-`denied_access` with reason `actor_claim_collision`; the caller still
-sees the generic missing-principal refusal.
+`act:` plus top-level `act.sub`, so `azp=X` and `act.sub=X` compose
+different keys (`iss|sub|X` vs `iss|sub|act:X`). An `azp` that
+already starts with `act:` (any case) is refused
+(`actor_claim_collision`). Same-token `azp=X` with `act.sub=X` is
+allowed; it composes the delegated key. Dispatch writes
+`denied_access` with reason `actor_claim_collision` for the prefix
+collision; the caller still sees the generic missing-principal
+refusal.
 
-No `updatedb`. Rebuild caches (`drush cr`). Policy profiles and
-designated-client matching still use the OAuth `client_id` / `azp`
-allowlist, not this actor slot. Request-rate flood keys still use the
-server-resolved uid. The language-neutral vectors in
-`tests/fixtures/principal-key-vectors.json` now expect the `act:`
-prefix on delegated keys; a JS twin of `fromClaims()` must match.
+No `updatedb` and no row rewrite. Stored `X` cannot be proven to
+have been `azp` versus `act.sub`, so kill-switch matching and
+webhook hold selection treat `iss|sub|X` and `iss|sub|act:X` as
+aliases of the same stop. That pairing is fail-closed and
+over-inclusive: a legacy stop on `iss|sub|X` stops both `azp=X` and
+`act.sub=X` until the row expires. A new `act:` stop also holds
+pre-upgrade webhook rows and carried jobs that still store the
+unprefixed key. Rebuild caches (`drush cr`).
 
-**Upgrade:** re-issue kill-switch stops and any operator-supplied
-`--principal-key` that targeted a delegated `act.sub` under the old
-unprefixed form (`iss|sub|<act.sub>`). Existing non-delegated
-`iss|sub|<azp>` keys keep matching. Held webhook rows that stored a
-delegated principal_key in the old form will not match the new
-`act:` actor; release or re-queue those rows as an operator after
-confirming the new key.
+Policy profiles and designated-client matching still use the OAuth
+`client_id` / `azp` allowlist, not this actor slot. Request-rate
+flood keys still use the server-resolved uid. The language-neutral
+vectors in `tests/fixtures/principal-key-vectors.json` now expect
+the `act:` prefix on delegated keys; a JS twin of `fromClaims()`
+must match. Product code always emits lowercase `act:`. Webhook
+hold selection uses SQL `IN` on those aliases; a MySQL `*_ci`
+collation can still over-hold a whole-key case fold, which predates
+this prefix.
 
-**Rollback:** revert the module and rebuild caches. Kill-switch
+**Upgrade:** operators do not need to re-issue active delegated
+stops across this deploy. Dual-match keeps a pre-upgrade
+`--principal-key=iss|sub|<act.sub>` stop in force, and a new
+`iss|sub|act:<act.sub>` stop holds backlog stored under the old
+spelling. Prefer the prefixed form for new delegated stops.
+`parsePrincipalKey` still accepts the unprefixed three-part form;
+that stop now enforces both spellings.
+
+**Rollback:** revert the module and rebuild caches. Dual-match goes
+away with the revert, so exact sha256 matching returns. Kill-switch
 rows and webhook keys written with the `act:` prefix after this
 change will not match the old unprefixed lookup. Re-issue those
-delegated stops against the unprefixed `iss|sub|<act.sub>` form.
+delegated stops as `iss|sub|<act.sub>` if the previous code is
+restored. No `updatedb` to undo.
 
 ## Sealed-token authentication denials are written to audit_chain
 

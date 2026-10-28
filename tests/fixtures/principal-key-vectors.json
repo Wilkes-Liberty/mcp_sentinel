@@ -48,8 +48,8 @@
     }
   },
   {
-    "name": "azp-equals-act-sub-denied",
-    "doc": "azp and act.sub share one actor slot unless the spoof is refused. Same-token azp=X and act.sub=X must fail closed.",
+    "name": "azp-equals-act-sub-uses-act-prefix",
+    "doc": "Same-token azp=X and act.sub=X is a legitimate self-actor. The prefix separates it from azp-only X.",
     "claims": {
       "iss": "https://idp.example/realms/agents",
       "sub": "human-1",
@@ -59,7 +59,8 @@
       }
     },
     "expected": {
-      "error": "actor_claim_collision"
+      "principalKey": "https://idp.example/realms/agents|human-1|act:shared-x",
+      "humanKey": "https://idp.example/realms/agents|human-1"
     }
   },
   {
@@ -85,6 +86,18 @@
       "iss": "https://idp.example/realms/agents",
       "sub": "human-1",
       "azp": "act:forged"
+    },
+    "expected": {
+      "error": "actor_claim_collision"
+    }
+  },
+  {
+    "name": "azp-with-uppercase-act-prefix-denied",
+    "doc": "The act: prefix guard is case-insensitive so ACT:X cannot occupy a delegated slot.",
+    "claims": {
+      "iss": "https://idp.example/realms/agents",
+      "sub": "human-1",
+      "azp": "ACT:forged"
     },
     "expected": {
       "error": "actor_claim_collision"

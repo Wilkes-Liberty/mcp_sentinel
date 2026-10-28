@@ -23,10 +23,12 @@ A stop targets one of three things:
 The keys use the same format the module uses everywhere else. `iss` is the
 token issuer. `sub` is the person. `actor` is the agent: `act:` plus the
 token's top-level `act.sub` when a delegation claim is present, or `azp`
-when there is no `act.sub`. A token whose `azp` equals `act.sub` is
-refused (`actor_claim_collision`) and never shares that slot. Non-delegated
-stops (`iss|sub|azp`) are unchanged. Re-issue any stop that targeted a
-delegated `act.sub` under the old unprefixed form.
+when there is no `act.sub`. An `azp` that already starts with `act:` (any
+case) is refused (`actor_claim_collision`) and never occupies that slot.
+Kill-switch matching also treats `iss|sub|X` and `iss|sub|act:X` as the
+same stop (fail-closed, over-inclusive) so a pre-upgrade delegated stop
+keeps matching after the prefix shipped. Non-delegated stops
+(`iss|sub|azp`) are unchanged.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the

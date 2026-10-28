@@ -208,7 +208,8 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertSame('actor_claim_collision', $explained->ruleId);
     $this->assertFalse($explained->widenAppropriate);
     $this->assertStringContainsString('azp', $explained->nextStep);
-    $this->assertStringContainsString('act.sub', $explained->nextStep);
+    $this->assertStringContainsString('act:', $explained->nextStep);
+    $this->assertStringContainsString('prefix', $explained->nextStep);
     $this->assertStringNotContainsString(
       'missing_principal',
       $explained->format(),

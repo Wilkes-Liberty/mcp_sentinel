@@ -20,10 +20,11 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * actor. Only act.sub is read — never act.subject — so
  * actChain() and the key agree.
  *
- * azp and act.sub are different identities. If they are
- * equal, or if azp already starts with ACT_PREFIX, the key
- * is refused (actor_claim_collision) so one claim cannot
- * occupy the other's kill, webhook, or audit slot.
+ * An azp that already starts with ACT_PREFIX (any case) is
+ * refused (actor_claim_collision) so it cannot occupy a
+ * delegated actor slot. Same-token azp=X with act.sub=X is
+ * allowed: the composed key is iss|sub|act:X, which is not
+ * the azp-only key iss|sub|X.
  *
  * Each part is capped at MAX_PART_LENGTH (256) characters.
  * Unicode whitespace-only parts (including NBSP), control
@@ -48,7 +49,8 @@ final class McpPrincipalKey {
    * Prefix on a delegated actor so act.sub cannot occupy an azp slot.
    *
    * Non-delegated keys keep the raw azp value. This prefix is not a
-   * JWT claim; it is only the stored/looked-up actor part.
+   * JWT claim; it is only the stored/looked-up actor part. Product
+   * code always emits this exact lowercase spelling.
    */
   public const ACT_PREFIX = 'act:';
 
@@ -142,10 +144,12 @@ final class McpPrincipalKey {
   /**
    * Resolves the actor or fails closed.
    *
-   * Delegated actors are prefixed. azp stays unprefixed so existing
-   * non-delegated principal keys, kill-switch rows, and webhook
-   * buckets keep matching. A token whose act.sub equals azp, or
-   * whose azp already starts with ACT_PREFIX, is refused.
+   * Delegated actors are prefixed. Authorized-party stays
+   * unprefixed so existing non-delegated principal keys stay
+   * valid. An azp that already starts with ACT_PREFIX (any
+   * case) is refused so it cannot occupy a delegated slot.
+   * Same-token azp=X with act.sub=X is not a collision: the
+   * delegated key is act:X.
    *
    * @param array<string, mixed> $claims
    *   Validated token claims.
@@ -156,7 +160,7 @@ final class McpPrincipalKey {
   private static function actorFromClaims(array $claims): string {
     $azp = $claims['azp'] ?? NULL;
     $azp = is_string($azp) ? $azp : '';
-    if ($azp !== '' && str_starts_with($azp, self::ACT_PREFIX)) {
+    if ($azp !== '' && self::actorHasActPrefix($azp)) {
       throw new McpPrincipalKeyException(
         McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
         'Authorized-party (azp) must not use the act.sub actor prefix.',
@@ -173,15 +177,79 @@ final class McpPrincipalKey {
       // Reject the raw claim before prefixing so whitespace-only
       // act.sub cannot hide behind ACT_PREFIX.
       self::assertSafePart($actor);
-      if ($azp !== '' && $actor === $azp) {
-        throw new McpPrincipalKeyException(
-          McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
-          'act.sub must not equal azp; the actor slot is namespaced.',
-        );
-      }
       return self::ACT_PREFIX . $actor;
     }
     return self::requirePart($claims, 'azp', McpPrincipalKeyException::MISSING_AZP);
+  }
+
+  /**
+   * Whether an actor part uses the delegated prefix (any case).
+   *
+   * Product code always emits ACT_PREFIX. The case-insensitive
+   * check stops an authorized-party of ACT:X occupying the
+   * delegated slot.
+   */
+  public static function actorHasActPrefix(string $actor): bool {
+    $length = strlen(self::ACT_PREFIX);
+    return strlen($actor) >= $length
+      && strncasecmp($actor, self::ACT_PREFIX, $length) === 0;
+  }
+
+  /**
+   * Canonical delegated actor spelling (lowercase prefix).
+   *
+   * Operator-supplied ACT:X becomes act:X so kill rows and
+   * parsePrincipalKey never store a mixed-case prefix.
+   */
+  public static function canonicalActActor(string $actor): string {
+    if (!self::actorHasActPrefix($actor)) {
+      return $actor;
+    }
+    return self::ACT_PREFIX . substr($actor, strlen(self::ACT_PREFIX));
+  }
+
+  /**
+   * Kill and webhook lookup spellings for one principal key.
+   *
+   * Bidirectional fail-closed transition aliases. A stop or
+   * webhook row stored as iss|sub|X also matches iss|sub|act:X
+   * and the reverse. That is over-inclusive: a legacy stop on
+   * iss|sub|X stops both azp=X and act.sub=X, because a stored
+   * X cannot be proven to have been azp versus act.sub. It does
+   * not match a different iss or sub, and it does not double
+   * the prefix (iss|sub|X does not match iss|sub|act:act:X).
+   *
+   * No update hook: stored X is ambiguous. Dual-match is the
+   * permanent smallest fail-closed upgrade. Rolling this
+   * module back restores exact-match lookup.
+   *
+   * @return list<string>
+   *   Canonical key plus its actor-slot twin, when the key
+   *   is iss|sub|actor. Otherwise the input only.
+   */
+  public static function enforcementAliases(string $principalKey): array {
+    if ($principalKey === '') {
+      return [];
+    }
+    if (!mb_check_encoding($principalKey, 'UTF-8')
+      || substr_count($principalKey, self::SEPARATOR) !== 2) {
+      return [$principalKey];
+    }
+    [$iss, $sub, $actor] = explode(self::SEPARATOR, $principalKey, 3);
+    $canonicalActor = self::canonicalActActor($actor);
+    $canonical = $iss . self::SEPARATOR . $sub . self::SEPARATOR . $canonicalActor;
+    $aliases = [$canonical];
+    if (self::actorHasActPrefix($canonicalActor)) {
+      $remainder = substr($canonicalActor, strlen(self::ACT_PREFIX));
+      if ($remainder !== '') {
+        $aliases[] = $iss . self::SEPARATOR . $sub . self::SEPARATOR . $remainder;
+      }
+    }
+    elseif ($canonicalActor !== '') {
+      $aliases[] = $iss . self::SEPARATOR . $sub . self::SEPARATOR
+        . self::ACT_PREFIX . $canonicalActor;
+    }
+    return array_values(array_unique($aliases));
   }
 
   /**
@@ -250,6 +318,7 @@ final class McpPrincipalKey {
       }
       self::assertSafePart($part);
     }
+    $parts[2] = self::canonicalActActor($parts[2]);
     return implode(self::SEPARATOR, $parts);
   }
 

@@ -178,9 +178,10 @@ final class McpDenyExplainer {
         'actor_claim_collision',
         'actor claim collision',
         FALSE,
-        'Mint a token whose azp and top-level act.sub are '
-        . 'distinct. act.sub is stored with an act: prefix so '
-        . 'it cannot occupy an azp principal key, kill-switch '
+        'Mint a token whose authorized-party (azp) does not '
+        . 'start with the act: actor prefix (any case). That '
+        . 'prefix is reserved for delegated act.sub so azp '
+        . 'cannot occupy a delegated principal key, kill-switch '
         . 'row, or webhook bucket.',
         'Stay denied.',
       );

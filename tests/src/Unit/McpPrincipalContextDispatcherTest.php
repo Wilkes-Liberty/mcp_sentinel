@@ -242,22 +242,21 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
-   * A token with azp=X and act.sub=X is refused and audited.
+   * An azp that uses the delegated actor prefix is refused and audited.
    *
-   * The caller sees the generic missing-principal refusal so a spoof
-   * is not a distinct agent-facing signal. The denied_access row
-   * names actor_claim_collision.
+   * The caller sees the generic missing-principal refusal so a
+   * prefix collision is not a distinct agent-facing signal. The
+   * denied_access row names actor_claim_collision.
    *
    * @covers ::assertDispatchAllowed
    */
-  public function testAzpEqualToActSubIsDeniedAndAudited(): void {
+  public function testAzpUsingActPrefixIsDeniedAndAudited(): void {
     $stack = new RequestStack();
     $request = Request::create('/mcp', 'POST');
     $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'human-1',
-      'azp' => 'shared-x',
-      'act' => ['sub' => 'shared-x'],
+      'azp' => 'act:forged',
       'tenant' => 'tenant-a',
     ]);
     $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
@@ -279,7 +278,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     $dispatcher = $this->dispatcher($stack, $holder, $audit);
     try {
       $dispatcher->admit(['note' => 'ok'], 'tool-a');
-      $this->fail('azp=X with act.sub=X must be denied.');
+      $this->fail('azp that uses the act: prefix must be denied.');
     }
     catch (McpPrincipalContextDeniedException $e) {
       $this->assertSame(

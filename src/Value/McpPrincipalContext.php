@@ -300,7 +300,7 @@ final readonly class McpPrincipalContext {
    *
    * Actor is ACT_PREFIX plus top-level act.sub when a delegation
    * claim is present, otherwise azp. Fails closed when the token
-   * cannot compose a key, including when azp equals act.sub.
+   * cannot compose a key, including when azp uses the act prefix.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
    *   Missing iss/sub/azp/act.sub, an actor claim collision, or a
