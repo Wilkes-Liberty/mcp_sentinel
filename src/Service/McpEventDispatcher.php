@@ -8,7 +8,6 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\mcp_sentinel\Event\McpEntityEvent;
-use Drupal\mcp_sentinel\McpWebhookEvents;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 /**
