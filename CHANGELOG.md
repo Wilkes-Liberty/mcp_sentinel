@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.5.1] - 2026-10-28
+
 ### Changed
 - The webhook event-filter field, schema, and README now name
   the three live events (`mcp.entity.presave`,
@@ -28,6 +30,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   messages, sealed-token mint-form description, and
   `NON_IDP_ISSUER` constant comment keep the sentence and drop
   `DEV-839` / `DEV-843`.
+- Use independent changelog fragments for pull requests and the shared validator for lossless release preparation.
 
 ### Fixed
 - The Drupal.org-layout GitHub job lost its job
@@ -3717,7 +3720,8 @@ See the `1.0.0-beta*` / `1.0.0-alpha*` sections below for full per-release detai
   read; expired locks are excluded by a query condition and reaped by cron.
 - Uninstalling the module now removes the `mcp_api` role it creates on install.
 
-[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.0...1.x
+[Unreleased]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.1...1.x
+[3.5.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.5.0...3.5.1
 [3.5.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.1...3.5.0
 [3.4.1]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.4.0...3.4.1
 [3.4.0]: https://git.drupalcode.org/project/mcp_sentinel/-/compare/3.3.2...3.4.0
