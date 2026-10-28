@@ -11,8 +11,9 @@ use Drupal\Core\Database\Transaction;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
-use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\McpWebhookEvents;
+use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\mcp_sentinel\Value\McpStoredValue;
 use Psr\Log\LoggerInterface;
@@ -157,11 +158,22 @@ final class McpWebhookQueueManager {
    * Enqueues delivery items for all matching enabled endpoints.
    *
    * @param string $eventName
-   *   The MCP event identifier.
+   *   A live MCP event identifier (see McpWebhookEvents::LIVE). Unknown
+   *   names are refused and never queued.
    * @param array<string, mixed> $payload
    *   The event payload (will be JSON-encoded for delivery).
    */
   public function enqueueForEvent(string $eventName, array $payload): void {
+    // Settings-form save is not the only writer. A config import or a
+    // caller typo must not queue a name that nothing in production
+    // produces. Fail closed: no delivery row, no queue item.
+    if (!McpWebhookEvents::isLive($eventName)) {
+      $this->logger->error(
+        'Webhook event @event refused: not in the live allowlist.',
+        ['@event' => $eventName],
+      );
+      return;
+    }
     $endpoints = (array) $this->configFactory
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');

@@ -8,6 +8,7 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\mcp_sentinel\Event\McpEntityEvent;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 /**
@@ -55,18 +56,25 @@ class McpEventDispatcher {
   /**
    * Dispatches an MCP entity event and queues webhooks for matching endpoints.
    *
-   * The in-process event always fires; the webhook enqueue only runs when at
-   * least one endpoint is configured (the queue manager applies the per-event
-   * and enabled-flag filtering). The payload carries a stable, serializable
-   * snapshot of the entity rather than the entity object, so the queued item
-   * stays valid even if the entity later changes or is deleted.
+   * Unknown names return without firing. A live name always fires the
+   * in-process event; the webhook enqueue only runs when at least one
+   * endpoint is configured (the queue manager applies the per-event and
+   * enabled-flag filtering). The payload carries a stable, serializable
+   * snapshot of the entity rather than the entity object, so the queued
+   * item stays valid even if the entity later changes or is deleted.
    *
    * @param string $eventName
-   *   The MCP event identifier (e.g. mcp.entity.presave).
+   *   A live MCP event identifier (see McpWebhookEvents::LIVE). Unknown
+   *   names return without firing or queuing.
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The entity the event concerns.
    */
   public function dispatch(string $eventName, EntityInterface $entity): void {
+    // Empty-filter endpoints receive every dispatched name. An unknown
+    // name is not a live event, so it must not fire in-process or enqueue.
+    if (!McpWebhookEvents::isLive($eventName)) {
+      return;
+    }
     $this->eventDispatcher->dispatch(new McpEntityEvent($entity, $eventName), $eventName);
 
     $config = $this->configFactory->get('mcp_sentinel.settings');

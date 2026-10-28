@@ -354,6 +354,73 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
+   * An unknown event name is not dispatched and not enqueued.
+   *
+   * Empty-filter endpoints would otherwise receive the typo. If this
+   * assertion is deleted, the allowlist can be bypassed at enqueue.
+   *
+   * @covers ::enqueueForEvent
+   */
+  public function testUnknownEventNameIsNotDispatched(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'all_events',
+          'label' => 'All',
+          'url' => 'https://example.com/all',
+          'secret_key' => '',
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])->save();
+
+    $node = Node::create(['type' => 'page', 'title' => 'T', 'uid' => 1]);
+    $heard = FALSE;
+    // A listener on the retired name must stay silent: dispatch refuses
+    // before the in-process event fires.
+    $this->container->get('event_dispatcher')->addListener(
+      'mcp.entity.save',
+      static function () use (&$heard): void {
+        $heard = TRUE;
+      },
+    );
+    \Drupal::service('mcp_sentinel.event_dispatcher')
+      ->dispatch('mcp.entity.save', $node);
+    $this->assertFalse(
+      $heard,
+      'Unknown names must not fire the in-process event.',
+    );
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+    $this->assertSame(
+      0,
+      (int) \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+        ->countQuery()
+        ->execute()
+        ->fetchField(),
+    );
+
+    // Direct enqueue is the alert-dispatcher path. A ghost name must
+    // not write a delivery row even when the filter is empty.
+    \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->enqueueForEvent('mcp.not.a.live.event', ['event' => 'ghost']);
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+    $this->assertSame(
+      0,
+      (int) \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+        ->countQuery()
+        ->execute()
+        ->fetchField(),
+    );
+  }
+
+  /**
    * Update_10008 migrates a legacy single webhook into webhook_endpoints.
    *
    * Also verifies that the migrated endpoint has allow_internal=FALSE (Fix 5).

@@ -437,6 +437,28 @@ final class McpSettingsFormTest extends BrowserTestBase {
   }
 
   /**
+   * An unknown event name is refused on save and nothing persists.
+   *
+   * If this assertion is deleted, a typo can be stored as a filter
+   * that never matches. mcp.entity.save keeps its own copy above.
+   */
+  public function testUnknownWebhookEventNameRejectedOnSettingsSave(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => "mcp.entity.update\nMCP.ENTITY.PRESAVE",
+    ], 'Save configuration');
+    $this->assertSession()->pageTextContains('Endpoint siem filters on mcp.entity.update');
+    $this->assertSession()->pageTextContains('which is not a live webhook event');
+    $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
+    $this->assertSame(
+      ['mcp.entity.save'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+  }
+
+  /**
    * A settings-form filter change writes a webhook_event_filter row.
    */
   public function testWebhookEventFilterChangeWritesAuditRow(): void {
