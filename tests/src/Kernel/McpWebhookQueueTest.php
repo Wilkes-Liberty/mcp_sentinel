@@ -484,7 +484,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
-   * dispatch() refuses mcp.anomaly.alert on an entity.
+   * Dispatch refuses mcp.anomaly.alert on an entity.
    *
    * The alert name is live for enqueueForEvent() but dispatch()
    * takes an EntityInterface and must not fire an entity-shaped
@@ -516,7 +516,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
-   * requeueDuePendingRows() refuses a stored unknown event_name.
+   * Requeue refuses a stored unknown event_name.
    *
    * Fails when only the requeue allowlist check is removed.
    *
@@ -551,7 +551,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
-   * replayDelivery() refuses a stored unknown event_name.
+   * Replay refuses a stored unknown event_name.
    *
    * Fails when only the replay allowlist check is removed. A sent
    * row stays sent.

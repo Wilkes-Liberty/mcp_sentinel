@@ -86,7 +86,7 @@ final class McpWebhookEvents {
   /**
    * Whether $name is an entity event that dispatch() may fire.
    *
-   * mcp.anomaly.alert is live and may be enqueued, but it is not an
+   * The mcp.anomaly.alert name is live and may be enqueued, but it is not an
    * entity event. dispatch() takes an EntityInterface and must not
    * fire an entity-shaped event under the alert name.
    *
