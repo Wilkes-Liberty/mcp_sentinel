@@ -22,7 +22,7 @@ use PHPUnit\Framework\Attributes\Group;
 final class McpWebhookEventsTest extends UnitTestCase {
 
   /**
-   * isLive() is true for the three live names and false otherwise.
+   * Live names return true from isLive(); everything else is refused.
    *
    * Asserts behavior, not LIVE against itself. The live-name cases
    * fail if LIVE is emptied (fail closed). The false cases fail if
@@ -74,9 +74,9 @@ final class McpWebhookEventsTest extends UnitTestCase {
   }
 
   /**
-   * isEntityEvent() is true only for the two entity names.
+   * Entity names return true from isEntityEvent(); the alert name does not.
    *
-   * mcp.anomaly.alert is live for enqueue and false here. That is
+   * The mcp.anomaly.alert name is live for enqueue and false here. That is
    * the dispatch() deny path.
    *
    * @covers ::isEntityEvent
