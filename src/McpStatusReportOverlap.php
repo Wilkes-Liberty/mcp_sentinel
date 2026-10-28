@@ -9,7 +9,7 @@ use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 /**
  * Maps source-contract reasons onto overlapping Status report WARNING gaps.
  *
- * Drupal's Status report draws one severity colour per requirement key.
+ * Drupal's Status report paints one severity per requirement key.
  * Empty agent scopes or a missing policy profile can produce both
  * mcp_sentinel_contract_not_ready (ERROR) and mcp_sentinel_not_governing
  * (WARNING). Those two keys are one operator-facing gap, so the
