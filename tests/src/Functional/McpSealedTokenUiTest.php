@@ -223,24 +223,25 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     bool $withCsrf = FALSE,
     ?string $tokenOverride = NULL,
   ): void {
-    $options = ['absolute' => TRUE];
-    if ($tokenOverride !== NULL) {
-      $options['query']['token'] = $tokenOverride;
-    }
-    elseif ($withCsrf) {
+    if ($withCsrf && $tokenOverride === NULL) {
       // Same token Url::fromRoute() puts on the Show button action.
       $url = Url::fromRoute('mcp_sentinel.sealed_token_reveal_post')
         ->setAbsolute()
         ->toString();
-      $driver = $this->getSession()->getDriver();
-      $this->assertInstanceOf(BrowserKitDriver::class, $driver);
-      $driver->getClient()->request('POST', $url);
-      return;
+    }
+    else {
+      $options = ['absolute' => TRUE];
+      if ($tokenOverride !== NULL) {
+        $options['query']['token'] = $tokenOverride;
+      }
+      $url = $this->buildUrl(
+        '/admin/config/services/mcp-sentinel/tokens/reveal',
+        $options,
+      );
     }
     $driver = $this->getSession()->getDriver();
     $this->assertInstanceOf(BrowserKitDriver::class, $driver);
-    $path = '/admin/config/services/mcp-sentinel/tokens/reveal';
-    $driver->getClient()->request('POST', $this->buildUrl($path, $options));
+    $driver->getClient()->request('POST', $url);
   }
 
   /**
