@@ -49,7 +49,11 @@ final class McpWebhookEventsTest extends UnitTestCase {
       $live,
     );
     foreach ($live as $name) {
-      $this->assertIsString($name);
+      // LIVE is list<string>; a non-string member must fail the test,
+      // not the isLive() signature.
+      if (!is_string($name)) {
+        $this->fail('LIVE members must be strings.');
+      }
       $this->assertTrue(
         McpWebhookEvents::isLive($name),
         $name . ' must be accepted as live.',
