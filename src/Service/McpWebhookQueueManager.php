@@ -284,11 +284,12 @@ final class McpWebhookQueueManager {
     $count = 0;
     foreach ($rows as $row) {
       $eventName = McpStoredValue::string($row->event_name ?? NULL);
+      $deliveryId = McpStoredValue::int($row->id ?? NULL);
       if (!McpWebhookEvents::isLive($eventName)) {
         // A stored unknown name is not delivered. Mark failed so cron
         // does not keep selecting it.
         $this->refuseStoredEventName(
-          McpStoredValue::int($row->id ?? NULL),
+          $deliveryId,
           $eventName,
           self::SURFACE_REQUEUE,
         );
@@ -301,9 +302,9 @@ final class McpWebhookQueueManager {
       // Use the stored payload; fall back to empty string for legacy rows.
       $payloadJson = McpStoredValue::string($row->payload ?? NULL);
       $itemId = $queue->createItem([
-        'delivery_id' => McpStoredValue::int($row->id ?? NULL),
+        'delivery_id' => $deliveryId,
         'endpoint'    => $endpoint,
-        'event_name'  => McpStoredValue::string($row->event_name ?? NULL),
+        'event_name'  => $eventName,
         'payload'     => $payloadJson,
         'principal_key' => McpStoredValue::string($row->principal_key ?? NULL),
         'human_key' => McpStoredValue::string($row->human_key ?? NULL),
