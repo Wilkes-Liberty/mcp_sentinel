@@ -1139,6 +1139,7 @@ class McpSettingsForm extends ConfigFormBase {
       // successful filter changes only.
       $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
       $endpointLabel = $id !== '' ? $id : $this->t('endpoint @n', ['@n' => $i + 1]);
+      $unknown = [];
       foreach ($events as $eventName) {
         if (McpWebhookEvents::isLive($eventName)) {
           continue;
@@ -1157,13 +1158,21 @@ class McpSettingsForm extends ConfigFormBase {
           );
           continue;
         }
+        $unknown[] = $eventName;
+      }
+      // One error per field: Drupal keeps the first setErrorByName for
+      // a name, so list every unknown name here. That also shows the
+      // case-variant typo next to mcp.entity.update.
+      if ($unknown !== []) {
         $form_state->setErrorByName(
           "webhooks][endpoints][$i][events]",
-          $this->t(
+          $this->formatPlural(
+            count($unknown),
             'Endpoint %endpoint filters on @event, which is not a live webhook event. Live names: @live.',
+            'Endpoint %endpoint filters on @event, which are not live webhook events. Live names: @live.',
             [
               '%endpoint' => $endpointLabel,
-              '@event' => $eventName,
+              '@event' => implode(', ', $unknown),
               '@live' => implode(', ', McpWebhookEvents::LIVE),
             ],
           ),

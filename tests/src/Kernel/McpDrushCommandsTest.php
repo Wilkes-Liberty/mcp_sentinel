@@ -381,7 +381,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
 
     $rowId = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
       'endpoint_id' => 'ep1',
-      'event_name' => 'mcp.test',
+      'event_name' => 'mcp.entity.presave',
       'payload_hash' => hash('sha256', 'test'),
       'payload' => '{}',
       'status' => 'failed',
