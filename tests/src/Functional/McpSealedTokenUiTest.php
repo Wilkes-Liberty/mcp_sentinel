@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Behat\Mink\Driver\BrowserKitDriver;
 use Drupal\consumers\Entity\Consumer;
+use Drupal\Core\Url;
 use Drupal\Tests\BrowserTestBase;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -116,13 +117,13 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->mintDesignatedToken();
     $this->assertSession()->addressEquals('/admin/config/services/mcp-sentinel/tokens/reveal');
     $this->assertSession()->statusCodeEquals(200);
-    $this->assertSession()->pageTextContains('Show sealed token');
+    $this->assertSession()->buttonExists('Show sealed token');
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertSession()->pageTextNotContains('Copy this token now');
     // A second GET still must not consume or echo the handoff.
     $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
     $this->assertSession()->statusCodeEquals(200);
-    $this->assertSession()->pageTextContains('Show sealed token');
+    $this->assertSession()->buttonExists('Show sealed token');
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertRevealAuditCount(0);
   }
@@ -146,7 +147,7 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     // Fail-closed: the handoff is still waiting for a valid POST.
     $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
     $this->assertSession()->statusCodeEquals(200);
-    $this->assertSession()->pageTextContains('Show sealed token');
+    $this->assertSession()->buttonExists('Show sealed token');
     $this->assertSession()->pageTextNotContains('mcs1.');
   }
 
@@ -227,9 +228,14 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
       $options['query']['token'] = $tokenOverride;
     }
     elseif ($withCsrf) {
-      // CsrfAccessCheck seeds the token with the request path.
-      $options['query']['token'] = $this->container->get('csrf_token')
-        ->get('/admin/config/services/mcp-sentinel/tokens/reveal');
+      // Same token Url::fromRoute() puts on the Show button action.
+      $url = Url::fromRoute('mcp_sentinel.sealed_token_reveal_post')
+        ->setAbsolute()
+        ->toString();
+      $driver = $this->getSession()->getDriver();
+      $this->assertInstanceOf(BrowserKitDriver::class, $driver);
+      $driver->getClient()->request('POST', $url);
+      return;
     }
     $driver = $this->getSession()->getDriver();
     $this->assertInstanceOf(BrowserKitDriver::class, $driver);

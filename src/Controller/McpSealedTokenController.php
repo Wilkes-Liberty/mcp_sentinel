@@ -148,9 +148,8 @@ final class McpSealedTokenController extends ControllerBase {
     $build['reveal'] = [
       '#type' => 'inline_template',
       '#template' => '<form method="post" action="{{ action }}">'
-        . '<input type="submit" class="button button--primary" '
-        . 'value="{{ label }}" />'
-        . '</form>',
+        . '<button type="submit" class="button button--primary">'
+        . '{{ label }}</button></form>',
       '#context' => [
         'action' => $action,
         'label' => $this->t('Show sealed token'),
