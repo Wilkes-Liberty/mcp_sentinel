@@ -22,7 +22,7 @@ use PHPUnit\Framework\Attributes\Group;
 final class McpWebhookEventsTest extends UnitTestCase {
 
   /**
-   * isLive() is true for the three live names and false otherwise.
+   * Live names return true from isLive(); everything else is refused.
    *
    * Asserts behavior, not LIVE against itself. The live-name cases
    * fail if LIVE is emptied (fail closed). The false cases fail if
@@ -31,7 +31,6 @@ final class McpWebhookEventsTest extends UnitTestCase {
    * @covers ::isLive
    * @dataProvider liveNameBehaviorProvider
    */
-<<<<<<< HEAD
   #[DataProvider('liveNameBehaviorProvider')]
   public function testIsLiveBehavior(string $name, bool $expected): void {
     $this->assertSame($expected, McpWebhookEvents::isLive($name));
@@ -55,39 +54,6 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'empty' => ['', FALSE],
       'whitespace' => [' ', FALSE],
     ];
-=======
-  public function testLiveAllowlistIsTheThreeQueuedNames(): void {
-    // Read LIVE through reflection so PHPStan does not treat the pin
-    // as a constant compared to itself (method.alreadyNarrowedType).
-    // The literals below are the fail-closed expected list.
-    $live = (new \ReflectionClass(McpWebhookEvents::class))
-      ->getConstant('LIVE');
-    $this->assertIsArray($live);
-    $this->assertNotSame(
-      [],
-      $live,
-      'An empty LIVE list refuses every event; do not ship that.',
-    );
-    $this->assertSame(
-      [
-        'mcp.entity.presave',
-        'mcp.entity.delete',
-        'mcp.anomaly.alert',
-      ],
-      $live,
-    );
-    foreach ($live as $name) {
-      // LIVE is list<string>; a non-string member must fail the test,
-      // not the isLive() signature.
-      if (!is_string($name)) {
-        $this->fail('LIVE members must be strings.');
-      }
-      $this->assertTrue(
-        McpWebhookEvents::isLive($name),
-        $name . ' must be accepted as live.',
-      );
-    }
->>>>>>> origin/cursor/followup-2026-10-28-webhook-event-allowlist
   }
 
   /**
@@ -108,9 +74,9 @@ final class McpWebhookEventsTest extends UnitTestCase {
   }
 
   /**
-   * isEntityEvent() is true only for the two entity names.
+   * Entity names return true from isEntityEvent(); the alert name does not.
    *
-   * mcp.anomaly.alert is live for enqueue and false here. That is
+   * The mcp.anomaly.alert name is live for enqueue and false here. That is
    * the dispatch() deny path.
    *
    * @covers ::isEntityEvent
