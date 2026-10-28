@@ -29,9 +29,15 @@ final class McpWebhookEventsTest extends UnitTestCase {
    * @covers ::isLive
    */
   public function testLiveAllowlistIsTheThreeQueuedNames(): void {
+    // Read LIVE through reflection so PHPStan does not treat the pin
+    // as a constant compared to itself (method.alreadyNarrowedType).
+    // The literals below are the fail-closed expected list.
+    $live = (new \ReflectionClass(McpWebhookEvents::class))
+      ->getConstant('LIVE');
+    $this->assertIsArray($live);
     $this->assertNotSame(
       [],
-      McpWebhookEvents::LIVE,
+      $live,
       'An empty LIVE list refuses every event; do not ship that.',
     );
     $this->assertSame(
@@ -40,9 +46,10 @@ final class McpWebhookEventsTest extends UnitTestCase {
         'mcp.entity.delete',
         'mcp.anomaly.alert',
       ],
-      McpWebhookEvents::LIVE,
+      $live,
     );
-    foreach (McpWebhookEvents::LIVE as $name) {
+    foreach ($live as $name) {
+      $this->assertIsString($name);
       $this->assertTrue(
         McpWebhookEvents::isLive($name),
         $name . ' must be accepted as live.',
