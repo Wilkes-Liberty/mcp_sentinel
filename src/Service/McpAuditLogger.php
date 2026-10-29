@@ -80,11 +80,11 @@ class McpAuditLogger {
   public const READ_CHANNELS = [self::CHANNEL, self::LEGACY_CHANNEL];
 
   /**
-   * audit_chain_log.entity_id length. audit_chain copies metadata id here.
+   * Length of audit_chain_log.entity_id. The chain copies metadata id here.
    *
-   * audit_chain 1.x bounds channel, operation, label, and user_agent
-   * but not entity_id. MySQL and MariaDB refuse a longer value
-   * (strict mode); SQLite ignores VARCHAR length. A denial that
+   * The audit_chain 1.x logger bounds channel, operation, label, and
+   * user_agent but not entity_id. MySQL and MariaDB refuse a longer
+   * value (strict mode); SQLite ignores VARCHAR length. A denial that
    * throws after a failed append is unaudited. Match this to
    * audit_chain.install hook_schema().
    */

@@ -10,7 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
- * audit_chain_log.entity_id is varchar(255); longer ids are truncated.
+ * The audit_chain_log.entity_id column is varchar(255).
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  *

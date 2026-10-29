@@ -237,10 +237,11 @@ final class McpAuditLoggerTest extends KernelTestBase {
   /**
    * A 256-character id still writes denied_access on MySQL.
    *
-   * audit_chain_log.entity_id is varchar(255). SQLite ignores that
-   * length; MySQL refuses the insert. deny() swallows the append, so
-   * the caller still sees 403 and the denial is unaudited. The logger
-   * must bound id and keep the full value in metadata.
+   * The audit_chain_log.entity_id column is varchar(255). SQLite
+   * ignores that length; MySQL refuses the insert. deny() swallows
+   * the append, so the caller still sees 403 and the denial is
+   * unaudited. The logger must bound id and keep the full value in
+   * metadata.
    *
    * @covers ::logAlways
    * @covers ::boundedEntityId

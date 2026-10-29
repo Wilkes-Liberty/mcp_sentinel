@@ -279,18 +279,14 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       McpPrincipalKeyException::PART_TOO_LONG,
       $ctx,
     );
-    $this->assertSame('unverified', $meta['id'] ?? '');
-    $this->assertLessThanOrEqual(
-      McpAuditLogger::ENTITY_ID_MAX_LENGTH,
-      mb_strlen((string) ($meta['id'] ?? ''), 'UTF-8'),
-    );
-    $this->assertSame('unverified', $meta['principal_key'] ?? '');
+    $this->assertSame('unverified', $meta['id']);
+    $this->assertSame('unverified', $meta['principal_key']);
     $this->assertSame(
       McpPrincipalKeyException::PART_TOO_LONG,
-      $meta['principal_unverified'] ?? '',
+      $meta['principal_unverified'],
     );
-    $this->assertSame($sub, $meta['sub'] ?? '');
-    $this->assertSame($iss, $meta['iss'] ?? '');
+    $this->assertSame($sub, $meta['sub']);
+    $this->assertSame($iss, $meta['iss']);
 
     $stack = new RequestStack();
     $request = Request::create('/mcp', 'POST');
@@ -303,15 +299,12 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     $audit->expects($this->once())->method('logAlways')->with(
       'denied_access',
       $this->callback(static function (array $row) use ($sub): bool {
-        $id = (string) ($row['id'] ?? '');
         $explain = (string) ($row['explain'] ?? '');
         $reason = (string) ($row['reason'] ?? '');
-        $unverified = (string) ($row['principal_unverified'] ?? '');
         $named = McpPrincipalKeyException::PART_TOO_LONG;
-        return $id === 'unverified'
-          && mb_strlen($id, 'UTF-8') <= McpAuditLogger::ENTITY_ID_MAX_LENGTH
+        return ($row['id'] ?? '') === 'unverified'
           && ($row['principal_key'] ?? '') === 'unverified'
-          && $unverified === $named
+          && ($row['principal_unverified'] ?? '') === $named
           && ($row['sub'] ?? '') === $sub
           && str_contains($explain . ' ' . $reason, $named);
       }),
@@ -371,11 +364,11 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     );
     $this->assertSame(
       McpAuditLogger::ENTITY_ID_MAX_LENGTH,
-      mb_strlen((string) ($meta['id'] ?? ''), 'UTF-8'),
+      mb_strlen($meta['id'], 'UTF-8'),
     );
-    $this->assertSame(str_repeat('c', 255), $meta['id'] ?? '');
-    $this->assertSame($sub, $meta['sub'] ?? '');
-    $this->assertStringStartsWith($iss . '|', $meta['principal_key'] ?? '');
+    $this->assertSame(str_repeat('c', 255), $meta['id']);
+    $this->assertSame($sub, $meta['sub']);
+    $this->assertStringStartsWith($iss . '|', $meta['principal_key']);
   }
 
   /**
