@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 use Drupal\Component\Utility\Crypt;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests the webhook delivery log listing page and replay action.
@@ -230,11 +231,13 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
   }
 
   /**
-   * CSRF token for $path using the Mink session seed.
+   * CSRF token for $path using the browser session seed.
    *
    * The test container's csrf_token service has a different
    * session from the logged-in browser, so a token minted
-   * there is rejected.
+   * there is rejected. The seed is read from the stored
+   * session payload; unserialize() is not used because the
+   * PHP session format warns on extra data.
    *
    * @param string $path
    *   Route path without a leading slash.
@@ -244,7 +247,10 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
    */
   private function csrfTokenForBrowserPath(string $path): string {
     $blob = $this->browserSessionBlob();
-    $seed = $this->csrfSeedFromSessionBlob($blob);
+    $seed = '';
+    if (preg_match('/s:1:"s";s:\d+:"([A-Za-z0-9_-]+)"/', $blob, $matches) === 1) {
+      $seed = $matches[1];
+    }
     $this->assertNotSame('', $seed, 'Session blob prefix: ' . substr($blob, 0, 200));
     $this->container->get('session_manager.metadata_bag')
       ->setCsrfTokenSeed($seed);
@@ -254,35 +260,38 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
   /**
    * Serialized session for the logged-in browser user.
    *
-   * Uses the session id stored by drupalLogin(). Looking up the
-   * cookie name from Request::create('/') can hash a different
-   * host than the test site and miss the browser cookie.
+   * The cookie name is hashed from the test-site base URL so it
+   * matches the browser cookie. The uid row is the fallback.
    *
    * @return string
    *   Stored session payload.
    */
   private function browserSessionBlob(): string {
+    $request = Request::create(rtrim((string) $this->baseUrl, '/') . '/');
+    $options = $this->container->get('session_configuration')
+      ->getOptions($request);
+    $name = is_array($options) && isset($options['name']) && is_string($options['name'])
+      ? $options['name']
+      : '';
+    $sid = $name !== '' ? (string) $this->getSession()->getCookie($name) : '';
+    if ($sid !== '') {
+      $blob = (string) $this->container->get('session_handler.storage')
+        ->read($sid);
+      if ($blob !== '') {
+        return $blob;
+      }
+      $blob = (string) \Drupal::database()
+        ->select('sessions', 's')
+        ->fields('s', ['session'])
+        ->condition('sid', Crypt::hashBase64($sid))
+        ->execute()
+        ->fetchField();
+      if ($blob !== '') {
+        return $blob;
+      }
+    }
     $account = $this->loggedInUser;
     $this->assertNotFalse($account);
-    $sid = '';
-    if (isset($account->sessionId) && is_string($account->sessionId)) {
-      $sid = $account->sessionId;
-    }
-    $this->assertNotSame('', $sid);
-    $blob = (string) $this->container->get('session_handler.storage')
-      ->read($sid);
-    if ($blob !== '') {
-      return $blob;
-    }
-    $blob = (string) \Drupal::database()
-      ->select('sessions', 's')
-      ->fields('s', ['session'])
-      ->condition('sid', Crypt::hashBase64($sid))
-      ->execute()
-      ->fetchField();
-    if ($blob !== '') {
-      return $blob;
-    }
     $blob = (string) \Drupal::database()
       ->select('sessions', 's')
       ->fields('s', ['session'])
@@ -293,87 +302,6 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
       ->fetchField();
     $this->assertNotSame('', $blob);
     return $blob;
-  }
-
-  /**
-   * Reads the CSRF seed out of a stored session payload.
-   *
-   * @param string $blob
-   *   Stored session payload.
-   *
-   * @return string
-   *   CSRF seed, or an empty string when missing.
-   */
-  private function csrfSeedFromSessionBlob(string $blob): string {
-    $unserialized = unserialize($blob, ['allowed_classes' => FALSE]);
-    $data = is_array($unserialized)
-      ? $unserialized
-      : $this->decodePhpSession($blob);
-    $seed = $this->csrfSeedFromSessionData($data);
-    if ($seed !== '') {
-      return $seed;
-    }
-    if (preg_match('/s:1:"s";s:\d+:"([A-Za-z0-9_-]+)"/', $blob, $matches)) {
-      return $matches[1];
-    }
-    return '';
-  }
-
-  /**
-   * Reads the CSRF seed from decoded session metadata.
-   *
-   * @param array<string, mixed> $data
-   *   Decoded session payload.
-   *
-   * @return string
-   *   CSRF seed, or an empty string when missing.
-   */
-  private function csrfSeedFromSessionData(array $data): string {
-    foreach ($data as $value) {
-      if (
-        is_array($value)
-        && isset($value['c'], $value['u'], $value['s'])
-        && is_string($value['s'])
-        && $value['s'] !== ''
-      ) {
-        return $value['s'];
-      }
-    }
-    return '';
-  }
-
-  /**
-   * Decodes the PHP pipe-delimited session payload.
-   *
-   * @param string $blob
-   *   Stored session payload.
-   *
-   * @return array<string, mixed>
-   *   Session keys and values.
-   */
-  private function decodePhpSession(string $blob): array {
-    $data = [];
-    $offset = 0;
-    $length = strlen($blob);
-    while ($offset < $length) {
-      $pipe = strpos($blob, '|', $offset);
-      if ($pipe === FALSE) {
-        break;
-      }
-      $key = substr($blob, $offset, $pipe - $offset);
-      if ($key === '') {
-        break;
-      }
-      $value = unserialize(substr($blob, $pipe + 1), [
-        'allowed_classes' => FALSE,
-      ]);
-      if ($value === FALSE && substr($blob, $pipe + 1, 5) !== 'b:0;') {
-        break;
-      }
-      $data[$key] = $value;
-      $offset = $pipe + 1 + strlen(serialize($value));
-    }
-    return $data;
   }
 
 }
