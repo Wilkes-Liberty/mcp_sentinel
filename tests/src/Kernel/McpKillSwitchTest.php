@@ -21,6 +21,7 @@ use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
 use Drupal\mcp_sentinel\Service\McpPaladinIntrospection;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpKillTtl;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
@@ -159,6 +160,223 @@ final class McpKillSwitchTest extends KernelTestBase {
     foreach ($this->bindingWeaken as $flag) {
       $this->bindings()->weakenForTest($flag);
     }
+  }
+
+  /**
+   * A pre-upgrade principal-key stop still kills a delegated token.
+   *
+   * Stored rows used iss|sub|<act.sub>. After the act: prefix,
+   * dual-match keeps that stop fail-closed. Over-inclusive: the
+   * same row also stops azp=<act.sub>.
+   */
+  public function testLegacyPrincipalKeyKillStopsDelegatedToken(): void {
+    $legacy = $this->principalSelector('subject-legacy', 'agent-7');
+    $this->killSwitch()->kill([$legacy], 'pre-upgrade', $this->paladinA());
+    $this->sealSubject('subject-legacy', 'other-client', 'agent-7');
+    try {
+      $this->dispatcher()->admit(['note' => 'ok'], 'mcp_kill_probe');
+      $this->fail('A legacy principal-key stop must still refuse the delegated token.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertSame(
+        McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+        $e->getMessage(),
+      );
+    }
+    $this->sealSubject('subject-legacy', 'agent-7');
+    $this->expectGenericDeny();
+  }
+
+  /**
+   * A kill row for iss|sub|act:X stops a delegated token.
+   */
+  public function testActPrefixedKillStopsDelegatedToken(): void {
+    $prefixed = $this->principalSelector(
+      'subject-act',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $this->killSwitch()->kill([$prefixed], 'delegated', $this->paladinA());
+    $this->sealSubject('subject-act', 'other-client', 'agent-7');
+    $this->expectGenericDeny();
+    $this->sealSubject('subject-act', 'other-client', 'agent-8');
+    $this->assertSame(
+      'subject-act',
+      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+    );
+  }
+
+  /**
+   * A new act:X stop also refuses a non-delegated azp=X token.
+   *
+   * Dual-match is permanent, not limited to leftover legacy
+   * rows. Identity stays separated: the sealed key is still
+   * iss|sub|X.
+   */
+  public function testNewActPrefixedStopRefusesNonDelegatedAzpToken(): void {
+    $prefixed = $this->principalSelector(
+      'subject-new-azp',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $this->killSwitch()->kill([$prefixed], 'new-act-stop', $this->paladinA());
+    $this->sealSubject('subject-new-azp', 'agent-7');
+    $this->expectGenericDeny();
+    $this->sealSubject('subject-new-azp', 'agent-8');
+    $this->assertSame(
+      'subject-new-azp',
+      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+    );
+  }
+
+  /**
+   * A new iss|sub|X stop also refuses a delegated act.sub=X token.
+   *
+   * Dual-match is permanent, not limited to leftover legacy
+   * rows. Identity stays separated: the sealed key is still
+   * iss|sub|act:X.
+   */
+  public function testNewUnprefixedStopRefusesDelegatedActSubToken(): void {
+    $unprefixed = $this->principalSelector('subject-new-act', 'agent-7');
+    $this->killSwitch()->kill([$unprefixed], 'new-azp-stop', $this->paladinA());
+    $this->sealSubject('subject-new-act', 'other-client', 'agent-7');
+    $this->expectGenericDeny();
+    $this->sealSubject('subject-new-act', 'other-client', 'agent-8');
+    $this->assertSame(
+      'subject-new-act',
+      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+    );
+  }
+
+  /**
+   * Status and unkill match the stored spelling; enforcement matches both.
+   *
+   * A legacy iss|sub|X stop still refuses act.sub=X. Status and
+   * unkill of the act: twin find no row. The operator must use
+   * the stored spelling.
+   */
+  public function testStatusAndUnkillMatchStoredSpellingOnly(): void {
+    $legacy = $this->principalSelector('subject-status-spell', 'agent-7');
+    $prefixed = $this->principalSelector(
+      'subject-status-spell',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $this->killSwitch()->kill([$legacy], 'stored-spelling', $this->paladinA());
+    $this->sealSubject('subject-status-spell', 'other-client', 'agent-7');
+    $this->expectGenericDeny();
+    $this->assertNull($this->killSwitch()->status($prefixed));
+    $stored = $this->killSwitch()->status($legacy);
+    $this->assertIsArray($stored);
+    $this->assertSame($legacy->key, $stored['selector_key']);
+    try {
+      $this->killSwitch()->requestUnkill(
+        [$prefixed],
+        'twin-spelling',
+        $this->paladinA(),
+      );
+      $this->fail('Unkill of the twin spelling must not find the stored row.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::NOT_PENDING, $e->reasonCode);
+    }
+    $pending = $this->killSwitch()->requestUnkill(
+      [$legacy],
+      'stored-spelling',
+      $this->paladinA(),
+    );
+    $this->assertTrue($pending->needsConfirm);
+    $this->assertSame(McpKillBlockStatus::UnkillPending, $pending->status);
+  }
+
+  /**
+   * A composed key over 770 is refused at dispatch and audited.
+   *
+   * A 256/256/253 delegated token is 771 characters. Admit
+   * must fail closed with part_too_long on the denied_access
+   * row. Removing assertSafeComposedKey() makes this fail.
+   */
+  public function testComposedOverlongDelegatedTokenIsDeniedAndAudited(): void {
+    $iss = str_repeat('a', 256);
+    $sub = str_repeat('a', 256);
+    $actSub = str_repeat('a', 253);
+    $claims = [
+      'iss' => $iss,
+      'sub' => $sub,
+      'azp' => 'agent-client',
+      'act' => ['sub' => $actSub],
+      'tenant' => 'tenant-a',
+    ];
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
+    try {
+      $this->dispatcher()->admit(['note' => 'ok'], 'mcp_kill_probe');
+      $this->fail('A 771-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertStringContainsString(
+        McpPrincipalKeyException::PART_TOO_LONG,
+        $e->getMessage(),
+      );
+    }
+    $meta = $this->lastAuditMetadata('denied_access');
+    $this->assertStringContainsString(
+      McpPrincipalKeyException::PART_TOO_LONG,
+      (string) ($meta['explain'] ?? '') . ' ' . (string) ($meta['reason'] ?? ''),
+    );
+  }
+
+  /**
+   * A new act: stop holds a job that still carries the pre-upgrade key.
+   */
+  public function testActPrefixedKillHoldsLegacyCarriedJob(): void {
+    $prefixed = $this->principalSelector(
+      'subject-carry',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $this->killSwitch()->kill([$prefixed], 'queued work', $this->paladinA());
+    $legacyKey = self::ISS . '|subject-carry|agent-7';
+    $this->assertTrue(
+      $this->killSwitch()->wouldHoldKeys(
+        $legacyKey,
+        self::ISS . '|subject-carry',
+        'tenant-a',
+      ),
+    );
+    $job = new McpPrincipalContextJob($this->principalContextHolder());
+    $handle = $job->beginCarrying(
+      $legacyKey,
+      self::ISS . '|subject-carry',
+      'tenant-a',
+    );
+    try {
+      $this->dispatcher()->admit(['note' => 'ok'], 'mcp_kill_job_probe');
+      $this->fail('A carried pre-upgrade key must be refused by an act: stop.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+    }
+    $job->end($handle);
   }
 
   /**
@@ -1599,15 +1817,26 @@ final class McpKillSwitchTest extends KernelTestBase {
 
   /**
    * Seals a Paladin-shaped principal on the current request.
+   *
+   * @param string $sub
+   *   Subject claim.
+   * @param string $azp
+   *   Authorized-party claim.
+   * @param string|null $actSub
+   *   Top-level act.sub when sealing a delegated token.
    */
-  private function sealSubject(string $sub, string $azp): void {
-    $request = Request::create('/mcp', 'POST');
-    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+  private function sealSubject(string $sub, string $azp, ?string $actSub = NULL): void {
+    $claims = [
       'iss' => self::ISS,
       'sub' => $sub,
       'azp' => $azp,
       'tenant' => 'tenant-a',
-    ]);
+    ];
+    if ($actSub !== NULL) {
+      $claims['act'] = ['sub' => $actSub];
+    }
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
     $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
     $holder = $this->principalContextHolder();
     $holder->resetForTest();

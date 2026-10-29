@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -286,7 +287,9 @@ final class McpPrincipalContextTest extends UnitTestCase {
   public function testDelegatedTokenPrincipalKeyUsesImmediateActSub(): void {
     $ctx = $this->context(actChain: ['agent-1', 'agent-2']);
     $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-1',
+      'https://idp.example/realms/agents|human-1|'
+      . McpPrincipalKey::ACT_PREFIX
+      . 'agent-1',
       $ctx->principalKey(),
     );
     $this->assertSame(

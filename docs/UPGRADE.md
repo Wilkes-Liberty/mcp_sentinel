@@ -4,6 +4,78 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Principal-key actor slot no longer mixes azp and act.sub
+
+`McpPrincipalKey::fromClaims()` keeps non-delegated keys as
+`iss|sub|azp` (no prefix). A delegated actor is stored as
+`act:` plus top-level `act.sub`, so `azp=X` and `act.sub=X` compose
+different keys (`iss|sub|X` vs `iss|sub|act:X`). An `azp` that
+already starts with `act:` (any case) is refused
+(`actor_claim_collision`). Same-token `azp=X` with `act.sub=X` is
+allowed; it composes the delegated key. Dispatch writes
+`denied_access` with reason `actor_claim_collision` for the prefix
+collision; the caller still sees the generic missing-principal
+refusal.
+
+No `updatedb` and no row rewrite. Stored `X` cannot be proven to
+have been `azp` versus `act.sub`, so kill-switch matching and
+webhook hold selection permanently treat `iss|sub|X` and
+`iss|sub|act:X` as the same stop. That pairing is fail-closed and
+over-inclusive (over-block only, never under-block): a new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token,
+and a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token, for as long as this module is installed. Individual stops
+still expire at their TTL; the pairing itself is not bounded to
+pre-upgrade rows. Audit and stored `principal_key` identity stay
+separated (`iss|sub|X` versus `iss|sub|act:X`). A new `act:` stop
+also holds webhook rows and carried jobs stored under the
+unprefixed key. Rebuild caches (`drush cr`).
+
+Policy profiles and designated-client matching still use the OAuth
+`client_id` / `azp` allowlist, not this actor slot. Request-rate
+flood keys still use the server-resolved uid. The language-neutral
+vectors in `tests/fixtures/principal-key-vectors.json` now expect
+the `act:` prefix on delegated keys; a JS twin of `fromClaims()`
+must match, including the raw `act.sub` cap and the 770-character
+composed-key bound. Product code always emits lowercase `act:`. Webhook
+hold selection uses SQL `IN` on those aliases; a MySQL `*_ci`
+collation can still over-hold a whole-key case fold, which predates
+this prefix. Dual-match strips one `act:` prefix only:
+`iss|sub|act:act:X` pairs with `iss|sub|act:X`, not with
+`iss|sub|X`. Operator-supplied `ACT:X` is stored as `act:X`.
+`holdMatching` uses that same set, so a stop of `iss|sub|act:X`
+does not select a pending row stored as `iss|sub|act:act:X`.
+Send-time `shouldHoldRow` still holds that row because the
+stored key's aliases include `iss|sub|act:X`. Product code
+emits `act:act:X` only when `act.sub` is itself `act:X`.
+
+**Upgrade:** operators do not need to re-issue active delegated
+stops across this deploy. Dual-match keeps a pre-upgrade
+`--principal-key=iss|sub|<act.sub>` stop in force, and a new
+`iss|sub|act:<act.sub>` stop holds backlog stored under the old
+spelling. Prefer the prefixed form for new delegated stops.
+`parsePrincipalKey` still accepts the unprefixed three-part form;
+that stop now enforces both spellings. A composed principal
+key longer than 770 characters (`McpKillSelector::MAX_KEY_LENGTH`)
+is refused (`part_too_long`): a 256/256/252 delegated token
+is exactly 770 and stays accepted; a 256/256/256 token is
+774 and is refused. Before this change, a delegated token
+whose raw `iss`, `sub`, and `act.sub` totalled 765–768
+characters composed an unprefixed key of at most 770 and
+was accepted. Those tokens now compose `iss|sub|act:X` over
+770 and are refused (`part_too_long`). `kill-status` and
+`unkill` still match the stored row's exact spelling. If
+enforcement refuses a token under a legacy `iss|sub|X` stop,
+status or unkill with `iss|sub|act:X` finds no row. Use the
+stored spelling.
+
+**Rollback:** revert the module and rebuild caches. Dual-match goes
+away with the revert, so exact sha256 matching returns. Kill-switch
+rows and webhook keys written with the `act:` prefix after this
+change will not match the old unprefixed lookup. Re-issue those
+delegated stops as `iss|sub|<act.sub>` if the previous code is
+restored. No `updatedb` to undo.
+
 ## Sealed-token reveal is POST with a CSRF token
 
 `GET /admin/config/services/mcp-sentinel/tokens/reveal` no longer

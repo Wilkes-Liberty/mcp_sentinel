@@ -306,7 +306,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertSame(['mcp_read', 'mcp_write'], $seen['scopes']);
     $this->assertSame(['agent-1', 'agent-2'], $seen['act']);
     $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-1',
+      'https://idp.example/realms/agents|human-1|act:agent-1',
       $seen['principal_key'],
     );
     $this->assertSame(
@@ -338,7 +338,7 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertSame(['agent-1'], $data['act']);
     $this->assertTrue($data['network']);
     $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-1',
+      'https://idp.example/realms/agents|human-1|act:agent-1',
       $data['principal_key'],
     );
     $this->assertSame(

@@ -170,6 +170,22 @@ final class McpDenyExplainer {
         'Stay denied.',
       );
     }
+    // Checked before "verified principal": the generic caller
+    // refusal is appended to the collision seed and would
+    // otherwise fold this into missing_principal.
+    if (str_contains($reason, 'actor_claim_collision')) {
+      return new McpDenyExplanation(
+        'actor_claim_collision',
+        'actor claim collision',
+        FALSE,
+        'Mint a token whose authorized-party (azp) does not '
+        . 'start with the act: actor prefix (any case). That '
+        . 'prefix is reserved for delegated act.sub so azp '
+        . 'cannot occupy a delegated principal key, kill-switch '
+        . 'row, or webhook bucket.',
+        'Stay denied.',
+      );
+    }
     if (str_contains($reason, 'missing_principal')
       || str_contains($reason, 'verified principal')) {
       return new McpDenyExplanation(

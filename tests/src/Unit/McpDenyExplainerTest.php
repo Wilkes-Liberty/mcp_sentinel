@@ -197,6 +197,27 @@ final class McpDenyExplainerTest extends UnitTestCase {
   }
 
   /**
+   * An azp / act.sub collision is named, not folded into missing_principal.
+   *
+   * @covers ::explain
+   */
+  public function testActorClaimCollisionIsNamed(): void {
+    $explained = (new McpDenyExplainer())->explain(
+      'actor_claim_collision A verified principal context is required.',
+    );
+    $this->assertSame('actor_claim_collision', $explained->ruleId);
+    $this->assertFalse($explained->widenAppropriate);
+    $this->assertStringContainsString('azp', $explained->nextStep);
+    $this->assertStringContainsString('act:', $explained->nextStep);
+    $this->assertStringContainsString('prefix', $explained->nextStep);
+    $this->assertStringNotContainsString(
+      'missing_principal',
+      $explained->format(),
+    );
+    $this->assertStringNotContainsString('DEV-', $explained->nextStep);
+  }
+
+  /**
    * An unsupported GraphQL operation kind is named, not unspecified.
    *
    * @covers ::explain

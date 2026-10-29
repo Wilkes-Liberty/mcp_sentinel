@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpKillEnforcerInterface;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
@@ -238,6 +239,65 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       }
     }
     $job->end($handle);
+  }
+
+  /**
+   * An azp that uses the delegated actor prefix is refused and audited.
+   *
+   * The caller sees the generic missing-principal refusal so a
+   * prefix collision is not a distinct agent-facing signal. The
+   * denied_access row names actor_claim_collision.
+   *
+   * @covers ::assertDispatchAllowed
+   */
+  public function testAzpUsingActPrefixIsDeniedAndAudited(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $azp = 'act:forged-client-secret-value';
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => $azp,
+      'tenant' => 'tenant-a',
+    ]);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $collision = McpPrincipalKeyException::ACTOR_CLAIM_COLLISION;
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      'denied_access',
+      $this->callback(static function (array $meta) use ($collision, $azp): bool {
+        $explain = (string) ($meta['explain'] ?? '');
+        foreach (['explain', 'reason', 'principal_key', 'human_key', 'rule', 'principal_unverified'] as $field) {
+          if (str_contains((string) ($meta[$field] ?? ''), $azp)) {
+            return FALSE;
+          }
+        }
+        return ($meta['reason'] ?? '') === $collision
+          && ($meta['principal_key'] ?? '') === 'unverified'
+          && ($meta['human_key'] ?? '') === 'unverified'
+          && ($meta['principal_unverified'] ?? '') === $collision
+          && ($meta['rule'] ?? '') === $collision
+          && ($meta['azp'] ?? '') === $azp
+          && !str_contains(strtolower($explain), 'secret');
+      }),
+    );
+    $dispatcher = $this->dispatcher($stack, $holder, $audit);
+    try {
+      $dispatcher->admit(['note' => 'ok'], 'tool-a');
+      $this->fail('azp that uses the act: prefix must be denied.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertSame(
+        McpPrincipalContextDispatcher::GENERIC_REFUSAL,
+        $e->getMessage(),
+      );
+    }
   }
 
   /**

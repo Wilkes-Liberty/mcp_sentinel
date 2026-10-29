@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Service\McpPrincipalKey;
+use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -91,7 +93,305 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains('nbsp-only-sub', $names);
     $this->assertContains('part-too-long-iss', $names);
     $this->assertContains('part-too-long-actor', $names);
+    $this->assertContains('azp-equals-act-sub-uses-act-prefix', $names);
+    $this->assertContains('act-sub-namespaced-apart-from-azp', $names);
+    $this->assertContains('azp-with-act-prefix-denied', $names);
+    $this->assertContains('azp-with-uppercase-act-prefix-denied', $names);
+    $this->assertContains('act-sub-252-accepted', $names);
+    $this->assertContains('act-sub-253-accepted', $names);
+    $this->assertContains('act-sub-256-accepted', $names);
+    $this->assertContains('act-sub-257-refused', $names);
+    $this->assertContains('delegated-composed-770-accepted', $names);
+    $this->assertContains('delegated-composed-771-refused', $names);
+    $this->assertContains('delegated-composed-774-refused', $names);
     $this->assertSame($names, array_unique($names));
+  }
+
+  /**
+   * Tokens with azp=X and act.sub=X must not share a principal key.
+   *
+   * The actor slot used to copy either claim as a raw string, so a
+   * delegated token with act.sub=X shared kill, webhook, and audit
+   * identity with a non-delegated token whose azp was X.
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpAndActSubDoNotShareTheActorNamespace(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $azpOnly = McpPrincipalKey::fromClaims([
+      'iss' => $iss,
+      'sub' => 'human-1',
+      'azp' => 'shared-x',
+    ]);
+    $delegated = McpPrincipalKey::fromClaims([
+      'iss' => $iss,
+      'sub' => 'human-1',
+      'azp' => 'other-client',
+      'act' => ['sub' => 'shared-x'],
+    ]);
+    $this->assertSame(
+      $iss . '|human-1|shared-x',
+      $azpOnly['principalKey'],
+    );
+    $this->assertSame(
+      $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'shared-x',
+      $delegated['principalKey'],
+    );
+    $this->assertNotSame(
+      $azpOnly['principalKey'],
+      $delegated['principalKey'],
+      'act.sub=X must not compose the same principal as azp=X.',
+    );
+    $this->assertSame($azpOnly['humanKey'], $delegated['humanKey']);
+  }
+
+  /**
+   * Same-token azp=X with act.sub=X composes the prefixed delegated key.
+   *
+   * The prefix already separates that identity from azp-only X.
+   * Refusing self-actor tokens would be an availability cost, not
+   * a namespace requirement.
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpEqualToActSubComposesThePrefixedActor(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $got = McpPrincipalKey::fromClaims([
+      'iss' => $iss,
+      'sub' => 'human-1',
+      'azp' => 'shared-x',
+      'act' => ['sub' => 'shared-x'],
+    ]);
+    $this->assertSame(
+      $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'shared-x',
+      $got['principalKey'],
+    );
+    $azpOnly = McpPrincipalKey::fromClaims([
+      'iss' => $iss,
+      'sub' => 'human-1',
+      'azp' => 'shared-x',
+    ]);
+    $this->assertNotSame($azpOnly['principalKey'], $got['principalKey']);
+  }
+
+  /**
+   * An azp that already uses the act.sub prefix cannot occupy that namespace.
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpUsingActPrefixFailsClosed(): void {
+    try {
+      McpPrincipalKey::fromClaims([
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => McpPrincipalKey::ACT_PREFIX . 'forged',
+      ]);
+      $this->fail('azp must not use the act.sub actor prefix.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(
+        McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+        $e->reasonCode,
+      );
+    }
+  }
+
+  /**
+   * The prefix guard is case-insensitive (ACT:X is refused).
+   *
+   * @covers ::fromClaims
+   */
+  public function testAzpUsingUppercaseActPrefixFailsClosed(): void {
+    try {
+      McpPrincipalKey::fromClaims([
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'ACT:forged',
+      ]);
+      $this->fail('azp must not use a case variant of the act.sub prefix.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(
+        McpPrincipalKeyException::ACTOR_CLAIM_COLLISION,
+        $e->reasonCode,
+      );
+    }
+  }
+
+  /**
+   * ParsePrincipalKey still accepts the pre-prefix delegated form.
+   *
+   * @covers ::parsePrincipalKey
+   */
+  public function testParsePrincipalKeyAcceptsLegacyDelegatedForm(): void {
+    $legacy = 'https://idp.example/realms/agents|human-1|agent-7';
+    $this->assertSame($legacy, McpPrincipalKey::parsePrincipalKey($legacy));
+  }
+
+  /**
+   * Parse applies the 256 cap to the raw act.sub, not the prefixed actor.
+   *
+   * @covers ::parsePrincipalKey
+   */
+  public function testParsePrincipalKeyCapsRawActSubBeforePrefix(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $accepted = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 256);
+    $this->assertSame($accepted, McpPrincipalKey::parsePrincipalKey($accepted));
+    try {
+      McpPrincipalKey::parsePrincipalKey(
+        $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 257),
+      );
+      $this->fail('A 257-character act.sub must fail closed.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::PART_TOO_LONG, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Parse refuses a composed delegated key over the stored column.
+   *
+   * A 256/256/252 token is exactly 770 and stays accepted.
+   * A 256/256/253 token is 771 and is refused. A 256/256/256
+   * token is 774. The kill and webhook columns stop at 770.
+   *
+   * @covers ::parsePrincipalKey
+   */
+  public function testParsePrincipalKeyRefusesOverlongComposedDelegatedKey(): void {
+    $iss = str_repeat('a', 256);
+    $sub = str_repeat('a', 256);
+    $accepted = $iss . '|' . $sub . '|'
+      . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 252);
+    $this->assertSame(770, mb_strlen($accepted, 'UTF-8'));
+    $this->assertSame($accepted, McpPrincipalKey::parsePrincipalKey($accepted));
+    $justOver = $iss . '|' . $sub . '|'
+      . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 253);
+    $this->assertSame(771, mb_strlen($justOver, 'UTF-8'));
+    try {
+      McpPrincipalKey::parsePrincipalKey($justOver);
+      $this->fail('A 771-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::PART_TOO_LONG, $e->reasonCode);
+    }
+    $overlong = $iss . '|' . $sub . '|'
+      . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 256);
+    $this->assertSame(774, mb_strlen($overlong, 'UTF-8'));
+    try {
+      McpPrincipalKey::parsePrincipalKey($overlong);
+      $this->fail('A 774-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::PART_TOO_LONG, $e->reasonCode);
+    }
+  }
+
+  /**
+   * Operator-supplied ACT: prefix is canonicalized to act:.
+   *
+   * @covers ::parsePrincipalKey
+   */
+  public function testParsePrincipalKeyCanonicalizesActPrefixCase(): void {
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|'
+      . McpPrincipalKey::ACT_PREFIX
+      . 'agent-7',
+      McpPrincipalKey::parsePrincipalKey(
+        'https://idp.example/realms/agents|human-1|ACT:agent-7',
+      ),
+    );
+  }
+
+  /**
+   * Kill/webhook aliases pair iss|sub|X with iss|sub|act:X.
+   *
+   * Permanent fail-closed pairing: a new stop on X also
+   * stops azp=X, and a new act:X stop also stops act.sub=X.
+   * Exact sha256 of the two spellings differs, so without
+   * aliases either spelling would fail open.
+   *
+   * @covers ::enforcementAliases
+   */
+  public function testEnforcementAliasesPairLegacyAndPrefixedForms(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $legacy = $iss . '|human-1|agent-7';
+    $prefixed = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $fromLegacy = McpPrincipalKey::enforcementAliases($legacy);
+    $fromPrefixed = McpPrincipalKey::enforcementAliases($prefixed);
+    $this->assertContains($legacy, $fromLegacy);
+    $this->assertContains($prefixed, $fromLegacy);
+    $this->assertContains($legacy, $fromPrefixed);
+    $this->assertContains($prefixed, $fromPrefixed);
+    $this->assertEqualsCanonicalizing($fromLegacy, $fromPrefixed);
+    $this->assertNotContains($iss . '|human-2|agent-7', $fromLegacy);
+    $this->assertNotContains(
+      $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'act:agent-7',
+      $fromLegacy,
+    );
+    $legacyHash = hash('sha256', 'principal_key' . "\0" . $legacy);
+    $prefixedHash = hash('sha256', 'principal_key' . "\0" . $prefixed);
+    $this->assertNotSame(
+      $legacyHash,
+      $prefixedHash,
+      'Exact-match lookup of the two spellings would fail open.',
+    );
+  }
+
+  /**
+   * Dual-match strips one act: prefix only.
+   *
+   * The iss|sub|act:act:X form pairs with iss|sub|act:X, not
+   * with iss|sub|X. Operator-supplied ACT:X is canonicalized
+   * to act:X and then paired with X.
+   *
+   * @covers ::enforcementAliases
+   */
+  public function testEnforcementAliasesStripOnePrefixOnly(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $double = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX
+      . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $prefixed = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $legacy = $iss . '|human-1|agent-7';
+    $fromDouble = McpPrincipalKey::enforcementAliases($double);
+    $this->assertContains($double, $fromDouble);
+    $this->assertContains($prefixed, $fromDouble);
+    $this->assertNotContains($legacy, $fromDouble);
+    $fromUpper = McpPrincipalKey::enforcementAliases(
+      $iss . '|human-1|ACT:agent-7',
+    );
+    $this->assertEqualsCanonicalizing([$prefixed, $legacy], $fromUpper);
+    $this->assertNotContains($double, $fromUpper);
+  }
+
+  /**
+   * Kill lookup hashes the actor-slot twin; exact-match would not.
+   *
+   * Dual-match is permanent. Reverting this module restores
+   * exact sha256 matching: an act: stop would miss an
+   * unprefixed row, and an unprefixed stop would miss a
+   * delegated token.
+   *
+   * @covers ::enforcementAliases
+   */
+  public function testKillLookupHashesIncludeTheActorSlotTwin(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $legacy = $iss . '|human-1|agent-7';
+    $prefixed = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $legacyOnly = (new McpKillSelector(
+      McpKillSelectorType::PrincipalKey,
+      $legacy,
+    ))->hash();
+    $prefixedOnly = (new McpKillSelector(
+      McpKillSelectorType::PrincipalKey,
+      $prefixed,
+    ))->hash();
+    $this->assertNotSame($legacyOnly, $prefixedOnly);
+    $fromLegacy = McpKillSelector::principalKeyLookupHashes($legacy);
+    $fromPrefixed = McpKillSelector::principalKeyLookupHashes($prefixed);
+    $this->assertContains($prefixedOnly, $fromLegacy);
+    $this->assertContains($legacyOnly, $fromPrefixed);
+    $this->assertContains($legacyOnly, $fromLegacy);
+    $this->assertContains($prefixedOnly, $fromPrefixed);
   }
 
   /**
@@ -127,7 +427,9 @@ final class McpPrincipalKeyTest extends UnitTestCase {
       McpPrincipalKey::formatHuman($ctx),
     );
     $this->assertSame(
-      'https://idp.example/realms/agents|human-1|agent-1',
+      'https://idp.example/realms/agents|human-1|'
+      . McpPrincipalKey::ACT_PREFIX
+      . 'agent-1',
       $ctx->principalKey(),
     );
   }

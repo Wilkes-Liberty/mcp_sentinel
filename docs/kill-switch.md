@@ -21,8 +21,30 @@ A stop targets one of three things:
 | Tenant-wide | `--tenant=TENANT` | Every agent whose token carries that tenant. |
 
 The keys use the same format the module uses everywhere else. `iss` is the
-token issuer. `sub` is the person. `actor` is the agent: the token's
-top-level `act.sub`, or `azp` when there is no `act.sub`.
+token issuer. `sub` is the person. `actor` is the agent: `act:` plus the
+token's top-level `act.sub` when a delegation claim is present, or `azp`
+when there is no `act.sub`. An `azp` that already starts with `act:` (any
+case) is refused (`actor_claim_collision`) and never occupies that slot.
+Kill-switch matching and webhook holds permanently treat
+`iss|sub|X` and `iss|sub|act:X` as the same stop (fail-closed,
+over-inclusive: over-block only, never under-block). A new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token;
+a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token. Audit and stored `principal_key` identity stay separated.
+Non-delegated stops (`iss|sub|azp`) still store the unprefixed
+key; enforcement looks up both spellings. Dual-match strips
+one `act:` prefix only: `iss|sub|act:act:X` pairs with
+`iss|sub|act:X`, not with `iss|sub|X`. Operator-supplied
+`ACT:X` is stored as `act:X`. `holdMatching` uses that same
+set, so a stop of `iss|sub|act:X` does not select a pending
+row stored as `iss|sub|act:act:X`. Send-time `shouldHoldRow`
+still holds that row. `kill-status` and `unkill` match the
+stored row's exact spelling. If a token is refused under a
+legacy `iss|sub|X` stop, status and unkill with
+`iss|sub|act:X` find no row. Use the stored spelling.
+A composed principal key longer than 770 characters is
+refused (`part_too_long`). A 256-character `act.sub` is
+accepted when `iss` and `sub` still fit that column.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the
@@ -369,7 +391,10 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=alice --principa
 ```
 
 Use `--human-key` or `--tenant` for those kinds of stop. The command
-prints `status: unkill_pending` and a batch id.
+prints `status: unkill_pending` and a batch id. The selector must
+match the stored spelling. Unkill of `iss|sub|act:X` does not
+find a row stored as `iss|sub|X`, even while that stop still
+refuses the delegated token.
 
 **The target stays stopped while the lift is pending.**
 
@@ -445,6 +470,10 @@ Pass exactly one selector. If there is no row, the command prints
 `status: active`. Otherwise it prints a table with `status`,
 `selector_type`, `selector_key`, `block_until`, `ttl`, `batch_id`,
 `requested_by`, `confirmed_by`, and `unkill_batch_id`.
+`kill-status` and `unkill` hash the supplied selector exactly.
+Enforcement matches both `iss|sub|X` and `iss|sub|act:X`, so a
+token can be refused while status of the twin spelling prints
+`active`. Use the stored `selector_key` spelling.
 
 `block_until` is a Unix timestamp. The `requested_by` and `confirmed_by`
 values are operator identity hashes, not names.

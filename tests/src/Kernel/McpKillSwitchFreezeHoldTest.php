@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 use Drupal\mcp_sentinel_test\Service\McpTestKillBlockUntilReader;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
@@ -100,6 +101,151 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     // is not always at modules/contrib/.
     require_once \Drupal::root() . '/' . \Drupal::service('extension.list.module')
       ->getPath('mcp_sentinel') . '/mcp_sentinel.install';
+  }
+
+  /**
+   * A new act: stop holds webhook rows stored with the pre-upgrade key.
+   */
+  public function testActPrefixedKillHoldsLegacyWebhookRow(): void {
+    $legacyKey = self::ISS . '|subject-wh-legacy|agent-7';
+    $prefixed = $this->principalSelector(
+      'subject-wh-legacy',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $in = $this->insertDelivery([
+      'principal_key' => $legacyKey,
+      'human_key' => self::ISS . '|subject-wh-legacy',
+      'tenant' => 'tenant-a',
+    ]);
+    $out = $this->insertDelivery([
+      'principal_key' => self::ISS . '|subject-wh-out|agent-out',
+      'human_key' => self::ISS . '|subject-wh-out',
+      'tenant' => 'tenant-out',
+    ]);
+    $this->killSwitch()->kill([$prefixed], 'hold-legacy', $this->paladinA());
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($in)['status'],
+    );
+    $this->assertSame('pending', $this->loadDelivery($out)['status']);
+  }
+
+  /**
+   * A legacy principal-key stop holds post-upgrade delegated webhook rows.
+   */
+  public function testLegacyKillHoldsActPrefixedWebhookRow(): void {
+    $prefixedKey = self::ISS . '|subject-wh-new|'
+      . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $legacy = $this->principalSelector('subject-wh-new', 'agent-7');
+    $in = $this->insertDelivery([
+      'principal_key' => $prefixedKey,
+      'human_key' => self::ISS . '|subject-wh-new',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->killSwitch()->kill([$legacy], 'hold-new', $this->paladinA());
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($in)['status'],
+    );
+  }
+
+  /**
+   * A held row's batch id matches a twin-spelling stop.
+   *
+   * MatchingKillBatchId looks up the actor-slot twin. Exact
+   * hash of the stored key would leave the hold audit
+   * batch_id empty.
+   */
+  public function testMatchingKillBatchIdPairsLegacyAndPrefixedSpellings(): void {
+    $prefixed = $this->principalSelector(
+      'subject-batch-a',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $killPrefixed = $this->killSwitch()->kill(
+      [$prefixed],
+      'batch-twin-a',
+      $this->paladinA(),
+    );
+    $legacyId = $this->insertDelivery([
+      'principal_key' => self::ISS . '|subject-batch-a|agent-7',
+      'human_key' => self::ISS . '|subject-batch-a',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->queue()->markHeld($legacyId);
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($legacyId)['status'],
+    );
+    $holdPrefixed = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->assertSame($killPrefixed->batchId, $holdPrefixed['batch_id']);
+
+    $legacy = $this->principalSelector('subject-batch-b', 'agent-7');
+    $killLegacy = $this->killSwitch()->kill(
+      [$legacy],
+      'batch-twin-b',
+      $this->paladinA(),
+    );
+    $prefixedId = $this->insertDelivery([
+      'principal_key' => self::ISS . '|subject-batch-b|'
+        . McpPrincipalKey::ACT_PREFIX . 'agent-7',
+      'human_key' => self::ISS . '|subject-batch-b',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->queue()->markHeld($prefixedId);
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($prefixedId)['status'],
+    );
+    $holdLegacy = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->assertSame($killLegacy->batchId, $holdLegacy['batch_id']);
+  }
+
+  /**
+   * Hold matching does not select act:act:X; send-time still holds it.
+   *
+   * Strip-one-prefix pairs a stop of iss|sub|act:X with X, not
+   * with act:act:X. shouldHoldRow looks up the stored key, whose
+   * aliases include act:X, so the worker still holds the row.
+   */
+  public function testHoldMatchingSkipsDoublePrefixedRow(): void {
+    $doubleKey = self::ISS . '|subject-wh-double|'
+      . McpPrincipalKey::ACT_PREFIX . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $prefixed = $this->principalSelector(
+      'subject-wh-double',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $id = $this->insertDelivery([
+      'principal_key' => $doubleKey,
+      'human_key' => self::ISS . '|subject-wh-double',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->killSwitch()->kill([$prefixed], 'hold-double', $this->paladinA());
+    $this->assertSame('pending', $this->loadDelivery($id)['status']);
+    $this->assertTrue($this->queue()->shouldHoldRow($this->loadDelivery($id)));
+  }
+
+  /**
+   * A kill row for iss|sub|act:X stops a delegated token and holds its rows.
+   */
+  public function testActPrefixedKillStopsDelegatedTokenAndHoldsWebhookRows(): void {
+    $prefixed = $this->principalSelector(
+      'subject-wh-act',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $newKey = self::ISS . '|subject-wh-act|'
+      . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $in = $this->insertDelivery([
+      'principal_key' => $newKey,
+      'human_key' => self::ISS . '|subject-wh-act',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->killSwitch()->kill([$prefixed], 'hold-act', $this->paladinA());
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($in)['status'],
+    );
+    $this->sealSubject('subject-wh-act', 'other-client', 'tenant-a', 'agent-7');
+    $this->expectGenericDeny();
   }
 
   /**
@@ -2305,15 +2451,33 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
 
   /**
    * Seals a Paladin-shaped principal on the current request.
+   *
+   * @param string $sub
+   *   Subject claim.
+   * @param string $azp
+   *   Authorized-party claim.
+   * @param string $tenant
+   *   Tenant claim.
+   * @param string|null $actSub
+   *   Top-level act.sub when sealing a delegated token.
    */
-  private function sealSubject(string $sub, string $azp, string $tenant = 'tenant-a'): void {
-    $request = Request::create('/mcp', 'POST');
-    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+  private function sealSubject(
+    string $sub,
+    string $azp,
+    string $tenant = 'tenant-a',
+    ?string $actSub = NULL,
+  ): void {
+    $claims = [
       'iss' => self::ISS,
       'sub' => $sub,
       'azp' => $azp,
       'tenant' => $tenant,
-    ]);
+    ];
+    if ($actSub !== NULL) {
+      $claims['act'] = ['sub' => $actSub];
+    }
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
     $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
     $holder = $this->principalContextHolder();
     $holder->resetForTest();

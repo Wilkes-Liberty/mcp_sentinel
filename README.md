@@ -49,11 +49,21 @@ Reserved identity and tenant keys (the full
 list is `McpPrincipalContext::RESERVED_IDENTITY_KEYS`, documented in
 [`API.md`](API.md#tool-plugin-contract)) are rejected before dispatch,
 including nested maps, case variants, format characters, and
-look-alike keys. The shared principal key is `iss|sub|actor` (actor =
-top-level `act.sub`, else `azp`; missing parts, Unicode whitespace-only
-values, invalid UTF-8, or a `|` fail closed). The human key is
-`iss|sub`. Import `mcp_sentinel.principal_key` (`fromClaims()`) for
-rate limits, budgets, and kill. Shared vectors:
+look-alike keys. The shared principal key is `iss|sub|actor`. A
+delegated actor is `act:` plus top-level `act.sub`; otherwise the
+actor is `azp` as-is.
+An `azp` that already starts with `act:` (any case) fails closed
+(`actor_claim_collision`) and is audited. Kill-switch matching and
+webhook holds permanently treat `iss|sub|X` and `iss|sub|act:X` as
+the same stop (over-block only, never under-block): a new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token,
+and a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token. Audit and stored `principal_key` identity stay separated.
+A composed principal key longer than 770 characters is refused
+(`part_too_long`). Missing parts, Unicode whitespace-only values,
+invalid UTF-8, or a `|` also fail closed. The human key is `iss|sub`. Import
+`mcp_sentinel.principal_key` (`fromClaims()`) for rate limits,
+budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json`. A network or sealed-token
 HTTP call whose token omits the tenant claim fails closed. Denial
 `denied_access` rows are always written; `audit_enabled` gates allow

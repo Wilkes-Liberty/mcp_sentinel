@@ -33,6 +33,11 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const MISSING_ACT_SUB = 'missing_act_sub';
 
   /**
+   * Authorized-party (azp) already uses the delegated actor prefix.
+   */
+  public const ACTOR_CLAIM_COLLISION = 'actor_claim_collision';
+
+  /**
    * A '|' in iss, sub, or actor would make the key forgeable.
    */
   public const INVALID_SEPARATOR = 'invalid_separator';
@@ -43,7 +48,7 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const INVALID_PART = 'invalid_part';
 
   /**
-   * A part exceeds MAX_PART_LENGTH (256) characters.
+   * A part exceeds MAX_PART_LENGTH (256) or the composed key exceeds 770.
    */
   public const PART_TOO_LONG = 'part_too_long';
 

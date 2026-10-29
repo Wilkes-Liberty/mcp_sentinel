@@ -58,6 +58,35 @@ final readonly class McpKillSelector {
   }
 
   /**
+   * Kill-registry hashes for a principal key and its actor-slot twin.
+   *
+   * Permanent pairing: every principal-key lookup includes
+   * both spellings. Aliases longer than the column are
+   * omitted; they cannot match a row.
+   *
+   * @return list<string>
+   *   Hashes to query.
+   */
+  public static function principalKeyLookupHashes(string $principalKey): array {
+    $hashes = [];
+    foreach (McpPrincipalKey::enforcementAliases($principalKey) as $alias) {
+      try {
+        $hashes[] = (new self(McpKillSelectorType::PrincipalKey, $alias))->hash();
+      }
+      catch (McpKillSwitchException) {
+        // Dual-match can add act: to a 767-770-character
+        // unprefixed key, producing a 771-774-character alias.
+        // That spelling cannot be stored, so it cannot match
+        // a row. Keep the unprefixed hash. fromClaims() and
+        // parsePrincipalKey() already refuse an over-long
+        // composed key, so a stored act: spelling never
+        // reaches this catch.
+      }
+    }
+    return $hashes;
+  }
+
+  /**
    * Principal-key selector (iss|sub|actor).
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException

@@ -142,6 +142,31 @@ final class McpVerifiedOauthClaimsTest extends UnitTestCase {
   }
 
   /**
+   * An azp that uses the act: prefix is still stamped so dispatch can audit it.
+   *
+   * Returning NULL here would look like a missing token and lose the
+   * actor_claim_collision reason on the denied_access row.
+   *
+   * @covers ::attributeFor
+   */
+  public function testPrefixedAzpClaimsArePublishedForDenial(): void {
+    $published = McpVerifiedOauthClaims::attributeFor([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-9',
+      'azp' => 'act:forged',
+      'tenant' => 'tenant-9',
+      'scope' => 'mcp_read',
+    ], '');
+    $this->assertSame([
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-9',
+      'tenant' => 'tenant-9',
+      'azp' => 'act:forged',
+      'scopes' => ['mcp_read'],
+    ], $published);
+  }
+
+  /**
    * The token audience supplies the client id when azp is absent.
    *
    * @covers ::attributeFor

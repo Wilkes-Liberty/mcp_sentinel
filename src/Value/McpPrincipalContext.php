@@ -298,11 +298,13 @@ final readonly class McpPrincipalContext {
   /**
    * Shared principal key: iss|sub|actor.
    *
-   * Actor is the top-level act.sub when a delegation claim is present,
-   * otherwise azp. Fails closed when the token cannot compose a key.
+   * Actor is ACT_PREFIX plus top-level act.sub when a delegation
+   * claim is present, otherwise azp. Fails closed when the token
+   * cannot compose a key, including when azp uses the act prefix.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
-   *   Missing iss/sub/azp/act.sub, or a '|' in a segment.
+   *   Missing iss/sub/azp/act.sub, an actor claim collision, or a
+   *   '|' in a segment.
    */
   public function principalKey(): string {
     return McpPrincipalKey::fromClaims($this->keyClaims())['principalKey'];
