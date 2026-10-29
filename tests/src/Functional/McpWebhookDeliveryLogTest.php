@@ -7,7 +7,6 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 use Drupal\Component\Utility\Crypt;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
-use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests the webhook delivery log listing page and replay action.
@@ -244,8 +243,9 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
    *   Token valid for the browser session.
    */
   private function csrfTokenForBrowserPath(string $path): string {
-    $seed = $this->csrfSeedFromSessionBlob($this->browserSessionBlob());
-    $this->assertNotSame('', $seed);
+    $blob = $this->browserSessionBlob();
+    $seed = $this->csrfSeedFromSessionBlob($blob);
+    $this->assertNotSame('', $seed, 'Session blob prefix: ' . substr($blob, 0, 200));
     $this->container->get('session_manager.metadata_bag')
       ->setCsrfTokenSeed($seed);
     return $this->container->get('csrf_token')->get($path);
@@ -254,16 +254,20 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
   /**
    * Serialized session for the logged-in browser user.
    *
+   * Uses the session id stored by drupalLogin(). Looking up the
+   * cookie name from Request::create('/') can hash a different
+   * host than the test site and miss the browser cookie.
+   *
    * @return string
    *   Stored session payload.
    */
   private function browserSessionBlob(): string {
-    $request = $this->container->get('request_stack')->getCurrentRequest()
-      ?? Request::create('/');
-    $cookie = $this->container->get('session_configuration')
-      ->getOptions($request)['name'] ?? '';
-    $this->assertNotSame('', $cookie);
-    $sid = (string) $this->getSession()->getCookie($cookie);
+    $account = $this->loggedInUser;
+    $this->assertNotFalse($account);
+    $sid = '';
+    if (isset($account->sessionId) && is_string($account->sessionId)) {
+      $sid = $account->sessionId;
+    }
     $this->assertNotSame('', $sid);
     $blob = (string) $this->container->get('session_handler.storage')
       ->read($sid);
@@ -279,8 +283,6 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     if ($blob !== '') {
       return $blob;
     }
-    $account = $this->loggedInUser;
-    $this->assertNotFalse($account);
     $blob = (string) \Drupal::database()
       ->select('sessions', 's')
       ->fields('s', ['session'])
