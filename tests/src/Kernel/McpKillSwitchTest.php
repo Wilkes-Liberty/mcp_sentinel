@@ -336,11 +336,33 @@ final class McpKillSwitchTest extends KernelTestBase {
         $e->getMessage(),
       );
     }
-    $meta = $this->lastAuditMetadata('denied_access');
+    // The sealed subject is 256 characters. audit_chain maps metadata.id
+    // onto entity_id varchar(255) and does not truncate it. MySQL 8
+    // strict mode refuses that insert; SQLite does not. A missing row
+    // here is the d.o phpunit failure on aa64970 (jobs 13226584 and
+    // 13226437). The column value must stay inside 255 bytes so the
+    // denial is recorded on every driver.
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata', 'entity_id'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $this->assertLessThanOrEqual(255, strlen((string) $row['entity_id']));
+    $this->assertSame(
+      'sha256:' . hash('sha256', $sub),
+      $row['entity_id'],
+    );
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
     $this->assertStringContainsString(
       McpPrincipalKeyException::PART_TOO_LONG,
       (string) ($meta['explain'] ?? '') . ' ' . (string) ($meta['reason'] ?? ''),
     );
+    $this->assertSame($sub, $meta['sub'] ?? NULL);
   }
 
   /**
