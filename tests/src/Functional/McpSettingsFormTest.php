@@ -452,8 +452,9 @@ final class McpSettingsFormTest extends BrowserTestBase {
     ], 'Save configuration');
     $this->assertSession()->pageTextContains('Endpoint siem filters on mcp.entity.update');
     $this->assertSession()->pageTextContains('MCP.ENTITY.PRESAVE');
-    $this->assertSession()->pageTextContains(str_repeat('x', McpWebhookEvents::NAME_MAX));
-    $this->assertSession()->pageTextNotContains(str_repeat('x', McpWebhookEvents::NAME_MAX + 1));
+    $error = $this->assertSession()->elementExists('css', '.messages--error')->getText();
+    $this->assertStringContainsString(str_repeat('x', McpWebhookEvents::NAME_MAX), $error);
+    $this->assertStringNotContainsString(str_repeat('x', McpWebhookEvents::NAME_MAX + 1), $error);
     $this->assertSession()->pageTextContains('which are not live webhook events');
     $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
     $this->assertSame(
