@@ -36,7 +36,8 @@ Policy profiles and designated-client matching still use the OAuth
 flood keys still use the server-resolved uid. The language-neutral
 vectors in `tests/fixtures/principal-key-vectors.json` now expect
 the `act:` prefix on delegated keys; a JS twin of `fromClaims()`
-must match. Product code always emits lowercase `act:`. Webhook
+must match, including the raw `act.sub` cap and the 770-character
+composed-key bound. Product code always emits lowercase `act:`. Webhook
 hold selection uses SQL `IN` on those aliases; a MySQL `*_ci`
 collation can still over-hold a whole-key case fold, which predates
 this prefix. Dual-match strips one `act:` prefix only:
@@ -54,7 +55,11 @@ stops across this deploy. Dual-match keeps a pre-upgrade
 `iss|sub|act:<act.sub>` stop holds backlog stored under the old
 spelling. Prefer the prefixed form for new delegated stops.
 `parsePrincipalKey` still accepts the unprefixed three-part form;
-that stop now enforces both spellings. `kill-status` and
+that stop now enforces both spellings. A composed principal
+key longer than 770 characters (`McpKillSelector::MAX_KEY_LENGTH`)
+is refused (`part_too_long`): a 256/256/252 delegated token
+is exactly 770 and stays accepted; a 256/256/256 token is
+774 and is refused. `kill-status` and
 `unkill` still match the stored row's exact spelling. If
 enforcement refuses a token under a legacy `iss|sub|X` stop,
 status or unkill with `iss|sub|act:X` finds no row. Use the

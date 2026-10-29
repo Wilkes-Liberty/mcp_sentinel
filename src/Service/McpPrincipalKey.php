@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 
 /**
@@ -33,8 +34,11 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * Each raw claim part is capped at MAX_PART_LENGTH (256)
  * characters. For a delegated token the cap applies to
  * act.sub before ACT_PREFIX is added, so a 256-character
- * act.sub stays accepted; the stored actor may be 260
- * characters. A raw part over 256 still fails closed.
+ * act.sub stays accepted when the composed key still fits
+ * the stored column (McpKillSelector::MAX_KEY_LENGTH, 770).
+ * A 256/256/252 delegated token is exactly 770 and is
+ * accepted. A 256/256/256 token is 774 and is refused
+ * (part_too_long). A raw part over 256 still fails closed.
  * Unicode whitespace-only parts (including NBSP), control
  * characters, invalid UTF-8, and '|' are rejected.
  *
@@ -146,12 +150,15 @@ final class McpPrincipalKey {
     // Delegated actors already passed assertSafePart on the
     // raw act.sub. Re-checking the prefixed string would
     // refuse a 253-to-256-character act.sub (part_too_long)
-    // that was accepted before the prefix existed.
+    // that was accepted before the prefix existed. The
+    // composed key is still bounded to the stored column.
     if (!self::actorHasActPrefix($actor)) {
       self::assertSafePart($actor);
     }
+    $principalKey = $iss . self::SEPARATOR . $sub . self::SEPARATOR . $actor;
+    self::assertSafeComposedKey($principalKey);
     return [
-      'principalKey' => $iss . self::SEPARATOR . $sub . self::SEPARATOR . $actor,
+      'principalKey' => $principalKey,
       'humanKey' => $iss . self::SEPARATOR . $sub,
     ];
   }
@@ -352,7 +359,9 @@ final class McpPrincipalKey {
       self::assertSafePart($part);
     }
     $parts[2] = self::canonicalActActor($parts[2]);
-    return implode(self::SEPARATOR, $parts);
+    $composed = implode(self::SEPARATOR, $parts);
+    self::assertSafeComposedKey($composed);
+    return $composed;
   }
 
   /**
@@ -449,6 +458,24 @@ final class McpPrincipalKey {
         'Principal-key claims must be at most '
         . (string) self::MAX_PART_LENGTH
         . ' characters per part.',
+      );
+    }
+  }
+
+  /**
+   * Refuses a composed key longer than the stored column.
+   *
+   * Matches McpKillSelector::MAX_KEY_LENGTH and the 770
+   * columns (kill selector_key, webhook principal_key).
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalKeyException
+   *   When the key cannot be stored.
+   */
+  private static function assertSafeComposedKey(string $key): void {
+    if (mb_strlen($key, 'UTF-8') > McpKillSelector::MAX_KEY_LENGTH) {
+      throw new McpPrincipalKeyException(
+        McpPrincipalKeyException::PART_TOO_LONG,
+        'A principal key is longer than the stored column.',
       );
     }
   }

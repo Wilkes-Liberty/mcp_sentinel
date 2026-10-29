@@ -42,6 +42,9 @@ still holds that row. `kill-status` and `unkill` match the
 stored row's exact spelling. If a token is refused under a
 legacy `iss|sub|X` stop, status and unkill with
 `iss|sub|act:X` find no row. Use the stored spelling.
+A composed principal key longer than 770 characters is
+refused (`part_too_long`). A 256-character `act.sub` is
+accepted when `iss` and `sub` still fit that column.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the

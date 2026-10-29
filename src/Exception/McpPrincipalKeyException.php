@@ -48,7 +48,7 @@ final class McpPrincipalKeyException extends \RuntimeException {
   public const INVALID_PART = 'invalid_part';
 
   /**
-   * A part exceeds MAX_PART_LENGTH (256) characters.
+   * A part exceeds MAX_PART_LENGTH (256) or the composed key exceeds 770.
    */
   public const PART_TOO_LONG = 'part_too_long';
 

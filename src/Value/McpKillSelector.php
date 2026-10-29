@@ -75,8 +75,10 @@ final readonly class McpKillSelector {
         $hashes[] = (new self(McpKillSelectorType::PrincipalKey, $alias))->hash();
       }
       catch (McpKillSwitchException) {
-        // An empty or over-long alias cannot be stored, so it
-        // cannot match a kill row. Drop it fail-closed.
+        // fromClaims() and parsePrincipalKey() refuse a key
+        // longer than MAX_KEY_LENGTH. An empty or leftover
+        // over-long alias cannot be stored as a row, so it
+        // cannot match one.
       }
     }
     return $hashes;
