@@ -203,12 +203,11 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     $url = Url::fromRoute('mcp_sentinel.webhook_replay', [
       'delivery' => $heldId,
     ]);
-    $path = $url->getInternalPath();
-    $this->drupalGet($path, [
-      'query' => [
-        'token' => $this->container->get('csrf_token')->get($path),
-      ],
-    ]);
+    // toString() (via drupalGet) adds the _csrf_token query value
+    // against the same path the access check validates. A token
+    // minted from getInternalPath() is rejected.
+    $this->drupalGet($url);
+    $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains(
       "Delivery $heldId could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
     );
