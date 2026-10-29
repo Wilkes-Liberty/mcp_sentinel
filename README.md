@@ -1338,8 +1338,9 @@ Admin routes:
   governance model, audit, encryption, DLP, rate limits, anomaly rules, IP
   allowlists, webhook endpoints). Linked from **Configuration → Web services**.
 - `/admin/config/services/mcp-sentinel/tokens` — sealed-token mint and revoke
-  (DEV-762). Short TTL, bound to a designated agent client, copy-once, no
-  secret echo after you leave the reveal page.
+  (DEV-762). Short TTL, bound to a designated agent client, copy-once. GET
+  `/tokens/reveal` never echoes the secret. Showing it is a CSRF-protected
+  POST; leave that page and the secret is gone.
 - `/admin/reports/mcp-sentinel` — **governance dashboard** (landing page; see
   below), linked from the **Reports** menu. Local-task tabs lead to the audit
   log, webhook deliveries, and (when the approval submodule is enabled)
@@ -1635,8 +1636,12 @@ a tool result or MCP error body must read the HMAC row instead.
 
 1. Designate at least one Consumer `client_id` under **OAuth agent channel**.
 2. Choose that client and a short TTL (15 minutes to 24 hours).
-3. Mint. Copy the bearer once. Leave the page — the secret is gone from
-   the admin UI. Only a hash remains, so revoke still works.
+3. Mint. The next page does not show the secret. Submit **Show sealed
+   token** (CSRF-protected POST) and copy the bearer once. Leave the
+   page — the secret is gone from the admin UI. Only a hash remains, so
+   revoke still works. A GET of `/tokens/reveal`, or a POST without a
+   valid CSRF token, reveals nothing. The CSRF refusal writes
+   `sealed_token_reveal_denied`.
 4. Use `Authorization: Bearer mcs1.…` on `/drupal-mcp/readiness` (whoami),
    JSON:API, GraphQL, and `mcp_server` routes that already accept oauth2.
    Unrelated oauth2 routes do not accept this bearer. Revoke if it leaks.
@@ -1646,8 +1651,17 @@ long-lived channel; sealed tokens are short-lived and client-bound.
 Path B is not claimed: this is a prerequisite pin, not a public HTTPS
 cut.
 
-Mint and revoke already write `sealed_token_mint` /
-`sealed_token_revoke`. Every authentication denial also writes a
+Mint, reveal, and revoke write `sealed_token_mint` /
+`sealed_token_reveal` / `sealed_token_revoke`. The reveal row is
+always written (`logAlways()`) when a CSRF-valid POST actually
+shows the secret — never the bearer — even when `audit_enabled` is
+off. GET is a prompt, not a denial, and does not write a reveal
+or denied row. A POST with a missing or invalid CSRF token is
+403, reveals nothing, and writes `sealed_token_reveal_denied`
+(`reason` `csrf_invalid`, the route, and the acting uid — never
+the bearer or the CSRF token). Mint and revoke still use `log()`
+and honour `audit_enabled`. Every
+authentication denial also writes a
 `denied_access` row (`tool: sealed_token`) with one of
 `malformed`, `bad_signature`, `expired`, `unknown_token`,
 `revoked`, `hash_mismatch`, `client_not_designated`,

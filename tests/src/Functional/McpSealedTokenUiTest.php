@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Behat\Mink\Driver\BrowserKitDriver;
 use Drupal\consumers\Entity\Consumer;
+use Drupal\Core\Session\AccountInterface;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use Drupal\Tests\BrowserTestBase;
+use Drupal\user\Entity\Role;
+use Drupal\user\RoleInterface;
+use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -84,6 +90,12 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     ], 'Mint sealed token');
     $this->assertSession()->addressEquals('/admin/config/services/mcp-sentinel/tokens/reveal');
     $this->assertSession()->responseHeaderContains('Cache-Control', 'no-store');
+    // GET after mint is the prompt. The secret stays in tempstore.
+    $this->assertSession()->pageTextContains('does not reveal the secret');
+    $this->assertSession()->pageTextNotContains('Copy this token now');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertSession()->pageTextNotContains('not-shown-in-ui');
+    $this->submitForm([], 'Show sealed token');
     $this->assertSession()->pageTextContains('Copy this token now');
     $this->assertSession()->pageTextContains('TTL: 900 seconds');
     $this->assertSession()->pageTextContains('mcs1.');
@@ -103,12 +115,366 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
   }
 
   /**
+   * GET never reveals the copy-once secret, even right after mint.
+   */
+  public function testGetDoesNotRevealSecret(): void {
+    $this->mintDesignatedToken();
+    $this->assertSession()->addressEquals('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->buttonExists('Show sealed token');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertSession()->pageTextNotContains('Copy this token now');
+    // A second GET still must not consume or echo the handoff.
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->buttonExists('Show sealed token');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+  }
+
+  /**
+   * POST without a CSRF token is 403 and leaves the secret unrevealed.
+   */
+  public function testPostWithoutCsrfTokenIsForbiddenAndRevealsNothing(): void {
+    $this->mintDesignatedToken();
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+    $this->postRevealPath();
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertSession()->pageTextNotContains('Copy this token now');
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(1);
+    $this->assertRevealDeniedAuditHasNoBearer();
+    // A present but invalid token is the same deny: 403, secret untouched.
+    $this->postRevealPath('not-a-csrf-token');
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(2);
+    $this->assertRevealDeniedAuditHasNoBearer();
+    // Fail-closed: the handoff is still waiting for a valid POST.
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->buttonExists('Show sealed token');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+  }
+
+  /**
+   * POST with a valid CSRF token reveals once, then the secret is gone.
+   */
+  public function testPostWithCsrfTokenRevealsOnce(): void {
+    $this->mintDesignatedToken();
+    $this->assertRevealAuditCount(0);
+    // The Show button action already has the browser-session CSRF
+    // token. Url::fromRoute() here signs a different session seed.
+    $action = $this->assertSession()
+      ->elementExists('css', 'form[method="post"]')
+      ->getAttribute('action');
+    $this->assertNotEmpty($action);
+    $this->submitForm([], 'Show sealed token');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('Copy this token now');
+    $this->assertSession()->pageTextContains('mcs1.');
+    $this->assertRevealAuditCount(1);
+    $this->assertRevealAuditHasNoBearer();
+    $this->assertRevealDeniedAuditCount(0);
+    // Same CSRF query string after consume: gone page, no bearer.
+    $this->postRevealUrl($action);
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('no longer shown');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertRevealAuditCount(1);
+    $this->assertRevealDeniedAuditCount(0);
+  }
+
+  /**
+   * A successful reveal always writes, even when audit_enabled is off.
+   */
+  public function testRevealAuditWritesWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    $this->mintDesignatedToken();
+    $this->assertRevealAuditCount(0);
+    $this->submitForm([], 'Show sealed token');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('Copy this token now');
+    $this->assertSession()->pageTextContains('mcs1.');
+    $this->assertRevealAuditCount(1);
+    $this->assertRevealAuditHasNoBearer();
+  }
+
+  /**
    * Unprivileged users cannot mint.
    */
   public function testForbiddenForUnprivilegedUser(): void {
     $this->drupalLogin($this->drupalCreateUser([]));
     $this->drupalGet('/admin/config/services/mcp-sentinel/tokens');
     $this->assertSession()->statusCodeEquals(403);
+  }
+
+  /**
+   * GET/POST without permission is 403, hides the secret, and does not consume.
+   */
+  public function testRevealPathForbiddenWithoutPermission(): void {
+    $this->mintDesignatedToken();
+    $admin = $this->loggedInUser;
+    $this->assertInstanceOf(UserInterface::class, $admin);
+    // The prompt form signs CSRF for this browser session. POST that
+    // URL after the permission is dropped, before any later GET, so a
+    // missing _permission is not masked by a CSRF 403.
+    $action = $this->assertSession()
+      ->elementExists('css', 'form[method="post"]')
+      ->getAttribute('action');
+    $this->assertNotEmpty($action);
+    $this->assertStringContainsString('token=', (string) $action);
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+
+    $role = $this->uniqueRole($admin);
+    $role->revokePermission('administer mcp sentinel')->save();
+    $this->container->get('entity_type.manager')
+      ->getStorage('user')
+      ->resetCache([(int) $admin->id()]);
+
+    $this->postRevealUrl($action);
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertRevealSecretNotShown();
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertRevealSecretNotShown();
+
+    $role->grantPermission('administer mcp sentinel')->save();
+    $this->container->get('entity_type.manager')
+      ->getStorage('user')
+      ->resetCache([(int) $admin->id()]);
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->buttonExists('Show sealed token');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+
+    $this->drupalLogout();
+    $this->assertAnonymousRevealIsDenied('GET');
+    $this->assertAnonymousRevealIsDenied('POST');
+
+    $this->drupalLogin($this->drupalCreateUser([]));
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertRevealSecretNotShown();
+
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->buttonExists('Show sealed token');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+  }
+
+  /**
+   * Mints one designated-client token and lands on the GET reveal prompt.
+   */
+  private function mintDesignatedToken(): void {
+    $owner = $this->drupalCreateUser([]);
+    $consumer = Consumer::create([
+      'client_id' => 'mcp-agent-prod',
+      'label' => 'MCP agent prod',
+      'owner_id' => $owner->id(),
+      'user_id' => $owner->id(),
+      'secret' => 'not-shown-in-ui',
+      'confidential' => TRUE,
+      'status' => 1,
+    ]);
+    $consumer->save();
+    $this->config('mcp_sentinel.settings')
+      ->set('agent_oauth_clients', ['mcp-agent-prod'])
+      ->save();
+
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens');
+    $this->submitForm([
+      'client_id' => 'mcp-agent-prod',
+      'tenant' => 'tenant-a',
+      'ttl' => '900',
+    ], 'Mint sealed token');
+  }
+
+  /**
+   * Asserts the current page never showed the copy-once secret.
+   */
+  private function assertRevealSecretNotShown(): void {
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertSession()->pageTextNotContains('Copy this token now');
+    $this->assertSession()->buttonNotExists('Show sealed token');
+  }
+
+  /**
+   * Asserts an anonymous reveal GET or POST is 403 and does not reveal.
+   *
+   * BrowserKit sees the access deny as 403. There is no login Location
+   * on this path in this test.
+   *
+   * @param string $method
+   *   GET or POST.
+   */
+  private function assertAnonymousRevealIsDenied(string $method): void {
+    $driver = $this->getSession()->getDriver();
+    $this->assertInstanceOf(BrowserKitDriver::class, $driver);
+    $client = $driver->getClient();
+    $follow = $client->isFollowingRedirects();
+    $client->followRedirects(FALSE);
+    try {
+      $client->request(
+        $method,
+        $this->getAbsoluteUrl('/admin/config/services/mcp-sentinel/tokens/reveal'),
+      );
+      $this->assertSession()->statusCodeEquals(403);
+      $location = $this->getSession()->getResponseHeader('Location');
+      $this->assertTrue(
+        $location === '' || $location === NULL || !str_contains((string) $location, 'user/login'),
+        'Anonymous reveal stays 403; it does not redirect to login.',
+      );
+      $this->assertRevealSecretNotShown();
+    }
+    finally {
+      $client->followRedirects($follow);
+    }
+  }
+
+  /**
+   * Returns the unique role created for a drupalCreateUser() account.
+   *
+   * @param \Drupal\user\UserInterface $account
+   *   The account.
+   *
+   * @return \Drupal\user\RoleInterface
+   *   The generated role.
+   */
+  private function uniqueRole(UserInterface $account): RoleInterface {
+    $rids = array_values(array_diff(
+      $account->getRoles(),
+      [AccountInterface::AUTHENTICATED_ROLE],
+    ));
+    $this->assertNotEmpty($rids);
+    $role = Role::load($rids[0]);
+    $this->assertInstanceOf(RoleInterface::class, $role);
+    return $role;
+  }
+
+  /**
+   * POSTs the reveal path, optionally with a CSRF query token.
+   *
+   * Uses the Mink BrowserKit client so the logged-in session is kept and
+   * assertSession() reads this POST. A missing or bad token must 403.
+   *
+   * @param string|null $tokenOverride
+   *   Explicit token query value when testing a bad token.
+   */
+  private function postRevealPath(?string $tokenOverride = NULL): void {
+    $options = ['absolute' => TRUE];
+    if ($tokenOverride !== NULL) {
+      $options['query']['token'] = $tokenOverride;
+    }
+    $this->postRevealUrl($this->buildUrl(
+      '/admin/config/services/mcp-sentinel/tokens/reveal',
+      $options,
+    ));
+  }
+
+  /**
+   * POSTs an already-built reveal URL through the BrowserKit client.
+   *
+   * @param string $url
+   *   Absolute or root-relative URL, including any CSRF query string.
+   */
+  private function postRevealUrl(string $url): void {
+    $driver = $this->getSession()->getDriver();
+    $this->assertInstanceOf(BrowserKitDriver::class, $driver);
+    // getAbsoluteUrl() keeps a relative ?token= query on the host.
+    $driver->getClient()->request('POST', $this->getAbsoluteUrl($url));
+  }
+
+  /**
+   * Asserts how many sealed_token_reveal audit rows exist.
+   */
+  private function assertRevealAuditCount(int $expected): void {
+    $db = $this->container->get('database');
+    $this->assertTrue($db->schema()->tableExists('audit_chain_log'));
+    $count = (int) $db->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'sealed_token_reveal')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame($expected, $count);
+  }
+
+  /**
+   * Asserts the latest reveal audit row never stored the bearer.
+   */
+  private function assertRevealAuditHasNoBearer(): void {
+    $row = $this->container->get('database')->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'sealed_token_reveal')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row);
+    $metadata = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $encoded = json_encode($metadata);
+    $this->assertIsString($encoded);
+    $this->assertStringNotContainsString('mcs1.', $encoded);
+    $this->assertArrayHasKey('jti', $metadata);
+    $this->assertNotSame('', $metadata['jti']);
+  }
+
+  /**
+   * Asserts how many sealed_token_reveal_denied audit rows exist.
+   */
+  private function assertRevealDeniedAuditCount(int $expected): void {
+    $db = $this->container->get('database');
+    $this->assertTrue($db->schema()->tableExists('audit_chain_log'));
+    $count = (int) $db->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'sealed_token_reveal_denied')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame($expected, $count);
+  }
+
+  /**
+   * Asserts the latest reveal-denied row is csrf_invalid and has no bearer.
+   */
+  private function assertRevealDeniedAuditHasNoBearer(): void {
+    $row = $this->container->get('database')->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'sealed_token_reveal_denied')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row);
+    $metadata = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $encoded = json_encode($metadata);
+    $this->assertIsString($encoded);
+    $this->assertStringNotContainsString('mcs1.', $encoded);
+    $this->assertSame('csrf_invalid', $metadata['reason'] ?? NULL);
+    $this->assertSame(
+      McpSealedTokenRevealCsrfDenySubscriber::ROUTE,
+      $metadata['route'] ?? NULL,
+    );
+    $this->assertArrayHasKey('uid', $metadata);
+    $this->assertNotFalse($this->loggedInUser);
+    $this->assertSame(
+      (int) $this->loggedInUser->id(),
+      (int) $metadata['uid'],
+    );
+    $this->assertArrayNotHasKey('token', $metadata);
   }
 
 }

@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\Component\Serialization\Yaml;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\Routing\Route;
@@ -71,6 +73,36 @@ final class McpSealedTokenRouteAlterTest extends KernelTestBase {
     $this->assertContains('mcp_sealed_token', $collection->get('vendor.proxy.context')->getOption('_auth'));
     $this->assertSame(['oauth2'], $collection->get('simple_oauth.userinfo')->getOption('_auth'));
     $this->assertSame(['oauth2'], $collection->get('vendor.other.api')->getOption('_auth'));
+  }
+
+  /**
+   * Reveal GET is a prompt; only POST consumes, and only with a CSRF token.
+   *
+   * Reads the shipped YAML. Asking the live route provider rebuilds
+   * JSON:API and needs field_item:image, which this kernel set does
+   * not install.
+   */
+  public function testRevealPostRequiresCsrfToken(): void {
+    $filename = dirname(__DIR__, 3) . '/mcp_sentinel.routing.yml';
+    $routes = Yaml::decode((string) file_get_contents($filename));
+    $this->assertIsArray($routes);
+
+    $get = $routes[McpSealedTokenRevealCsrfDenySubscriber::GET_ROUTE];
+    $this->assertSame(['GET'], $get['methods']);
+    $this->assertArrayNotHasKey('_csrf_token', $get['requirements'] ?? []);
+    $this->assertSame(
+      '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::revealPrompt',
+      $get['defaults']['_controller'],
+    );
+
+    $post = $routes[McpSealedTokenRevealCsrfDenySubscriber::ROUTE];
+    $this->assertSame(['POST'], $post['methods']);
+    $this->assertSame('TRUE', $post['requirements']['_csrf_token']);
+    $this->assertSame(
+      '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::reveal',
+      $post['defaults']['_controller'],
+    );
+    $this->assertSame($get['path'], $post['path']);
   }
 
 }

@@ -535,6 +535,16 @@ services:
     tags:
       - { name: event_subscriber }
 
+  # CSRF 403 on the reveal POST. Observes only; the 403 and tempstore stay.
+  mcp_sentinel.sealed_token_reveal_csrf_deny_subscriber:
+    class: Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber
+    arguments:
+      - '@mcp_sentinel.audit_logger'
+      - '@current_user'
+      - '@logger.channel.mcp_sentinel'
+    tags:
+      - { name: event_subscriber }
+
   mcp_sentinel.anomaly_detector:
     class: Drupal\mcp_sentinel\Service\McpAnomalyDetector
     arguments:
