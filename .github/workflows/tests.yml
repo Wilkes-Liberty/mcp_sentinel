@@ -1123,6 +1123,13 @@ jobs:
       # someone else's script and can drift — if this job and the d.o cspell
       # job ever disagree, the d.o job is right and this one needs re-syncing
       # against prepare-cspell.php.
+      #
+      # Binary and dictionary versions matter as much as the config. d.o
+      # runs Drupal core's locked cspell 9.8.0 with
+      # @cspell/dict-software-terms 5.2.2 (11.x yarn.lock). `npx cspell@8`
+      # (and even `npx cspell@9.8.0`) resolves software-terms 5.4.8, which
+      # added GHSA. That is why this job stayed green on ec74d80 while d.o
+      # job 13225039 failed six times on that word.
       - name: Assemble the dictionary set drupalcode uses
         env:
           CORE_BRANCH: '11.x'
@@ -1158,7 +1165,9 @@ jobs:
       - name: cspell
         run: |
           set -euo pipefail
-          npx --yes cspell@8 lint -c .cspell-ci.json \
+          npm install --prefix .cspell-ci --no-save --silent \
+            cspell@9.8.0 @cspell/dict-software-terms@5.2.2
+          .cspell-ci/node_modules/.bin/cspell lint -c .cspell-ci.json \
             --no-progress --show-suggestions --show-context \
             --exclude '.cspell-ci/**' --exclude '.cspell-ci.json' \
             .

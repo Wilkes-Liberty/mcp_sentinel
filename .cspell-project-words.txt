@@ -51,6 +51,7 @@ filebeat
 footgun
 gatechange
 gethostbynamel
+GHSA
 gpgsign
 highcharts
 hmac
