@@ -414,7 +414,7 @@ final class McpWebhookQueueManager {
       $this->auditRefusedEventName(
         $eventName,
         self::SURFACE_REPLAY,
-        $deliveryId,
+        NULL,
         McpStoredValue::rowString($row, 'endpoint_id'),
       );
       return FALSE;
@@ -1413,7 +1413,7 @@ final class McpWebhookQueueManager {
     $this->auditRefusedEventName(
       $eventName,
       $surface,
-      $deliveryId,
+      NULL,
       $endpointId,
     );
     if ($deliveryId < 1) {
