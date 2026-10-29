@@ -193,3 +193,4 @@ euid
 strcut
 uid_nonzero
 token_flag_refused
+csrf_invalid

@@ -119,7 +119,8 @@ mcp_sentinel.sealed_token_reveal:
 
 # POST is the only method that shows the secret. _csrf_token fail-closes
 # a missing or bad token as 403 before the controller runs, so the
-# plaintext stays in tempstore until a valid POST consumes it.
+# plaintext stays in tempstore until a valid POST consumes it. That 403
+# writes sealed_token_reveal_denied (csrf_invalid).
 mcp_sentinel.sealed_token_reveal_post:
   path: '/admin/config/services/mcp-sentinel/tokens/reveal'
   defaults:

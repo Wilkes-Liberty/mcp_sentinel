@@ -33,7 +33,8 @@ final class McpSealedTokenController extends ControllerBase {
    * @param \Drupal\Core\Datetime\DateFormatterInterface $dateFormatter
    *   Date formatter for the listing table.
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
-   *   Writes sealed_token_reveal when the secret is actually shown.
+   *   Writes sealed_token_reveal through logAlways() when the secret
+   *   is actually shown.
    */
   public function __construct(
     private readonly McpSealedTokenManager $tokens,
@@ -52,7 +53,8 @@ final class McpSealedTokenController extends ControllerBase {
       $container->get('mcp_sentinel.admin_status'),
       $container->get('mcp_sentinel.sealed_token_reveal_store'),
       $container->get('date.formatter'),
-      // Reveal audit is written only after a CSRF-valid POST shows the secret.
+      // Reveal audit is always written after a CSRF-valid POST shows
+      // the secret. CSRF 403s are written by the deny subscriber.
       $container->get('mcp_sentinel.audit_logger'),
     );
   }
@@ -168,6 +170,7 @@ final class McpSealedTokenController extends ControllerBase {
    *
    * The route is POST plus _csrf_token. A missing or bad token is 403
    * before this method runs, so the tempstore key is left untouched.
+   * That 403 writes sealed_token_reveal_denied (csrf_invalid).
    *
    * @return array
    *   Render array. The secret is gone from tempstore after this request.
@@ -183,8 +186,9 @@ final class McpSealedTokenController extends ControllerBase {
     $build = $this->revealShell(TRUE);
 
     // Never store the bearer. jti and client_id are enough to pair this
-    // row with the earlier sealed_token_mint entry.
-    $this->auditLogger->log('sealed_token_reveal', [
+    // row with the earlier sealed_token_mint entry. Disclosure is always
+    // written, including when audit_enabled is off.
+    $this->auditLogger->logAlways('sealed_token_reveal', [
       'jti' => $issued['jti'],
       'client_id' => $issued['client_id'],
       'ttl' => $issued['ttl'],
@@ -249,7 +253,7 @@ final class McpSealedTokenController extends ControllerBase {
    * @return array
    *   Base render array with cache headers and the admin status strip.
    */
-  private function revealShell(bool $withCopyLibrary = FALSE): array {
+  private function revealShell(bool $withCopyLibrary): array {
     $libraries = ['mcp_sentinel/admin'];
     if ($withCopyLibrary) {
       $libraries[] = 'mcp_sentinel/sealed_token';

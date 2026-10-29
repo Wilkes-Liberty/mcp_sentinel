@@ -10,7 +10,12 @@ see `CONNECTOR.md`.
 shows or consumes the copy-once secret. After mint, that GET is a
 prompt. Showing the bearer is `POST` on the same path and requires
 Drupal's `_csrf_token` query parameter. A missing or bad token is
-403 and reveals nothing. Operators who bookmarked the GET URL, or
+403 and reveals nothing; that refusal writes
+`sealed_token_reveal_denied` (`reason` `csrf_invalid`, route,
+acting uid — never the bearer or the CSRF token). A successful
+POST always writes `sealed_token_reveal`, including when
+`audit_enabled` is off. Mint and revoke still honour
+`audit_enabled`. Operators who bookmarked the GET URL, or
 scripts that fetched it, must use the **Show sealed token** button
 (or POST with a valid token) instead. Rebuild caches (`drush cr`)
 so the split GET/POST routes load. No `updatedb`.

@@ -125,6 +125,7 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->assertSession()->buttonExists('Show sealed token');
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
   }
 
   /**
@@ -133,16 +134,21 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
   public function testPostWithoutCsrfTokenIsForbiddenAndRevealsNothing(): void {
     $this->mintDesignatedToken();
     $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
     $this->postRevealPath();
     $this->assertSession()->statusCodeEquals(403);
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertSession()->pageTextNotContains('Copy this token now');
     $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(1);
+    $this->assertRevealDeniedAuditHasNoBearer();
     // A present but invalid token is the same deny: 403, secret untouched.
     $this->postRevealPath('not-a-csrf-token');
     $this->assertSession()->statusCodeEquals(403);
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(2);
+    $this->assertRevealDeniedAuditHasNoBearer();
     // Fail-closed: the handoff is still waiting for a valid POST.
     $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
     $this->assertSession()->statusCodeEquals(200);
@@ -168,12 +174,29 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->assertSession()->pageTextContains('mcs1.');
     $this->assertRevealAuditCount(1);
     $this->assertRevealAuditHasNoBearer();
+    $this->assertRevealDeniedAuditCount(0);
     // Same CSRF query string after consume: gone page, no bearer.
     $this->postRevealUrl($action);
     $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains('no longer shown');
     $this->assertSession()->pageTextNotContains('mcs1.');
     $this->assertRevealAuditCount(1);
+    $this->assertRevealDeniedAuditCount(0);
+  }
+
+  /**
+   * A successful reveal always writes, even when audit_enabled is off.
+   */
+  public function testRevealAuditWritesWhenAuditDisabled(): void {
+    $this->config('mcp_sentinel.settings')->set('audit_enabled', FALSE)->save();
+    $this->mintDesignatedToken();
+    $this->assertRevealAuditCount(0);
+    $this->submitForm([], 'Show sealed token');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains('Copy this token now');
+    $this->assertSession()->pageTextContains('mcs1.');
+    $this->assertRevealAuditCount(1);
+    $this->assertRevealAuditHasNoBearer();
   }
 
   /**
@@ -279,6 +302,51 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->assertStringNotContainsString('mcs1.', $encoded);
     $this->assertArrayHasKey('jti', $metadata);
     $this->assertNotSame('', $metadata['jti']);
+  }
+
+  /**
+   * Asserts how many sealed_token_reveal_denied audit rows exist.
+   */
+  private function assertRevealDeniedAuditCount(int $expected): void {
+    $db = $this->container->get('database');
+    $this->assertTrue($db->schema()->tableExists('audit_chain_log'));
+    $count = (int) $db->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'sealed_token_reveal_denied')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame($expected, $count);
+  }
+
+  /**
+   * Asserts the latest reveal-denied row is csrf_invalid and has no bearer.
+   */
+  private function assertRevealDeniedAuditHasNoBearer(): void {
+    $row = $this->container->get('database')->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'sealed_token_reveal_denied')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertNotFalse($row);
+    $metadata = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $encoded = json_encode($metadata);
+    $this->assertIsString($encoded);
+    $this->assertStringNotContainsString('mcs1.', $encoded);
+    $this->assertSame('csrf_invalid', $metadata['reason'] ?? NULL);
+    $this->assertSame(
+      'mcp_sentinel.sealed_token_reveal_post',
+      $metadata['route'] ?? NULL,
+    );
+    $this->assertArrayHasKey('uid', $metadata);
+    $this->assertNotFalse($this->loggedInUser);
+    $this->assertSame(
+      (int) $this->loggedInUser->id(),
+      (int) $metadata['uid'],
+    );
+    $this->assertArrayNotHasKey('token', $metadata);
   }
 
 }
