@@ -8,6 +8,7 @@ use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -136,7 +137,7 @@ final class McpSealedTokenMintForm extends FormBase {
       'scopes' => $issued['scopes'],
     ]);
     // GET prompt only. The CSRF POST on that path is what shows the secret.
-    $form_state->setRedirect('mcp_sentinel.sealed_token_reveal');
+    $form_state->setRedirect(McpSealedTokenRevealCsrfDenySubscriber::GET_ROUTE);
   }
 
 }

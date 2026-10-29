@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Component\Serialization\Yaml;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\Routing\Route;
@@ -86,7 +87,7 @@ final class McpSealedTokenRouteAlterTest extends KernelTestBase {
     $routes = Yaml::decode((string) file_get_contents($filename));
     $this->assertIsArray($routes);
 
-    $get = $routes['mcp_sentinel.sealed_token_reveal'];
+    $get = $routes[McpSealedTokenRevealCsrfDenySubscriber::GET_ROUTE];
     $this->assertSame(['GET'], $get['methods']);
     $this->assertArrayNotHasKey('_csrf_token', $get['requirements'] ?? []);
     $this->assertSame(
@@ -94,7 +95,7 @@ final class McpSealedTokenRouteAlterTest extends KernelTestBase {
       $get['defaults']['_controller'],
     );
 
-    $post = $routes['mcp_sentinel.sealed_token_reveal_post'];
+    $post = $routes[McpSealedTokenRevealCsrfDenySubscriber::ROUTE];
     $this->assertSame(['POST'], $post['methods']);
     $this->assertSame('TRUE', $post['requirements']['_csrf_token']);
     $this->assertSame(

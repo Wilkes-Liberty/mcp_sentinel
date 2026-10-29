@@ -19,8 +19,10 @@ POST always writes `sealed_token_reveal`, including when
 scripts that fetched it, must use the **Show sealed token** button
 (or POST with a valid token) instead. Rebuild caches (`drush cr`)
 so the split GET/POST routes load. No `updatedb`.
-Rollback is a plain revert of this change. GET reveal returns
-to consuming the handoff on GET. No database rollback. The
+A replayed valid POST after consume is 200 with the gone
+page, no bearer, and no extra audit row. Rollback is a
+plain revert of this change. GET reveal returns to
+consuming the handoff on GET. No database rollback. The
 CSRF-deny subscriber is gone after revert; rebuild caches
 (`drush cr`) so the previous GET consume route loads.
 

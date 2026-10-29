@@ -9,6 +9,7 @@ use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\TempStore\PrivateTempStore;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use Drupal\mcp_sentinel\Form\McpSealedTokenMintForm;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
@@ -145,7 +146,7 @@ final class McpSealedTokenController extends ControllerBase {
     // Url::fromRoute() appends ?token= because the POST route requires
     // _csrf_token. A form without that query string is 403 and reveals
     // nothing.
-    $action = Url::fromRoute('mcp_sentinel.sealed_token_reveal_post')
+    $action = Url::fromRoute(McpSealedTokenRevealCsrfDenySubscriber::ROUTE)
       ->toString();
     $build['reveal'] = [
       '#type' => 'inline_template',
