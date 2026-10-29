@@ -6,10 +6,13 @@ namespace Drupal\mcp_sentinel\Controller;
 
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Datetime\DateFormatterInterface;
+use Drupal\Core\TempStore\PrivateTempStore;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use Drupal\mcp_sentinel\Form\McpSealedTokenMintForm;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\RedirectResponse;
@@ -30,12 +33,16 @@ final class McpSealedTokenController extends ControllerBase {
    *   Reveal tempstore. Its expire is McpSealedTokenManager::REVEAL_STORE_TTL.
    * @param \Drupal\Core\Datetime\DateFormatterInterface $dateFormatter
    *   Date formatter for the listing table.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
+   *   Writes sealed_token_reveal through logAlways() when the secret
+   *   is actually shown.
    */
   public function __construct(
     private readonly McpSealedTokenManager $tokens,
     private readonly McpAdminStatus $adminStatus,
     private readonly PrivateTempStoreFactory $tempStoreFactory,
     private readonly DateFormatterInterface $dateFormatter,
+    private readonly McpAuditLogger $auditLogger,
   ) {}
 
   /**
@@ -47,6 +54,9 @@ final class McpSealedTokenController extends ControllerBase {
       $container->get('mcp_sentinel.admin_status'),
       $container->get('mcp_sentinel.sealed_token_reveal_store'),
       $container->get('date.formatter'),
+      // Reveal audit is always written after a CSRF-valid POST shows
+      // the secret. CSRF 403s are written by the deny subscriber.
+      $container->get('mcp_sentinel.audit_logger'),
     );
   }
 
@@ -113,49 +123,82 @@ final class McpSealedTokenController extends ControllerBase {
   }
 
   /**
-   * Shows the minted secret once, then forgets it.
+   * GET landing after mint: offers a CSRF POST, never shows the secret.
+   *
+   * Peeking the tempstore does not delete the handoff. A refresh or
+   * prefetch of this path must not echo or burn the plaintext.
    *
    * @return array
-   *   Render array. The secret is gone after this request.
+   *   Prompt or gone render array. The secret is never in this response.
    */
-  public function reveal(): array {
-    $store = $this->tempStoreFactory->get('mcp_sentinel_sealed_token');
-    $issued = $store->get('reveal');
-    $store->delete('reveal');
-
-    $build = [
-      '#cache' => [
-        'max-age' => 0,
-      ],
-      '#attached' => [
-        'library' => ['mcp_sentinel/sealed_token', 'mcp_sentinel/admin'],
-        'http_header' => [
-          ['Cache-Control', 'private, no-store', TRUE],
-        ],
-      ],
-      'status' => [
-        '#theme' => 'mcp_sentinel_status_strip',
-        '#strip' => $this->adminStatus->build(),
-      ],
-    ];
-
-    if (!is_array($issued) || !isset($issued['token']) || !is_string($issued['token'])) {
-      $build['gone'] = [
-        '#markup' => '<p>' . $this->t('The sealed token is no longer shown. It was copy-once: refresh, navigation, or a second visit does not echo the secret. Revoke the token and mint a new one if you lost it.') . '</p>',
-      ];
-      $build['back'] = [
-        '#type' => 'link',
-        '#title' => $this->t('Back to sealed tokens'),
-        '#url' => Url::fromRoute('mcp_sentinel.sealed_token'),
-      ];
-      return $build;
+  public function revealPrompt(): array {
+    $build = $this->revealShell(FALSE);
+    // GET only looks. Delete happens on the CSRF-protected POST.
+    if ($this->issuedPayload($this->revealStore()->get('reveal')) === NULL) {
+      return $this->goneBuild($build);
     }
 
-    $ttl = (int) ($issued['ttl'] ?? 0);
+    $build['help'] = [
+      '#markup' => '<p>' . $this->t(
+        'The sealed token is ready. Show it once. Refreshing this page does not reveal the secret.',
+      ) . '</p>',
+    ];
+    // Url::fromRoute() appends ?token= because the POST route requires
+    // _csrf_token. A form without that query string is 403 and reveals
+    // nothing.
+    $action = Url::fromRoute(McpSealedTokenRevealCsrfDenySubscriber::ROUTE)
+      ->toString();
+    $build['reveal'] = [
+      '#type' => 'inline_template',
+      '#template' => '<form method="post" action="{{ action }}">'
+        . '<button type="submit" class="button button--primary">'
+        . '{{ label }}</button></form>',
+      '#context' => [
+        'action' => $action,
+        'label' => $this->t('Show sealed token'),
+      ],
+    ];
+    $build['back'] = [
+      '#type' => 'link',
+      '#title' => $this->t('Back to sealed tokens'),
+      '#url' => Url::fromRoute('mcp_sentinel.sealed_token'),
+    ];
+    return $build;
+  }
+
+  /**
+   * Shows the minted secret once, then forgets it.
+   *
+   * The route is POST plus _csrf_token. A missing or bad token is 403
+   * before this method runs, so the tempstore key is left untouched.
+   * That 403 writes sealed_token_reveal_denied (csrf_invalid).
+   *
+   * @return array
+   *   Render array. The secret is gone from tempstore after this request.
+   */
+  public function reveal(): array {
+    $store = $this->revealStore();
+    // Consume first so a second valid POST cannot echo the same secret.
+    $issued = $this->issuedPayload($store->get('reveal'));
+    $store->delete('reveal');
+    if ($issued === NULL) {
+      return $this->goneBuild($this->revealShell(FALSE));
+    }
+    $build = $this->revealShell(TRUE);
+
+    // Never store the bearer. jti and client_id are enough to pair this
+    // row with the earlier sealed_token_mint entry. Disclosure is always
+    // written, including when audit_enabled is off.
+    $this->auditLogger->logAlways('sealed_token_reveal', [
+      'jti' => $issued['jti'],
+      'client_id' => $issued['client_id'],
+      'ttl' => $issued['ttl'],
+    ]);
+
     $build['warning'] = [
       '#markup' => '<p><strong>' . $this->t('Copy this token now. It will not be shown again.') . '</strong> ' . $this->t('TTL: @ttl seconds. Client: @client. Leave this page and the secret is gone from the admin UI.', [
-        '@ttl' => $ttl,
-        '@client' => (string) ($issued['client_id'] ?? ''),
+        '@ttl' => $issued['ttl'],
+        '@client' => $issued['client_id'],
       ]) . '</p>',
     ];
     $build['token'] = [
@@ -200,6 +243,93 @@ final class McpSealedTokenController extends ControllerBase {
       $this->messenger()->addWarning($this->t('That sealed token was already revoked or was not found.'));
     }
     return $this->redirect('mcp_sentinel.sealed_token');
+  }
+
+  /**
+   * Shared no-store shell for the prompt and the consume page.
+   *
+   * @param bool $withCopyLibrary
+   *   TRUE to attach the copy-once helper. The prompt has no secret.
+   *
+   * @return array
+   *   Base render array with cache headers and the admin status strip.
+   */
+  private function revealShell(bool $withCopyLibrary): array {
+    $libraries = ['mcp_sentinel/admin'];
+    if ($withCopyLibrary) {
+      $libraries[] = 'mcp_sentinel/sealed_token';
+    }
+    return [
+      '#cache' => [
+        'max-age' => 0,
+      ],
+      '#attached' => [
+        'library' => $libraries,
+        'http_header' => [
+          ['Cache-Control', 'private, no-store', TRUE],
+        ],
+      ],
+      'status' => [
+        '#theme' => 'mcp_sentinel_status_strip',
+        '#strip' => $this->adminStatus->build(),
+      ],
+    ];
+  }
+
+  /**
+   * Copy-once tempstore that holds the plaintext until POST or TTL.
+   */
+  private function revealStore(): PrivateTempStore {
+    return $this->tempStoreFactory->get('mcp_sentinel_sealed_token');
+  }
+
+  /**
+   * Returns the handoff when it still carries a string secret.
+   *
+   * @param mixed $issued
+   *   Tempstore payload, or NULL when the key is gone.
+   *
+   * @return array{token: string, jti: string, client_id: string, ttl: int}|null
+   *   The payload, or NULL when there is nothing to show.
+   */
+  private function issuedPayload(mixed $issued): ?array {
+    if (!is_array($issued)
+      || !isset($issued['token'])
+      || !is_string($issued['token'])
+      || $issued['token'] === '') {
+      return NULL;
+    }
+    // Rebuild with typed keys. A mixed tempstore bag is not this shape.
+    $jti = $issued['jti'] ?? '';
+    $clientId = $issued['client_id'] ?? '';
+    $ttl = $issued['ttl'] ?? 0;
+    return [
+      'token' => $issued['token'],
+      'jti' => is_string($jti) ? $jti : '',
+      'client_id' => is_string($clientId) ? $clientId : '',
+      'ttl' => is_numeric($ttl) ? (int) $ttl : 0,
+    ];
+  }
+
+  /**
+   * Explains that the secret is gone and links back to the mint listing.
+   *
+   * @param array $build
+   *   Reveal shell render array.
+   *
+   * @return array
+   *   Gone page. Must not include the bearer.
+   */
+  private function goneBuild(array $build): array {
+    $build['gone'] = [
+      '#markup' => '<p>' . $this->t('The sealed token is no longer shown. It was copy-once: refresh, navigation, or a second visit does not echo the secret. Revoke the token and mint a new one if you lost it.') . '</p>',
+    ];
+    $build['back'] = [
+      '#type' => 'link',
+      '#title' => $this->t('Back to sealed tokens'),
+      '#url' => Url::fromRoute('mcp_sentinel.sealed_token'),
+    ];
+    return $build;
   }
 
 }

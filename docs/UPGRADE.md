@@ -4,6 +4,28 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Sealed-token reveal is POST with a CSRF token
+
+`GET /admin/config/services/mcp-sentinel/tokens/reveal` no longer
+shows or consumes the copy-once secret. After mint, that GET is a
+prompt. Showing the bearer is `POST` on the same path and requires
+Drupal's `_csrf_token` query parameter. A missing or bad token is
+403 and reveals nothing; that refusal writes
+`sealed_token_reveal_denied` (`reason` `csrf_invalid`, route,
+acting uid — never the bearer or the CSRF token). A successful
+POST always writes `sealed_token_reveal`, including when
+`audit_enabled` is off. Mint and revoke still honour
+`audit_enabled`. Operators who bookmarked the GET URL, or
+scripts that fetched it, must use the **Show sealed token** button
+(or POST with a valid token) instead. Rebuild caches (`drush cr`)
+so the split GET/POST routes load. No `updatedb`.
+A replayed valid POST after consume is 200 with the gone
+page, no bearer, and no extra audit row. Rollback is a
+plain revert of this change. GET reveal returns to
+consuming the handoff on GET. No database rollback. The
+CSRF-deny subscriber is gone after revert; rebuild caches
+(`drush cr`) so the previous GET consume route loads.
+
 ## Webhook event names are a hard allowlist (DEV-1209)
 
 Unknown names are refused on settings save, `dispatch()`,

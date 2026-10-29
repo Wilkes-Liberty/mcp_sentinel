@@ -8,6 +8,7 @@ use Drupal\Core\Form\FormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\TempStore\PrivateTempStoreFactory;
 use Drupal\Core\Url;
+use Drupal\mcp_sentinel\EventSubscriber\McpSealedTokenRevealCsrfDenySubscriber;
 use Drupal\mcp_sentinel\Service\McpAdminStatus;
 use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -15,8 +16,9 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 /**
  * Mints a short-lived sealed token bound to a designated agent client.
  *
- * The raw secret is written to private tempstore and shown once on the
- * reveal page. Leaving that page (or refreshing) drops the secret.
+ * The raw secret is written to private tempstore and shown once after a
+ * CSRF-protected POST to the reveal path. A GET of that path never echoes
+ * the secret. That POST, or REVEAL_STORE_TTL, drops the plaintext.
  */
 final class McpSealedTokenMintForm extends FormBase {
 
@@ -134,7 +136,8 @@ final class McpSealedTokenMintForm extends FormBase {
       'ttl' => $issued['ttl'],
       'scopes' => $issued['scopes'],
     ]);
-    $form_state->setRedirect('mcp_sentinel.sealed_token_reveal');
+    // GET prompt only. The CSRF POST on that path is what shows the secret.
+    $form_state->setRedirect(McpSealedTokenRevealCsrfDenySubscriber::GET_ROUTE);
   }
 
 }

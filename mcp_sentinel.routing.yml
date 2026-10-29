@@ -104,13 +104,32 @@ mcp_sentinel.sealed_token:
   requirements:
     _permission: 'administer mcp sentinel'
 
+# GET is the mint-form landing page. It never consumes or echoes the
+# copy-once secret, so a prefetch or refresh cannot burn the token.
 mcp_sentinel.sealed_token_reveal:
+  path: '/admin/config/services/mcp-sentinel/tokens/reveal'
+  defaults:
+    _controller: '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::revealPrompt'
+    _title: 'Copy sealed token'
+  methods: [GET]
+  requirements:
+    _permission: 'administer mcp sentinel'
+  options:
+    no_cache: TRUE
+
+# POST is the only method that shows the secret. _csrf_token fail-closes
+# a missing or bad token as 403 before the controller runs, so the
+# plaintext stays in tempstore until a valid POST consumes it. That 403
+# writes sealed_token_reveal_denied (csrf_invalid).
+mcp_sentinel.sealed_token_reveal_post:
   path: '/admin/config/services/mcp-sentinel/tokens/reveal'
   defaults:
     _controller: '\Drupal\mcp_sentinel\Controller\McpSealedTokenController::reveal'
     _title: 'Copy sealed token'
+  methods: [POST]
   requirements:
     _permission: 'administer mcp sentinel'
+    _csrf_token: 'TRUE'
   options:
     no_cache: TRUE
 

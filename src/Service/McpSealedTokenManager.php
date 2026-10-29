@@ -72,7 +72,8 @@ final class McpSealedTokenManager {
    * Private tempstore TTL for the copy-once reveal handoff, in seconds.
    *
    * The table stores a hash only. Tempstore holds the plaintext until the
-   * reveal GET deletes it, or this TTL elapses. It is not durable storage.
+   * CSRF-protected reveal POST deletes it, or this TTL elapses. It is not
+   * durable storage. A GET of the reveal path must not consume this key.
    * Core's PrivateTempStoreFactory::get() takes only the collection name, so
    * this value is the factory's expire (see revealTempStore()), not a second
    * argument to get().
