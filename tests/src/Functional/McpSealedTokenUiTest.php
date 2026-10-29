@@ -220,13 +220,14 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->mintDesignatedToken();
     $admin = $this->loggedInUser;
     $this->assertInstanceOf(UserInterface::class, $admin);
-    // The prompt form signs CSRF for this browser session. Reuse it after
-    // the permission is dropped so a missing _permission is not masked
-    // by a CSRF 403.
+    // The prompt form signs CSRF for this browser session. POST that
+    // URL after the permission is dropped, before any later GET, so a
+    // missing _permission is not masked by a CSRF 403.
     $action = $this->assertSession()
       ->elementExists('css', 'form[method="post"]')
       ->getAttribute('action');
     $this->assertNotEmpty($action);
+    $this->assertStringContainsString('token=', (string) $action);
     $this->assertRevealAuditCount(0);
     $this->assertRevealDeniedAuditCount(0);
 
@@ -236,14 +237,15 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
       ->getStorage('user')
       ->resetCache([(int) $admin->id()]);
 
-    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
-    $this->assertSession()->statusCodeEquals(403);
-    $this->assertRevealSecretNotShown();
     $this->postRevealUrl($action);
     $this->assertSession()->statusCodeEquals(403);
     $this->assertRevealSecretNotShown();
     $this->assertRevealAuditCount(0);
     $this->assertRevealDeniedAuditCount(0);
+
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertRevealSecretNotShown();
 
     $role->grantPermission('administer mcp sentinel')->save();
     $this->container->get('entity_type.manager')
