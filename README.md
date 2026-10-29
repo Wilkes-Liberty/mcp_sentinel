@@ -1164,7 +1164,7 @@ form. Each endpoint is its own add/remove row (use **Add endpoint** /
 A stored filter that is not one of the three live names — including
 `mcp.entity.save`, a typo, or a case variant — blocks the whole
 settings save, even when that endpoint is disabled. The validation
-message names the endpoint machine id (cut at 128 characters) and
+message names the endpoint machine id (cut at 64 characters) and
 the refused names (each cut at 128 characters; the first 3 plus
 `, and N more`). Type a live name or clear the filter; the form
 does not rewrite it. Disabled rows are checked too because they

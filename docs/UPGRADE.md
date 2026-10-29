@@ -8,7 +8,7 @@ see `CONNECTOR.md`.
 
 Unknown names are refused on settings save, `dispatch()`,
 `enqueueForEvent()`, the worker, requeue, and replay. Settings
-validation echoes the endpoint machine id cut at 128 characters,
+validation echoes the endpoint machine id cut at 64 characters,
 each unknown name cut at 128 characters, and the first 3 names
 plus `, and N more`. Cuts are UTF-8 characters after invalid
 sequences are scrubbed (`mb_scrub` then `mb_substr`), not raw

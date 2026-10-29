@@ -468,6 +468,38 @@ final class McpWebhookQueueTest extends KernelTestBase {
   }
 
   /**
+   * A stored-row refusal cuts endpoint_id at ENDPOINT_ID_MAX characters.
+   *
+   * Pins auditRefusedEventName(), the one call site that writes
+   * endpoint_id on webhook_event_refused. Worker, requeue, and
+   * replay pass the stored id through that method. Fails if the
+   * cut goes back to substr() or is removed.
+   *
+   * @covers ::auditRefusedEventName
+   */
+  public function testRefusedAuditEndpointIdIsTruncated(): void {
+    $long = str_repeat('é', 100);
+    \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->auditRefusedEventName(
+        'mcp.not.a.live.event',
+        McpWebhookQueueManager::SURFACE_REPLAY,
+        1,
+        $long,
+      );
+    $meta = $this->latestRefusedAudit();
+    $endpoint = (string) $meta['endpoint_id'];
+    $this->assertTrue(mb_check_encoding($endpoint, 'UTF-8'));
+    $this->assertSame(
+      str_repeat('é', McpWebhookEvents::ENDPOINT_ID_MAX),
+      $endpoint,
+    );
+    $this->assertSame(
+      McpWebhookEvents::ENDPOINT_ID_MAX,
+      mb_strlen($endpoint, 'UTF-8'),
+    );
+  }
+
+  /**
    * Dispatch refuses mcp.anomaly.alert on an entity.
    *
    * The alert name is live for enqueueForEvent() but dispatch()

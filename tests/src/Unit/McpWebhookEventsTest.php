@@ -149,6 +149,12 @@ final class McpWebhookEventsTest extends UnitTestCase {
   /**
    * Invalid UTF-8 is scrubbed before the cut so the result stays valid.
    *
+   * On PHP 8.2, mb_substr() does not substitute invalid bytes, so
+   * removing mb_scrub() can leave invalid UTF-8. Since PHP 8.3,
+   * mb_substr() already replaces invalid bytes and this assertion
+   * stays green without the scrub. The scrub is kept for the 8.2
+   * floor in composer.json.
+   *
    * @covers ::boundName
    */
   public function testBoundNameScrubsInvalidUtf8(): void {

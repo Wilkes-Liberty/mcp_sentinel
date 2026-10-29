@@ -174,4 +174,27 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     );
   }
 
+  /**
+   * Replay of a held unknown name names the status, not a refusal.
+   */
+  public function testReplayHeldUnknownEventNameNamesStatus(): void {
+    $id = $this->seedRow(
+      McpWebhookQueueManager::STATUS_HELD,
+      1,
+      'ep1',
+      'mcp.not.a.live.event',
+    );
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/webhooks');
+    $this->clickLink('Replay');
+    $this->assertSession()->pageTextContains(
+      "Delivery $id could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
+    );
+    $this->assertSession()->pageTextNotContains('was refused');
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+  }
+
 }

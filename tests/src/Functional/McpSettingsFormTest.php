@@ -472,11 +472,11 @@ final class McpSettingsFormTest extends BrowserTestBase {
    * Unknown-name validation caps the endpoint id and the echoed list.
    *
    * The machine-id field is HTML-maxlength 64; the posted value can
-   * still be longer. The error uses boundName (NAME_MAX characters)
-   * for the id and the first UNKNOWN_EVENT_ECHO_MAX names plus
-   * ", and N more". The textarea still holds the typed names, so
-   * this asserts the comma-separated sentence, not a page-wide
-   * absence of later names.
+   * still be longer. The error uses boundText at ENDPOINT_ID_MAX
+   * for the id, boundName for each unknown name, and the first
+   * UNKNOWN_EVENT_ECHO_MAX names plus ", and N more". The textarea
+   * still holds the typed names, so this asserts the comma-separated
+   * sentence, not a page-wide absence of later names.
    */
   public function testUnknownWebhookEventEchoIsCapped(): void {
     $this->seedRetiredSaveWebhookEndpoint();
@@ -491,7 +491,7 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $more = count($names) - count($shown);
     $this->assertGreaterThan(0, $more);
     $this->assertSession()->pageTextContains(
-      'Endpoint ' . str_repeat('a', McpWebhookEvents::NAME_MAX)
+      'Endpoint ' . str_repeat('a', McpWebhookEvents::ENDPOINT_ID_MAX)
       . ' filters on ' . implode(', ', $shown)
       . ', and ' . $more . ' more, which are not live webhook events',
     );

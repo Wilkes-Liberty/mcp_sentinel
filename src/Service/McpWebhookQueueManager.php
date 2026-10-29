@@ -49,6 +49,16 @@ final class McpWebhookQueueManager {
   public const STATUS_DISCARDED = 'discarded';
 
   /**
+   * Statuses that stop replay without writing a refusal audit.
+   *
+   * @var list<string>
+   */
+  public const REPLAY_BLOCKED_STATUSES = [
+    self::STATUS_HELD,
+    self::STATUS_DISCARDED,
+  ];
+
+  /**
    * Delivery row that will not be sent again.
    */
   public const STATUS_FAILED = 'failed';
@@ -414,7 +424,7 @@ final class McpWebhookQueueManager {
     if ($row === NULL) {
       return FALSE;
     }
-    if (in_array(McpStoredValue::rowString($row, 'status'), [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+    if ($this->isReplayBlockedStatus(McpStoredValue::rowString($row, 'status'))) {
       return FALSE;
     }
     $eventName = McpStoredValue::rowString($row, 'event_name');
@@ -498,7 +508,7 @@ final class McpWebhookQueueManager {
       return NULL;
     }
     $status = McpStoredValue::rowString($row, 'status');
-    if (in_array($status, [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+    if ($this->isReplayBlockedStatus($status)) {
       return NULL;
     }
     $eventName = McpStoredValue::rowString($row, 'event_name');
@@ -526,10 +536,23 @@ final class McpWebhookQueueManager {
       return NULL;
     }
     $status = McpStoredValue::rowString($row, 'status');
-    if (in_array($status, [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+    if ($this->isReplayBlockedStatus($status)) {
       return $status;
     }
     return NULL;
+  }
+
+  /**
+   * Whether $status stops replay without a refusal audit.
+   *
+   * @param string $status
+   *   Stored delivery status.
+   *
+   * @return bool
+   *   TRUE for held or discarded.
+   */
+  private function isReplayBlockedStatus(string $status): bool {
+    return in_array($status, self::REPLAY_BLOCKED_STATUSES, TRUE);
   }
 
   /**

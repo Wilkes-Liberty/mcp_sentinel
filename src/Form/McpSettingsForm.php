@@ -1146,7 +1146,7 @@ class McpSettingsForm extends ConfigFormBase {
       // successful filter changes only.
       $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
       $endpointLabel = $id !== ''
-        ? McpWebhookEvents::boundName($id)
+        ? McpWebhookEvents::boundText($id, McpWebhookEvents::ENDPOINT_ID_MAX)
         : $this->t('endpoint @n', ['@n' => $i + 1]);
       $unknown = [];
       foreach ($events as $eventName) {

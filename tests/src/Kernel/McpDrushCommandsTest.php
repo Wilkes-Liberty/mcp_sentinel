@@ -450,6 +450,61 @@ final class McpDrushCommandsTest extends KernelTestBase {
   }
 
   /**
+   * Webhook-replay of a held unknown name names the status, not a refusal.
+   *
+   * @covers ::webhookReplay
+   */
+  public function testWebhookReplayHeldUnknownEventNameNamesStatus(): void {
+    $db = $this->container->get('database');
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $rowId = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
+      'endpoint_id' => 'ep1',
+      'event_name' => 'mcp.not.a.live.event',
+      'payload_hash' => hash('sha256', 'test'),
+      'payload' => '{}',
+      'status' => McpWebhookQueueManager::STATUS_HELD,
+      'attempts' => 1,
+      'created' => $now,
+    ])->execute();
+
+    $spy = new class() extends AbstractLogger {
+
+      /**
+       * Captured log records.
+       *
+       * @var array<int, array{0: string, 1: string}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = [(string) $level, (string) $message];
+      }
+
+    };
+    $drushLogger = new DrushLoggerManager();
+    $drushLogger->add('spy', $spy);
+    $this->commands->setLogger($drushLogger);
+
+    $result = $this->commands->webhookReplay($rowId);
+    $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+    $messages = array_column($spy->records, 1);
+    $this->assertContains(
+      sprintf(
+        'Delivery %d could not be replayed (%s).',
+        $rowId,
+        McpWebhookQueueManager::STATUS_HELD,
+      ),
+      $messages,
+    );
+    foreach ($messages as $message) {
+      $this->assertStringNotContainsString('was refused', $message);
+    }
+  }
+
+  /**
    * Audit-verify writes last_verify state (ok=TRUE) on a clean chain.
    *
    * @covers ::auditVerify
