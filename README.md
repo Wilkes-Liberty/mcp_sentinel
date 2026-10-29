@@ -246,8 +246,14 @@ profiles at **Configuration → Web services → MCP Sentinel → MCP policy pro
 > **enabled but cannot govern any request** — both `agent_scopes` and
 > `agent_oauth_clients` empty (with the role fallback unusable), or no policy
 > profile configured — the status report (**Reports → Status report**) raises a
-> WARNING, "MCP Sentinel: not governing any request". Fix the warning before
-> relying on governance; until then the module is failing open.
+> WARNING, "MCP Sentinel: not governing any request". When that same gap is
+> already an ERROR on the source-governance contract row
+> (`agent_scopes_missing` or `active_profile_missing`), the Status report
+> keeps both severities on that one ERROR row instead of repeating the gap.
+> The row stays ERROR so it cannot sit as warning-only; the WARNING copy
+> stays in the value and description. Distinct gaps (for example a missing
+> server module plus empty scopes) stay two rows. Fix the listed gap before
+> relying on governance; until then that gap is failing open.
 
 ## Tool result contract
 
