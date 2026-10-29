@@ -121,7 +121,18 @@ class McpWebhookDeliveryController extends ControllerBase {
       ];
 
       $operations = [];
-      if (in_array($row->status, ['failed', 'failed_ssrf', 'failed_redirect', 'failed_key', 'sent'], TRUE)) {
+      // Held and discarded are not re-queued. The Replay action
+      // still names that status so the operator is not told the
+      // row or endpoint is missing.
+      if (in_array($row->status, [
+        'failed',
+        'failed_ssrf',
+        'failed_redirect',
+        'failed_key',
+        'sent',
+        McpWebhookQueueManager::STATUS_HELD,
+        McpWebhookQueueManager::STATUS_DISCARDED,
+      ], TRUE)) {
         $operations['replay'] = [
           'title' => $this->t('Replay'),
           'url' => Url::fromRoute('mcp_sentinel.webhook_replay', [
