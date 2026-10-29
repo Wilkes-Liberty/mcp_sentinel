@@ -28,6 +28,11 @@ use Symfony\Component\HttpKernel\KernelEvents;
 final class McpSealedTokenRevealCsrfDenySubscriber implements EventSubscriberInterface {
 
   /**
+   * GET prompt route. Peek only; never consumes the handoff.
+   */
+  public const GET_ROUTE = 'mcp_sentinel.sealed_token_reveal';
+
+  /**
    * POST consume route that requires Drupal's CSRF token.
    */
   public const ROUTE = 'mcp_sentinel.sealed_token_reveal_post';

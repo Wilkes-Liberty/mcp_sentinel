@@ -1591,11 +1591,12 @@ Mint, reveal, and revoke write `sealed_token_mint` /
 `sealed_token_reveal` / `sealed_token_revoke`. The reveal row is
 always written (`logAlways()`) when a CSRF-valid POST actually
 shows the secret — never the bearer — even when `audit_enabled` is
-off. A denied GET does not write that row. A POST with a missing
-or invalid CSRF token is 403, reveals nothing, and writes
-`sealed_token_reveal_denied` (`reason` `csrf_invalid`, the route,
-and the acting uid — never the bearer or the CSRF token). Mint and
-revoke still use `log()` and honour `audit_enabled`. Every
+off. GET is a prompt, not a denial, and does not write a reveal
+or denied row. A POST with a missing or invalid CSRF token is
+403, reveals nothing, and writes `sealed_token_reveal_denied`
+(`reason` `csrf_invalid`, the route, and the acting uid — never
+the bearer or the CSRF token). Mint and revoke still use `log()`
+and honour `audit_enabled`. Every
 authentication denial also writes a
 `denied_access` row (`tool: sealed_token`) with one of
 `malformed`, `bad_signature`, `expired`, `unknown_token`,

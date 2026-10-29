@@ -26,8 +26,8 @@ final class McpSealedTokenRevealSubscriber implements EventSubscriberInterface {
    * waiting; the POST page carries the plaintext. Neither may be cached.
    */
   private const ROUTES = [
-    'mcp_sentinel.sealed_token_reveal',
-    'mcp_sentinel.sealed_token_reveal_post',
+    McpSealedTokenRevealCsrfDenySubscriber::GET_ROUTE,
+    McpSealedTokenRevealCsrfDenySubscriber::ROUTE,
   ];
 
   /**

@@ -120,7 +120,7 @@ final class McpSealedTokenRevealCsrfDenySubscriberTest extends UnitTestCase {
     $audit->expects($this->never())->method('logAlways');
     $event = $this->exceptionEvent(
       new AccessDeniedHttpException(),
-      'mcp_sentinel.sealed_token_reveal',
+      McpSealedTokenRevealCsrfDenySubscriber::GET_ROUTE,
     );
     $this->subscriber($audit, TRUE, 2)->onException($event);
   }

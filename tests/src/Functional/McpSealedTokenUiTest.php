@@ -7,6 +7,7 @@ namespace Drupal\Tests\mcp_sentinel\Functional;
 use Behat\Mink\Driver\BrowserKitDriver;
 use Drupal\consumers\Entity\Consumer;
 use Drupal\Tests\BrowserTestBase;
+use Drupal\user\UserInterface;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -209,6 +210,44 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
   }
 
   /**
+   * GET/POST without permission is 403, hides the secret, and does not consume.
+   */
+  public function testRevealPathForbiddenWithoutPermission(): void {
+    $this->mintDesignatedToken();
+    $admin = $this->loggedInUser;
+    $this->assertInstanceOf(UserInterface::class, $admin);
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+
+    // Anonymous HTML 403s are redirected to login. The secret must still
+    // stay hidden and the admin handoff must stay in tempstore.
+    $this->drupalLogout();
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertRevealSecretNotShown();
+    $this->postRevealPath();
+    $this->assertRevealSecretNotShown();
+
+    $this->drupalLogin($this->drupalCreateUser([]));
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertRevealSecretNotShown();
+    $this->postRevealPath();
+    $this->assertSession()->statusCodeEquals(403);
+    $this->assertRevealSecretNotShown();
+
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+
+    $this->drupalLogin($admin);
+    $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->buttonExists('Show sealed token');
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertRevealAuditCount(0);
+    $this->assertRevealDeniedAuditCount(0);
+  }
+
+  /**
    * Mints one designated-client token and lands on the GET reveal prompt.
    */
   private function mintDesignatedToken(): void {
@@ -234,6 +273,15 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
       'tenant' => 'tenant-a',
       'ttl' => '900',
     ], 'Mint sealed token');
+  }
+
+  /**
+   * Asserts the current page never showed the copy-once secret.
+   */
+  private function assertRevealSecretNotShown(): void {
+    $this->assertSession()->pageTextNotContains('mcs1.');
+    $this->assertSession()->pageTextNotContains('Copy this token now');
+    $this->assertSession()->buttonNotExists('Show sealed token');
   }
 
   /**
