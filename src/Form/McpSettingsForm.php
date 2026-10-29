@@ -32,6 +32,11 @@ class McpSettingsForm extends ConfigFormBase {
   use McpListEditorTrait;
 
   /**
+   * How many unknown event names one validation error lists.
+   */
+  public const UNKNOWN_EVENT_ECHO_MAX = 3;
+
+  /**
    * The entity type manager.
    */
   protected EntityTypeManagerInterface $entityTypeManager;
@@ -1140,7 +1145,9 @@ class McpSettingsForm extends ConfigFormBase {
       // webhook_event_filter audit row — that operation is for
       // successful filter changes only.
       $events = $this->splitWebhookEventNames((string) ($ep['events'] ?? ''));
-      $endpointLabel = $id !== '' ? $id : $this->t('endpoint @n', ['@n' => $i + 1]);
+      $endpointLabel = $id !== ''
+        ? McpWebhookEvents::boundName($id)
+        : $this->t('endpoint @n', ['@n' => $i + 1]);
       $unknown = [];
       foreach ($events as $eventName) {
         if (McpWebhookEvents::isLive($eventName)) {
@@ -1164,7 +1171,8 @@ class McpSettingsForm extends ConfigFormBase {
       }
       // One error per field: Drupal keeps the first setErrorByName for
       // a name, so list every unknown name here. That also shows the
-      // case-variant typo next to mcp.entity.update.
+      // case-variant typo next to mcp.entity.update. The list is capped
+      // so a pasted block cannot turn the error into a page-length dump.
       if ($unknown !== []) {
         $form_state->setErrorByName(
           "webhooks][endpoints][$i][events]",
@@ -1174,13 +1182,32 @@ class McpSettingsForm extends ConfigFormBase {
             'Endpoint %endpoint filters on @event, which are not live webhook events. Live names: @live.',
             [
               '%endpoint' => $endpointLabel,
-              '@event' => implode(', ', $unknown),
+              '@event' => $this->formatUnknownEventEcho($unknown),
               '@live' => implode(', ', McpWebhookEvents::LIVE),
             ],
           ),
         );
       }
     }
+  }
+
+  /**
+   * Lists the first UNKNOWN_EVENT_ECHO_MAX unknown names.
+   *
+   * @param list<string> $unknown
+   *   Already-bounded unknown names.
+   *
+   * @return string
+   *   Comma-separated names, with ", and N more" when the list is longer.
+   */
+  private function formatUnknownEventEcho(array $unknown): string {
+    $shown = array_slice($unknown, 0, self::UNKNOWN_EVENT_ECHO_MAX);
+    $text = implode(', ', $shown);
+    $more = count($unknown) - count($shown);
+    if ($more > 0) {
+      $text .= (string) $this->t(', and @count more', ['@count' => $more]);
+    }
+    return $text;
   }
 
   /**

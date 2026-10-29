@@ -331,8 +331,16 @@ final class McpSentinelCommands extends DrushCommands {
       return self::EXIT_FAILURE;
     }
     if (!$this->webhookQueueManager->replayDelivery($deliveryId)) {
+      $hold = $this->webhookQueueManager->replayHoldStatus($deliveryId);
       $refused = $this->webhookQueueManager->refusedReplayEventName($deliveryId);
-      if ($refused !== NULL) {
+      if ($hold !== NULL) {
+        $this->logger()->error(sprintf(
+          'Delivery %d could not be replayed (%s).',
+          $deliveryId,
+          $hold,
+        ));
+      }
+      elseif ($refused !== NULL) {
         $this->logger()->error(sprintf(
           'Delivery %d could not be replayed: event name %s was refused.',
           $deliveryId,

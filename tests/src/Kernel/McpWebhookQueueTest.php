@@ -455,12 +455,14 @@ final class McpWebhookQueueTest extends KernelTestBase {
    */
   public function testRefusedEventNameIsTruncatedInAudit(): void {
     $this->enableEmptyFilterEndpoint();
-    $long = str_repeat('x', 200);
+    $long = str_repeat('é', 200);
     \Drupal::service('mcp_sentinel.webhook_queue_manager')
       ->enqueueForEvent($long, ['event' => 'ghost', 'payload' => 'no']);
     $meta = $this->latestRefusedAudit();
-    $this->assertSame(str_repeat('x', 128), $meta['event']);
-    $this->assertSame(128, strlen((string) $meta['event']));
+    $event = (string) $meta['event'];
+    $this->assertTrue(mb_check_encoding($event, 'UTF-8'));
+    $this->assertSame(str_repeat('é', 128), $event);
+    $this->assertSame(128, mb_strlen($event, 'UTF-8'));
     $this->assertArrayNotHasKey('payload', $meta);
     $this->assertNoWebhookDelivery();
   }
@@ -555,11 +557,12 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $replayed = \Drupal::service('mcp_sentinel.webhook_queue_manager')
       ->replayDelivery($id);
     $this->assertFalse($replayed);
+    $manager = \Drupal::service('mcp_sentinel.webhook_queue_manager');
     $this->assertSame(
       'mcp.not.a.live.event',
-      \Drupal::service('mcp_sentinel.webhook_queue_manager')
-        ->refusedReplayEventName($id),
+      $manager->refusedReplayEventName($id),
     );
+    $this->assertNull($manager->replayHoldStatus($id));
     $this->assertSame(
       0,
       \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
@@ -575,6 +578,70 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $this->assertArrayHasKey('endpoint_id', $meta);
     $this->assertSame('all_events', $meta['endpoint_id']);
     $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * A held unknown name is not reported as a refused replay.
+   *
+   * Replay returns before the allowlist check, so no refusal audit
+   * is written. The operator message must not say "refused".
+   *
+   * @covers ::replayDelivery
+   * @covers ::refusedReplayEventName
+   * @covers ::replayHoldStatus
+   */
+  public function testReplayHeldUnknownEventNameIsNotRefused(): void {
+    $this->enableEmptyFilterEndpoint();
+    $id = $this->seedDeliveryRow([
+      'endpoint_id' => 'all_events',
+      'event_name' => 'mcp.not.a.live.event',
+      'status' => McpWebhookQueueManager::STATUS_HELD,
+    ]);
+    $manager = \Drupal::service('mcp_sentinel.webhook_queue_manager');
+    $this->assertFalse($manager->replayDelivery($id));
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $manager->replayHoldStatus($id),
+    );
+    $this->assertNull($manager->refusedReplayEventName($id));
+    $count = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $count);
+  }
+
+  /**
+   * A discarded unknown name is not reported as a refused replay.
+   *
+   * Same early return as held: no refusal audit, no "refused"
+   * operator wording.
+   *
+   * @covers ::replayDelivery
+   * @covers ::refusedReplayEventName
+   * @covers ::replayHoldStatus
+   */
+  public function testReplayDiscardedUnknownEventNameIsNotRefused(): void {
+    $this->enableEmptyFilterEndpoint();
+    $id = $this->seedDeliveryRow([
+      'endpoint_id' => 'all_events',
+      'event_name' => 'mcp.not.a.live.event',
+      'status' => McpWebhookQueueManager::STATUS_DISCARDED,
+    ]);
+    $manager = \Drupal::service('mcp_sentinel.webhook_queue_manager');
+    $this->assertFalse($manager->replayDelivery($id));
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_DISCARDED,
+      $manager->replayHoldStatus($id),
+    );
+    $this->assertNull($manager->refusedReplayEventName($id));
+    $count = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $count);
   }
 
   /**

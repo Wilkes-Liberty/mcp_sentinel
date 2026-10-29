@@ -55,7 +55,12 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'empty' => ['', FALSE],
       'whitespace' => [' ', FALSE],
       'padded live' => [' mcp.entity.presave', FALSE],
-      'over-long' => [str_repeat('x', 200), FALSE],
+      'trailing space' => ['mcp.entity.presave ', FALSE],
+      'mixed whitespace' => [" \tmcp.entity.presave \n", FALSE],
+      'newline' => ["mcp.entity.presave\n", FALSE],
+      'tab' => ["mcp.entity.presave\t", FALSE],
+      'nbsp' => ["mcp.entity.presave\u{00A0}", FALSE],
+      'cyrillic lookalike' => ['mсp.entity.presave', FALSE],
     ];
   }
 
@@ -90,24 +95,81 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'empty' => ['', FALSE],
       'whitespace' => [' ', FALSE],
       'padded live' => [' mcp.entity.presave', FALSE],
-      'over-long' => [str_repeat('x', 200), FALSE],
+      'trailing space' => ['mcp.entity.presave ', FALSE],
+      'mixed whitespace' => [" \tmcp.entity.presave \n", FALSE],
+      'newline' => ["mcp.entity.presave\n", FALSE],
+      'tab' => ["mcp.entity.presave\t", FALSE],
+      'nbsp' => ["mcp.entity.presave\u{00A0}", FALSE],
+      'cyrillic lookalike' => ['mсp.entity.presave', FALSE],
     ];
   }
 
   /**
-   * Over-long names are cut at NAME_MAX.
+   * boundName cuts at NAME_MAX characters of valid UTF-8.
+   *
+   * The ASCII over-long case fails if the cut is removed. The
+   * multibyte cases fail if the cut is still a raw byte substr.
+   *
+   * @covers ::boundName
+   * @covers ::boundText
+   * @dataProvider boundNameProvider
+   */
+  #[DataProvider('boundNameProvider')]
+  public function testBoundNameCutsAtMax(string $input, string $expected): void {
+    $bounded = McpWebhookEvents::boundName($input);
+    $this->assertSame($expected, $bounded);
+    $this->assertTrue(mb_check_encoding($bounded, 'UTF-8'));
+    $this->assertLessThanOrEqual(
+      McpWebhookEvents::NAME_MAX,
+      mb_strlen($bounded, 'UTF-8'),
+    );
+  }
+
+  /**
+   * Inputs that pin the character-safe NAME_MAX cut.
+   *
+   * @return array<string, array{string, string}>
+   *   Keyed rows of [input, expected].
+   */
+  public static function boundNameProvider(): array {
+    $asciiAt = str_repeat('x', McpWebhookEvents::NAME_MAX);
+    $multiAt = str_repeat('é', McpWebhookEvents::NAME_MAX);
+    return [
+      'ascii at cap' => [$asciiAt, $asciiAt],
+      'ascii over cap' => [str_repeat('x', 200), $asciiAt],
+      'multibyte at cap' => [$multiAt, $multiAt],
+      'multibyte over cap' => [str_repeat('é', 200), $multiAt],
+      'live name unchanged' => [
+        McpWebhookEvents::ENTITY_PRESAVE,
+        McpWebhookEvents::ENTITY_PRESAVE,
+      ],
+    ];
+  }
+
+  /**
+   * Invalid UTF-8 is scrubbed before the cut so the result stays valid.
    *
    * @covers ::boundName
    */
-  public function testBoundNameCutsAtMax(): void {
+  public function testBoundNameScrubsInvalidUtf8(): void {
+    $bounded = McpWebhookEvents::boundName("mcp.bad\x80\x80" . str_repeat('x', 200));
+    $this->assertTrue(mb_check_encoding($bounded, 'UTF-8'));
     $this->assertSame(
-      str_repeat('x', McpWebhookEvents::NAME_MAX),
-      McpWebhookEvents::boundName(str_repeat('x', 200)),
+      McpWebhookEvents::NAME_MAX,
+      mb_strlen($bounded, 'UTF-8'),
     );
-    $this->assertSame(
-      McpWebhookEvents::ENTITY_PRESAVE,
-      McpWebhookEvents::boundName(McpWebhookEvents::ENTITY_PRESAVE),
-    );
+  }
+
+  /**
+   * Endpoint ids use the same character-safe cut at ENDPOINT_ID_MAX.
+   *
+   * @covers ::boundText
+   */
+  public function testBoundTextCutsEndpointId(): void {
+    $at = str_repeat('é', McpWebhookEvents::ENDPOINT_ID_MAX);
+    $bounded = McpWebhookEvents::boundText(str_repeat('é', 100), McpWebhookEvents::ENDPOINT_ID_MAX);
+    $this->assertSame($at, $bounded);
+    $this->assertTrue(mb_check_encoding($bounded, 'UTF-8'));
   }
 
 }

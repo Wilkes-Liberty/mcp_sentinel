@@ -45,9 +45,18 @@ final class McpWebhookEvents {
   /**
    * Longest event name stored in audit or shown to the operator.
    *
-   * Matches the delivery-row event_name column.
+   * Matches the delivery-row event_name column. Count is characters
+   * after invalid UTF-8 is scrubbed, not raw bytes.
    */
   public const NAME_MAX = 128;
+
+  /**
+   * Longest endpoint id stored on a webhook_event_refused audit row.
+   *
+   * Count is characters after invalid UTF-8 is scrubbed, not raw
+   * bytes. Matches the settings-form machine-id maxlength.
+   */
+  public const ENDPOINT_ID_MAX = 64;
 
   /**
    * Event names that carry an EntityInterface (dispatch() only).
@@ -109,16 +118,34 @@ final class McpWebhookEvents {
   }
 
   /**
-   * Cuts $name to NAME_MAX characters.
+   * Cuts $text to $max characters of valid UTF-8.
+   *
+   * Invalid sequences are scrubbed first so a mid-codepoint cut
+   * cannot land in audit metadata or an operator message.
+   *
+   * @param string $text
+   *   Raw text.
+   * @param int $max
+   *   Maximum character count.
+   *
+   * @return string
+   *   Valid UTF-8, at most $max characters.
+   */
+  public static function boundText(string $text, int $max): string {
+    return mb_substr(mb_scrub($text, 'UTF-8'), 0, $max, 'UTF-8');
+  }
+
+  /**
+   * Cuts $name to NAME_MAX characters of valid UTF-8.
    *
    * @param string $name
    *   Candidate event name.
    *
    * @return string
-   *   The same string, or the first NAME_MAX characters.
+   *   Valid UTF-8, at most NAME_MAX characters.
    */
   public static function boundName(string $name): string {
-    return substr($name, 0, self::NAME_MAX);
+    return self::boundText($name, self::NAME_MAX);
   }
 
 }

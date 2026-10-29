@@ -1164,20 +1164,30 @@ form. Each endpoint is its own add/remove row (use **Add endpoint** /
 A stored filter that is not one of the three live names — including
 `mcp.entity.save`, a typo, or a case variant — blocks the whole
 settings save, even when that endpoint is disabled. The validation
-message names the endpoint and the refused name. Type a live name or
-clear the filter; the form does not rewrite it. Disabled rows are
-checked too because they are exported config and can be re-enabled.
-Delivery is not widened: `dispatch()`, `enqueueForEvent()`, the
-worker, `requeueDuePendingRows()`, and replay refuse unknown names
-and write a `webhook_event_refused` audit row (name cut at 128
-characters, no payload). A rejected settings save is a validation
-error, not a persisted change, so it is not a `webhook_event_filter`
-row.
+message names the endpoint machine id (cut at 128 characters) and
+the refused names (each cut at 128 characters; the first 3 plus
+`, and N more`). Type a live name or clear the filter; the form
+does not rewrite it. Disabled rows are checked too because they
+are exported config and can be re-enabled. Delivery is not
+widened: `dispatch()`, `enqueueForEvent()`, the worker,
+`requeueDuePendingRows()`, and replay refuse unknown names and
+write a `webhook_event_refused` audit row (name cut at 128
+characters of valid UTF-8, endpoint id at 64 characters when a
+stored row is refused, no payload). A rejected settings save is a
+validation error, not a persisted change, so it is not a
+`webhook_event_filter` row.
 
 A queued delivery whose stored `event_name` is unknown is marked
 failed (worker and requeue) or left untouched (replay of a sent
-row). In-repo producers only emit live names, so this path is for
-imported or hand-inserted rows.
+row). Replay of a held or discarded row does not claim the name
+was refused: those statuses return first and no refusal audit is
+written. In-repo producers only emit live names, so this path is
+for imported or hand-inserted rows.
+
+No update hook; 10039 is unchanged. A plain revert is clean.
+Rows already marked `failed` with
+`Unknown webhook event name refused.` stay failed after revert.
+They are ordinary failed delivery rows and are not rewritten.
 
 ### Request headers and signatures
 

@@ -493,14 +493,12 @@ final class McpWebhookQueueManager {
    *   The refused name, cut at NAME_MAX, or NULL.
    */
   public function refusedReplayEventName(int $deliveryId): ?string {
-    $row = McpStoredValue::stringKeyedRow(
-      $this->database->select('mcp_sentinel_webhook_delivery', 'd')
-        ->fields('d')
-        ->condition('d.id', $deliveryId)
-        ->execute()
-        ?->fetchAssoc(),
-    );
+    $row = $this->loadDeliveryRow($deliveryId);
     if ($row === NULL) {
+      return NULL;
+    }
+    $status = McpStoredValue::rowString($row, 'status');
+    if (in_array($status, [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
       return NULL;
     }
     $eventName = McpStoredValue::rowString($row, 'event_name');
@@ -508,6 +506,49 @@ final class McpWebhookQueueManager {
       return NULL;
     }
     return McpWebhookEvents::boundName($eventName);
+  }
+
+  /**
+   * Held or discarded status that blocked replay, or NULL.
+   *
+   * Replay of a held or discarded row does not write a
+   * webhook_event_refused audit row, even when event_name is unknown.
+   *
+   * @param int $deliveryId
+   *   Delivery log row id.
+   *
+   * @return string|null
+   *   STATUS_HELD, STATUS_DISCARDED, or NULL.
+   */
+  public function replayHoldStatus(int $deliveryId): ?string {
+    $row = $this->loadDeliveryRow($deliveryId);
+    if ($row === NULL) {
+      return NULL;
+    }
+    $status = McpStoredValue::rowString($row, 'status');
+    if (in_array($status, [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+      return $status;
+    }
+    return NULL;
+  }
+
+  /**
+   * Loads one delivery row, or NULL when missing.
+   *
+   * @param int $deliveryId
+   *   Delivery log row id.
+   *
+   * @return array<string, mixed>|null
+   *   String-keyed row, or NULL.
+   */
+  private function loadDeliveryRow(int $deliveryId): ?array {
+    return McpStoredValue::stringKeyedRow(
+      $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d')
+        ->condition('d.id', $deliveryId)
+        ->execute()
+        ?->fetchAssoc(),
+    );
   }
 
   /**
@@ -1392,8 +1433,8 @@ final class McpWebhookQueueManager {
    * Audits a refused webhook event name. The payload is never stored.
    *
    * @param string $eventName
-   *   The refused name. Cut at 128 characters, same bound as the
-   *   delivery-row event_name column.
+   *   The refused name. Cut at NAME_MAX characters of valid UTF-8,
+   *   same bound as the delivery-row event_name column.
    * @param string $surface
    *   One of the SURFACE_* constants (dispatch, enqueue, worker,
    *   requeue, replay).
@@ -1421,10 +1462,9 @@ final class McpWebhookQueueManager {
     if ($deliveryId !== NULL && $deliveryId > 0) {
       $metadata['delivery_id'] = $deliveryId;
     }
-    $boundedEndpoint = substr(
+    $boundedEndpoint = McpWebhookEvents::boundText(
       McpStoredValue::string($endpointId ?? ''),
-      0,
-      64,
+      McpWebhookEvents::ENDPOINT_ID_MAX,
     );
     if ($boundedEndpoint !== '') {
       $metadata['endpoint_id'] = $boundedEndpoint;

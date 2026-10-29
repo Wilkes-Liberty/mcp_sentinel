@@ -338,7 +338,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $status = McpStoredValue::string($row['status'] ?? '');
     if (in_array($status, [
       'sent',
-      'failed',
+      McpWebhookQueueManager::STATUS_FAILED,
       'failed_ssrf',
       'failed_redirect',
       'failed_key',
@@ -367,7 +367,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
 
     $attempts = McpStoredValue::int($row['attempts'] ?? 0);
     if ($attempts >= self::MAX_ATTEMPTS) {
-      $this->updateRow($deliveryId, 'failed', NULL, 'Max attempts reached.', $attempts);
+      $this->updateRow($deliveryId, McpWebhookQueueManager::STATUS_FAILED, NULL, 'Max attempts reached.', $attempts);
       return;
     }
 
@@ -602,7 +602,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
    */
   private function scheduleRetry(int $id, int $attempts, ?int $code, ?string $body): void {
     if ($attempts >= self::MAX_ATTEMPTS) {
-      $this->updateRow($id, 'failed', $code, $body, $attempts, TRUE);
+      $this->updateRow($id, McpWebhookQueueManager::STATUS_FAILED, $code, $body, $attempts, TRUE);
       return;
     }
     // The attempt count is 1-based for the just-completed try; the next wait

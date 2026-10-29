@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\key\Entity\Key;
+use Drupal\mcp_sentinel\Form\McpSettingsForm;
 use Drupal\mcp_sentinel\McpWebhookEvents;
 use Drupal\Tests\BrowserTestBase;
 
@@ -461,6 +462,43 @@ final class McpSettingsFormTest extends BrowserTestBase {
       . ', which are not live webhook events',
     );
     $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
+    $this->assertSame(
+      ['mcp.entity.save'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+  }
+
+  /**
+   * Unknown-name validation caps the endpoint id and the echoed list.
+   *
+   * The machine-id field is HTML-maxlength 64; the posted value can
+   * still be longer. The error uses boundName (NAME_MAX characters)
+   * for the id and the first UNKNOWN_EVENT_ECHO_MAX names plus
+   * ", and N more". The textarea still holds the typed names, so
+   * this asserts the comma-separated sentence, not a page-wide
+   * absence of later names.
+   */
+  public function testUnknownWebhookEventEchoIsCapped(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $names = ['mcp.a', 'mcp.b', 'mcp.c', 'mcp.d', 'mcp.e', 'mcp.f'];
+    $this->submitForm([
+      'webhooks[endpoints][0][id]' => str_repeat('a', 200),
+      'webhooks[endpoints][0][events]' => implode("\n", $names),
+    ], 'Save configuration');
+    $shown = array_slice($names, 0, McpSettingsForm::UNKNOWN_EVENT_ECHO_MAX);
+    $more = count($names) - count($shown);
+    $this->assertGreaterThan(0, $more);
+    $this->assertSession()->pageTextContains(
+      'Endpoint ' . str_repeat('a', McpWebhookEvents::NAME_MAX)
+      . ' filters on ' . implode(', ', $shown)
+      . ', and ' . $more . ' more, which are not live webhook events',
+    );
+    $this->assertSame(
+      'siem',
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['id'],
+    );
     $this->assertSame(
       ['mcp.entity.save'],
       \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],

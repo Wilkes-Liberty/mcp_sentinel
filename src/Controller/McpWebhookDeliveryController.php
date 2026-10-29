@@ -220,8 +220,15 @@ class McpWebhookDeliveryController extends ControllerBase {
       ));
     }
     else {
+      $hold = $this->queueManager->replayHoldStatus($delivery);
       $refused = $this->queueManager->refusedReplayEventName($delivery);
-      if ($refused !== NULL) {
+      if ($hold !== NULL) {
+        $this->messenger()->addError($this->t(
+          'Delivery @id could not be replayed (@status).',
+          ['@id' => $delivery, '@status' => $hold],
+        ));
+      }
+      elseif ($refused !== NULL) {
         $this->messenger()->addError($this->t(
           'Delivery @id could not be replayed: event name @event was refused.',
           ['@id' => $delivery, '@event' => $refused],

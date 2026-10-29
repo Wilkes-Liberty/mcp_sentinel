@@ -13,6 +13,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpSentinelCommands;
 use Drupal\mcp_sentinel\Service\McpAnomalyEvidence;
 use Drupal\mcp_sentinel\Service\McpAuditLogger;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drush\Log\DrushLoggerManager;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -445,7 +446,7 @@ final class McpDrushCommandsTest extends KernelTestBase {
       ->condition('d.id', $rowId)
       ->execute()
       ->fetchField();
-    $this->assertSame('failed', $status);
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $status);
   }
 
   /**

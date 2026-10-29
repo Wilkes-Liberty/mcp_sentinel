@@ -191,6 +191,44 @@ final class McpWebhookWorkerTest extends KernelTestBase {
   }
 
   /**
+   * An empty stored column falls back to the queue item event_name.
+   *
+   * Fails if the worker only reads the row and treats empty as
+   * the refused name, or if it ignores the item fallback.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerFallsBackToItemEventName(): void {
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id'  => 'ep1',
+        'event_name'   => '',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload'      => '{}',
+        'status'       => 'pending',
+        'attempts'     => 0,
+        'created'      => \Drupal::time()->getRequestTime(),
+      ])->execute();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200, [], 'ok')], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.not.a.live.event',
+      'payload' => '{}',
+    ]);
+    $this->assertCount(0, $history, 'Unknown fallback names must not be POSTed.');
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_WORKER, $meta['surface']);
+  }
+
+  /**
    * A 200 response marks the row sent.
    *
    * @covers ::processItem

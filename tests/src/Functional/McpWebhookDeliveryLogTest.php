@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
 
 /**
@@ -166,7 +167,7 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     );
     $row = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
       ->fields('d')->condition('d.id', $id)->execute()->fetchAssoc();
-    $this->assertSame('failed', $row['status']);
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $row['status']);
     $this->assertSame(
       0,
       \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
