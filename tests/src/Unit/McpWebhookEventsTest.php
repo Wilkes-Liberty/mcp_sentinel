@@ -56,7 +56,7 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'whitespace' => [' ', FALSE],
       'padded live' => [' mcp.entity.presave', FALSE],
       'trailing space' => ['mcp.entity.presave ', FALSE],
-      'mixed whitespace' => [" \tmcp.entity.presave \n", FALSE],
+      'mixed whitespace' => [" \t" . "mcp.entity.presave \n", FALSE],
       'newline' => ["mcp.entity.presave\n", FALSE],
       'tab' => ["mcp.entity.presave\t", FALSE],
       'nbsp' => ["mcp.entity.presave\u{00A0}", FALSE],
@@ -96,7 +96,7 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'whitespace' => [' ', FALSE],
       'padded live' => [' mcp.entity.presave', FALSE],
       'trailing space' => ['mcp.entity.presave ', FALSE],
-      'mixed whitespace' => [" \tmcp.entity.presave \n", FALSE],
+      'mixed whitespace' => [" \t" . "mcp.entity.presave \n", FALSE],
       'newline' => ["mcp.entity.presave\n", FALSE],
       'tab' => ["mcp.entity.presave\t", FALSE],
       'nbsp' => ["mcp.entity.presave\u{00A0}", FALSE],
@@ -105,7 +105,7 @@ final class McpWebhookEventsTest extends UnitTestCase {
   }
 
   /**
-   * boundName cuts at NAME_MAX characters of valid UTF-8.
+   * BoundName cuts at NAME_MAX characters of valid UTF-8.
    *
    * The ASCII over-long case fails if the cut is removed. The
    * multibyte cases fail if the cut is still a raw byte substr.
