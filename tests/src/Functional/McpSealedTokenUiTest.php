@@ -255,8 +255,8 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
     $this->assertSession()->pageTextNotContains('mcs1.');
 
     $this->drupalLogout();
-    $this->assertAnonymousRevealRedirectsToLogin('GET');
-    $this->assertAnonymousRevealRedirectsToLogin('POST');
+    $this->assertAnonymousRevealIsDenied('GET');
+    $this->assertAnonymousRevealIsDenied('POST');
 
     $this->drupalLogin($this->drupalCreateUser([]));
     $this->drupalGet('/admin/config/services/mcp-sentinel/tokens/reveal');
@@ -310,12 +310,15 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
   }
 
   /**
-   * Asserts an anonymous reveal GET or POST is a login redirect, not a reveal.
+   * Asserts an anonymous reveal GET or POST is 403 and does not reveal.
+   *
+   * BrowserKit sees the access deny as 403. There is no login Location
+   * on this path in this test.
    *
    * @param string $method
    *   GET or POST.
    */
-  private function assertAnonymousRevealRedirectsToLogin(string $method): void {
+  private function assertAnonymousRevealIsDenied(string $method): void {
     $driver = $this->getSession()->getDriver();
     $this->assertInstanceOf(BrowserKitDriver::class, $driver);
     $client = $driver->getClient();
@@ -326,10 +329,12 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
         $method,
         $this->getAbsoluteUrl('/admin/config/services/mcp-sentinel/tokens/reveal'),
       );
-      $this->assertSession()->statusCodeEquals(302);
+      $this->assertSession()->statusCodeEquals(403);
       $location = $this->getSession()->getResponseHeader('Location');
-      $this->assertIsString($location);
-      $this->assertStringContainsString('user/login', $location);
+      $this->assertTrue(
+        $location === '' || $location === NULL || !str_contains((string) $location, 'user/login'),
+        'Anonymous reveal stays 403; it does not redirect to login.',
+      );
       $this->assertRevealSecretNotShown();
     }
     finally {
