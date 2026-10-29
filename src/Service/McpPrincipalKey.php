@@ -156,7 +156,6 @@ final class McpPrincipalKey {
       self::assertSafePart($actor);
     }
     $principalKey = $iss . self::SEPARATOR . $sub . self::SEPARATOR . $actor;
-    self::assertSafeComposedKey($principalKey);
     return [
       'principalKey' => $principalKey,
       'humanKey' => $iss . self::SEPARATOR . $sub,
@@ -360,7 +359,6 @@ final class McpPrincipalKey {
     }
     $parts[2] = self::canonicalActActor($parts[2]);
     $composed = implode(self::SEPARATOR, $parts);
-    self::assertSafeComposedKey($composed);
     return $composed;
   }
 
