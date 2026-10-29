@@ -450,12 +450,16 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->submitForm([
       'webhooks[endpoints][0][events]' => "mcp.entity.update\nMCP.ENTITY.PRESAVE\n" . str_repeat('x', 200),
     ], 'Save configuration');
-    $this->assertSession()->pageTextContains('Endpoint siem filters on mcp.entity.update');
-    $this->assertSession()->pageTextContains('MCP.ENTITY.PRESAVE');
-    $error = $this->assertSession()->elementExists('css', '.messages--error')->getText();
-    $this->assertStringContainsString(str_repeat('x', McpWebhookEvents::NAME_MAX), $error);
-    $this->assertStringNotContainsString(str_repeat('x', McpWebhookEvents::NAME_MAX + 1), $error);
-    $this->assertSession()->pageTextContains('which are not live webhook events');
+    // The validation sentence is comma-separated. The textarea still
+    // holds the typed 200-character name on its own line, so a
+    // page-wide 129-x check cannot prove the echo is cut. Stark on
+    // Drupal 11 also has no .messages--error wrapper.
+    $capped = str_repeat('x', McpWebhookEvents::NAME_MAX);
+    $this->assertSession()->pageTextContains(
+      'Endpoint siem filters on mcp.entity.update, MCP.ENTITY.PRESAVE, '
+      . $capped
+      . ', which are not live webhook events',
+    );
     $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
     $this->assertSame(
       ['mcp.entity.save'],
