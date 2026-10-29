@@ -97,6 +97,10 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains('act-sub-namespaced-apart-from-azp', $names);
     $this->assertContains('azp-with-act-prefix-denied', $names);
     $this->assertContains('azp-with-uppercase-act-prefix-denied', $names);
+    $this->assertContains('act-sub-252-accepted', $names);
+    $this->assertContains('act-sub-253-accepted', $names);
+    $this->assertContains('act-sub-256-accepted', $names);
+    $this->assertContains('act-sub-257-refused', $names);
     $this->assertSame($names, array_unique($names));
   }
 
@@ -219,6 +223,26 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   public function testParsePrincipalKeyAcceptsLegacyDelegatedForm(): void {
     $legacy = 'https://idp.example/realms/agents|human-1|agent-7';
     $this->assertSame($legacy, McpPrincipalKey::parsePrincipalKey($legacy));
+  }
+
+  /**
+   * Parse applies the 256 cap to the raw act.sub, not the prefixed actor.
+   *
+   * @covers ::parsePrincipalKey
+   */
+  public function testParsePrincipalKeyCapsRawActSubBeforePrefix(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $accepted = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 256);
+    $this->assertSame($accepted, McpPrincipalKey::parsePrincipalKey($accepted));
+    try {
+      McpPrincipalKey::parsePrincipalKey(
+        $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 257),
+      );
+      $this->fail('A 257-character act.sub must fail closed.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::PART_TOO_LONG, $e->reasonCode);
+    }
   }
 
   /**

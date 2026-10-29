@@ -30,7 +30,11 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * (over-inclusive only; never fail open). See
  * enforcementAliases().
  *
- * Each part is capped at MAX_PART_LENGTH (256) characters.
+ * Each raw claim part is capped at MAX_PART_LENGTH (256)
+ * characters. For a delegated token the cap applies to
+ * act.sub before ACT_PREFIX is added, so a 256-character
+ * act.sub stays accepted; the stored actor may be 260
+ * characters. A raw part over 256 still fails closed.
  * Unicode whitespace-only parts (including NBSP), control
  * characters, invalid UTF-8, and '|' are rejected.
  *
@@ -136,8 +140,15 @@ final class McpPrincipalKey {
     $iss = self::requirePart($claims, 'iss', McpPrincipalKeyException::MISSING_ISS);
     $sub = self::requirePart($claims, 'sub', McpPrincipalKeyException::MISSING_SUB);
     $actor = self::actorFromClaims($claims);
-    foreach ([$iss, $sub, $actor] as $part) {
+    foreach ([$iss, $sub] as $part) {
       self::assertSafePart($part);
+    }
+    // Delegated actors already passed assertSafePart on the
+    // raw act.sub. Re-checking the prefixed string would
+    // refuse a 253-to-256-character act.sub (part_too_long)
+    // that was accepted before the prefix existed.
+    if (!self::actorHasActPrefix($actor)) {
+      self::assertSafePart($actor);
     }
     return [
       'principalKey' => $iss . self::SEPARATOR . $sub . self::SEPARATOR . $actor,
@@ -178,8 +189,9 @@ final class McpPrincipalKey {
           'A delegation (act) claim requires a top-level act.sub.',
         );
       }
-      // Reject the raw claim before prefixing so whitespace-only
-      // act.sub cannot hide behind ACT_PREFIX.
+      // Cap and reject the raw claim before prefixing so
+      // whitespace-only act.sub cannot hide behind ACT_PREFIX
+      // and a 253-to-256-character act.sub stays accepted.
       self::assertSafePart($actor);
       return self::ACT_PREFIX . $actor;
     }
@@ -324,6 +336,12 @@ final class McpPrincipalKey {
           $missing[$i],
           'Principal key requires a ' . $names[$i] . ' claim.',
         );
+      }
+      // Apply the 256 cap to the raw act.sub when the actor
+      // already carries ACT_PREFIX, matching fromClaims().
+      if ($i === 2 && self::actorHasActPrefix($part)) {
+        self::assertSafePart(substr($part, strlen(self::ACT_PREFIX)));
+        continue;
       }
       self::assertSafePart($part);
     }
