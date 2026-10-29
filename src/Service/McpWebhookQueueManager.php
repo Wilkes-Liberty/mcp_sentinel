@@ -285,6 +285,7 @@ final class McpWebhookQueueManager {
     foreach ($rows as $row) {
       $eventName = McpStoredValue::string($row->event_name ?? NULL);
       $deliveryId = McpStoredValue::int($row->id ?? NULL);
+      $endpointId = McpStoredValue::string($row->endpoint_id ?? NULL);
       if (!McpWebhookEvents::isLive($eventName)) {
         // A stored unknown name is not delivered. Mark failed so cron
         // does not keep selecting it.
@@ -292,10 +293,11 @@ final class McpWebhookQueueManager {
           $deliveryId,
           $eventName,
           self::SURFACE_REQUEUE,
+          $endpointId,
         );
         continue;
       }
-      $endpoint = $this->findEndpoint(McpStoredValue::string($row->endpoint_id ?? NULL));
+      $endpoint = $this->findEndpoint($endpointId);
       if ($endpoint === NULL) {
         continue;
       }
@@ -409,7 +411,12 @@ final class McpWebhookQueueManager {
     if (!McpWebhookEvents::isLive($eventName)) {
       // Leave the stored status alone: a sent row must not become
       // failed because someone asked to replay it.
-      $this->auditRefusedEventName($eventName, self::SURFACE_REPLAY);
+      $this->auditRefusedEventName(
+        $eventName,
+        self::SURFACE_REPLAY,
+        $deliveryId,
+        McpStoredValue::rowString($row, 'endpoint_id'),
+      );
       return FALSE;
     }
     $endpoint = $this->findEndpoint(McpStoredValue::rowString($row, 'endpoint_id'));
@@ -1350,17 +1357,39 @@ final class McpWebhookQueueManager {
    * @param string $surface
    *   One of the SURFACE_* constants (dispatch, enqueue, worker,
    *   requeue, replay).
+   * @param int|null $deliveryId
+   *   Delivery row id when a stored row is refused. Omitted on
+   *   dispatch and enqueue, where no row exists.
+   * @param string|null $endpointId
+   *   Endpoint id when known. Omitted when empty.
    */
-  public function auditRefusedEventName(string $eventName, string $surface): void {
+  public function auditRefusedEventName(
+    string $eventName,
+    string $surface,
+    ?int $deliveryId = NULL,
+    ?string $endpointId = NULL,
+  ): void {
     $bounded = substr($eventName, 0, 128);
     $this->logger->error(
       'Webhook event @event refused on @surface: not an allowed name for this path.',
       ['@event' => $bounded, '@surface' => $surface],
     );
-    $this->auditLogger->logAlways(self::AUDIT_EVENT_REFUSED, [
+    $metadata = [
       'event' => $bounded,
       'surface' => $surface,
-    ]);
+    ];
+    if ($deliveryId !== NULL && $deliveryId > 0) {
+      $metadata['delivery_id'] = $deliveryId;
+    }
+    $boundedEndpoint = substr(
+      McpStoredValue::string($endpointId ?? ''),
+      0,
+      64,
+    );
+    if ($boundedEndpoint !== '') {
+      $metadata['endpoint_id'] = $boundedEndpoint;
+    }
+    $this->auditLogger->logAlways(self::AUDIT_EVENT_REFUSED, $metadata);
   }
 
   /**
@@ -1372,9 +1401,21 @@ final class McpWebhookQueueManager {
    *   The refused name.
    * @param string $surface
    *   Refusal surface (requeue or worker).
+   * @param string $endpointId
+   *   Endpoint id from the stored row, when known.
    */
-  private function refuseStoredEventName(int $deliveryId, string $eventName, string $surface): void {
-    $this->auditRefusedEventName($eventName, $surface);
+  private function refuseStoredEventName(
+    int $deliveryId,
+    string $eventName,
+    string $surface,
+    string $endpointId = '',
+  ): void {
+    $this->auditRefusedEventName(
+      $eventName,
+      $surface,
+      $deliveryId,
+      $endpointId,
+    );
     if ($deliveryId < 1) {
       return;
     }

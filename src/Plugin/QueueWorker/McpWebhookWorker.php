@@ -382,6 +382,8 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       $this->webhookQueue->auditRefusedEventName(
         $eventName,
         McpWebhookQueueManager::SURFACE_WORKER,
+        $deliveryId,
+        McpStoredValue::string($row['endpoint_id'] ?? ''),
       );
       $this->updateRow($deliveryId, 'failed', NULL,
         'Unknown webhook event name refused.', $attempts);

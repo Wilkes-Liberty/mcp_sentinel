@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpWebhookRefusedAuditTestTrait;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -35,6 +36,7 @@ use Symfony\Component\HttpFoundation\Request;
 final class McpWebhookWorkerTest extends KernelTestBase {
 
   use McpAuditSchemaTestTrait;
+  use McpWebhookRefusedAuditTestTrait;
 
   /**
    * {@inheritdoc}
@@ -178,19 +180,13 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       (string) $row['last_response_body'],
     );
     $this->assertCount(0, $history, 'Unknown event names must not be POSTed.');
-    $audit = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l', ['operation', 'metadata'])
-      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
-      ->orderBy('l.id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertNotFalse($audit, 'A webhook_event_refused audit row must exist.');
-    $meta = $this->container->get('mcp_sentinel.audit_logger')
-      ->decodeMetadata((string) $audit['metadata']);
+    $meta = $this->latestRefusedAudit();
     $this->assertSame('mcp.not.a.live.event', $meta['event']);
     $this->assertSame(McpWebhookQueueManager::SURFACE_WORKER, $meta['surface']);
+    $this->assertArrayHasKey('delivery_id', $meta);
+    $this->assertSame($id, (int) $meta['delivery_id']);
+    $this->assertArrayHasKey('endpoint_id', $meta);
+    $this->assertSame('ep1', $meta['endpoint_id']);
     $this->assertArrayNotHasKey('payload', $meta);
   }
 

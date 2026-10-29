@@ -8,8 +8,9 @@ namespace Drupal\mcp_sentinel;
  * Live webhook event names. Unknown names are never saved or dispatched.
  *
  * Only these three names are ever queued (entity presave, entity delete,
- * anomaly alert). The settings form and both enqueue paths read this
- * list so a typo cannot persist as a filter or leave the process.
+ * anomaly alert). The settings form, dispatch, enqueue, worker, requeue,
+ * and replay read this list so a typo cannot persist as a filter or
+ * leave the process.
  *
  * Kept as a final class rather than a backed enum in src/Enum/: that
  * directory holds closed variant sets, and this allowlist still needs

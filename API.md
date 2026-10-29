@@ -74,8 +74,9 @@ Dispatched whenever a **governed** MCP operation creates, updates, or deletes an
 entity. This is the extension point the reliable-webhook pipeline rides on: the
 `McpEventDispatcher` service both fires this Symfony event and enqueues a
 configured webhook delivery. Unknown event names are refused: no
-in-process event fires and nothing is queued. Subscribe to stream governed changes into your own
-SIEM, queue, or notification system without touching the audit log.
+in-process event fires and nothing is queued. Subscribe to stream
+governed changes into your own SIEM, queue, or notification system
+without touching the audit log.
 
 | Method | Returns |
 |--------|---------|

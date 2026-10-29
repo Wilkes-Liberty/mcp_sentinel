@@ -10,6 +10,7 @@ use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpWebhookRefusedAuditTestTrait;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
@@ -24,6 +25,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 final class McpWebhookQueueTest extends KernelTestBase {
 
   use McpAuditSchemaTestTrait;
+  use McpWebhookRefusedAuditTestTrait;
 
   /**
    * {@inheritdoc}
@@ -109,26 +111,6 @@ final class McpWebhookQueueTest extends KernelTestBase {
         ->execute()
         ->fetchField(),
     );
-  }
-
-  /**
-   * Latest webhook_event_refused metadata, or fail if none.
-   *
-   * @return array<string, mixed>
-   *   Decoded metadata.
-   */
-  private function latestRefusedAudit(): array {
-    $row = $this->container->get('database')
-      ->select('audit_chain_log', 'l')
-      ->fields('l', ['operation', 'metadata'])
-      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
-      ->orderBy('l.id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchAssoc();
-    $this->assertNotFalse($row, 'A webhook_event_refused audit row must exist.');
-    return $this->container->get('mcp_sentinel.audit_logger')
-      ->decodeMetadata((string) $row['metadata']);
   }
 
   /**
@@ -547,6 +529,10 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $meta = $this->latestRefusedAudit();
     $this->assertSame('mcp.not.a.live.event', $meta['event']);
     $this->assertSame(McpWebhookQueueManager::SURFACE_REQUEUE, $meta['surface']);
+    $this->assertArrayHasKey('delivery_id', $meta);
+    $this->assertSame($id, (int) $meta['delivery_id']);
+    $this->assertArrayHasKey('endpoint_id', $meta);
+    $this->assertSame('all_events', $meta['endpoint_id']);
     $this->assertArrayNotHasKey('payload', $meta);
   }
 
@@ -579,6 +565,10 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $meta = $this->latestRefusedAudit();
     $this->assertSame('mcp.not.a.live.event', $meta['event']);
     $this->assertSame(McpWebhookQueueManager::SURFACE_REPLAY, $meta['surface']);
+    $this->assertArrayHasKey('delivery_id', $meta);
+    $this->assertSame($id, (int) $meta['delivery_id']);
+    $this->assertArrayHasKey('endpoint_id', $meta);
+    $this->assertSame('all_events', $meta['endpoint_id']);
     $this->assertArrayNotHasKey('payload', $meta);
   }
 

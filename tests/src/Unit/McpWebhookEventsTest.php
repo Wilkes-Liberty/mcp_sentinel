@@ -48,29 +48,13 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'delete' => ['mcp.entity.delete', TRUE],
       'alert' => ['mcp.anomaly.alert', TRUE],
       'retired save' => ['mcp.entity.save', FALSE],
+      'retired constant' => [McpWebhookEvents::RETIRED_ENTITY_SAVE, FALSE],
       'update typo' => ['mcp.entity.update', FALSE],
       'case variant' => ['MCP.ENTITY.PRESAVE', FALSE],
       'unknown' => ['mcp.not.a.live.event', FALSE],
       'empty' => ['', FALSE],
       'whitespace' => [' ', FALSE],
     ];
-  }
-
-  /**
-   * Retired, empty, and case-variant names are not live.
-   *
-   * Strict comparison is the deny path. If isLive() starts folding
-   * case or treating mcp.entity.save as presave, this fails.
-   *
-   * @covers ::isLive
-   */
-  public function testUnknownAndRetiredNamesAreNotLive(): void {
-    $this->assertFalse(McpWebhookEvents::isLive(McpWebhookEvents::RETIRED_ENTITY_SAVE));
-    $this->assertFalse(McpWebhookEvents::isLive('mcp.entity.save'));
-    $this->assertFalse(McpWebhookEvents::isLive('mcp.entity.update'));
-    $this->assertFalse(McpWebhookEvents::isLive('MCP.ENTITY.PRESAVE'));
-    $this->assertFalse(McpWebhookEvents::isLive(''));
-    $this->assertFalse(McpWebhookEvents::isLive('mcp.not.a.live.event'));
   }
 
   /**
