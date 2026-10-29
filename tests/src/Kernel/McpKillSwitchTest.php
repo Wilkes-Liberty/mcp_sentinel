@@ -251,6 +251,46 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * Status and unkill match the stored spelling; enforcement matches both.
+   *
+   * A legacy iss|sub|X stop still refuses act.sub=X. Status and
+   * unkill of the act: twin find no row. The operator must use
+   * the stored spelling.
+   */
+  public function testStatusAndUnkillMatchStoredSpellingOnly(): void {
+    $legacy = $this->principalSelector('subject-status-spell', 'agent-7');
+    $prefixed = $this->principalSelector(
+      'subject-status-spell',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $this->killSwitch()->kill([$legacy], 'stored-spelling', $this->paladinA());
+    $this->sealSubject('subject-status-spell', 'other-client', 'agent-7');
+    $this->expectGenericDeny();
+    $this->assertNull($this->killSwitch()->status($prefixed));
+    $stored = $this->killSwitch()->status($legacy);
+    $this->assertIsArray($stored);
+    $this->assertSame($legacy->key, $stored['selector_key']);
+    try {
+      $this->killSwitch()->requestUnkill(
+        [$prefixed],
+        'twin-spelling',
+        $this->paladinA(),
+      );
+      $this->fail('Unkill of the twin spelling must not find the stored row.');
+    }
+    catch (McpKillSwitchException $e) {
+      $this->assertSame(McpKillSwitchException::NOT_PENDING, $e->reasonCode);
+    }
+    $pending = $this->killSwitch()->requestUnkill(
+      [$legacy],
+      'stored-spelling',
+      $this->paladinA(),
+    );
+    $this->assertTrue($pending->needsConfirm);
+    $this->assertSame(McpKillBlockStatus::UnkillPending, $pending->status);
+  }
+
+  /**
    * A new act: stop holds a job that still carries the pre-upgrade key.
    */
   public function testActPrefixedKillHoldsLegacyCarriedJob(): void {

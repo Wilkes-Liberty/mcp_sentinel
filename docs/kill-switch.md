@@ -32,7 +32,10 @@ over-inclusive: over-block only, never under-block). A new
 a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
 token. Audit and stored `principal_key` identity stay separated.
 Non-delegated stops (`iss|sub|azp`) still store the unprefixed
-key; enforcement looks up both spellings.
+key; enforcement looks up both spellings. `kill-status` and
+`unkill` match the stored row's exact spelling. If a token is
+refused under a legacy `iss|sub|X` stop, status and unkill
+with `iss|sub|act:X` find no row. Use the stored spelling.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the
@@ -379,7 +382,10 @@ PALADIN_TOKEN=ACCESS_TOKEN drush mcp-sentinel:unkill --operator=alice --principa
 ```
 
 Use `--human-key` or `--tenant` for those kinds of stop. The command
-prints `status: unkill_pending` and a batch id.
+prints `status: unkill_pending` and a batch id. The selector must
+match the stored spelling. Unkill of `iss|sub|act:X` does not
+find a row stored as `iss|sub|X`, even while that stop still
+refuses the delegated token.
 
 **The target stays stopped while the lift is pending.**
 
@@ -455,6 +461,10 @@ Pass exactly one selector. If there is no row, the command prints
 `status: active`. Otherwise it prints a table with `status`,
 `selector_type`, `selector_key`, `block_until`, `ttl`, `batch_id`,
 `requested_by`, `confirmed_by`, and `unkill_batch_id`.
+`kill-status` and `unkill` hash the supplied selector exactly.
+Enforcement matches both `iss|sub|X` and `iss|sub|act:X`, so a
+token can be refused while status of the twin spelling prints
+`active`. Use the stored `selector_key` spelling.
 
 `block_until` is a Unix timestamp. The `requested_by` and `confirmed_by`
 values are operator identity hashes, not names.

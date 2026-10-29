@@ -47,7 +47,11 @@ stops across this deploy. Dual-match keeps a pre-upgrade
 `iss|sub|act:<act.sub>` stop holds backlog stored under the old
 spelling. Prefer the prefixed form for new delegated stops.
 `parsePrincipalKey` still accepts the unprefixed three-part form;
-that stop now enforces both spellings.
+that stop now enforces both spellings. `kill-status` and
+`unkill` still match the stored row's exact spelling. If
+enforcement refuses a token under a legacy `iss|sub|X` stop,
+status or unkill with `iss|sub|act:X` finds no row. Use the
+stored spelling.
 
 **Rollback:** revert the module and rebuild caches. Dual-match goes
 away with the revert, so exact sha256 matching returns. Kill-switch
