@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\key\Entity\Key;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Drupal\Tests\BrowserTestBase;
 
 /**
@@ -447,10 +448,12 @@ final class McpSettingsFormTest extends BrowserTestBase {
     $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
     $this->drupalGet('/admin/config/services/mcp-sentinel');
     $this->submitForm([
-      'webhooks[endpoints][0][events]' => "mcp.entity.update\nMCP.ENTITY.PRESAVE",
+      'webhooks[endpoints][0][events]' => "mcp.entity.update\nMCP.ENTITY.PRESAVE\n" . str_repeat('x', 200),
     ], 'Save configuration');
     $this->assertSession()->pageTextContains('Endpoint siem filters on mcp.entity.update');
     $this->assertSession()->pageTextContains('MCP.ENTITY.PRESAVE');
+    $this->assertSession()->pageTextContains(str_repeat('x', McpWebhookEvents::NAME_MAX));
+    $this->assertSession()->pageTextNotContains(str_repeat('x', McpWebhookEvents::NAME_MAX + 1));
     $this->assertSession()->pageTextContains('which are not live webhook events');
     $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
     $this->assertSame(

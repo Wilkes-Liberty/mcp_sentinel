@@ -407,6 +407,48 @@ final class McpDrushCommandsTest extends KernelTestBase {
   }
 
   /**
+   * Webhook-replay refuses a stored unknown event_name.
+   *
+   * @covers ::webhookReplay
+   */
+  public function testWebhookReplayRefusesUnknownEventName(): void {
+    $this->config('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'ep1',
+          'label' => 'Test',
+          'url' => 'https://example.com/hook',
+          'secret_key' => '',
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])
+      ->save();
+
+    $db = $this->container->get('database');
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $rowId = (int) $db->insert('mcp_sentinel_webhook_delivery')->fields([
+      'endpoint_id' => 'ep1',
+      'event_name' => 'mcp.not.a.live.event',
+      'payload_hash' => hash('sha256', 'test'),
+      'payload' => '{}',
+      'status' => 'failed',
+      'attempts' => 1,
+      'created' => $now,
+    ])->execute();
+
+    $result = $this->commands->webhookReplay($rowId);
+    $this->assertSame(McpSentinelCommands::EXIT_FAILURE, $result);
+    $status = $db->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d', ['status'])
+      ->condition('d.id', $rowId)
+      ->execute()
+      ->fetchField();
+    $this->assertSame('failed', $status);
+  }
+
+  /**
    * Audit-verify writes last_verify state (ok=TRUE) on a clean chain.
    *
    * @covers ::auditVerify

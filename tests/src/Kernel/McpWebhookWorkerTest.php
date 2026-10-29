@@ -174,9 +174,9 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       'payload' => '{}',
     ]);
     $row = $this->loadRow($id);
-    $this->assertSame('failed', $row['status']);
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $row['status']);
     $this->assertStringContainsString(
-      'Unknown webhook event name refused.',
+      McpWebhookQueueManager::REASON_UNKNOWN_EVENT,
       (string) $row['last_response_body'],
     );
     $this->assertCount(0, $history, 'Unknown event names must not be POSTed.');

@@ -49,6 +49,16 @@ final class McpWebhookQueueManager {
   public const STATUS_DISCARDED = 'discarded';
 
   /**
+   * Delivery row that will not be sent again.
+   */
+  public const STATUS_FAILED = 'failed';
+
+  /**
+   * Stored last_response_body when an unknown event_name is refused.
+   */
+  public const REASON_UNKNOWN_EVENT = 'Unknown webhook event name refused.';
+
+  /**
    * Audit operation for holding in-scope queued deliveries.
    */
   public const AUDIT_HOLD = 'agent_side_effect_hold';
@@ -468,6 +478,36 @@ final class McpWebhookQueueManager {
         ->execute();
     }
     return TRUE;
+  }
+
+  /**
+   * Event name that blocked replay, or NULL when that is not why.
+   *
+   * Used by the delivery-log replay action and drush so a refused
+   * row is not reported as missing.
+   *
+   * @param int $deliveryId
+   *   Delivery log row id.
+   *
+   * @return string|null
+   *   The refused name, cut at NAME_MAX, or NULL.
+   */
+  public function refusedReplayEventName(int $deliveryId): ?string {
+    $row = McpStoredValue::stringKeyedRow(
+      $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d')
+        ->condition('d.id', $deliveryId)
+        ->execute()
+        ?->fetchAssoc(),
+    );
+    if ($row === NULL) {
+      return NULL;
+    }
+    $eventName = McpStoredValue::rowString($row, 'event_name');
+    if (McpWebhookEvents::isLive($eventName)) {
+      return NULL;
+    }
+    return McpWebhookEvents::boundName($eventName);
   }
 
   /**
@@ -1369,7 +1409,7 @@ final class McpWebhookQueueManager {
     ?int $deliveryId = NULL,
     ?string $endpointId = NULL,
   ): void {
-    $bounded = substr($eventName, 0, 128);
+    $bounded = McpWebhookEvents::boundName($eventName);
     $this->logger->error(
       'Webhook event @event refused on @surface: not an allowed name for this path.',
       ['@event' => $bounded, '@surface' => $surface],
@@ -1422,8 +1462,8 @@ final class McpWebhookQueueManager {
     $this->database->update('mcp_sentinel_webhook_delivery')
       ->condition('id', $deliveryId)
       ->fields([
-        'status' => 'failed',
-        'last_response_body' => 'Unknown webhook event name refused.',
+        'status' => self::STATUS_FAILED,
+        'last_response_body' => self::REASON_UNKNOWN_EVENT,
         'last_attempt' => $this->time->getRequestTime(),
       ])
       ->execute();

@@ -385,8 +385,13 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
         $deliveryId,
         McpStoredValue::string($row['endpoint_id'] ?? ''),
       );
-      $this->updateRow($deliveryId, 'failed', NULL,
-        'Unknown webhook event name refused.', $attempts);
+      $this->updateRow(
+        $deliveryId,
+        McpWebhookQueueManager::STATUS_FAILED,
+        NULL,
+        McpWebhookQueueManager::REASON_UNKNOWN_EVENT,
+        $attempts,
+      );
       return;
     }
 

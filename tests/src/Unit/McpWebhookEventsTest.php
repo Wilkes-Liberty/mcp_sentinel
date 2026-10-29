@@ -54,6 +54,8 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'unknown' => ['mcp.not.a.live.event', FALSE],
       'empty' => ['', FALSE],
       'whitespace' => [' ', FALSE],
+      'padded live' => [' mcp.entity.presave', FALSE],
+      'over-long' => [str_repeat('x', 200), FALSE],
     ];
   }
 
@@ -87,7 +89,25 @@ final class McpWebhookEventsTest extends UnitTestCase {
       'unknown' => ['mcp.not.a.live.event', FALSE],
       'empty' => ['', FALSE],
       'whitespace' => [' ', FALSE],
+      'padded live' => [' mcp.entity.presave', FALSE],
+      'over-long' => [str_repeat('x', 200), FALSE],
     ];
+  }
+
+  /**
+   * Over-long names are cut at NAME_MAX.
+   *
+   * @covers ::boundName
+   */
+  public function testBoundNameCutsAtMax(): void {
+    $this->assertSame(
+      str_repeat('x', McpWebhookEvents::NAME_MAX),
+      McpWebhookEvents::boundName(str_repeat('x', 200)),
+    );
+    $this->assertSame(
+      McpWebhookEvents::ENTITY_PRESAVE,
+      McpWebhookEvents::boundName(McpWebhookEvents::ENTITY_PRESAVE),
+    );
   }
 
 }

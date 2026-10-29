@@ -220,10 +220,19 @@ class McpWebhookDeliveryController extends ControllerBase {
       ));
     }
     else {
-      $this->messenger()->addError($this->t(
-        'Delivery @id could not be replayed (row or endpoint missing).',
-        ['@id' => $delivery]
-      ));
+      $refused = $this->queueManager->refusedReplayEventName($delivery);
+      if ($refused !== NULL) {
+        $this->messenger()->addError($this->t(
+          'Delivery @id could not be replayed: event name @event was refused.',
+          ['@id' => $delivery, '@event' => $refused],
+        ));
+      }
+      else {
+        $this->messenger()->addError($this->t(
+          'Delivery @id could not be replayed (row or endpoint missing).',
+          ['@id' => $delivery],
+        ));
+      }
     }
     return new RedirectResponse(
       Url::fromRoute('mcp_sentinel.webhook_delivery')->toString()

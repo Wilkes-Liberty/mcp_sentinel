@@ -521,9 +521,9 @@ final class McpWebhookQueueTest extends KernelTestBase {
     );
     $row = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
       ->fields('d')->condition('id', $id)->execute()->fetchAssoc();
-    $this->assertSame('failed', $row['status']);
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $row['status']);
     $this->assertStringContainsString(
-      'Unknown webhook event name refused.',
+      McpWebhookQueueManager::REASON_UNKNOWN_EVENT,
       (string) $row['last_response_body'],
     );
     $meta = $this->latestRefusedAudit();
@@ -555,6 +555,11 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $replayed = \Drupal::service('mcp_sentinel.webhook_queue_manager')
       ->replayDelivery($id);
     $this->assertFalse($replayed);
+    $this->assertSame(
+      'mcp.not.a.live.event',
+      \Drupal::service('mcp_sentinel.webhook_queue_manager')
+        ->refusedReplayEventName($id),
+    );
     $this->assertSame(
       0,
       \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),

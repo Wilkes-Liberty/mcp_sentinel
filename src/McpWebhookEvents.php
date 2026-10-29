@@ -43,6 +43,13 @@ final class McpWebhookEvents {
   public const RETIRED_ENTITY_SAVE = 'mcp.entity.save';
 
   /**
+   * Longest event name stored in audit or shown to the operator.
+   *
+   * Matches the delivery-row event_name column.
+   */
+  public const NAME_MAX = 128;
+
+  /**
    * Event names that carry an EntityInterface (dispatch() only).
    *
    * An empty list refuses every name (fail closed). LIVE is this list
@@ -99,6 +106,19 @@ final class McpWebhookEvents {
    */
   public static function isEntityEvent(string $name): bool {
     return in_array($name, self::ENTITY, TRUE);
+  }
+
+  /**
+   * Cuts $name to NAME_MAX characters.
+   *
+   * @param string $name
+   *   Candidate event name.
+   *
+   * @return string
+   *   The same string, or the first NAME_MAX characters.
+   */
+  public static function boundName(string $name): string {
+    return substr($name, 0, self::NAME_MAX);
   }
 
 }

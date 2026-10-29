@@ -32,17 +32,20 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
    *   Number of delivery attempts.
    * @param string $endpointId
    *   Endpoint identifier (defaults to 'ep1').
+   * @param string $eventName
+   *   Stored event name (defaults to a live name).
    */
   private function seedRow(
     string $status,
     int $attempts = 0,
     string $endpointId = 'ep1',
+    string $eventName = 'mcp.entity.presave',
   ): int {
     return (int) \Drupal::database()
       ->insert('mcp_sentinel_webhook_delivery')
       ->fields([
         'endpoint_id'        => $endpointId,
-        'event_name'         => 'mcp.entity.presave',
+        'event_name'         => $eventName,
         'payload_hash'       => hash('sha256', '{}'),
         'payload'            => '{}',
         'status'             => $status,
@@ -147,6 +150,26 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     $this->assertSame(
       1,
       \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems()
+    );
+  }
+
+  /**
+   * Replay of a stored unknown event_name names the refused event.
+   */
+  public function testReplayRefusedUnknownEventName(): void {
+    $id = $this->seedRow('failed', 1, 'ep1', 'mcp.not.a.live.event');
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/webhooks');
+    $this->clickLink('Replay');
+    $this->assertSession()->pageTextContains(
+      "Delivery $id could not be replayed: event name mcp.not.a.live.event was refused.",
+    );
+    $row = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('d.id', $id)->execute()->fetchAssoc();
+    $this->assertSame('failed', $row['status']);
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
     );
   }
 

@@ -1160,7 +1160,7 @@ class McpSettingsForm extends ConfigFormBase {
           );
           continue;
         }
-        $unknown[] = $eventName;
+        $unknown[] = McpWebhookEvents::boundName($eventName);
       }
       // One error per field: Drupal keeps the first setErrorByName for
       // a name, so list every unknown name here. That also shows the
