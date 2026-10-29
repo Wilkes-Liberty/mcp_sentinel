@@ -219,6 +219,7 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     $this->drupalGet(
       $this->getAbsoluteUrl('/' . $path) . '?token=' . rawurlencode($token),
     );
+    $this->assertSession()->statusCodeEquals(200);
     $this->assertSession()->pageTextContains(
       "Delivery $heldId could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
     );
