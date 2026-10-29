@@ -23,8 +23,9 @@ final class McpWebhookQueueManagerReplayOfferTest extends UnitTestCase {
   /**
    * Held and discarded never get a Replay action.
    *
-   * Restoring those statuses on the listing button fails this
-   * helper and McpWebhookDeliveryLogTest::linkNotExists('Replay').
+   * Pins canOfferReplay() and isReplayBlockedStatus(). An
+   * inline status list in the listing controller is caught
+   * by McpWebhookDeliveryLogTest::linkNotExists('Replay').
    *
    * @covers ::canOfferReplay
    * @covers ::isReplayBlockedStatus

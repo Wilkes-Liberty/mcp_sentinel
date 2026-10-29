@@ -319,8 +319,8 @@ final class McpSentinelCommands extends DrushCommands {
    *
    * Resets the row to 'pending' and re-queues it so the worker replays the
    * stored payload byte-for-byte. Exits with a failure code when no positive
-   * delivery ID is given, the event name is not live, or the row/endpoint
-   * no longer exists.
+   * delivery ID is given, the row is held or discarded, the event name is
+   * not live, or the row/endpoint no longer exists.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-replay', aliases: ['mcps:webhook-replay'])]
   #[CLI\Argument(name: 'deliveryId', description: 'Delivery log row ID to replay.')]

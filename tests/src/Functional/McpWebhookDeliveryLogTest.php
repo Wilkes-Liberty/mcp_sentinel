@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
-use Drupal\Component\Utility\Crypt;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
 use Symfony\Component\HttpFoundation\Request;
@@ -261,7 +260,10 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
    * Serialized session for the logged-in browser user.
    *
    * The cookie name is hashed from the test-site base URL so it
-   * matches the browser cookie. The uid row is the fallback.
+   * matches the browser cookie. session_handler.storage already
+   * hashes that id; a second query on the same sid cannot find
+   * a row the first read missed. The uid row is only for when
+   * the cookie name does not match and $sid is empty.
    *
    * @return string
    *   Stored session payload.
@@ -277,18 +279,8 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     if ($sid !== '') {
       $blob = (string) $this->container->get('session_handler.storage')
         ->read($sid);
-      if ($blob !== '') {
-        return $blob;
-      }
-      $blob = (string) \Drupal::database()
-        ->select('sessions', 's')
-        ->fields('s', ['session'])
-        ->condition('sid', Crypt::hashBase64($sid))
-        ->execute()
-        ->fetchField();
-      if ($blob !== '') {
-        return $blob;
-      }
+      $this->assertNotSame('', $blob);
+      return $blob;
     }
     $account = $this->loggedInUser;
     $this->assertNotFalse($account);
