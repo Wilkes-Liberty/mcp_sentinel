@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\consumers\Entity\Consumer;
+use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
+use Drupal\mcp_sentinel\Service\McpGovernanceReadiness;
+use Drupal\user\Entity\User;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
@@ -17,6 +21,10 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * profile exists), and stays silent when governance is properly wired. The
  * check mirrors how McpOauthContext::isAgentChannel() and McpPolicyResolver
  * actually decide, so the assertions track real governance behaviour.
+ *
+ * When the source-contract ERROR already names that same gap, the hook
+ * keeps both severities on one ERROR row instead of repeating it as a
+ * WARNING. Distinct gaps stay two rows.
  *
  * Approach mirrors McpUpdateHookChainTest: the .install file is loaded directly
  * and the hook function is invoked, simulating each config end-state in turn.
@@ -140,6 +148,18 @@ final class McpRequirementsTest extends KernelTestBase {
       REQUIREMENT_WARNING,
       $requirements['mcp_sentinel_not_governing']['severity']
     );
+    // Kernel tests do not enable mcp_sentinel_server, so the contract ERROR
+    // is server_module_missing — a different gap from empty scopes. Two
+    // problems stay two rows; folding here would hide the WARNING.
+    $this->assertArrayHasKey('mcp_sentinel_contract_not_ready', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['mcp_sentinel_contract_not_ready']['severity']
+    );
+    $this->assertStringContainsString(
+      'server_module_missing',
+      (string) $requirements['mcp_sentinel_contract_not_ready']['value']
+    );
   }
 
   /**
@@ -223,6 +243,165 @@ final class McpRequirementsTest extends KernelTestBase {
       REQUIREMENT_WARNING,
       $requirements['mcp_sentinel_not_governing']['severity']
     );
+    // Scopes are set, so the contract ERROR is still the missing server
+    // module, not active_profile_missing. That is a second problem, so
+    // the WARNING row stays.
+    $this->assertArrayHasKey('mcp_sentinel_contract_not_ready', $requirements);
+    $this->assertStringContainsString(
+      'server_module_missing',
+      (string) $requirements['mcp_sentinel_contract_not_ready']['value']
+    );
+  }
+
+  /**
+   * Empty scopes that the contract already names share one ERROR row.
+   *
+   * Companion modules are stubbed present so the evaluator can reach
+   * agent_scopes_missing. Both severities stay on that row; the WARNING
+   * key is not repeated. The row stays ERROR so it cannot sit as
+   * warning-only.
+   */
+  public function testOverlappingEmptyScopesShareOneRow(): void {
+    $this->stubCompanionsEnabled();
+    $this->config('mcp_sentinel.settings')
+      ->set('enabled', TRUE)
+      ->set('agent_scopes', [])
+      ->set('agent_oauth_clients', [])
+      ->set('governed_role_fallback', FALSE)
+      ->save();
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_contract_not_ready', $requirements);
+    $this->assertArrayNotHasKey('mcp_sentinel_not_governing', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['mcp_sentinel_contract_not_ready']['severity']
+    );
+    $value = (string) $requirements['mcp_sentinel_contract_not_ready']['value'];
+    $this->assertStringContainsString('ERROR:', $value);
+    $this->assertStringContainsString('WARNING:', $value);
+    $this->assertStringContainsString('agent_scopes_missing', $value);
+    $this->assertStringContainsString('Enabled but not governing', $value);
+    $description = $requirements['mcp_sentinel_contract_not_ready']['description'];
+    $this->assertIsArray($description);
+    $this->assertStringContainsString('same gap', $description['#prefix']);
+    $this->assertNotEmpty($description['#items']);
+  }
+
+  /**
+   * A missing profile the contract already names shares one ERROR row.
+   */
+  public function testOverlappingMissingProfileSharesOneRow(): void {
+    $this->stubCompanionsEnabled();
+    $this->installEntitySchema('consumer');
+    // simple_oauth queries oauth2_token when a consumer is saved.
+    $this->installEntitySchema('oauth2_token');
+    $owner = User::create([
+      'name' => 'mcp_status_report_agent',
+      'status' => 1,
+    ]);
+    $owner->save();
+    Consumer::create([
+      'client_id' => 'mcp-status-report-client',
+      'label' => 'Status report client',
+      'owner_id' => $owner->id(),
+      'user_id' => $owner->id(),
+      'secret' => 'not-echoed',
+      'confidential' => TRUE,
+      'status' => 1,
+    ])->save();
+    $this->config('mcp_sentinel.settings')
+      ->set('enabled', TRUE)
+      ->set('agent_scopes', ['mcp_read'])
+      ->set('agent_oauth_clients', ['mcp-status-report-client'])
+      ->set('governed_role_fallback', FALSE)
+      ->save();
+    $this->deleteAllProfiles();
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_contract_not_ready', $requirements);
+    $this->assertArrayNotHasKey('mcp_sentinel_not_governing', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['mcp_sentinel_contract_not_ready']['severity']
+    );
+    $value = (string) $requirements['mcp_sentinel_contract_not_ready']['value'];
+    $this->assertStringContainsString('ERROR:', $value);
+    $this->assertStringContainsString('WARNING:', $value);
+    $this->assertStringContainsString('active_profile_missing', $value);
+  }
+
+  /**
+   * Empty scopes plus a missing profile keep the leftover WARNING row.
+   *
+   * The contract names agent_scopes_missing first, so the channel WARNING
+   * folds into that ERROR. No profile is a second problem and stays on
+   * mcp_sentinel_not_governing. One row per problem.
+   */
+  public function testPartialOverlapKeepsTheLeftoverWarning(): void {
+    $this->stubCompanionsEnabled();
+    $this->config('mcp_sentinel.settings')
+      ->set('enabled', TRUE)
+      ->set('agent_scopes', [])
+      ->set('agent_oauth_clients', [])
+      ->set('governed_role_fallback', FALSE)
+      ->save();
+    $this->deleteAllProfiles();
+
+    $requirements = mcp_sentinel_requirements('runtime');
+    $this->assertArrayHasKey('mcp_sentinel_contract_not_ready', $requirements);
+    $this->assertArrayHasKey('mcp_sentinel_not_governing', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['mcp_sentinel_contract_not_ready']['severity']
+    );
+    $this->assertSame(
+      REQUIREMENT_WARNING,
+      $requirements['mcp_sentinel_not_governing']['severity']
+    );
+    $this->assertStringContainsString(
+      'agent_scopes_missing',
+      (string) $requirements['mcp_sentinel_contract_not_ready']['value']
+    );
+    $this->assertStringContainsString(
+      'WARNING:',
+      (string) $requirements['mcp_sentinel_contract_not_ready']['value']
+    );
+    $items = $requirements['mcp_sentinel_not_governing']['description']['#items'];
+    $this->assertCount(1, $items);
+    $this->assertStringContainsString('policy profile', (string) $items[0]);
+  }
+
+  /**
+   * Rebuilds readiness so companion modules look enabled.
+   *
+   * Kernel tests do not enable mcp_sentinel_server, the tool bridge, or
+   * mcp_server_oauth. The live evaluator therefore stops at
+   * server_module_missing before it can name the overlapping reasons.
+   * Swap in an evaluator that treats those companions as present so the
+   * hook can reach agent_scopes_missing and active_profile_missing.
+   */
+  private function stubCompanionsEnabled(): void {
+    $modules = $this->createMock(ModuleHandlerInterface::class);
+    $modules->method('moduleExists')->willReturnCallback(
+      static function (string $name): bool {
+        return in_array($name, [
+          'audit_chain',
+          'mcp_sentinel_server',
+          'mcp_server_tool_bridge',
+          'mcp_server_oauth',
+        ], TRUE);
+      },
+    );
+    $readiness = new McpGovernanceReadiness(
+      $this->container->get('config.factory'),
+      $this->container->get('entity_type.manager'),
+      $modules,
+      $this->container->get('mcp_sentinel.policy_resolver'),
+      $this->container->get('mcp_sentinel.oauth_context'),
+      $this->container->get('audit_chain.logger'),
+    );
+    $this->container->set('mcp_sentinel.governance_readiness', $readiness);
   }
 
   /**

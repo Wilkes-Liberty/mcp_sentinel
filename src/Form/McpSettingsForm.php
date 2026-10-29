@@ -174,7 +174,9 @@ class McpSettingsForm extends ConfigFormBase {
         '#items' => [
           ['#markup' => $this->t('<strong>Install &amp; enable:</strong> <code>composer require drupal/mcp_sentinel</code>, then <code>drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y</code> and <code>drush cr</code>.')],
           ['#markup' => $this->t('<strong>Register the Tool plugins</strong> with mcp_server: <code>drush mcp-sentinel:setup</code>.')],
-          ['#markup' => $this->t('<strong>Make requests governable:</strong> set the governed roles (<em>MCP Access</em> tab) and the OAuth agent scopes / client IDs (<em>OAuth agent channel</em> tab). Until a request can match the agent channel, the Status report warns that the module is <em>not governing any request</em>.')],
+          // Overlapping contract ERROR and not-governing WARNING share one
+          // Status report row; distinct gaps stay two rows.
+          ['#markup' => $this->t('<strong>Make requests governable:</strong> set the governed roles (<em>MCP Access</em> tab) and the OAuth agent scopes / client IDs (<em>OAuth agent channel</em> tab). Until a request can match the agent channel, the Status report warns that the module is <em>not governing any request</em>. When the source-governance contract ERROR already names that same gap, both severities share that one ERROR row.')],
           ['#markup' => $this->t('<strong>Define per-agent policy</strong> at <a href=":profiles">MCP policy profiles</a> (allowed operations, entity scope, redaction, rate limits).', [':profiles' => $profiles_url])],
           ['#markup' => $this->t('<strong>For signed webhooks or at-rest audit encryption,</strong> create a <a href=":keys">Key</a> and select it in the <em>Audit Logging</em> / <em>Reliable webhooks</em> tabs.', [':keys' => $keys_url])],
         ],
