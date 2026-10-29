@@ -251,9 +251,9 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   /**
    * Parse refuses a composed delegated key over the stored column.
    *
-   * A 256/256/256 token is 774 characters. The kill and webhook
-   * columns stop at 770. A 256/256/252 token is exactly 770
-   * and stays accepted.
+   * A 256/256/252 token is exactly 770 and stays accepted.
+   * A 256/256/253 token is 771 and is refused. A 256/256/256
+   * token is 774. The kill and webhook columns stop at 770.
    *
    * @covers ::parsePrincipalKey
    */
@@ -264,6 +264,16 @@ final class McpPrincipalKeyTest extends UnitTestCase {
       . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 252);
     $this->assertSame(770, mb_strlen($accepted, 'UTF-8'));
     $this->assertSame($accepted, McpPrincipalKey::parsePrincipalKey($accepted));
+    $justOver = $iss . '|' . $sub . '|'
+      . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 253);
+    $this->assertSame(771, mb_strlen($justOver, 'UTF-8'));
+    try {
+      McpPrincipalKey::parsePrincipalKey($justOver);
+      $this->fail('A 771-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalKeyException $e) {
+      $this->assertSame(McpPrincipalKeyException::PART_TOO_LONG, $e->reasonCode);
+    }
     $overlong = $iss . '|' . $sub . '|'
       . McpPrincipalKey::ACT_PREFIX . str_repeat('a', 256);
     $this->assertSame(774, mb_strlen($overlong, 'UTF-8'));

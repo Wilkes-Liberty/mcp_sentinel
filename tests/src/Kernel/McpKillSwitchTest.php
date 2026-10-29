@@ -291,6 +291,59 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * A composed key over 770 is refused at dispatch and audited.
+   *
+   * A 256/256/253 delegated token is 771 characters. Admit
+   * must fail closed with part_too_long on the denied_access
+   * row. Removing assertSafeComposedKey() makes this fail.
+   */
+  public function testComposedOverlongDelegatedTokenIsDeniedAndAudited(): void {
+    $iss = str_repeat('a', 256);
+    $sub = str_repeat('a', 256);
+    $actSub = str_repeat('a', 253);
+    $claims = [
+      'iss' => $iss,
+      'sub' => $sub,
+      'azp' => 'agent-client',
+      'act' => ['sub' => $actSub],
+      'tenant' => 'tenant-a',
+    ];
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $holder = $this->principalContextHolder();
+    $holder->resetForTest();
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
+    try {
+      $this->dispatcher()->admit(['note' => 'ok'], 'mcp_kill_probe');
+      $this->fail('A 771-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertStringContainsString(
+        McpPrincipalKeyException::PART_TOO_LONG,
+        $e->getMessage(),
+      );
+    }
+    $meta = $this->lastAuditMetadata('denied_access');
+    $this->assertStringContainsString(
+      McpPrincipalKeyException::PART_TOO_LONG,
+      (string) ($meta['explain'] ?? '') . ' ' . (string) ($meta['reason'] ?? ''),
+    );
+  }
+
+  /**
    * A new act: stop holds a job that still carries the pre-upgrade key.
    */
   public function testActPrefixedKillHoldsLegacyCarriedJob(): void {
