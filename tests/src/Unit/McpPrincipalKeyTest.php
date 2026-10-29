@@ -102,6 +102,7 @@ final class McpPrincipalKeyTest extends UnitTestCase {
     $this->assertContains('act-sub-256-accepted', $names);
     $this->assertContains('act-sub-257-refused', $names);
     $this->assertContains('delegated-composed-770-accepted', $names);
+    $this->assertContains('delegated-composed-771-refused', $names);
     $this->assertContains('delegated-composed-774-refused', $names);
     $this->assertSame($names, array_unique($names));
   }

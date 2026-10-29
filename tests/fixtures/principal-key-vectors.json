@@ -215,9 +215,7 @@
       "iss": "https://idp.example/realms/agents",
       "sub": "human-1",
       "azp": "agent-client",
-      "act": [
-        "agent-1"
-      ]
+      "act": ["agent-1"]
     },
     "expected": {
       "error": "missing_act_sub"
@@ -280,12 +278,12 @@
     "doc": "Non-ASCII letters are valid and not case-folded or NFKC-normalized.",
     "claims": {
       "iss": "https://idp.example/realms/agents",
-      "sub": "\u7528\u6237-1",
+      "sub": "用户-1",
       "azp": "agent-client"
     },
     "expected": {
-      "principalKey": "https://idp.example/realms/agents|\u7528\u6237-1|agent-client",
-      "humanKey": "https://idp.example/realms/agents|\u7528\u6237-1"
+      "principalKey": "https://idp.example/realms/agents|用户-1|agent-client",
+      "humanKey": "https://idp.example/realms/agents|用户-1"
     }
   },
   {
@@ -436,6 +434,21 @@
       "azp": "agent-client",
       "act": {
         "sub": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "expected": {
+      "error": "part_too_long"
+    }
+  },
+  {
+    "name": "delegated-composed-771-refused",
+    "doc": "A 256-character iss, 256-character sub and 253-character act.sub compose a 771-character key and fail closed (part_too_long).",
+    "claims": {
+      "iss": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sub": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "azp": "agent-client",
+      "act": {
+        "sub": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     },
     "expected": {

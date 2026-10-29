@@ -75,10 +75,13 @@ final readonly class McpKillSelector {
         $hashes[] = (new self(McpKillSelectorType::PrincipalKey, $alias))->hash();
       }
       catch (McpKillSwitchException) {
-        // fromClaims() and parsePrincipalKey() refuse a key
-        // longer than MAX_KEY_LENGTH. An empty or leftover
-        // over-long alias cannot be stored as a row, so it
-        // cannot match one.
+        // Dual-match can add act: to a 770-character
+        // unprefixed key, producing a 774-character alias.
+        // That spelling cannot be stored, so it cannot match
+        // a row. Keep the unprefixed hash. fromClaims() and
+        // parsePrincipalKey() already refuse an over-long
+        // composed key, so a stored act: spelling never
+        // reaches this catch.
       }
     }
     return $hashes;
