@@ -279,6 +279,10 @@ is not jailbreak detection. Prompt text in a result does not change policy.
 - **PHP 8.2+.** The base module and approval services support PHP 8.2.
   Optional MCP transport modules also inherit their transport dependencies'
   PHP requirements; MCP Server currently requires PHP 8.3.
+- **PHP `ext-intl` / `Spoofchecker`.** MCP Sentinel refuses reserved
+  look-alike argument keys with intl Spoofchecker (UTS #39). Without
+  `ext-intl` / `Spoofchecker`, governed tool calls fail closed
+  (`lookalike_check_unavailable`). Install the PHP intl extension.
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
 - [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
   signing secret and (optionally) the audit encryption key outside exported

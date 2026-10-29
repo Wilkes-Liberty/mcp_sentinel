@@ -48,7 +48,7 @@ final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface
   }
 
   /**
-   * Begins a job seal for one console command invocation.
+   * Begins a deny-only overlay for one console command invocation.
    *
    * @param \Symfony\Component\Console\Event\ConsoleCommandEvent $event
    *   The console command event.
@@ -60,7 +60,7 @@ final class McpPrincipalContextCliSubscriber implements EventSubscriberInterface
   }
 
   /**
-   * Ends the job seal after the command returns.
+   * Ends the deny-only overlay after the command returns.
    *
    * @param \Symfony\Component\Console\Event\ConsoleEvent $event
    *   The console terminate event.
