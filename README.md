@@ -386,6 +386,18 @@ For governed agents — requests whose authenticated account holds a governed ro
 A `mcp_sentinel_graphql_schema` tool exposes the GraphQL SDL so agents can
 discover available types, queries, and mutations.
 
+Enabling this submodule installs `drupal/graphql` 4.x, which requires
+`webonyx/graphql-php` 14.x. That 14.x line has no upstream fix for three
+open DoS advisories: [GHSA-r7cg-qjjm-xhqq](https://github.com/advisories/GHSA-r7cg-qjjm-xhqq)
+(high, unbounded parser recursion, fixed in 15.32.3),
+[GHSA-fc86-6rv6-2jpm](https://github.com/advisories/GHSA-fc86-6rv6-2jpm)
+(high, quadratic validation via inline fragments, fixed in 15.32.2), and
+[GHSA-68jq-c3rv-pcrr](https://github.com/advisories/GHSA-68jq-c3rv-pcrr)
+/ CVE-2026-40476 (medium, quadratic-complexity DoS, fixed in 15.31.5).
+The core module does not use GraphQL. Sites that enable the submodule
+should enforce GraphQL query depth and complexity limits, and HTTP
+request size limits, at the edge.
+
 ## What This Adds
 
 | Feature | Without module | With module |
