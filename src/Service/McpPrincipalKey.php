@@ -205,7 +205,7 @@ final class McpPrincipalKey {
    * check stops an authorized-party of ACT:X occupying the
    * delegated slot.
    */
-  public static function actorHasActPrefix(string $actor): bool {
+  private static function actorHasActPrefix(string $actor): bool {
     $length = strlen(self::ACT_PREFIX);
     return strlen($actor) >= $length
       && strncasecmp($actor, self::ACT_PREFIX, $length) === 0;
@@ -217,7 +217,7 @@ final class McpPrincipalKey {
    * Operator-supplied ACT:X becomes act:X so kill rows and
    * parsePrincipalKey never store a mixed-case prefix.
    */
-  public static function canonicalActActor(string $actor): string {
+  private static function canonicalActActor(string $actor): string {
     if (!self::actorHasActPrefix($actor)) {
       return $actor;
     }

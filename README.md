@@ -59,9 +59,8 @@ the same stop (over-block only, never under-block): a new
 `iss|sub|act:X` stop also refuses a non-delegated `azp=X` token,
 and a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
 token. Audit and stored `principal_key` identity stay separated.
-Missing parts,
-Unicode whitespace-only values, invalid UTF-8, or a `|` also fail
-closed. The human key is `iss|sub`. Import
+Missing parts, Unicode whitespace-only values, invalid UTF-8, or a
+`|` also fail closed. The human key is `iss|sub`. Import
 `mcp_sentinel.principal_key` (`fromClaims()`) for rate limits,
 budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json`. A network or sealed-token

@@ -608,9 +608,6 @@ final class McpWebhookQueueManager {
         $values = $selector->type === McpKillSelectorType::PrincipalKey
           ? McpPrincipalKey::enforcementAliases($selector->key)
           : [$selector->key];
-        if ($values === []) {
-          continue;
-        }
         $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
           ->fields('d', ['id'])
           ->condition($column, $values, 'IN')
@@ -1245,9 +1242,10 @@ final class McpWebhookQueueManager {
     $hashes = [];
     foreach ($selectors as $selector) {
       if ($selector->type === McpKillSelectorType::PrincipalKey) {
-        foreach (McpKillSelector::principalKeyLookupHashes($selector->key) as $hash) {
-          $hashes[] = $hash;
-        }
+        $hashes = [
+          ...$hashes,
+          ...McpKillSelector::principalKeyLookupHashes($selector->key),
+        ];
         continue;
       }
       $hashes[] = $selector->hash();

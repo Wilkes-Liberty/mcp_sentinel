@@ -2404,9 +2404,10 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   private function lookupHashes(string $principalKey, string $humanKey, string $tenant): array {
     $hashes = [];
     if ($principalKey !== '') {
-      foreach (McpKillSelector::principalKeyLookupHashes($principalKey) as $hash) {
-        $hashes[] = $hash;
-      }
+      $hashes = [
+        ...$hashes,
+        ...McpKillSelector::principalKeyLookupHashes($principalKey),
+      ];
     }
     if ($humanKey !== '') {
       $hashes[] = (new McpKillSelector(McpKillSelectorType::HumanKey, $humanKey))->hash();

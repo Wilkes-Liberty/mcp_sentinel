@@ -253,10 +253,11 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   public function testAzpUsingActPrefixIsDeniedAndAudited(): void {
     $stack = new RequestStack();
     $request = Request::create('/mcp', 'POST');
+    $azp = 'act:forged-client-secret-value';
     $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
       'iss' => 'https://idp.example/realms/agents',
       'sub' => 'human-1',
-      'azp' => 'act:forged',
+      'azp' => $azp,
       'tenant' => 'tenant-a',
     ]);
     $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
@@ -266,13 +267,20 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     $audit = $this->createMock(McpAuditLogger::class);
     $audit->expects($this->once())->method('logAlways')->with(
       'denied_access',
-      $this->callback(static function (array $meta) use ($collision): bool {
+      $this->callback(static function (array $meta) use ($collision, $azp): bool {
+        $explain = (string) ($meta['explain'] ?? '');
+        foreach (['explain', 'reason', 'principal_key', 'human_key', 'rule', 'principal_unverified'] as $field) {
+          if (str_contains((string) ($meta[$field] ?? ''), $azp)) {
+            return FALSE;
+          }
+        }
         return ($meta['reason'] ?? '') === $collision
           && ($meta['principal_key'] ?? '') === 'unverified'
           && ($meta['human_key'] ?? '') === 'unverified'
           && ($meta['principal_unverified'] ?? '') === $collision
           && ($meta['rule'] ?? '') === $collision
-          && !str_contains((string) ($meta['explain'] ?? ''), 'secret');
+          && ($meta['azp'] ?? '') === $azp
+          && !str_contains(strtolower($explain), 'secret');
       }),
     );
     $dispatcher = $this->dispatcher($stack, $holder, $audit);
