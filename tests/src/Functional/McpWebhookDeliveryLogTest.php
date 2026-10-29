@@ -270,7 +270,7 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
     $request = Request::create(rtrim((string) $this->baseUrl, '/') . '/');
     $options = $this->container->get('session_configuration')
       ->getOptions($request);
-    $name = is_array($options) && isset($options['name']) && is_string($options['name'])
+    $name = isset($options['name']) && is_string($options['name'])
       ? $options['name']
       : '';
     $sid = $name !== '' ? (string) $this->getSession()->getCookie($name) : '';
