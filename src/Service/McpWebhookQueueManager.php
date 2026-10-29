@@ -599,18 +599,9 @@ final class McpWebhookQueueManager {
           McpKillSelectorType::HumanKey => 'human_key',
           McpKillSelectorType::Tenant => 'tenant',
         };
-        // Principal-key stops permanently match the actor-slot
-        // twin (iss|sub|X ↔ iss|sub|act:X), including new
-        // stops of either spelling. SQL = / IN follows the
-        // column collation: a MySQL *_ci collation can still
-        // over-hold a whole-key case fold, which predates this
-        // prefix. Product code never emits ACT:.
-        $values = $selector->type === McpKillSelectorType::PrincipalKey
-          ? McpPrincipalKey::enforcementAliases($selector->key)
-          : [$selector->key];
         $query = $this->database->select('mcp_sentinel_webhook_delivery', 'd')
           ->fields('d', ['id'])
-          ->condition($column, $values, 'IN')
+          ->condition($column, $selector->key)
           ->condition('status', 'pending');
         $query->forUpdate();
         $statement = $query->execute();
@@ -1241,13 +1232,6 @@ final class McpWebhookQueueManager {
     }
     $hashes = [];
     foreach ($selectors as $selector) {
-      if ($selector->type === McpKillSelectorType::PrincipalKey) {
-        $hashes = [
-          ...$hashes,
-          ...McpKillSelector::principalKeyLookupHashes($selector->key),
-        ];
-        continue;
-      }
       $hashes[] = $selector->hash();
     }
     if ($hashes === []) {
