@@ -8,6 +8,7 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\mcp_sentinel\Event\McpEntityEvent;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 /**
@@ -71,18 +72,32 @@ class McpEventDispatcher {
   /**
    * Dispatches an MCP entity event and queues webhooks for matching endpoints.
    *
-   * The in-process event always fires; the webhook enqueue only runs when at
-   * least one endpoint is configured (the queue manager applies the per-event
-   * and enabled-flag filtering). The payload carries a stable, serializable
-   * snapshot of the entity rather than the entity object, so the queued item
-   * stays valid even if the entity later changes or is deleted.
+   * Unknown names and non-entity names return without firing. An entity
+   * name always fires the in-process event; the webhook enqueue only
+   * runs when at least one endpoint is configured (the queue manager
+   * applies the per-event and enabled-flag filtering). The payload
+   * carries a stable, serializable snapshot of the entity rather than
+   * the entity object, so the queued item stays valid even if the
+   * entity later changes or is deleted.
    *
    * @param string $eventName
-   *   The MCP event identifier (e.g. mcp.entity.presave).
+   *   An entity MCP event identifier (see McpWebhookEvents::ENTITY).
+   *   Unknown names and mcp.anomaly.alert return without firing or
+   *   queuing and write a webhook_event_refused audit row.
    * @param \Drupal\Core\Entity\EntityInterface $entity
    *   The entity the event concerns.
    */
   public function dispatch(string $eventName, EntityInterface $entity): void {
+    // dispatch() builds an entity payload. Only entity names may fire
+    // here; the alert name is live for enqueueForEvent() but not for
+    // this path. A refusal is audited and never queues.
+    if (!McpWebhookEvents::isEntityEvent($eventName)) {
+      $this->webhookQueueManager->auditRefusedEventName(
+        $eventName,
+        McpWebhookQueueManager::SURFACE_DISPATCH,
+      );
+      return;
+    }
     $this->eventDispatcher->dispatch(new McpEntityEvent($entity, $eventName), $eventName);
 
     $config = $this->configFactory->get('mcp_sentinel.settings');

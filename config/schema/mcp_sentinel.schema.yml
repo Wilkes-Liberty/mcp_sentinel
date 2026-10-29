@@ -61,7 +61,7 @@ mcp_sentinel.settings:
             label: 'Key entity ID for signing secret'
           events:
             type: sequence
-            label: 'Event filter (empty = all; mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert)'
+            label: 'Event filter (empty = all live; allowlist mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert)'
             sequence:
               type: string
           enabled:

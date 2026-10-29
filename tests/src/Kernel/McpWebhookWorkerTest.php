@@ -12,7 +12,10 @@ use Drupal\mcp_sentinel\Plugin\QueueWorker\McpWebhookWorker;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextHolder;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextJob;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpWebhookRefusedAuditTestTrait;
 use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
@@ -31,6 +34,9 @@ use Symfony\Component\HttpFoundation\Request;
  */
 #[RunTestsInSeparateProcesses]
 final class McpWebhookWorkerTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
+  use McpWebhookRefusedAuditTestTrait;
 
   /**
    * {@inheritdoc}
@@ -66,6 +72,7 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       'mcp_sentinel_webhook_delivery',
       'mcp_sentinel_kill_block',
     ]);
+    $this->installAuditChainSchema();
     $this->installConfig(['mcp_sentinel']);
   }
 
@@ -133,6 +140,92 @@ final class McpWebhookWorkerTest extends KernelTestBase {
       $this->fail('Dispatcher holder is not McpPrincipalContextHolder.');
     }
     return $holder;
+  }
+
+  /**
+   * An unknown stored event_name is not delivered.
+   *
+   * Fails when only the worker allowlist check is removed.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerRefusesUnknownEventName(): void {
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id'  => 'ep1',
+        'event_name'   => 'mcp.not.a.live.event',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload'      => '{}',
+        'status'       => 'pending',
+        'attempts'     => 0,
+        'created'      => \Drupal::time()->getRequestTime(),
+      ])->execute();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200, [], 'ok')], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.not.a.live.event',
+      'payload' => '{}',
+    ]);
+    $row = $this->loadRow($id);
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $row['status']);
+    $this->assertStringContainsString(
+      McpWebhookQueueManager::REASON_UNKNOWN_EVENT,
+      (string) $row['last_response_body'],
+    );
+    $this->assertCount(0, $history, 'Unknown event names must not be POSTed.');
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_WORKER, $meta['surface']);
+    $this->assertArrayHasKey('delivery_id', $meta);
+    $this->assertSame($id, (int) $meta['delivery_id']);
+    $this->assertArrayHasKey('endpoint_id', $meta);
+    $this->assertSame('ep1', $meta['endpoint_id']);
+    $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * An empty stored column falls back to the queue item event_name.
+   *
+   * Fails if the worker only reads the row and treats empty as
+   * the refused name, or if it ignores the item fallback.
+   *
+   * @covers ::processItem
+   */
+  public function testWorkerFallsBackToItemEventName(): void {
+    $id = (int) $this->container->get('database')
+      ->insert('mcp_sentinel_webhook_delivery')
+      ->fields([
+        'endpoint_id'  => 'ep1',
+        'event_name'   => '',
+        'payload_hash' => hash('sha256', '{}'),
+        'payload'      => '{}',
+        'status'       => 'pending',
+        'attempts'     => 0,
+        'created'      => \Drupal::time()->getRequestTime(),
+      ])->execute();
+    $history = [];
+    $worker = $this->buildWorker([new Response(200, [], 'ok')], $history);
+    $worker->processItem([
+      'delivery_id' => $id,
+      'endpoint' => [
+        'id' => 'ep1',
+        'url' => 'https://example.com/hook',
+        'secret_key' => '',
+      ],
+      'event_name' => 'mcp.not.a.live.event',
+      'payload' => '{}',
+    ]);
+    $this->assertCount(0, $history, 'Unknown fallback names must not be POSTed.');
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_WORKER, $meta['surface']);
   }
 
   /**
