@@ -24,7 +24,11 @@ use Drupal\mcp_sentinel\Value\McpPrincipalContext;
  * refused (actor_claim_collision) so it cannot occupy a
  * delegated actor slot. Same-token azp=X with act.sub=X is
  * allowed: the composed key is iss|sub|act:X, which is not
- * the azp-only key iss|sub|X.
+ * the azp-only key iss|sub|X. Audit and stored principal_key
+ * identity stay separated. Kill-switch and webhook-hold
+ * lookup permanently treat the two spellings as one stop
+ * (over-inclusive only; never fail open). See
+ * enforcementAliases().
  *
  * Each part is capped at MAX_PART_LENGTH (256) characters.
  * Unicode whitespace-only parts (including NBSP), control
@@ -211,16 +215,21 @@ final class McpPrincipalKey {
   /**
    * Kill and webhook lookup spellings for one principal key.
    *
-   * Bidirectional fail-closed transition aliases. A stop or
-   * webhook row stored as iss|sub|X also matches iss|sub|act:X
-   * and the reverse. That is over-inclusive: a legacy stop on
-   * iss|sub|X stops both azp=X and act.sub=X, because a stored
-   * X cannot be proven to have been azp versus act.sub. It does
-   * not match a different iss or sub, and it does not double
-   * the prefix (iss|sub|X does not match iss|sub|act:act:X).
+   * Permanent bidirectional aliases for every lookup, not a
+   * time-bounded upgrade. A stop or webhook row stored as
+   * iss|sub|X also matches iss|sub|act:X and the reverse. A
+   * new iss|sub|act:X stop therefore also refuses a
+   * non-delegated azp=X token, and a new iss|sub|X stop also
+   * refuses a delegated act.sub=X token, for as long as this
+   * module is installed. That is over-inclusive on purpose
+   * (over-block only, never under-block): stored X cannot be
+   * proven to have been azp versus act.sub. It does not match
+   * a different iss or sub, and it does not double the prefix
+   * (iss|sub|X does not match iss|sub|act:act:X).
    *
+   * Audit and stored principal_key identity stay separated.
    * No update hook: stored X is ambiguous. Dual-match is the
-   * permanent smallest fail-closed upgrade. Rolling this
+   * permanent smallest fail-closed pairing. Rolling this
    * module back restores exact-match lookup.
    *
    * @return list<string>

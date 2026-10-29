@@ -2392,9 +2392,11 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
   /**
    * Lookup hashes for the three key kinds.
    *
-   * A principal-key lookup includes the actor-slot twin so a
-   * legacy iss|sub|X stop still matches iss|sub|act:X (and the
-   * reverse). That pairing is fail-closed and over-inclusive.
+   * A principal-key lookup permanently includes the actor-slot
+   * twin (iss|sub|X ↔ iss|sub|act:X). New stops of either
+   * spelling enforce both identities. That pairing is
+   * fail-closed and over-inclusive (over-block only). Audit
+   * and stored principal_key identity stay separated.
    *
    * @return list<string>
    *   Hashes to query.

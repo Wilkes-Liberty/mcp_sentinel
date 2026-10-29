@@ -599,8 +599,9 @@ final class McpWebhookQueueManager {
           McpKillSelectorType::HumanKey => 'human_key',
           McpKillSelectorType::Tenant => 'tenant',
         };
-        // Principal-key stops also match the actor-slot twin
-        // (iss|sub|X ↔ iss|sub|act:X). SQL = / IN follows the
+        // Principal-key stops permanently match the actor-slot
+        // twin (iss|sub|X ↔ iss|sub|act:X), including new
+        // stops of either spelling. SQL = / IN follows the
         // column collation: a MySQL *_ci collation can still
         // over-hold a whole-key case fold, which predates this
         // prefix. Product code never emits ACT:.
@@ -1230,6 +1231,9 @@ final class McpWebhookQueueManager {
 
   /**
    * Batch id of a matching active kill-block, or empty.
+   *
+   * A principal-key delivery looks up both spellings so a
+   * held row's correlation matches a twin-spelling stop.
    *
    * @param list<\Drupal\mcp_sentinel\Value\McpKillSelector> $selectors
    *   Delivery keys.

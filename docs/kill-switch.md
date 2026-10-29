@@ -25,10 +25,14 @@ token issuer. `sub` is the person. `actor` is the agent: `act:` plus the
 token's top-level `act.sub` when a delegation claim is present, or `azp`
 when there is no `act.sub`. An `azp` that already starts with `act:` (any
 case) is refused (`actor_claim_collision`) and never occupies that slot.
-Kill-switch matching also treats `iss|sub|X` and `iss|sub|act:X` as the
-same stop (fail-closed, over-inclusive) so a pre-upgrade delegated stop
-keeps matching after the prefix shipped. Non-delegated stops
-(`iss|sub|azp`) are unchanged.
+Kill-switch matching and webhook holds permanently treat
+`iss|sub|X` and `iss|sub|act:X` as the same stop (fail-closed,
+over-inclusive: over-block only, never under-block). A new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token;
+a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token. Audit and stored `principal_key` identity stay separated.
+Non-delegated stops (`iss|sub|azp`) still store the unprefixed
+key; enforcement looks up both spellings.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the

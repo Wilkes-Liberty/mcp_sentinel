@@ -240,9 +240,10 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   /**
    * Kill/webhook aliases pair iss|sub|X with iss|sub|act:X.
    *
-   * Fail-closed and over-inclusive: a legacy stop on X also
-   * stops azp=X. Exact sha256 of the two spellings differs, so
-   * without aliases an upgrade (or rollback) would fail open.
+   * Permanent fail-closed pairing: a new stop on X also
+   * stops azp=X, and a new act:X stop also stops act.sub=X.
+   * Exact sha256 of the two spellings differs, so without
+   * aliases either spelling would fail open.
    *
    * @covers ::enforcementAliases
    */
@@ -274,9 +275,10 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   /**
    * Kill lookup hashes the actor-slot twin; exact-match would not.
    *
-   * Dual-match is the upgrade. Reverting this module restores
-   * exact sha256 matching: an act: stop would miss a legacy
-   * row, and a legacy stop would miss a delegated token.
+   * Dual-match is permanent. Reverting this module restores
+   * exact sha256 matching: an act: stop would miss an
+   * unprefixed row, and an unprefixed stop would miss a
+   * delegated token.
    *
    * @covers ::enforcementAliases
    */

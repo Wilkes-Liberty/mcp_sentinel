@@ -231,9 +231,13 @@ keys stay valid. `client_id` and `act.subject` are never the actor.
 starts with `act:` (any case) is refused (`actor_claim_collision`)
 and dispatch writes a `denied_access` row with that reason. The
 caller still sees the generic missing-principal refusal. Kill-switch
-matching and webhook hold selection also look up the actor-slot twin
-(`iss|sub|X` ↔ `iss|sub|act:X`) so a pre-upgrade delegated stop
-stays in force. That pairing is fail-closed and over-inclusive.
+matching and webhook hold selection permanently look up the
+actor-slot twin (`iss|sub|X` ↔ `iss|sub|act:X`). A new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token,
+and a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token. That pairing is fail-closed and over-inclusive (over-block
+only, never under-block). Audit and stored `principal_key`
+identity stay separated.
 `humanKey()` is `iss|sub`. Missing iss/sub/azp/`act.sub`, a
 `|`, Unicode whitespace-only parts (including NBSP), control
 characters, invalid UTF-8, or a part longer than 256 characters, also

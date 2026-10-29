@@ -210,6 +210,47 @@ final class McpKillSwitchTest extends KernelTestBase {
   }
 
   /**
+   * A new act:X stop also refuses a non-delegated azp=X token.
+   *
+   * Dual-match is permanent, not limited to leftover legacy
+   * rows. Identity stays separated: the sealed key is still
+   * iss|sub|X.
+   */
+  public function testNewActPrefixedStopRefusesNonDelegatedAzpToken(): void {
+    $prefixed = $this->principalSelector(
+      'subject-new-azp',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $this->killSwitch()->kill([$prefixed], 'new-act-stop', $this->paladinA());
+    $this->sealSubject('subject-new-azp', 'agent-7');
+    $this->expectGenericDeny();
+    $this->sealSubject('subject-new-azp', 'agent-8');
+    $this->assertSame(
+      'subject-new-azp',
+      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+    );
+  }
+
+  /**
+   * A new iss|sub|X stop also refuses a delegated act.sub=X token.
+   *
+   * Dual-match is permanent, not limited to leftover legacy
+   * rows. Identity stays separated: the sealed key is still
+   * iss|sub|act:X.
+   */
+  public function testNewUnprefixedStopRefusesDelegatedActSubToken(): void {
+    $unprefixed = $this->principalSelector('subject-new-act', 'agent-7');
+    $this->killSwitch()->kill([$unprefixed], 'new-azp-stop', $this->paladinA());
+    $this->sealSubject('subject-new-act', 'other-client', 'agent-7');
+    $this->expectGenericDeny();
+    $this->sealSubject('subject-new-act', 'other-client', 'agent-8');
+    $this->assertSame(
+      'subject-new-act',
+      $this->dispatcher()->admit(['note' => 'ok'], 'probe')->subject(),
+    );
+  }
+
+  /**
    * A new act: stop holds a job that still carries the pre-upgrade key.
    */
   public function testActPrefixedKillHoldsLegacyCarriedJob(): void {

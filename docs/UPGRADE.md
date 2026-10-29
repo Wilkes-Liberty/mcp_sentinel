@@ -19,11 +19,16 @@ refusal.
 
 No `updatedb` and no row rewrite. Stored `X` cannot be proven to
 have been `azp` versus `act.sub`, so kill-switch matching and
-webhook hold selection treat `iss|sub|X` and `iss|sub|act:X` as
-aliases of the same stop. That pairing is fail-closed and
-over-inclusive: a legacy stop on `iss|sub|X` stops both `azp=X` and
-`act.sub=X` until the row expires. A new `act:` stop also holds
-pre-upgrade webhook rows and carried jobs that still store the
+webhook hold selection permanently treat `iss|sub|X` and
+`iss|sub|act:X` as the same stop. That pairing is fail-closed and
+over-inclusive (over-block only, never under-block): a new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token,
+and a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token, for as long as this module is installed. Individual stops
+still expire at their TTL; the pairing itself is not bounded to
+pre-upgrade rows. Audit and stored `principal_key` identity stay
+separated (`iss|sub|X` versus `iss|sub|act:X`). A new `act:` stop
+also holds webhook rows and carried jobs stored under the
 unprefixed key. Rebuild caches (`drush cr`).
 
 Policy profiles and designated-client matching still use the OAuth

@@ -150,6 +150,57 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * A held row's batch id matches a twin-spelling stop.
+   *
+   * matchingKillBatchId looks up the actor-slot twin. Exact
+   * hash of the stored key would leave the hold audit
+   * batch_id empty.
+   */
+  public function testMatchingKillBatchIdPairsLegacyAndPrefixedSpellings(): void {
+    $prefixed = $this->principalSelector(
+      'subject-batch-a',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $killPrefixed = $this->killSwitch()->kill(
+      [$prefixed],
+      'batch-twin-a',
+      $this->paladinA(),
+    );
+    $legacyId = $this->insertDelivery([
+      'principal_key' => self::ISS . '|subject-batch-a|agent-7',
+      'human_key' => self::ISS . '|subject-batch-a',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->queue()->markHeld($legacyId);
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($legacyId)['status'],
+    );
+    $holdPrefixed = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->assertSame($killPrefixed->batchId, $holdPrefixed['batch_id']);
+
+    $legacy = $this->principalSelector('subject-batch-b', 'agent-7');
+    $killLegacy = $this->killSwitch()->kill(
+      [$legacy],
+      'batch-twin-b',
+      $this->paladinA(),
+    );
+    $prefixedId = $this->insertDelivery([
+      'principal_key' => self::ISS . '|subject-batch-b|'
+      . McpPrincipalKey::ACT_PREFIX . 'agent-7',
+      'human_key' => self::ISS . '|subject-batch-b',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->queue()->markHeld($prefixedId);
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $this->loadDelivery($prefixedId)['status'],
+    );
+    $holdLegacy = $this->lastAuditMetadata(McpWebhookQueueManager::AUDIT_HOLD);
+    $this->assertSame($killLegacy->batchId, $holdLegacy['batch_id']);
+  }
+
+  /**
    * A kill row for iss|sub|act:X stops a delegated token and holds its rows.
    */
   public function testActPrefixedKillStopsDelegatedTokenAndHoldsWebhookRows(): void {

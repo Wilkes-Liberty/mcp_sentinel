@@ -58,10 +58,12 @@ final readonly class McpKillSelector {
   }
 
   /**
-   * Kill-registry hashes for a principal key and its transition twin.
+   * Kill-registry hashes for a principal key and its actor-slot twin.
    *
-   * Aliases that cannot be stored (empty or longer than the
-   * column) are omitted; they cannot match a row.
+   * Permanent pairing: every principal-key lookup includes
+   * both spellings. Aliases that cannot be stored (empty or
+   * longer than the column) are omitted; they cannot match a
+   * row.
    *
    * @return list<string>
    *   Hashes to query.

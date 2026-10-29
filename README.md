@@ -54,8 +54,11 @@ delegated actor is `act:` plus top-level `act.sub`; otherwise the
 actor is `azp` as-is.
 An `azp` that already starts with `act:` (any case) fails closed
 (`actor_claim_collision`) and is audited. Kill-switch matching and
-webhook holds treat `iss|sub|X` and `iss|sub|act:X` as aliases of
-the same stop so a pre-upgrade delegated stop stays in force.
+webhook holds permanently treat `iss|sub|X` and `iss|sub|act:X` as
+the same stop (over-block only, never under-block): a new
+`iss|sub|act:X` stop also refuses a non-delegated `azp=X` token,
+and a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
+token. Audit and stored `principal_key` identity stay separated.
 Missing parts,
 Unicode whitespace-only values, invalid UTF-8, or a `|` also fail
 closed. The human key is `iss|sub`. Import
