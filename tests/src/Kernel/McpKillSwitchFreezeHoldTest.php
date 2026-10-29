@@ -152,7 +152,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   /**
    * A held row's batch id matches a twin-spelling stop.
    *
-   * matchingKillBatchId looks up the actor-slot twin. Exact
+   * MatchingKillBatchId looks up the actor-slot twin. Exact
    * hash of the stored key would leave the hold audit
    * batch_id empty.
    */
@@ -187,7 +187,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
     );
     $prefixedId = $this->insertDelivery([
       'principal_key' => self::ISS . '|subject-batch-b|'
-      . McpPrincipalKey::ACT_PREFIX . 'agent-7',
+        . McpPrincipalKey::ACT_PREFIX . 'agent-7',
       'human_key' => self::ISS . '|subject-batch-b',
       'tenant' => 'tenant-a',
     ]);
