@@ -1250,9 +1250,6 @@ final class McpWebhookQueueManager {
       }
       $hashes[] = $selector->hash();
     }
-    if ($hashes === []) {
-      return '';
-    }
     $row = $this->database->select(McpKillSwitch::TABLE, 'k')
       ->fields('k', ['batch_id'])
       ->condition('selector_hash', $hashes, 'IN')
