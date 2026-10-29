@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\McpWebhookEvents;
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
+use Drupal\Tests\mcp_sentinel\Traits\McpWebhookRefusedAuditTestTrait;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
@@ -19,6 +23,9 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  */
 #[RunTestsInSeparateProcesses]
 final class McpWebhookQueueTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
+  use McpWebhookRefusedAuditTestTrait;
 
   /**
    * {@inheritdoc}
@@ -66,8 +73,44 @@ final class McpWebhookQueueTest extends KernelTestBase {
     // the alias repository, which needs the path_alias storage.
     $this->installEntitySchema('path_alias');
     $this->installSchema('mcp_sentinel', ['mcp_sentinel_webhook_delivery']);
+    $this->installAuditChainSchema();
     $this->installConfig(['mcp_sentinel']);
     NodeType::create(['type' => 'page', 'name' => 'Page'])->save();
+  }
+
+  /**
+   * Enables one empty-filter HTTPS endpoint.
+   */
+  private function enableEmptyFilterEndpoint(): void {
+    \Drupal::configFactory()->getEditable('mcp_sentinel.settings')
+      ->set('webhook_endpoints', [
+        [
+          'id' => 'all_events',
+          'label' => 'All',
+          'url' => 'https://example.com/all',
+          'secret_key' => '',
+          'events' => [],
+          'enabled' => TRUE,
+          'allow_internal' => FALSE,
+        ],
+      ])->save();
+  }
+
+  /**
+   * Asserts that nothing was queued or written to the delivery log.
+   */
+  private function assertNoWebhookDelivery(): void {
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+    $this->assertSame(
+      0,
+      (int) \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+        ->countQuery()
+        ->execute()
+        ->fetchField(),
+    );
   }
 
   /**
@@ -351,6 +394,288 @@ final class McpWebhookQueueTest extends KernelTestBase {
       0,
       \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems()
     );
+  }
+
+  /**
+   * An unknown event name is not dispatched.
+   *
+   * Fails when only the dispatch() guard is removed. The enqueue
+   * sibling is testUnknownEventNameIsNotEnqueued.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpEventDispatcher::dispatch
+   */
+  public function testUnknownEventNameIsNotDispatched(): void {
+    $this->enableEmptyFilterEndpoint();
+    $node = Node::create(['type' => 'page', 'title' => 'T', 'uid' => 1]);
+    $heard = FALSE;
+    // A listener on the retired name must stay silent: dispatch refuses
+    // before the in-process event fires.
+    $this->container->get('event_dispatcher')->addListener(
+      'mcp.entity.save',
+      static function () use (&$heard): void {
+        $heard = TRUE;
+      },
+    );
+    \Drupal::service('mcp_sentinel.event_dispatcher')
+      ->dispatch('mcp.entity.save', $node);
+    $this->assertFalse(
+      $heard,
+      'Unknown names must not fire the in-process event.',
+    );
+    $this->assertNoWebhookDelivery();
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.entity.save', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_DISPATCH, $meta['surface']);
+    $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * An unknown event name is not enqueued.
+   *
+   * Fails when only the enqueueForEvent() guard is removed. Direct
+   * enqueue is the alert-dispatcher path.
+   *
+   * @covers ::enqueueForEvent
+   */
+  public function testUnknownEventNameIsNotEnqueued(): void {
+    $this->enableEmptyFilterEndpoint();
+    \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->enqueueForEvent('mcp.not.a.live.event', ['event' => 'ghost']);
+    $this->assertNoWebhookDelivery();
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_ENQUEUE, $meta['surface']);
+    $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * A refused enqueue stores at most 128 characters of the name.
+   *
+   * @covers ::enqueueForEvent
+   */
+  public function testRefusedEventNameIsTruncatedInAudit(): void {
+    $this->enableEmptyFilterEndpoint();
+    $long = str_repeat('é', 200);
+    \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->enqueueForEvent($long, ['event' => 'ghost', 'payload' => 'no']);
+    $meta = $this->latestRefusedAudit();
+    $event = (string) $meta['event'];
+    $this->assertTrue(mb_check_encoding($event, 'UTF-8'));
+    $this->assertSame(str_repeat('é', 128), $event);
+    $this->assertSame(128, mb_strlen($event, 'UTF-8'));
+    $this->assertArrayNotHasKey('payload', $meta);
+    $this->assertNoWebhookDelivery();
+  }
+
+  /**
+   * A stored-row refusal cuts endpoint_id at ENDPOINT_ID_MAX characters.
+   *
+   * Pins auditRefusedEventName(), the one call site that writes
+   * endpoint_id on webhook_event_refused. Worker, requeue, and
+   * replay pass the stored id through that method. The fixture
+   * starts with one ASCII byte so substr(..., 0, 64) splits a
+   * following é (2 bytes) and fails mb_check_encoding. The
+   * length and equality checks still fail if the cut is removed.
+   *
+   * @covers ::auditRefusedEventName
+   */
+  public function testRefusedAuditEndpointIdIsTruncated(): void {
+    $long = 'a' . str_repeat('é', 100);
+    \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->auditRefusedEventName(
+        'mcp.not.a.live.event',
+        McpWebhookQueueManager::SURFACE_REPLAY,
+        1,
+        $long,
+      );
+    $meta = $this->latestRefusedAudit();
+    $endpoint = (string) $meta['endpoint_id'];
+    $this->assertTrue(mb_check_encoding($endpoint, 'UTF-8'));
+    $this->assertSame(
+      'a' . str_repeat('é', McpWebhookEvents::ENDPOINT_ID_MAX - 1),
+      $endpoint,
+    );
+    $this->assertSame(
+      McpWebhookEvents::ENDPOINT_ID_MAX,
+      mb_strlen($endpoint, 'UTF-8'),
+    );
+  }
+
+  /**
+   * Dispatch refuses mcp.anomaly.alert on an entity.
+   *
+   * The alert name is live for enqueueForEvent() but dispatch()
+   * takes an EntityInterface and must not fire an entity-shaped
+   * event under it. Fails if the dispatch guard uses isLive().
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpEventDispatcher::dispatch
+   */
+  public function testAnomalyAlertIsNotDispatchedOnEntity(): void {
+    $this->enableEmptyFilterEndpoint();
+    $node = Node::create(['type' => 'page', 'title' => 'T', 'uid' => 1]);
+    $heard = FALSE;
+    $this->container->get('event_dispatcher')->addListener(
+      McpWebhookEvents::ANOMALY_ALERT,
+      static function () use (&$heard): void {
+        $heard = TRUE;
+      },
+    );
+    \Drupal::service('mcp_sentinel.event_dispatcher')
+      ->dispatch(McpWebhookEvents::ANOMALY_ALERT, $node);
+    $this->assertFalse(
+      $heard,
+      'mcp.anomaly.alert must not fire as an entity event.',
+    );
+    $this->assertNoWebhookDelivery();
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame(McpWebhookEvents::ANOMALY_ALERT, $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_DISPATCH, $meta['surface']);
+    $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * Requeue refuses a stored unknown event_name.
+   *
+   * Fails when only the requeue allowlist check is removed.
+   *
+   * @covers ::requeueDuePendingRows
+   */
+  public function testRequeueRefusesUnknownEventName(): void {
+    $this->enableEmptyFilterEndpoint();
+    $id = $this->seedDeliveryRow([
+      'endpoint_id' => 'all_events',
+      'event_name' => 'mcp.not.a.live.event',
+      'status' => 'pending',
+      'next_attempt' => \Drupal::time()->getRequestTime() - 10,
+    ]);
+    $requeued = \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->requeueDuePendingRows();
+    $this->assertSame(0, $requeued);
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+    $row = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('id', $id)->execute()->fetchAssoc();
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $row['status']);
+    $this->assertStringContainsString(
+      McpWebhookQueueManager::REASON_UNKNOWN_EVENT,
+      (string) $row['last_response_body'],
+    );
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_REQUEUE, $meta['surface']);
+    $this->assertArrayHasKey('delivery_id', $meta);
+    $this->assertSame($id, (int) $meta['delivery_id']);
+    $this->assertArrayHasKey('endpoint_id', $meta);
+    $this->assertSame('all_events', $meta['endpoint_id']);
+    $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * Replay refuses a stored unknown event_name.
+   *
+   * Fails when only the replay allowlist check is removed. A sent
+   * row stays sent.
+   *
+   * @covers ::replayDelivery
+   */
+  public function testReplayRefusesUnknownEventName(): void {
+    $this->enableEmptyFilterEndpoint();
+    $id = $this->seedDeliveryRow([
+      'endpoint_id' => 'all_events',
+      'event_name' => 'mcp.not.a.live.event',
+      'status' => 'sent',
+      'attempts' => 1,
+    ]);
+    $replayed = \Drupal::service('mcp_sentinel.webhook_queue_manager')
+      ->replayDelivery($id);
+    $this->assertFalse($replayed);
+    $manager = \Drupal::service('mcp_sentinel.webhook_queue_manager');
+    $this->assertSame(
+      'mcp.not.a.live.event',
+      $manager->refusedReplayEventName($id),
+    );
+    $this->assertNull($manager->replayHoldStatus($id));
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+    $row = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('id', $id)->execute()->fetchAssoc();
+    $this->assertSame('sent', $row['status']);
+    $meta = $this->latestRefusedAudit();
+    $this->assertSame('mcp.not.a.live.event', $meta['event']);
+    $this->assertSame(McpWebhookQueueManager::SURFACE_REPLAY, $meta['surface']);
+    $this->assertArrayHasKey('delivery_id', $meta);
+    $this->assertSame($id, (int) $meta['delivery_id']);
+    $this->assertArrayHasKey('endpoint_id', $meta);
+    $this->assertSame('all_events', $meta['endpoint_id']);
+    $this->assertArrayNotHasKey('payload', $meta);
+  }
+
+  /**
+   * A held unknown name is not reported as a refused replay.
+   *
+   * Replay returns before the allowlist check, so no refusal audit
+   * is written. The operator message must not say "refused".
+   *
+   * @covers ::replayDelivery
+   * @covers ::refusedReplayEventName
+   * @covers ::replayHoldStatus
+   */
+  public function testReplayHeldUnknownEventNameIsNotRefused(): void {
+    $this->enableEmptyFilterEndpoint();
+    $id = $this->seedDeliveryRow([
+      'endpoint_id' => 'all_events',
+      'event_name' => 'mcp.not.a.live.event',
+      'status' => McpWebhookQueueManager::STATUS_HELD,
+    ]);
+    $manager = \Drupal::service('mcp_sentinel.webhook_queue_manager');
+    $this->assertFalse($manager->replayDelivery($id));
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_HELD,
+      $manager->replayHoldStatus($id),
+    );
+    $this->assertNull($manager->refusedReplayEventName($id));
+    $count = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $count);
+  }
+
+  /**
+   * A discarded unknown name is not reported as a refused replay.
+   *
+   * Same early return as held: no refusal audit, no "refused"
+   * operator wording.
+   *
+   * @covers ::replayDelivery
+   * @covers ::refusedReplayEventName
+   * @covers ::replayHoldStatus
+   */
+  public function testReplayDiscardedUnknownEventNameIsNotRefused(): void {
+    $this->enableEmptyFilterEndpoint();
+    $id = $this->seedDeliveryRow([
+      'endpoint_id' => 'all_events',
+      'event_name' => 'mcp.not.a.live.event',
+      'status' => McpWebhookQueueManager::STATUS_DISCARDED,
+    ]);
+    $manager = \Drupal::service('mcp_sentinel.webhook_queue_manager');
+    $this->assertFalse($manager->replayDelivery($id));
+    $this->assertSame(
+      McpWebhookQueueManager::STATUS_DISCARDED,
+      $manager->replayHoldStatus($id),
+    );
+    $this->assertNull($manager->refusedReplayEventName($id));
+    $count = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->condition('l.operation', McpWebhookQueueManager::AUDIT_EVENT_REFUSED)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(0, $count);
   }
 
   /**

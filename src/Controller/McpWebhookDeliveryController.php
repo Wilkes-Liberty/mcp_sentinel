@@ -121,7 +121,7 @@ class McpWebhookDeliveryController extends ControllerBase {
       ];
 
       $operations = [];
-      if (in_array($row->status, ['failed', 'failed_ssrf', 'failed_redirect', 'failed_key', 'sent'], TRUE)) {
+      if (McpWebhookQueueManager::canOfferReplay((string) ($row->status ?? ''))) {
         $operations['replay'] = [
           'title' => $this->t('Replay'),
           'url' => Url::fromRoute('mcp_sentinel.webhook_replay', [
@@ -220,10 +220,26 @@ class McpWebhookDeliveryController extends ControllerBase {
       ));
     }
     else {
-      $this->messenger()->addError($this->t(
-        'Delivery @id could not be replayed (row or endpoint missing).',
-        ['@id' => $delivery]
-      ));
+      $hold = $this->queueManager->replayHoldStatus($delivery);
+      $refused = $this->queueManager->refusedReplayEventName($delivery);
+      if ($hold !== NULL) {
+        $this->messenger()->addError($this->t(
+          'Delivery @id could not be replayed (@status).',
+          ['@id' => $delivery, '@status' => $hold],
+        ));
+      }
+      elseif ($refused !== NULL) {
+        $this->messenger()->addError($this->t(
+          'Delivery @id could not be replayed: event name @event was refused.',
+          ['@id' => $delivery, '@event' => $refused],
+        ));
+      }
+      else {
+        $this->messenger()->addError($this->t(
+          'Delivery @id could not be replayed (row or endpoint missing).',
+          ['@id' => $delivery],
+        ));
+      }
     }
     return new RedirectResponse(
       Url::fromRoute('mcp_sentinel.webhook_delivery')->toString()

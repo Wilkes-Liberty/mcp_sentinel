@@ -7,6 +7,7 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Mail\MailManagerInterface;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Drupal\mcp_sentinel\Value\McpAnomalyPreparedRule;
 use Psr\Log\LoggerInterface;
 
@@ -175,29 +176,32 @@ final class McpAlertDispatcher {
         );
       }
 
-      // Webhook alert: enqueue via the F9 queue manager with the
-      // 'mcp.anomaly.alert' event name so configured endpoints whose
-      // 'events' filter includes 'mcp.anomaly.alert' receive it.
+      // Webhook alert: enqueue via the F9 queue manager with
+      // McpWebhookEvents::ANOMALY_ALERT so configured endpoints whose
+      // events filter includes that live name receive it.
       if ($alertWebhook) {
-        $this->webhookQueueManager->enqueueForEvent('mcp.anomaly.alert', [
-          'rule_id' => $ruleId,
-          'rule_label' => $ruleLabel,
-          'count' => $count,
-          'threshold' => $threshold,
-          'window_seconds' => $window,
-          'signal' => $evidence['signal'],
-          'actor' => $evidence['actor'],
-          'target_scope' => $evidence['target_scope'],
-          'rule_version' => $evidence['rule_version'],
-          'outcome' => $evidence['outcome'],
-          'site' => $evidence['site'],
-          'host' => $evidence['host'],
-          'environment' => $evidence['environment'],
-          'sources' => $evidence['sources'],
-          'reasons' => $evidence['reasons'],
-          'tenants' => $evidence['tenants'],
-          'timestamp' => time(),
-        ]);
+        $this->webhookQueueManager->enqueueForEvent(
+          McpWebhookEvents::ANOMALY_ALERT,
+          [
+            'rule_id' => $ruleId,
+            'rule_label' => $ruleLabel,
+            'count' => $count,
+            'threshold' => $threshold,
+            'window_seconds' => $window,
+            'signal' => $evidence['signal'],
+            'actor' => $evidence['actor'],
+            'target_scope' => $evidence['target_scope'],
+            'rule_version' => $evidence['rule_version'],
+            'outcome' => $evidence['outcome'],
+            'site' => $evidence['site'],
+            'host' => $evidence['host'],
+            'environment' => $evidence['environment'],
+            'sources' => $evidence['sources'],
+            'reasons' => $evidence['reasons'],
+            'tenants' => $evidence['tenants'],
+            'timestamp' => time(),
+          ],
+        );
       }
     }
   }

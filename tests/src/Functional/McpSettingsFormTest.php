@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
 use Drupal\key\Entity\Key;
+use Drupal\mcp_sentinel\Form\McpSettingsForm;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Drupal\Tests\BrowserTestBase;
 
 /**
@@ -430,6 +432,73 @@ final class McpSettingsFormTest extends BrowserTestBase {
     ], 'Save configuration');
     $this->assertSession()->pageTextContains('Endpoint siem still filters on mcp.entity.save');
     $this->assertSession()->pageTextContains('Type mcp.entity.presave');
+    $this->assertSame(
+      ['mcp.entity.save'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+  }
+
+  /**
+   * An unknown event name is refused on save and nothing persists.
+   *
+   * If this assertion is deleted, a typo can be stored as a filter
+   * that never matches. mcp.entity.save keeps its own copy above.
+   */
+  public function testUnknownWebhookEventNameRejectedOnSettingsSave(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $this->submitForm([
+      'webhooks[endpoints][0][events]' => "mcp.entity.update\nMCP.ENTITY.PRESAVE\n" . str_repeat('x', 200),
+    ], 'Save configuration');
+    // The validation sentence is comma-separated. The textarea still
+    // holds the typed 200-character name on its own line, so a
+    // page-wide 129-x check cannot prove the echo is cut. Stark on
+    // Drupal 11 also has no .messages--error wrapper.
+    $capped = str_repeat('x', McpWebhookEvents::NAME_MAX);
+    $this->assertSession()->pageTextContains(
+      'Endpoint siem filters on mcp.entity.update, MCP.ENTITY.PRESAVE, '
+      . $capped
+      . ', which are not live webhook events',
+    );
+    $this->assertSession()->pageTextContains('mcp.entity.presave, mcp.entity.delete, mcp.anomaly.alert');
+    $this->assertSame(
+      ['mcp.entity.save'],
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],
+    );
+  }
+
+  /**
+   * Unknown-name validation caps the endpoint id and the echoed list.
+   *
+   * The machine-id field is HTML-maxlength 64; the posted value can
+   * still be longer. The error uses boundText at ENDPOINT_ID_MAX
+   * for the id, boundName for each unknown name, and the first
+   * UNKNOWN_EVENT_ECHO_MAX names plus ", and N more". The textarea
+   * still holds the typed names, so this asserts the comma-separated
+   * sentence, not a page-wide absence of later names.
+   */
+  public function testUnknownWebhookEventEchoIsCapped(): void {
+    $this->seedRetiredSaveWebhookEndpoint();
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/config/services/mcp-sentinel');
+    $names = ['mcp.a', 'mcp.b', 'mcp.c', 'mcp.d', 'mcp.e', 'mcp.f'];
+    $this->submitForm([
+      'webhooks[endpoints][0][id]' => str_repeat('a', 200),
+      'webhooks[endpoints][0][events]' => implode("\n", $names),
+    ], 'Save configuration');
+    $shown = array_slice($names, 0, McpSettingsForm::UNKNOWN_EVENT_ECHO_MAX);
+    $more = count($names) - count($shown);
+    $this->assertGreaterThan(0, $more);
+    $this->assertSession()->pageTextContains(
+      'Endpoint ' . str_repeat('a', McpWebhookEvents::ENDPOINT_ID_MAX)
+      . ' filters on ' . implode(', ', $shown)
+      . ', and ' . $more . ' more, which are not live webhook events',
+    );
+    $this->assertSame(
+      'siem',
+      \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['id'],
+    );
     $this->assertSame(
       ['mcp.entity.save'],
       \Drupal::config('mcp_sentinel.settings')->get('webhook_endpoints')[0]['events'],

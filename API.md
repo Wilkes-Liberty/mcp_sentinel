@@ -73,8 +73,10 @@ public function onDestructiveOp(McpDestructiveOpEvent $event): void {
 Dispatched whenever a **governed** MCP operation creates, updates, or deletes an
 entity. This is the extension point the reliable-webhook pipeline rides on: the
 `McpEventDispatcher` service both fires this Symfony event and enqueues a
-configured webhook delivery. Subscribe to stream governed changes into your own
-SIEM, queue, or notification system without touching the audit log.
+configured webhook delivery. Unknown event names are refused: no
+in-process event fires and nothing is queued. Subscribe to stream
+governed changes into your own SIEM, queue, or notification system
+without touching the audit log.
 
 | Method | Returns |
 |--------|---------|
@@ -634,7 +636,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.access_checker` | `McpAccessChecker` | entity/create access decisions, JSON:API filter access, `isClientIpAllowed()`, `checkConfigAccess()`, `checkBundleFloor()` (attested portable-policy deny, d.o #3617702) |
 | `mcp_sentinel.policy_bundle_registry` | `McpPolicyBundleRegistry` | mint / verify / activate / simulate / revoke / rollback / emergency deny for portable policy bundles. Live access consults `simulate()` through `McpAccessChecker` |
 | `mcp_sentinel.audit_logger` | `McpAuditLogger` | MCP policy in front of the shared chain: read-suppression, change diffs (`computeChangeDiff()` / `computeConfigDiff()`), redaction and DLP. Chain mechanics live in `audit_chain.logger`; write there directly if you want tamper-evident audit for something other than MCP traffic |
-| `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
+| `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — entity names only (`mcp.entity.presave`, `mcp.entity.delete`); unknown or `mcp.anomaly.alert` names are a refused audited no-op |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |
 | `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) or a verified sealed token (`mcs1.` prefix) |
 | `mcp_sentinel.admin_status` | `McpAdminStatus` | admin status strip: MCP on/off, designated clients, readiness, last whoami |
