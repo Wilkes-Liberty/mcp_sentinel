@@ -59,7 +59,11 @@ that stop now enforces both spellings. A composed principal
 key longer than 770 characters (`McpKillSelector::MAX_KEY_LENGTH`)
 is refused (`part_too_long`): a 256/256/252 delegated token
 is exactly 770 and stays accepted; a 256/256/256 token is
-774 and is refused. `kill-status` and
+774 and is refused. Before this change, a delegated token
+whose raw `iss`, `sub`, and `act.sub` totalled 765–768
+characters composed an unprefixed key of at most 770 and
+was accepted. Those tokens now compose `iss|sub|act:X` over
+770 and are refused (`part_too_long`). `kill-status` and
 `unkill` still match the stored row's exact spelling. If
 enforcement refuses a token under a legacy `iss|sub|X` stop,
 status or unkill with `iss|sub|act:X` finds no row. Use the
