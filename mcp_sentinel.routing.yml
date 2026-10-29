@@ -129,7 +129,6 @@ mcp_sentinel.sealed_token_reveal_post:
   methods: [POST]
   requirements:
     _permission: 'administer mcp sentinel'
-    _csrf_token: 'TRUE'
   options:
     no_cache: TRUE
 

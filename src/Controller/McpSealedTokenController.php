@@ -122,47 +122,13 @@ final class McpSealedTokenController extends ControllerBase {
   }
 
   /**
-   * GET landing after mint: offers a CSRF POST, never shows the secret.
-   *
-   * Peeking the tempstore does not delete the handoff. A refresh or
-   * prefetch of this path must not echo or burn the plaintext.
+   * GET landing after mint. This red-proof build consumes like the old GET.
    *
    * @return array
-   *   Prompt or gone render array. The secret is never in this response.
+   *   Reveal or gone render array.
    */
   public function revealPrompt(): array {
-    $build = $this->revealShell(FALSE);
-    // GET only looks. Delete happens on the CSRF-protected POST.
-    if ($this->issuedPayload($this->revealStore()->get('reveal')) === NULL) {
-      return $this->goneBuild($build);
-    }
-
-    $build['help'] = [
-      '#markup' => '<p>' . $this->t(
-        'The sealed token is ready. Show it once. Refreshing this page does not reveal the secret.',
-      ) . '</p>',
-    ];
-    // Url::fromRoute() appends ?token= because the POST route requires
-    // _csrf_token. A form without that query string is 403 and reveals
-    // nothing.
-    $action = Url::fromRoute('mcp_sentinel.sealed_token_reveal_post')
-      ->toString();
-    $build['reveal'] = [
-      '#type' => 'inline_template',
-      '#template' => '<form method="post" action="{{ action }}">'
-        . '<button type="submit" class="button button--primary">'
-        . '{{ label }}</button></form>',
-      '#context' => [
-        'action' => $action,
-        'label' => $this->t('Show sealed token'),
-      ],
-    ];
-    $build['back'] = [
-      '#type' => 'link',
-      '#title' => $this->t('Back to sealed tokens'),
-      '#url' => Url::fromRoute('mcp_sentinel.sealed_token'),
-    ];
-    return $build;
+    return $this->reveal();
   }
 
   /**
