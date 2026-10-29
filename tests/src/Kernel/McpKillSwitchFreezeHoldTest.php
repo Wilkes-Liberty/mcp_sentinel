@@ -201,7 +201,7 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
-   * holdMatching does not select act:act:X; send-time still holds it.
+   * Hold matching does not select act:act:X; send-time still holds it.
    *
    * Strip-one-prefix pairs a stop of iss|sub|act:X with X, not
    * with act:act:X. shouldHoldRow looks up the stored key, whose

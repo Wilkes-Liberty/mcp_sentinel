@@ -299,9 +299,9 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   /**
    * Dual-match strips one act: prefix only.
    *
-   * iss|sub|act:act:X pairs with iss|sub|act:X, not with
-   * iss|sub|X. Operator-supplied ACT:X is canonicalized to
-   * act:X and then paired with X.
+   * The iss|sub|act:act:X form pairs with iss|sub|act:X, not
+   * with iss|sub|X. Operator-supplied ACT:X is canonicalized
+   * to act:X and then paired with X.
    *
    * @covers ::enforcementAliases
    */
