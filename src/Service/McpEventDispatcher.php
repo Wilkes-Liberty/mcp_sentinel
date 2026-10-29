@@ -28,8 +28,24 @@ use Symfony\Component\EventDispatcher\EventDispatcherInterface;
  * X-MCP-Delivery (row id) and X-MCP-Signature-256, an HMAC over
  * "{timestamp}.{body}"; see the README "Reliable webhooks" section.
  *
- * Verify the body-only signature:
- *   hash_equals('sha256=' . hash_hmac('sha256', $body, $secret), $header)
+ * Verify X-MCP-Signature-256 against "{X-MCP-Timestamp}.{raw body}".
+ * Also reject X-MCP-Timestamp outside your allowed clock skew; see
+ * README "Reliable webhooks" step 3 (the snippet uses 300 seconds):
+ *   $timestamp = $request->headers->get('X-MCP-Timestamp', '');
+ *   $expected = 'sha256=' . hash_hmac(
+ *     'sha256',
+ *     $timestamp . '.' . $body,
+ *     $secret,
+ *   );
+ *   $valid = hash_equals(
+ *     $expected,
+ *     $request->headers->get('X-MCP-Signature-256', ''),
+ *   )
+ *     && preg_match('/^[0-9]+$/', $timestamp) === 1
+ *     && abs(time() - (int) $timestamp) <= 300;
+ *
+ * X-MCP-Signature is the body-only legacy header. Do not apply that
+ * verify to X-MCP-Signature-256.
  */
 class McpEventDispatcher {
 

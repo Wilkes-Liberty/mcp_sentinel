@@ -12,7 +12,11 @@ extension points.
 ## Requirements
 
 - Drupal 10.6+, 11.3+, or 12 — the branches upstream still supports.
-- PHP matching your Drupal core requirement.
+- PHP matching your Drupal core requirement, including `ext-intl` /
+  `Spoofchecker`. MCP Sentinel refuses reserved look-alike
+  argument keys with intl Spoofchecker (UTS #39). Without `ext-intl` /
+  `Spoofchecker`, governed tool calls fail closed
+  (`lookalike_check_unavailable`). Install the PHP intl extension.
 
 ### Hard dependencies (installed automatically by Composer)
 
