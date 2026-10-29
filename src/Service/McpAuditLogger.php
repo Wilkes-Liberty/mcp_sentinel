@@ -371,7 +371,51 @@ class McpAuditLogger {
       }
     }
 
-    $this->requireChain()->log(self::CHANNEL, $operation, $metadata);
+    $this->requireChain()->log(
+      self::CHANNEL,
+      $operation,
+      self::boundChainIdentity($metadata),
+    );
+  }
+
+  /**
+   * Bounds identity fields to audit_chain_log column widths.
+   *
+   * Audit_chain 1.13.0 maps metadata.id to entity_id varchar(255)
+   * and does not truncate it (it does truncate label). entity_type
+   * and bundle are varchar(128) and are also copied unbounded.
+   * MySQL 8 and PostgreSQL refuse an oversize insert; SQLite
+   * stores it. deny() then swallows that exception, so a
+   * 256-character principal subject (MAX_PART_LENGTH) can be
+   * denied with no denied_access row. Hash the oversize value
+   * into the column and keep the original in metadata.
+   *
+   * @param array<string, mixed> $metadata
+   *   Metadata about to be handed to audit_chain.
+   *
+   * @return array<string, mixed>
+   *   The same map with oversize identity fields replaced.
+   */
+  public static function boundChainIdentity(array $metadata): array {
+    $limits = [
+      'entity_type' => 128,
+      'bundle' => 128,
+      'id' => 255,
+    ];
+    foreach ($limits as $key => $max) {
+      if (!isset($metadata[$key])) {
+        continue;
+      }
+      $value = (string) $metadata[$key];
+      if (strlen($value) <= $max) {
+        continue;
+      }
+      $digest = hash('sha256', $value);
+      $metadata[$key . '_original'] = $value;
+      $metadata[$key . '_sha256'] = $digest;
+      $metadata[$key] = 'sha256:' . $digest;
+    }
+    return $metadata;
   }
 
   /**

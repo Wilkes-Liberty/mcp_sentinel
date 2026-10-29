@@ -1163,7 +1163,8 @@ jobs:
             --exclude '.cspell-ci/**' --exclude '.cspell-ci.json' \
             .
 
-  # MySQL kernel coverage for the unique uid index and update 10037 (DEV-986).
+  # MySQL kernel coverage for the unique uid index, update 10037
+  # (DEV-986), and overlong denied_access entity_id (DEV-1180).
   phpunit-mysql-operator-binding:
     name: PHPUnit — MySQL operator binding (Drupal 11, PHP 8.4)
     needs: changes
@@ -1246,7 +1247,7 @@ jobs:
           test -L web/modules/contrib/mcp_sentinel \
             || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
 
-      - name: PHPUnit — unique uid index and update 10037
+      - name: PHPUnit — unique uid index, update 10037, overlong denial audit
         working-directory: drupal
         env:
           SIMPLETEST_DB: 'mysql://drupal:drupal@127.0.0.1:3306/drupal'
@@ -1263,7 +1264,11 @@ jobs:
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
-            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts' \
+            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts|testComposedOverlongDelegatedTokenIsDeniedAndAudited' \
+            || status=1
+          vendor/bin/phpunit -c "${config}" \
+            "${module}/tests/src/Kernel/McpAuditLoggerTest.php" \
+            --filter 'testOversizedEntityIdIsHashedAndStillWritten|testEntityIdAtColumnLimitIsUnchanged' \
             || status=1
           exit "${status}"
 
@@ -1349,7 +1354,7 @@ jobs:
           test -L web/modules/contrib/mcp_sentinel \
             || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
 
-      - name: PHPUnit — unique uid index and update 10037
+      - name: PHPUnit — unique uid index, update 10037, overlong denial audit
         working-directory: drupal
         env:
           SIMPLETEST_DB: 'pgsql://drupal:drupal@127.0.0.1:5432/drupal'
@@ -1366,7 +1371,11 @@ jobs:
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
-            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts' \
+            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts|testComposedOverlongDelegatedTokenIsDeniedAndAudited' \
+            || status=1
+          vendor/bin/phpunit -c "${config}" \
+            "${module}/tests/src/Kernel/McpAuditLoggerTest.php" \
+            --filter 'testOversizedEntityIdIsHashedAndStillWritten|testEntityIdAtColumnLimitIsUnchanged' \
             || status=1
           exit "${status}"
 

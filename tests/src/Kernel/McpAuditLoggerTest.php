@@ -234,6 +234,68 @@ final class McpAuditLoggerTest extends KernelTestBase {
   }
 
   /**
+   * An entity id over 255 bytes is hashed so the denial row still writes.
+   *
+   * Audit_chain 1.13.0 copies metadata.id onto entity_id varchar(255)
+   * without truncating it (it does truncate label). MySQL 8 strict
+   * mode refuses the insert; SQLite stores the oversize value. The
+   * logger must bound the column field and keep the original in
+   * metadata so a 256-character principal subject cannot drop the
+   * denied_access row (d.o pipeline 1023398).
+   *
+   * @covers ::logAlways
+   */
+  public function testOversizedEntityIdIsHashedAndStillWritten(): void {
+    $id = str_repeat('b', 256);
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('denied_access', [
+      'entity_type' => 'principal',
+      'id' => $id,
+      'reason' => 'part_too_long',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id', 'metadata', 'operation'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $this->assertLessThanOrEqual(255, strlen((string) $row['entity_id']));
+    $this->assertSame('sha256:' . hash('sha256', $id), $row['entity_id']);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame($id, $meta['id_original'] ?? NULL);
+    $this->assertSame(hash('sha256', $id), $meta['id_sha256'] ?? NULL);
+    $this->assertSame('part_too_long', $meta['reason'] ?? NULL);
+  }
+
+  /**
+   * An entity id of exactly 255 bytes is stored unchanged.
+   *
+   * @covers ::logAlways
+   */
+  public function testEntityIdAtColumnLimitIsUnchanged(): void {
+    $id = str_repeat('c', 255);
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('denied_access', [
+      'id' => $id,
+      'reason' => 'ok',
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $this->assertSame($id, $row['entity_id']);
+  }
+
+  /**
    * Denied-access rows are written when audit_enabled is off.
    *
    * @covers ::log
