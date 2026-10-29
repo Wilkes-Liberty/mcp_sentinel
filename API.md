@@ -240,7 +240,8 @@ only, never under-block). Audit and stored `principal_key`
 identity stay separated.
 `humanKey()` is `iss|sub`. Missing iss/sub/azp/`act.sub`, a
 `|`, Unicode whitespace-only parts (including NBSP), control
-characters, invalid UTF-8, or a part longer than 256 characters, also
+characters, invalid UTF-8, a part longer than 256 characters, or a
+composed key longer than 770 characters (`part_too_long`), also
 fails closed. Import `mcp_sentinel.principal_key::fromClaims()` from
 rate limits, budgets, and kill. Shared vectors:
 `tests/fixtures/principal-key-vectors.json` (the Node connector will
