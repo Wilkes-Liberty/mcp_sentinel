@@ -297,6 +297,32 @@ final class McpPrincipalKeyTest extends UnitTestCase {
   }
 
   /**
+   * Dual-match strips one act: prefix only.
+   *
+   * iss|sub|act:act:X pairs with iss|sub|act:X, not with
+   * iss|sub|X. Operator-supplied ACT:X is canonicalized to
+   * act:X and then paired with X.
+   *
+   * @covers ::enforcementAliases
+   */
+  public function testEnforcementAliasesStripOnePrefixOnly(): void {
+    $iss = 'https://idp.example/realms/agents';
+    $double = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX
+      . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $prefixed = $iss . '|human-1|' . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $legacy = $iss . '|human-1|agent-7';
+    $fromDouble = McpPrincipalKey::enforcementAliases($double);
+    $this->assertContains($double, $fromDouble);
+    $this->assertContains($prefixed, $fromDouble);
+    $this->assertNotContains($legacy, $fromDouble);
+    $fromUpper = McpPrincipalKey::enforcementAliases(
+      $iss . '|human-1|ACT:agent-7',
+    );
+    $this->assertEqualsCanonicalizing([$prefixed, $legacy], $fromUpper);
+    $this->assertNotContains($double, $fromUpper);
+  }
+
+  /**
    * Kill lookup hashes the actor-slot twin; exact-match would not.
    *
    * Dual-match is permanent. Reverting this module restores

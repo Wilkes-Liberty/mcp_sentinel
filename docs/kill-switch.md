@@ -32,10 +32,16 @@ over-inclusive: over-block only, never under-block). A new
 a new `iss|sub|X` stop also refuses a delegated `act.sub=X`
 token. Audit and stored `principal_key` identity stay separated.
 Non-delegated stops (`iss|sub|azp`) still store the unprefixed
-key; enforcement looks up both spellings. `kill-status` and
-`unkill` match the stored row's exact spelling. If a token is
-refused under a legacy `iss|sub|X` stop, status and unkill
-with `iss|sub|act:X` find no row. Use the stored spelling.
+key; enforcement looks up both spellings. Dual-match strips
+one `act:` prefix only: `iss|sub|act:act:X` pairs with
+`iss|sub|act:X`, not with `iss|sub|X`. Operator-supplied
+`ACT:X` is stored as `act:X`. `holdMatching` uses that same
+set, so a stop of `iss|sub|act:X` does not select a pending
+row stored as `iss|sub|act:act:X`. Send-time `shouldHoldRow`
+still holds that row. `kill-status` and `unkill` match the
+stored row's exact spelling. If a token is refused under a
+legacy `iss|sub|X` stop, status and unkill with
+`iss|sub|act:X` find no row. Use the stored spelling.
 
 The module checks the registry on every governed call, before the tool
 runs. It checks again just before a governed write is saved. If the

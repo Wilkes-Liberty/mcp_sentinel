@@ -49,7 +49,7 @@ final class McpPrincipalKey {
   public const SEPARATOR = '|';
 
   /**
-   * Maximum Unicode characters per iss, sub, or actor part.
+   * Maximum Unicode characters per raw iss, sub, azp, or act.sub.
    */
   public const MAX_PART_LENGTH = 256;
 
@@ -236,8 +236,14 @@ final class McpPrincipalKey {
    * module is installed. That is over-inclusive on purpose
    * (over-block only, never under-block): stored X cannot be
    * proven to have been azp versus act.sub. It does not match
-   * a different iss or sub, and it does not double the prefix
-   * (iss|sub|X does not match iss|sub|act:act:X).
+   * a different iss or sub, and it strips only one prefix
+   * (iss|sub|act:act:X pairs with iss|sub|act:X, not with
+   * iss|sub|X). Operator-supplied ACT:X is canonicalized to
+   * act:X before pairing. holdMatching uses this same set, so
+   * a stop of iss|sub|act:X does not select a pending row
+   * stored as iss|sub|act:act:X. Send-time shouldHoldRow
+   * still catches that row: the stored key's aliases include
+   * iss|sub|act:X.
    *
    * Audit and stored principal_key identity stay separated.
    * No update hook: stored X is ambiguous. Dual-match is the

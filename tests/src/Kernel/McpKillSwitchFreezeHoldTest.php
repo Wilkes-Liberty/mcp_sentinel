@@ -201,6 +201,30 @@ final class McpKillSwitchFreezeHoldTest extends KernelTestBase {
   }
 
   /**
+   * holdMatching does not select act:act:X; send-time still holds it.
+   *
+   * Strip-one-prefix pairs a stop of iss|sub|act:X with X, not
+   * with act:act:X. shouldHoldRow looks up the stored key, whose
+   * aliases include act:X, so the worker still holds the row.
+   */
+  public function testHoldMatchingSkipsDoublePrefixedRow(): void {
+    $doubleKey = self::ISS . '|subject-wh-double|'
+      . McpPrincipalKey::ACT_PREFIX . McpPrincipalKey::ACT_PREFIX . 'agent-7';
+    $prefixed = $this->principalSelector(
+      'subject-wh-double',
+      McpPrincipalKey::ACT_PREFIX . 'agent-7',
+    );
+    $id = $this->insertDelivery([
+      'principal_key' => $doubleKey,
+      'human_key' => self::ISS . '|subject-wh-double',
+      'tenant' => 'tenant-a',
+    ]);
+    $this->killSwitch()->kill([$prefixed], 'hold-double', $this->paladinA());
+    $this->assertSame('pending', $this->loadDelivery($id)['status']);
+    $this->assertTrue($this->queue()->shouldHoldRow($this->loadDelivery($id)));
+  }
+
+  /**
    * A kill row for iss|sub|act:X stops a delegated token and holds its rows.
    */
   public function testActPrefixedKillStopsDelegatedTokenAndHoldsWebhookRows(): void {

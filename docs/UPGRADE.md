@@ -39,7 +39,14 @@ the `act:` prefix on delegated keys; a JS twin of `fromClaims()`
 must match. Product code always emits lowercase `act:`. Webhook
 hold selection uses SQL `IN` on those aliases; a MySQL `*_ci`
 collation can still over-hold a whole-key case fold, which predates
-this prefix.
+this prefix. Dual-match strips one `act:` prefix only:
+`iss|sub|act:act:X` pairs with `iss|sub|act:X`, not with
+`iss|sub|X`. Operator-supplied `ACT:X` is stored as `act:X`.
+`holdMatching` uses that same set, so a stop of `iss|sub|act:X`
+does not select a pending row stored as `iss|sub|act:act:X`.
+Send-time `shouldHoldRow` still holds that row because the
+stored key's aliases include `iss|sub|act:X`. Product code
+emits `act:act:X` only when `act.sub` is itself `act:X`.
 
 **Upgrade:** operators do not need to re-issue active delegated
 stops across this deploy. Dual-match keeps a pre-upgrade
