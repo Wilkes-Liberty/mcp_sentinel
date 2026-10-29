@@ -328,7 +328,7 @@ final class McpSealedTokenUiTest extends BrowserTestBase {
       );
       $this->assertSession()->statusCodeEquals(302);
       $location = $this->getSession()->getResponseHeader('Location');
-      $this->assertNotFalse($location);
+      $this->assertIsString($location);
       $this->assertStringContainsString('user/login', $location);
       $this->assertRevealSecretNotShown();
     }
