@@ -15,6 +15,7 @@ use Drupal\mcp_sentinel\Enum\McpKillBreakGlassAction;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpKillSwitch;
 use Drupal\mcp_sentinel\Service\McpOperatorBinding;
 use Drupal\mcp_sentinel\Service\McpOperatorIdentityFactory;
@@ -295,7 +296,10 @@ final class McpKillSwitchTest extends KernelTestBase {
    *
    * A 256/256/253 delegated token is 771 characters. Admit
    * must fail closed with part_too_long on the denied_access
-   * row. Removing assertSafeComposedKey() makes this fail.
+   * row. entity_id must stay at or under 255 characters so
+   * MySQL/MariaDB can store the row (audit_chain varchar 255).
+   * Removing assertSafeComposedKey() or putting the 256-character
+   * subject in entity_id makes this fail.
    */
   public function testComposedOverlongDelegatedTokenIsDeniedAndAudited(): void {
     $iss = str_repeat('a', 256);
@@ -340,6 +344,22 @@ final class McpKillSwitchTest extends KernelTestBase {
     $this->assertStringContainsString(
       McpPrincipalKeyException::PART_TOO_LONG,
       (string) ($meta['explain'] ?? '') . ' ' . (string) ($meta['reason'] ?? ''),
+    );
+    $this->assertSame('unverified', $meta['principal_key'] ?? '');
+    $this->assertSame($sub, $meta['sub'] ?? '');
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $this->assertSame('unverified', $row['entity_id']);
+    $this->assertLessThanOrEqual(
+      McpAuditLogger::ENTITY_ID_MAX_LENGTH,
+      mb_strlen((string) $row['entity_id'], 'UTF-8'),
     );
   }
 

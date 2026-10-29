@@ -242,6 +242,143 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
+   * Overlong delegated-token deny metadata fits audit_chain entity_id.
+   *
+   * A 256-character subject is a legal claim part. Putting it in
+   * metadata id overflows audit_chain_log.entity_id (varchar 255) on
+   * MySQL; deny() then swallows the append. The row must still name
+   * part_too_long and keep the full subject in metadata.sub.
+   *
+   * @covers ::denialAuditMetadata
+   * @covers ::admit
+   */
+  public function testComposedOverlongDelegatedTokenAuditFitsEntityIdColumn(): void {
+    $iss = str_repeat('a', 256);
+    $sub = str_repeat('a', 256);
+    $actSub = str_repeat('a', 253);
+    $claims = [
+      'iss' => $iss,
+      'sub' => $sub,
+      'azp' => 'agent-client',
+      'act' => ['sub' => $actSub],
+      'tenant' => 'tenant-a',
+    ];
+    $ctx = new McpPrincipalContext(
+      $iss,
+      $sub,
+      'agent-client',
+      'agent-client',
+      ['mcp_read'],
+      'tenant-a',
+      [$actSub],
+      TRUE,
+      $claims,
+    );
+    $meta = McpPrincipalContextDispatcher::denialAuditMetadata(
+      'mcp_kill_probe',
+      McpPrincipalKeyException::PART_TOO_LONG,
+      $ctx,
+    );
+    $this->assertSame('unverified', $meta['id'] ?? '');
+    $this->assertLessThanOrEqual(
+      McpAuditLogger::ENTITY_ID_MAX_LENGTH,
+      mb_strlen((string) ($meta['id'] ?? ''), 'UTF-8'),
+    );
+    $this->assertSame('unverified', $meta['principal_key'] ?? '');
+    $this->assertSame(
+      McpPrincipalKeyException::PART_TOO_LONG,
+      $meta['principal_unverified'] ?? '',
+    );
+    $this->assertSame($sub, $meta['sub'] ?? '');
+    $this->assertSame($iss, $meta['iss'] ?? '');
+
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal($ctx, $request);
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      'denied_access',
+      $this->callback(static function (array $row) use ($sub): bool {
+        $id = (string) ($row['id'] ?? '');
+        $explain = (string) ($row['explain'] ?? '');
+        $reason = (string) ($row['reason'] ?? '');
+        $unverified = (string) ($row['principal_unverified'] ?? '');
+        $named = McpPrincipalKeyException::PART_TOO_LONG;
+        return $id === 'unverified'
+          && mb_strlen($id, 'UTF-8') <= McpAuditLogger::ENTITY_ID_MAX_LENGTH
+          && ($row['principal_key'] ?? '') === 'unverified'
+          && $unverified === $named
+          && ($row['sub'] ?? '') === $sub
+          && str_contains($explain . ' ' . $reason, $named);
+      }),
+    );
+    $dispatcher = $this->dispatcher($stack, $holder, $audit);
+    try {
+      $dispatcher->admit(['note' => 'ok'], 'mcp_kill_probe');
+      $this->fail('A 771-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertStringContainsString(
+        McpPrincipalKeyException::PART_TOO_LONG,
+        $e->getMessage(),
+      );
+    }
+  }
+
+  /**
+   * A composed 770-character key still bounds entity_id to 255.
+   *
+   * 256/256/252 plus act: is exactly 770 and is accepted. The
+   * subject remains in metadata.sub; entity_id is truncated so
+   * MySQL can store the deny row.
+   *
+   * @covers ::denialAuditMetadata
+   */
+  public function testAcceptedDelegatedSubjectFitsEntityIdColumn(): void {
+    $iss = str_repeat('b', 256);
+    $sub = str_repeat('c', 256);
+    $actSub = str_repeat('d', 252);
+    $claims = [
+      'iss' => $iss,
+      'sub' => $sub,
+      'azp' => 'agent-client',
+      'act' => ['sub' => $actSub],
+      'tenant' => 'tenant-a',
+    ];
+    $ctx = new McpPrincipalContext(
+      $iss,
+      $sub,
+      'agent-client',
+      'agent-client',
+      ['mcp_read'],
+      'tenant-a',
+      [$actSub],
+      TRUE,
+      $claims,
+    );
+    $meta = McpPrincipalContextDispatcher::denialAuditMetadata(
+      'mcp_kill_probe',
+      'principal_killed',
+      $ctx,
+    );
+    $this->assertSame(
+      McpAuditLogger::ENTITY_ID_MAX_LENGTH,
+      mb_strlen((string) ($meta['id'] ?? ''), 'UTF-8'),
+    );
+    $this->assertSame(str_repeat('c', 255), $meta['id'] ?? '');
+    $this->assertSame($sub, $meta['sub'] ?? '');
+    $this->assertStringStartsWith($iss . '|', $meta['principal_key'] ?? '');
+  }
+
+  /**
    * An azp that uses the delegated actor prefix is refused and audited.
    *
    * The caller sees the generic missing-principal refusal so a

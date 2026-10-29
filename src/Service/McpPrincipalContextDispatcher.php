@@ -505,7 +505,11 @@ final class McpPrincipalContextDispatcher {
     $meta = [
       'tool' => $toolId !== '' ? $toolId : 'unknown_tool',
       'entity_type' => 'principal',
-      'id' => $ctx->subject() !== '' ? $ctx->subject() : 'unverified',
+      // Unverified until fromClaims() succeeds. A 256-character
+      // subject (MAX_PART_LENGTH) overflows audit_chain_log.entity_id
+      // (varchar 255) on MySQL; deny() then swallows the append and
+      // the denial is unaudited. Full iss/sub stay in metadata.
+      'id' => 'unverified',
       'operation' => 'dispatch',
       'reason' => $reasonCode,
     ];
@@ -518,6 +522,9 @@ final class McpPrincipalContextDispatcher {
       $meta['tenant'] = $ctx->tenant();
       $parts = explode(McpPrincipalKey::SEPARATOR, $keys['principalKey']);
       $meta['actor'] = $parts[2] ?? '';
+      if ($ctx->subject() !== '') {
+        $meta['id'] = McpAuditLogger::boundedEntityId($ctx->subject());
+      }
     }
     catch (McpPrincipalKeyException $e) {
       $meta['principal_key'] = 'unverified';

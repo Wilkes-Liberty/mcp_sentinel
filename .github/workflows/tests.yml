@@ -1163,7 +1163,10 @@ jobs:
             --exclude '.cspell-ci/**' --exclude '.cspell-ci.json' \
             .
 
-  # MySQL kernel coverage for the unique uid index and update 10037 (DEV-986).
+  # MySQL kernel coverage for the unique uid index and update 10037
+  # (DEV-986), plus the overlong-deny audit write (DEV-1180). SQLite
+  # ignores VARCHAR(255); a 256-character JWT subject in metadata id
+  # inserts there and fails on drupal.org MySQL (pipeline 1023398).
   phpunit-mysql-operator-binding:
     name: PHPUnit — MySQL operator binding (Drupal 11, PHP 8.4)
     needs: changes
@@ -1246,7 +1249,7 @@ jobs:
           test -L web/modules/contrib/mcp_sentinel \
             || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
 
-      - name: PHPUnit — unique uid index and update 10037
+      - name: PHPUnit — unique uid index, update 10037, overlong deny audit
         working-directory: drupal
         env:
           SIMPLETEST_DB: 'mysql://drupal:drupal@127.0.0.1:3306/drupal'
@@ -1263,11 +1266,17 @@ jobs:
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
-            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts' \
+            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts|testComposedOverlongDelegatedTokenIsDeniedAndAudited' \
+            || status=1
+          vendor/bin/phpunit -c "${config}" \
+            "${module}/tests/src/Kernel/McpAuditLoggerTest.php" \
+            --filter 'testDeniedAccessWithMaxPartSubjectFitsEntityIdColumn' \
             || status=1
           exit "${status}"
 
-  # PostgreSQL kernel coverage for pg_indexes / partial WHERE uid > 0 (DEV-986).
+  # PostgreSQL kernel coverage for pg_indexes / partial WHERE uid > 0
+  # (DEV-986), plus the overlong-deny audit write (DEV-1180). PG
+  # also enforces varchar(255).
   phpunit-pgsql-operator-binding:
     name: PHPUnit — PostgreSQL operator binding (Drupal 11, PHP 8.4)
     needs: changes
@@ -1349,7 +1358,7 @@ jobs:
           test -L web/modules/contrib/mcp_sentinel \
             || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
 
-      - name: PHPUnit — unique uid index and update 10037
+      - name: PHPUnit — unique uid index, update 10037, overlong deny audit
         working-directory: drupal
         env:
           SIMPLETEST_DB: 'pgsql://drupal:drupal@127.0.0.1:5432/drupal'
@@ -1366,7 +1375,11 @@ jobs:
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
-            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts' \
+            --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts|testComposedOverlongDelegatedTokenIsDeniedAndAudited' \
+            || status=1
+          vendor/bin/phpunit -c "${config}" \
+            "${module}/tests/src/Kernel/McpAuditLoggerTest.php" \
+            --filter 'testDeniedAccessWithMaxPartSubjectFitsEntityIdColumn' \
             || status=1
           exit "${status}"
 
@@ -1685,6 +1698,14 @@ jobs:
             exit 1
           fi
 
+      # Layout only: www-data, custom mount, zend.assertions.
+      # Stays on SQLite. VARCHAR(255) is not enforced, so a 256-character
+      # audit entity_id still inserts here and fails on d.o MySQL
+      # (pipeline 1023398, McpKillSwitchTest::testComposedOverlong…).
+      # Do not switch this job to MySQL — that is a 1200-test suite
+      # and not this job's purpose. Column-length denials are covered
+      # by phpunit-mysql-operator-binding and by unit tests that assert
+      # metadata id / entity_id length ≤ 255 (those fail on SQLite too).
       - name: PHPUnit — Kernel (drupal.org layout)
         timeout-minutes: 40
         working-directory: ${{ github.workspace }}

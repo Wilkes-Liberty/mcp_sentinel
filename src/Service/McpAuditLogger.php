@@ -80,6 +80,17 @@ class McpAuditLogger {
   public const READ_CHANNELS = [self::CHANNEL, self::LEGACY_CHANNEL];
 
   /**
+   * audit_chain_log.entity_id length. audit_chain copies metadata id here.
+   *
+   * audit_chain 1.x bounds channel, operation, label, and user_agent
+   * but not entity_id. MySQL and MariaDB refuse a longer value
+   * (strict mode); SQLite ignores VARCHAR length. A denial that
+   * throws after a failed append is unaudited. Match this to
+   * audit_chain.install hook_schema().
+   */
+  public const ENTITY_ID_MAX_LENGTH = 255;
+
+  /**
    * Maximum number of changed fields recorded in a single change diff.
    */
   private const DIFF_MAX_FIELDS = 50;
@@ -371,7 +382,48 @@ class McpAuditLogger {
       }
     }
 
+    $this->boundEntityIdForChain($metadata);
+
     $this->requireChain()->log(self::CHANNEL, $operation, $metadata);
+  }
+
+  /**
+   * Fits metadata id into audit_chain_log.entity_id.
+   *
+   * The full value stays in metadata (entity_id_unbounded) when
+   * truncated so a 256-character JWT subject is still recorded.
+   *
+   * @param array<string, mixed> $metadata
+   *   Metadata passed to the chain. Modified in place.
+   */
+  private function boundEntityIdForChain(array &$metadata): void {
+    if (!array_key_exists('id', $metadata) || !is_scalar($metadata['id'])) {
+      return;
+    }
+    $id = (string) $metadata['id'];
+    if (mb_strlen($id, 'UTF-8') <= self::ENTITY_ID_MAX_LENGTH) {
+      return;
+    }
+    if (!array_key_exists('entity_id_unbounded', $metadata)) {
+      $metadata['entity_id_unbounded'] = $id;
+    }
+    $metadata['id'] = self::boundedEntityId($id);
+  }
+
+  /**
+   * Truncates a value to audit_chain_log.entity_id.
+   *
+   * @param string $id
+   *   Candidate entity id (JWT subject, node id, config name).
+   *
+   * @return string
+   *   $id, or the first ENTITY_ID_MAX_LENGTH characters.
+   */
+  public static function boundedEntityId(string $id): string {
+    if (mb_strlen($id, 'UTF-8') <= self::ENTITY_ID_MAX_LENGTH) {
+      return $id;
+    }
+    return mb_substr($id, 0, self::ENTITY_ID_MAX_LENGTH, 'UTF-8');
   }
 
   /**

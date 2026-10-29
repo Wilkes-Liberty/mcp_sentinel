@@ -6,6 +6,7 @@ namespace Drupal\Tests\mcp_sentinel\Kernel;
 
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\KernelTests\KernelTestBase;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
@@ -231,6 +232,48 @@ final class McpAuditLoggerTest extends KernelTestBase {
     $count = (int) $this->container->get('database')
       ->select('audit_chain_log')->countQuery()->execute()->fetchField();
     $this->assertSame(0, $count);
+  }
+
+  /**
+   * A 256-character id still writes denied_access on MySQL.
+   *
+   * audit_chain_log.entity_id is varchar(255). SQLite ignores that
+   * length; MySQL refuses the insert. deny() swallows the append, so
+   * the caller still sees 403 and the denial is unaudited. The logger
+   * must bound id and keep the full value in metadata.
+   *
+   * @covers ::logAlways
+   * @covers ::boundedEntityId
+   */
+  public function testDeniedAccessWithMaxPartSubjectFitsEntityIdColumn(): void {
+    $subject = str_repeat('s', 256);
+    $this->assertSame(256, mb_strlen($subject, 'UTF-8'));
+    $this->container->get('mcp_sentinel.audit_logger')->logAlways('denied_access', [
+      'id' => $subject,
+      'reason' => 'part_too_long',
+      'sub' => $subject,
+    ]);
+
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['entity_id', 'metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $this->assertSame(
+      McpAuditLogger::ENTITY_ID_MAX_LENGTH,
+      mb_strlen((string) $row['entity_id'], 'UTF-8'),
+    );
+    $this->assertSame(
+      str_repeat('s', McpAuditLogger::ENTITY_ID_MAX_LENGTH),
+      $row['entity_id'],
+    );
+    $metadata = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame($subject, $metadata['sub'] ?? '');
+    $this->assertSame($subject, $metadata['entity_id_unbounded'] ?? '');
+    $this->assertSame('part_too_long', $metadata['reason'] ?? '');
   }
 
   /**
