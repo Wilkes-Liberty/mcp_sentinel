@@ -396,6 +396,18 @@ For governed agents — requests whose authenticated account holds a governed ro
 A `mcp_sentinel_graphql_schema` tool exposes the GraphQL SDL so agents can
 discover available types, queries, and mutations.
 
+Enabling this submodule installs `drupal/graphql` 4.x, which requires
+`webonyx/graphql-php` 14.x. That 14.x line has no upstream fix for three
+open DoS advisories: [GHSA-r7cg-qjjm-xhqq](https://github.com/advisories/GHSA-r7cg-qjjm-xhqq)
+(high, unbounded parser recursion, fixed in 15.32.3),
+[GHSA-fc86-6rv6-2jpm](https://github.com/advisories/GHSA-fc86-6rv6-2jpm)
+(high, quadratic validation via inline fragments, fixed in 15.32.2), and
+[GHSA-68jq-c3rv-pcrr](https://github.com/advisories/GHSA-68jq-c3rv-pcrr)
+/ CVE-2026-40476 (medium, quadratic-complexity DoS, fixed in 15.31.5).
+The core module does not use GraphQL. Sites that enable the submodule
+should enforce GraphQL query depth and complexity limits, and HTTP
+request size limits, at the edge.
+
 ## What This Adds
 
 | Feature | Without module | With module |
@@ -1166,8 +1178,38 @@ form. Each endpoint is its own add/remove row (use **Add endpoint** /
 | **Label** | Human-readable name. |
 | **URL** | HTTPS endpoint (plain HTTP is rejected). |
 | **Signing secret** | A [Key](https://www.drupal.org/project/key) entity holding the HMAC secret. Use a File or Environment key provider so the value never lands in exported config. |
-| **Event filter** | One event name per line; leave empty to receive all events. Live names: `mcp.entity.presave` (entity write, before commit), `mcp.entity.delete`, and `mcp.anomaly.alert`. A stored or typed `mcp.entity.save` filter is shown as stored and refused on save; type `mcp.entity.presave` instead. A settings-form save that adds, removes, or changes a filter writes a `webhook_event_filter` audit row (`added`, `removed`, or `changed`). A missing endpoint is not logged as an empty filter. `drush cset`, config import, and recipe apply do not. |
+| **Event filter** | One event name per line; leave empty to receive every live event. Live names (hard allowlist): `mcp.entity.presave` (entity write, before commit), `mcp.entity.delete`, and `mcp.anomaly.alert`. Unknown names are refused on save. `McpEventDispatcher::dispatch()` and `enqueueForEvent()` refuse them too (audited no-op; third-party callers of `mcp_sentinel.event_dispatcher` get the same). A stored or typed `mcp.entity.save` filter is shown as stored and refused on save; type `mcp.entity.presave` instead. A settings-form save that adds, removes, or changes a filter writes a `webhook_event_filter` audit row (`added`, `removed`, or `changed`). A missing endpoint is not logged as an empty filter. `drush cset`, config import, and recipe apply do not. |
 | **Enabled** | Toggles delivery without deleting the endpoint. |
+
+### Upgrade
+
+A stored filter that is not one of the three live names — including
+`mcp.entity.save`, a typo, or a case variant — blocks the whole
+settings save, even when that endpoint is disabled. The validation
+message names the endpoint machine id (cut at 64 characters) and
+the refused names (each cut at 128 characters; the first 3 plus
+`, and N more`). Type a live name or clear the filter; the form
+does not rewrite it. Disabled rows are checked too because they
+are exported config and can be re-enabled. Delivery is not
+widened: `dispatch()`, `enqueueForEvent()`, the worker,
+`requeueDuePendingRows()`, and replay refuse unknown names and
+write a `webhook_event_refused` audit row (name cut at 128
+characters of valid UTF-8, endpoint id at 64 characters when a
+stored row is refused, no payload). A rejected settings save is a
+validation error, not a persisted change, so it is not a
+`webhook_event_filter` row.
+
+A queued delivery whose stored `event_name` is unknown is marked
+failed (worker and requeue) or left untouched (replay of a sent
+row). Replay of a held or discarded row does not claim the name
+was refused: those statuses return first and no refusal audit is
+written. In-repo producers only emit live names, so this path is
+for imported or hand-inserted rows.
+
+No update hook; 10039 is unchanged. A plain revert is clean.
+Rows already marked `failed` with
+`Unknown webhook event name refused.` stay failed after revert.
+They are ordinary failed delivery rows and are not rewritten.
 
 ### Request headers and signatures
 
@@ -1245,7 +1287,9 @@ re-delivered, so duplicate queue items or concurrent workers cannot double-send.
 settings*) lists recent deliveries with status, attempts, last response code, and next
 attempt time. Use the CSRF-protected **Replay** action — or
 `drush mcp-sentinel:webhook-replay <delivery-id>` — to reset a `failed`/`sent`
-row to `pending` and re-queue it.
+row to `pending` and re-queue it. Held and discarded rows have no Replay
+action. A direct or drush replay of those rows names the status and
+does not write a refusal audit.
 
 ### SSRF protection (HTTPS required)
 

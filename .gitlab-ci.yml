@@ -79,10 +79,36 @@ variables:
   # CSpell is already clean on 1.x. Keep it a required job so a new
   # project word fails the pipeline instead of mailing a warning.
   _CSPELL_ALLOW_FAILURE: '0'
+  # CI-only Packagist advisory ignores. Do not copy into composer.json —
+  # site installs must still see these advisories. Applied globally in
+  # .composer-base before_script so every composer lane (current,
+  # previous-minor, next-minor, next-major) inherits it without replacing
+  # the gitlab_templates install script.
+  #
+  # PKSA-p9gd-j6gr-6f9t: CVE-2026-53965 in mcp/sdk CLIENT HttpTransport
+  # SSE buffering. mcp_server pins ^0.6 and cannot reach the 0.7.1 fix.
+  # PKSA-xwpn-zs9j-6wy5: GHSA-r7cg-qjjm-xhqq, high, unbounded parser
+  # recursion stack overflow, fixed in 15.32.3.
+  # PKSA-sf9j-1gs7-xzvx: GHSA-fc86-6rv6-2jpm, high, quadratic validation
+  # via inline fragments, fixed in 15.32.2.
+  # PKSA-7h5p-prw9-w5nr: GHSA-68jq-c3rv-pcrr / CVE-2026-40476, medium,
+  # quadratic-complexity DoS, fixed in 15.31.5.
+  # The last three have no 14.x fix; drupal/graphql 4.x (via
+  # graphql_compose in require-dev) pins webonyx/graphql-php ^14.8.
+  COMPOSER_ADVISORY_IGNORE_IDS: '["PKSA-p9gd-j6gr-6f9t","PKSA-xwpn-zs9j-6wy5","PKSA-sf9j-1gs7-xzvx","PKSA-7h5p-prw9-w5nr"]'
 
 ################
 # Project overrides
 ################
+
+# expand_composer_json.php merges require-dev (including graphql_compose)
+# then runs composer install. Packagist refuses graphql-php 14.x, so the
+# same three IDs that GitHub ignores must be set before that install.
+# before_script on .composer-base is inherited by every composer lane
+# and does not replace the template script, artifacts, or rules.
+.composer-base:
+  before_script:
+    - composer config --global --json --merge policy.advisories.ignore-id "$COMPOSER_ADVISORY_IGNORE_IDS"
 
 # composer (previous major) is skipped by OPT_IN_TEST_PREVIOUS_MAJOR=0.
 # If a schedule or UI form opts the lane back in, do not fail the pipeline:

@@ -76,6 +76,31 @@ change will not match the old unprefixed lookup. Re-issue those
 delegated stops as `iss|sub|<act.sub>` if the previous code is
 restored. No `updatedb` to undo.
 
+## Webhook event names are a hard allowlist (DEV-1209)
+
+Unknown names are refused on settings save, `dispatch()`,
+`enqueueForEvent()`, the worker, requeue, and replay. Settings
+validation echoes the endpoint machine id cut at 64 characters,
+each unknown name cut at 128 characters, and the first 3 names
+plus `, and N more`. Cuts are UTF-8 characters after invalid
+sequences are scrubbed (`mb_scrub` then `mb_substr`), not raw
+bytes. A `webhook_event_refused` audit row stores the same
+bounded name (and a bounded `endpoint_id` at 64 characters when
+a stored row is refused). No payload is stored.
+
+No update hook; 10039 is unchanged. A plain revert is clean:
+there is no schema change and no `hook_update_N` to roll back.
+Rebuild caches after deploy or revert (`drush cr`).
+
+Rows already marked `failed` with last_response_body
+`Unknown webhook event name refused.` stay failed after revert.
+They are ordinary failed delivery rows. This module does not
+rewrite or delete them. A later worker or requeue pass leaves a
+failed row alone. Replay of those rows after revert follows the
+pre-allowlist replay rules (no refusal audit). After revert,
+new unknown names enqueue or dispatch again as they did before
+this change.
+
 ## Sealed-token authentication denials are written to audit_chain
 
 `McpSealedTokenManager::verify()` and
