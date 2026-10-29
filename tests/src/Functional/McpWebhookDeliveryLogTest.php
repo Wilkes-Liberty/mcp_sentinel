@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\Core\Url;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
 
@@ -185,8 +186,12 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
       'mcp.not.a.live.event',
     );
     $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
-    $this->drupalGet('/admin/reports/mcp-sentinel/webhooks');
-    $this->clickLink('Replay');
+    // Held rows have no Replay operations link. Hit the CSRF-protected
+    // route the same way that link would, so the controller wording
+    // is still covered.
+    $this->drupalGet(Url::fromRoute('mcp_sentinel.webhook_replay', [
+      'delivery' => $id,
+    ])->toString());
     $this->assertSession()->pageTextContains(
       "Delivery $id could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
     );
