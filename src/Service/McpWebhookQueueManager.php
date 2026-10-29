@@ -64,6 +64,23 @@ final class McpWebhookQueueManager {
   public const STATUS_FAILED = 'failed';
 
   /**
+   * Statuses the delivery log may offer Replay for.
+   *
+   * Held and discarded are never in this list. canOfferReplay()
+   * also consults REPLAY_BLOCKED_STATUSES so a later edit cannot
+   * put a blocked status on the button.
+   *
+   * @var list<string>
+   */
+  public const REPLAYABLE_STATUSES = [
+    self::STATUS_FAILED,
+    'failed_ssrf',
+    'failed_redirect',
+    'failed_key',
+    'sent',
+  ];
+
+  /**
    * Stored last_response_body when an unknown event_name is refused.
    */
   public const REASON_UNKNOWN_EVENT = 'Unknown webhook event name refused.';
@@ -424,7 +441,7 @@ final class McpWebhookQueueManager {
     if ($row === NULL) {
       return FALSE;
     }
-    if ($this->isReplayBlockedStatus(McpStoredValue::rowString($row, 'status'))) {
+    if (self::isReplayBlockedStatus(McpStoredValue::rowString($row, 'status'))) {
       return FALSE;
     }
     $eventName = McpStoredValue::rowString($row, 'event_name');
@@ -508,7 +525,7 @@ final class McpWebhookQueueManager {
       return NULL;
     }
     $status = McpStoredValue::rowString($row, 'status');
-    if ($this->isReplayBlockedStatus($status)) {
+    if (self::isReplayBlockedStatus($status)) {
       return NULL;
     }
     $eventName = McpStoredValue::rowString($row, 'event_name');
@@ -536,7 +553,7 @@ final class McpWebhookQueueManager {
       return NULL;
     }
     $status = McpStoredValue::rowString($row, 'status');
-    if ($this->isReplayBlockedStatus($status)) {
+    if (self::isReplayBlockedStatus($status)) {
       return $status;
     }
     return NULL;
@@ -551,8 +568,24 @@ final class McpWebhookQueueManager {
    * @return bool
    *   TRUE for held or discarded.
    */
-  private function isReplayBlockedStatus(string $status): bool {
+  public static function isReplayBlockedStatus(string $status): bool {
     return in_array($status, self::REPLAY_BLOCKED_STATUSES, TRUE);
+  }
+
+  /**
+   * Whether the delivery log may show Replay for $status.
+   *
+   * @param string $status
+   *   Stored delivery status.
+   *
+   * @return bool
+   *   TRUE for failed or sent rows that are not held or discarded.
+   */
+  public static function canOfferReplay(string $status): bool {
+    if (self::isReplayBlockedStatus($status)) {
+      return FALSE;
+    }
+    return in_array($status, self::REPLAYABLE_STATUSES, TRUE);
   }
 
   /**

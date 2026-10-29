@@ -472,13 +472,15 @@ final class McpWebhookQueueTest extends KernelTestBase {
    *
    * Pins auditRefusedEventName(), the one call site that writes
    * endpoint_id on webhook_event_refused. Worker, requeue, and
-   * replay pass the stored id through that method. Fails if the
-   * cut goes back to substr() or is removed.
+   * replay pass the stored id through that method. The fixture
+   * starts with one ASCII byte so substr(..., 0, 64) splits a
+   * following é (2 bytes) and fails mb_check_encoding. The
+   * length and equality checks still fail if the cut is removed.
    *
    * @covers ::auditRefusedEventName
    */
   public function testRefusedAuditEndpointIdIsTruncated(): void {
-    $long = str_repeat('é', 100);
+    $long = 'a' . str_repeat('é', 100);
     \Drupal::service('mcp_sentinel.webhook_queue_manager')
       ->auditRefusedEventName(
         'mcp.not.a.live.event',
@@ -490,7 +492,7 @@ final class McpWebhookQueueTest extends KernelTestBase {
     $endpoint = (string) $meta['endpoint_id'];
     $this->assertTrue(mb_check_encoding($endpoint, 'UTF-8'));
     $this->assertSame(
-      str_repeat('é', McpWebhookEvents::ENDPOINT_ID_MAX),
+      'a' . str_repeat('é', McpWebhookEvents::ENDPOINT_ID_MAX - 1),
       $endpoint,
     );
     $this->assertSame(

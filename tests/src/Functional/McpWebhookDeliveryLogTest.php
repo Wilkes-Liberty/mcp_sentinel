@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\Core\Url;
 use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
 
@@ -176,19 +177,40 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
 
   /**
    * Replay of a held unknown name names the status, not a refusal.
+   *
+   * Held and discarded rows have no Replay link. The wording is
+   * reached through the CSRF-tokened route. Fails if that link
+   * is put back on the listing.
    */
   public function testReplayHeldUnknownEventNameNamesStatus(): void {
-    $id = $this->seedRow(
+    $heldId = $this->seedRow(
       McpWebhookQueueManager::STATUS_HELD,
       1,
-      'ep1',
+      'ep_held',
+      'mcp.not.a.live.event',
+    );
+    $this->seedRow(
+      McpWebhookQueueManager::STATUS_DISCARDED,
+      1,
+      'ep_discarded',
       'mcp.not.a.live.event',
     );
     $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
     $this->drupalGet('/admin/reports/mcp-sentinel/webhooks');
-    $this->clickLink('Replay');
+    $this->assertSession()->pageTextContains('ep_held');
+    $this->assertSession()->pageTextContains('ep_discarded');
+    $this->assertSession()->linkNotExists('Replay');
+    $url = Url::fromRoute('mcp_sentinel.webhook_replay', [
+      'delivery' => $heldId,
+    ]);
+    $path = $url->getInternalPath();
+    $this->drupalGet($path, [
+      'query' => [
+        'token' => $this->container->get('csrf_token')->get($path),
+      ],
+    ]);
     $this->assertSession()->pageTextContains(
-      "Delivery $id could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
+      "Delivery $heldId could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
     );
     $this->assertSession()->pageTextNotContains('was refused');
     $this->assertSame(

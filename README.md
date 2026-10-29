@@ -1265,7 +1265,9 @@ re-delivered, so duplicate queue items or concurrent workers cannot double-send.
 settings*) lists recent deliveries with status, attempts, last response code, and next
 attempt time. Use the CSRF-protected **Replay** action — or
 `drush mcp-sentinel:webhook-replay <delivery-id>` — to reset a `failed`/`sent`
-row to `pending` and re-queue it.
+row to `pending` and re-queue it. Held and discarded rows have no Replay
+action. A direct or drush replay of those rows names the status and
+does not write a refusal audit.
 
 ### SSRF protection (HTTPS required)
 
