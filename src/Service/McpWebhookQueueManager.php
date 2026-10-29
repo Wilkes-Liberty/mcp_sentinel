@@ -11,8 +11,9 @@ use Drupal\Core\Database\Transaction;
 use Drupal\Core\Queue\QueueFactory;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
-use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
+use Drupal\mcp_sentinel\McpWebhookEvents;
+use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\mcp_sentinel\Value\McpStoredValue;
 use Psr\Log\LoggerInterface;
@@ -48,6 +49,43 @@ final class McpWebhookQueueManager {
   public const STATUS_DISCARDED = 'discarded';
 
   /**
+   * Statuses that stop replay without writing a refusal audit.
+   *
+   * @var list<string>
+   */
+  public const REPLAY_BLOCKED_STATUSES = [
+    self::STATUS_HELD,
+    self::STATUS_DISCARDED,
+  ];
+
+  /**
+   * Delivery row that will not be sent again.
+   */
+  public const STATUS_FAILED = 'failed';
+
+  /**
+   * Statuses the delivery log may offer Replay for.
+   *
+   * Held and discarded are never in this list. canOfferReplay()
+   * also consults REPLAY_BLOCKED_STATUSES so a later edit cannot
+   * put a blocked status on the button.
+   *
+   * @var list<string>
+   */
+  public const REPLAYABLE_STATUSES = [
+    self::STATUS_FAILED,
+    'failed_ssrf',
+    'failed_redirect',
+    'failed_key',
+    'sent',
+  ];
+
+  /**
+   * Stored last_response_body when an unknown event_name is refused.
+   */
+  public const REASON_UNKNOWN_EVENT = 'Unknown webhook event name refused.';
+
+  /**
    * Audit operation for holding in-scope queued deliveries.
    */
   public const AUDIT_HOLD = 'agent_side_effect_hold';
@@ -66,6 +104,36 @@ final class McpWebhookQueueManager {
    * Audit operation for a refused hold/release/discard.
    */
   public const AUDIT_REFUSE = 'agent_side_effect_refuse';
+
+  /**
+   * Audit operation for a refused webhook event name.
+   */
+  public const AUDIT_EVENT_REFUSED = 'webhook_event_refused';
+
+  /**
+   * Refusal surface: McpEventDispatcher::dispatch().
+   */
+  public const SURFACE_DISPATCH = 'dispatch';
+
+  /**
+   * Refusal surface: enqueueForEvent().
+   */
+  public const SURFACE_ENQUEUE = 'enqueue';
+
+  /**
+   * Refusal surface: McpWebhookWorker.
+   */
+  public const SURFACE_WORKER = 'worker';
+
+  /**
+   * Refusal surface: requeueDuePendingRows().
+   */
+  public const SURFACE_REQUEUE = 'requeue';
+
+  /**
+   * Refusal surface: replayDelivery().
+   */
+  public const SURFACE_REPLAY = 'replay';
 
   /**
    * Refusal reason when enqueue keys meet or exceed the column length.
@@ -157,11 +225,21 @@ final class McpWebhookQueueManager {
    * Enqueues delivery items for all matching enabled endpoints.
    *
    * @param string $eventName
-   *   The MCP event identifier.
+   *   A live MCP event identifier (see McpWebhookEvents::LIVE). Unknown
+   *   names are refused, audited, and never queued.
    * @param array<string, mixed> $payload
-   *   The event payload (will be JSON-encoded for delivery).
+   *   The event payload (will be JSON-encoded for delivery). The
+   *   payload is not stored on a refusal.
    */
   public function enqueueForEvent(string $eventName, array $payload): void {
+    // Settings-form save is not the only writer. A config import or a
+    // caller typo must not queue a name that nothing in production
+    // produces. Fail closed: no delivery row, no queue item, audit
+    // the refused name (no payload).
+    if (!McpWebhookEvents::isLive($eventName)) {
+      $this->auditRefusedEventName($eventName, self::SURFACE_ENQUEUE);
+      return;
+    }
     $endpoints = (array) $this->configFactory
       ->get('mcp_sentinel.settings')
       ->get('webhook_endpoints');
@@ -242,16 +320,30 @@ final class McpWebhookQueueManager {
     $queue = $this->queueFactory->get(self::QUEUE_NAME);
     $count = 0;
     foreach ($rows as $row) {
-      $endpoint = $this->findEndpoint(McpStoredValue::string($row->endpoint_id ?? NULL));
+      $eventName = McpStoredValue::string($row->event_name ?? NULL);
+      $deliveryId = McpStoredValue::int($row->id ?? NULL);
+      $endpointId = McpStoredValue::string($row->endpoint_id ?? NULL);
+      if (!McpWebhookEvents::isLive($eventName)) {
+        // A stored unknown name is not delivered. Mark failed so cron
+        // does not keep selecting it.
+        $this->refuseStoredEventName(
+          $deliveryId,
+          $eventName,
+          self::SURFACE_REQUEUE,
+          $endpointId,
+        );
+        continue;
+      }
+      $endpoint = $this->findEndpoint($endpointId);
       if ($endpoint === NULL) {
         continue;
       }
       // Use the stored payload; fall back to empty string for legacy rows.
       $payloadJson = McpStoredValue::string($row->payload ?? NULL);
       $itemId = $queue->createItem([
-        'delivery_id' => McpStoredValue::int($row->id ?? NULL),
+        'delivery_id' => $deliveryId,
         'endpoint'    => $endpoint,
-        'event_name'  => McpStoredValue::string($row->event_name ?? NULL),
+        'event_name'  => $eventName,
         'payload'     => $payloadJson,
         'principal_key' => McpStoredValue::string($row->principal_key ?? NULL),
         'human_key' => McpStoredValue::string($row->human_key ?? NULL),
@@ -349,7 +441,19 @@ final class McpWebhookQueueManager {
     if ($row === NULL) {
       return FALSE;
     }
-    if (in_array(McpStoredValue::rowString($row, 'status'), [self::STATUS_HELD, self::STATUS_DISCARDED], TRUE)) {
+    if (self::isReplayBlockedStatus(McpStoredValue::rowString($row, 'status'))) {
+      return FALSE;
+    }
+    $eventName = McpStoredValue::rowString($row, 'event_name');
+    if (!McpWebhookEvents::isLive($eventName)) {
+      // Leave the stored status alone: a sent row must not become
+      // failed because someone asked to replay it.
+      $this->auditRefusedEventName(
+        $eventName,
+        self::SURFACE_REPLAY,
+        $deliveryId,
+        McpStoredValue::rowString($row, 'endpoint_id'),
+      );
       return FALSE;
     }
     $endpoint = $this->findEndpoint(McpStoredValue::rowString($row, 'endpoint_id'));
@@ -401,6 +505,106 @@ final class McpWebhookQueueManager {
         ->execute();
     }
     return TRUE;
+  }
+
+  /**
+   * Event name that blocked replay, or NULL when that is not why.
+   *
+   * Used by the delivery-log replay action and drush so a refused
+   * row is not reported as missing.
+   *
+   * @param int $deliveryId
+   *   Delivery log row id.
+   *
+   * @return string|null
+   *   The refused name, cut at NAME_MAX, or NULL.
+   */
+  public function refusedReplayEventName(int $deliveryId): ?string {
+    $row = $this->loadDeliveryRow($deliveryId);
+    if ($row === NULL) {
+      return NULL;
+    }
+    $status = McpStoredValue::rowString($row, 'status');
+    if (self::isReplayBlockedStatus($status)) {
+      return NULL;
+    }
+    $eventName = McpStoredValue::rowString($row, 'event_name');
+    if (McpWebhookEvents::isLive($eventName)) {
+      return NULL;
+    }
+    return McpWebhookEvents::boundName($eventName);
+  }
+
+  /**
+   * Held or discarded status that blocked replay, or NULL.
+   *
+   * Replay of a held or discarded row does not write a
+   * webhook_event_refused audit row, even when event_name is unknown.
+   *
+   * @param int $deliveryId
+   *   Delivery log row id.
+   *
+   * @return string|null
+   *   STATUS_HELD, STATUS_DISCARDED, or NULL.
+   */
+  public function replayHoldStatus(int $deliveryId): ?string {
+    $row = $this->loadDeliveryRow($deliveryId);
+    if ($row === NULL) {
+      return NULL;
+    }
+    $status = McpStoredValue::rowString($row, 'status');
+    if (self::isReplayBlockedStatus($status)) {
+      return $status;
+    }
+    return NULL;
+  }
+
+  /**
+   * Whether $status stops replay without a refusal audit.
+   *
+   * @param string $status
+   *   Stored delivery status.
+   *
+   * @return bool
+   *   TRUE for held or discarded.
+   */
+  public static function isReplayBlockedStatus(string $status): bool {
+    return in_array($status, self::REPLAY_BLOCKED_STATUSES, TRUE);
+  }
+
+  /**
+   * Whether the delivery log may show Replay for $status.
+   *
+   * @param string $status
+   *   Stored delivery status.
+   *
+   * @return bool
+   *   TRUE for failed or sent rows that are not held or discarded.
+   */
+  public static function canOfferReplay(string $status): bool {
+    if (self::isReplayBlockedStatus($status)) {
+      return FALSE;
+    }
+    return in_array($status, self::REPLAYABLE_STATUSES, TRUE);
+  }
+
+  /**
+   * Loads one delivery row, or NULL when missing.
+   *
+   * @param int $deliveryId
+   *   Delivery log row id.
+   *
+   * @return array<string, mixed>|null
+   *   String-keyed row, or NULL.
+   */
+  private function loadDeliveryRow(int $deliveryId): ?array {
+    return McpStoredValue::stringKeyedRow(
+      $this->database->select('mcp_sentinel_webhook_delivery', 'd')
+        ->fields('d')
+        ->condition('d.id', $deliveryId)
+        ->execute()
+        ?->fetchAssoc(),
+    );
   }
 
   /**
@@ -1279,6 +1483,86 @@ final class McpWebhookQueueManager {
       }
     }
     return [$principalKey, $humanKey, $tenant];
+  }
+
+  /**
+   * Audits a refused webhook event name. The payload is never stored.
+   *
+   * @param string $eventName
+   *   The refused name. Cut at NAME_MAX characters of valid UTF-8,
+   *   same bound as the delivery-row event_name column.
+   * @param string $surface
+   *   One of the SURFACE_* constants (dispatch, enqueue, worker,
+   *   requeue, replay).
+   * @param int|null $deliveryId
+   *   Delivery row id when a stored row is refused. Omitted on
+   *   dispatch and enqueue, where no row exists.
+   * @param string|null $endpointId
+   *   Endpoint id when known. Omitted when empty.
+   */
+  public function auditRefusedEventName(
+    string $eventName,
+    string $surface,
+    ?int $deliveryId = NULL,
+    ?string $endpointId = NULL,
+  ): void {
+    $bounded = McpWebhookEvents::boundName($eventName);
+    $this->logger->error(
+      'Webhook event @event refused on @surface: not an allowed name for this path.',
+      ['@event' => $bounded, '@surface' => $surface],
+    );
+    $metadata = [
+      'event' => $bounded,
+      'surface' => $surface,
+    ];
+    if ($deliveryId !== NULL && $deliveryId > 0) {
+      $metadata['delivery_id'] = $deliveryId;
+    }
+    $boundedEndpoint = McpWebhookEvents::boundText(
+      McpStoredValue::string($endpointId ?? ''),
+      McpWebhookEvents::ENDPOINT_ID_MAX,
+    );
+    if ($boundedEndpoint !== '') {
+      $metadata['endpoint_id'] = $boundedEndpoint;
+    }
+    $this->auditLogger->logAlways(self::AUDIT_EVENT_REFUSED, $metadata);
+  }
+
+  /**
+   * Marks a stored delivery failed after an unknown event_name refusal.
+   *
+   * @param int $deliveryId
+   *   Delivery row id.
+   * @param string $eventName
+   *   The refused name.
+   * @param string $surface
+   *   Refusal surface (requeue or worker).
+   * @param string $endpointId
+   *   Endpoint id from the stored row, when known.
+   */
+  private function refuseStoredEventName(
+    int $deliveryId,
+    string $eventName,
+    string $surface,
+    string $endpointId = '',
+  ): void {
+    $this->auditRefusedEventName(
+      $eventName,
+      $surface,
+      $deliveryId,
+      $endpointId,
+    );
+    if ($deliveryId < 1) {
+      return;
+    }
+    $this->database->update('mcp_sentinel_webhook_delivery')
+      ->condition('id', $deliveryId)
+      ->fields([
+        'status' => self::STATUS_FAILED,
+        'last_response_body' => self::REASON_UNKNOWN_EVENT,
+        'last_attempt' => $this->time->getRequestTime(),
+      ])
+      ->execute();
   }
 
   /**

@@ -30,6 +30,31 @@ concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# CI-only Packagist advisory ignores. Applied at every composer config
+# site below. Do not copy this list into composer.json — site installs
+# must still see these advisories.
+#
+# PKSA-p9gd-j6gr-6f9t: CVE-2026-53965 in mcp/sdk CLIENT HttpTransport
+# SSE buffering. This scaffold uses the SDK only as the server side of
+# drupal/mcp_server, so the vulnerable class is never instantiated.
+# mcp_server pins ^0.6, which cannot reach the 0.7.1 fix — drop this
+# ignore once upstream allows ^0.7.
+#
+# PKSA-xwpn-zs9j-6wy5: GHSA-r7cg-qjjm-xhqq, high. Unbounded parser
+# recursion stack overflow in webonyx/graphql-php. Fixed in 15.32.3.
+# CI cannot upgrade: drupal/graphql 4.x (via graphql_compose) pins
+# graphql-php 14.x; there is no 14.x fix.
+#
+# PKSA-sf9j-1gs7-xzvx: GHSA-fc86-6rv6-2jpm, high. Quadratic validation
+# via inline fragments in OverlappingFieldsCanBeMerged. Fixed in
+# 15.32.2. Same 14.x pin as above.
+#
+# PKSA-7h5p-prw9-w5nr: GHSA-68jq-c3rv-pcrr / CVE-2026-40476, medium.
+# Quadratic-complexity DoS in OverlappingFieldsCanBeMerged. Fixed in
+# 15.31.5. Same 14.x pin as above.
+env:
+  COMPOSER_ADVISORY_IGNORE_IDS: '["PKSA-p9gd-j6gr-6f9t","PKSA-xwpn-zs9j-6wy5","PKSA-sf9j-1gs7-xzvx","PKSA-7h5p-prw9-w5nr"]'
+
 jobs:
   # Detect whether this PR/push touches anything other than documentation. The
   # heavy jobs below are gated on this so a docs-only change doesn't burn CI
@@ -200,12 +225,7 @@ jobs:
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           # Install the working copy, not the released package.
           composer config repositories.mcp_sentinel path ../module
-          # CVE-2026-53965 (PKSA-p9gd-j6gr-6f9t) is in mcp/sdk's CLIENT
-          # HttpTransport SSE buffering; this scaffold uses the SDK only as
-          # the server side of drupal/mcp_server, so the vulnerable class is
-          # never instantiated. mcp_server pins ^0.6, which cannot reach the
-          # 0.7.1 fix — drop this ignore once upstream allows ^0.7.
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -471,12 +491,7 @@ jobs:
           composer config --no-plugins allow-plugins.phpstan/extension-installer true
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer config repositories.mcp_sentinel path ../module
-          # CVE-2026-53965 (PKSA-p9gd-j6gr-6f9t) is in mcp/sdk's CLIENT
-          # HttpTransport SSE buffering; this scaffold uses the SDK only as
-          # the server side of drupal/mcp_server, so the vulnerable class is
-          # never instantiated. mcp_server pins ^0.6, which cannot reach the
-          # 0.7.1 fix — drop this ignore once upstream allows ^0.7.
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -655,7 +670,7 @@ jobs:
           composer config --no-plugins allow-plugins.phpstan/extension-installer true
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer config repositories.mcp_sentinel path ../module
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -812,7 +827,7 @@ jobs:
           composer config --no-plugins allow-plugins.phpstan/extension-installer true
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer config repositories.mcp_sentinel path ../module
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -1018,12 +1033,7 @@ jobs:
           composer config --no-plugins allow-plugins.phpstan/extension-installer true
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer config repositories.mcp_sentinel path ../module
-          # CVE-2026-53965 (PKSA-p9gd-j6gr-6f9t) is in mcp/sdk's CLIENT
-          # HttpTransport SSE buffering; this scaffold uses the SDK only as
-          # the server side of drupal/mcp_server, so the vulnerable class is
-          # never instantiated. mcp_server pins ^0.6, which cannot reach the
-          # 0.7.1 fix — drop this ignore once upstream allows ^0.7.
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -1210,7 +1220,7 @@ jobs:
           composer config --no-plugins allow-plugins.phpstan/extension-installer true
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer config repositories.mcp_sentinel path ../module
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -1313,7 +1323,7 @@ jobs:
           composer config --no-plugins allow-plugins.phpstan/extension-installer true
           composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
           composer config repositories.mcp_sentinel path ../module
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
 
       - name: Install dependencies
         working-directory: drupal
@@ -1460,7 +1470,7 @@ jobs:
           echo "596c389bee74250ab11718b81be5118e281e3c453a98b0f43e61e067f783cbd9  symlink_project.php" | sha256sum -c -
           cp -v composer.json composer.json.backup
           php expand_composer_json.php
-          composer config --json policy.advisories.ignore-id '["PKSA-p9gd-j6gr-6f9t"]'
+          composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
           retry composer install --no-interaction --no-progress
           # twig/twig <3.30: 3.30.0 compiles Drupal's swapped escape
           # filter straight into EscaperRuntime::escape() and every

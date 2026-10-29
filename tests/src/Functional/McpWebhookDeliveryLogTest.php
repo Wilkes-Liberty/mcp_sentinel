@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Functional;
 
+use Drupal\mcp_sentinel\Service\McpWebhookQueueManager;
 use Drupal\Tests\BrowserTestBase;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Tests the webhook delivery log listing page and replay action.
@@ -32,17 +34,20 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
    *   Number of delivery attempts.
    * @param string $endpointId
    *   Endpoint identifier (defaults to 'ep1').
+   * @param string $eventName
+   *   Stored event name (defaults to a live name).
    */
   private function seedRow(
     string $status,
     int $attempts = 0,
     string $endpointId = 'ep1',
+    string $eventName = 'mcp.entity.presave',
   ): int {
     return (int) \Drupal::database()
       ->insert('mcp_sentinel_webhook_delivery')
       ->fields([
         'endpoint_id'        => $endpointId,
-        'event_name'         => 'mcp.entity.presave',
+        'event_name'         => $eventName,
         'payload_hash'       => hash('sha256', '{}'),
         'payload'            => '{}',
         'status'             => $status,
@@ -148,6 +153,147 @@ final class McpWebhookDeliveryLogTest extends BrowserTestBase {
       1,
       \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems()
     );
+  }
+
+  /**
+   * Replay of a stored unknown event_name names the refused event.
+   */
+  public function testReplayRefusedUnknownEventName(): void {
+    $id = $this->seedRow('failed', 1, 'ep1', 'mcp.not.a.live.event');
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/webhooks');
+    $this->clickLink('Replay');
+    $this->assertSession()->pageTextContains(
+      "Delivery $id could not be replayed: event name mcp.not.a.live.event was refused.",
+    );
+    $row = \Drupal::database()->select('mcp_sentinel_webhook_delivery', 'd')
+      ->fields('d')->condition('d.id', $id)->execute()->fetchAssoc();
+    $this->assertSame(McpWebhookQueueManager::STATUS_FAILED, $row['status']);
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+  }
+
+  /**
+   * Replay of a held unknown name names the status, not a refusal.
+   *
+   * Held and discarded rows have no Replay link. The wording is
+   * reached through the CSRF-tokened route. linkNotExists('Replay')
+   * fails if that link is put back on the listing.
+   */
+  public function testReplayHeldUnknownEventNameNamesStatus(): void {
+    $heldId = $this->seedRow(
+      McpWebhookQueueManager::STATUS_HELD,
+      1,
+      'ep_held',
+      'mcp.not.a.live.event',
+    );
+    $discardedId = $this->seedRow(
+      McpWebhookQueueManager::STATUS_DISCARDED,
+      1,
+      'ep_discarded',
+      'mcp.not.a.live.event',
+    );
+    $this->drupalLogin($this->drupalCreateUser(['administer mcp sentinel']));
+    $this->drupalGet('/admin/reports/mcp-sentinel/webhooks');
+    $this->assertSession()->pageTextContains('ep_held');
+    $this->assertSession()->pageTextContains('ep_discarded');
+    $this->assertSession()->linkNotExists('Replay');
+    $this->assertSession()->elementNotExists(
+      'css',
+      'a[href*="/webhooks/' . $heldId . '/replay"]',
+    );
+    $this->assertSession()->elementNotExists(
+      'css',
+      'a[href*="/webhooks/' . $discardedId . '/replay"]',
+    );
+
+    $route = $this->container->get('router.route_provider')
+      ->getRouteByName('mcp_sentinel.webhook_replay');
+    $path = ltrim(strtr($route->getPath(), [
+      '{delivery}' => (string) $heldId,
+    ]), '/');
+    $token = $this->csrfTokenForBrowserPath($path);
+    $this->drupalGet(
+      $this->getAbsoluteUrl('/' . $path) . '?token=' . rawurlencode($token),
+    );
+    $this->assertSession()->statusCodeEquals(200);
+    $this->assertSession()->pageTextContains(
+      "Delivery $heldId could not be replayed (" . McpWebhookQueueManager::STATUS_HELD . ').',
+    );
+    $this->assertSession()->pageTextNotContains('was refused');
+    $this->assertSame(
+      0,
+      \Drupal::queue('mcp_sentinel_webhook_delivery')->numberOfItems(),
+    );
+  }
+
+  /**
+   * CSRF token for $path using the browser session seed.
+   *
+   * The test container's csrf_token service has a different
+   * session from the logged-in browser, so a token minted
+   * there is rejected. The seed is read from the stored
+   * session payload; unserialize() is not used because the
+   * PHP session format warns on extra data.
+   *
+   * @param string $path
+   *   Route path without a leading slash.
+   *
+   * @return string
+   *   Token valid for the browser session.
+   */
+  private function csrfTokenForBrowserPath(string $path): string {
+    $blob = $this->browserSessionBlob();
+    $seed = '';
+    if (preg_match('/s:1:"s";s:\d+:"([A-Za-z0-9_-]+)"/', $blob, $matches) === 1) {
+      $seed = $matches[1];
+    }
+    $this->assertNotSame('', $seed, 'Session blob prefix: ' . substr($blob, 0, 200));
+    $this->container->get('session_manager.metadata_bag')
+      ->setCsrfTokenSeed($seed);
+    return $this->container->get('csrf_token')->get($path);
+  }
+
+  /**
+   * Serialized session for the logged-in browser user.
+   *
+   * The cookie name is hashed from the test-site base URL so it
+   * matches the browser cookie. session_handler.storage already
+   * hashes that id; a second query on the same sid cannot find
+   * a row the first read missed. The uid row is only for when
+   * the cookie name does not match and $sid is empty.
+   *
+   * @return string
+   *   Stored session payload.
+   */
+  private function browserSessionBlob(): string {
+    $request = Request::create(rtrim((string) $this->baseUrl, '/') . '/');
+    $options = $this->container->get('session_configuration')
+      ->getOptions($request);
+    $name = isset($options['name']) && is_string($options['name'])
+      ? $options['name']
+      : '';
+    $sid = $name !== '' ? (string) $this->getSession()->getCookie($name) : '';
+    if ($sid !== '') {
+      $blob = (string) $this->container->get('session_handler.storage')
+        ->read($sid);
+      $this->assertNotSame('', $blob);
+      return $blob;
+    }
+    $account = $this->loggedInUser;
+    $this->assertNotFalse($account);
+    $blob = (string) \Drupal::database()
+      ->select('sessions', 's')
+      ->fields('s', ['session'])
+      ->condition('uid', (int) $account->id())
+      ->orderBy('timestamp', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchField();
+    $this->assertNotSame('', $blob);
+    return $blob;
   }
 
 }

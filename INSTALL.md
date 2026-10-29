@@ -34,6 +34,13 @@ These are required because the module calls their PHP APIs directly:
   so it is a `require-dev`/`suggest` dependency only; see the note on
   `minimum-stability` in `README.md`.
 - `drupal/graphql_compose` — enables the `mcp_sentinel_graphql` submodule.
+  This pulls `drupal/graphql` 4.x and therefore `webonyx/graphql-php` 14.x.
+  That 14.x line has no upstream fix for three open DoS advisories
+  (GHSA-r7cg-qjjm-xhqq and GHSA-fc86-6rv6-2jpm, high; GHSA-68jq-c3rv-pcrr /
+  CVE-2026-40476, medium; fixed only in 15.32.3, 15.32.2, and 15.31.5).
+  The core module does not use GraphQL. If you enable the submodule,
+  enforce query depth/complexity limits and request size limits at the
+  edge. See `README.md` → GraphQL governance.
 - `drupal/charts` — optional. Upgrades the governance dashboard's built-in
   inline-SVG charts to interactive, exportable charts. Install it together with a
   charts library submodule (for example `charts_chartjs`) and enable both:
@@ -77,7 +84,8 @@ drush en mcp_sentinel -y
 # submodule is mandatory for connector-facing production readiness.
 drush en mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y
 
-# Optional: govern the GraphQL Compose endpoint.
+# Optional: govern the GraphQL Compose endpoint. The submodule
+# runs on graphql-php 14.x with the open DoS advisories noted above.
 drush en mcp_sentinel_graphql -y
 
 # Optional: human-approval gate for destructive operations.
@@ -149,9 +157,13 @@ connector is documented separately in `docs/CONNECTOR.md`.
 > Missing server/bridge/OAuth/audit wiring, empty scopes, absent or disabled
 > Tool registrations, an undesignated/disabled Consumer, blocked owner, or no
 > applicable active role-bound profile produces a stable not-ready reason and
-> refuses the governed path. `contract_ready` means only that this local
-> configuration and availability contract is complete; it does not claim
-> policy effectiveness, verified evidence, or overall security posture.
+> refuses the governed path. On the Status report, when that contract ERROR
+> already names the same gap as the "not governing" WARNING
+> (`agent_scopes_missing` or `active_profile_missing`), both severities share
+> that one ERROR row; distinct gaps stay two rows. `contract_ready` means only
+> that this local configuration and availability contract is complete; it
+> does not claim policy effectiveness, verified evidence, or overall security
+> posture.
 
 > **Agent discovery.** Once the agent channel is wired, agents can introspect
 > your content model before acting via the governed context endpoint

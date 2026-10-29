@@ -319,7 +319,8 @@ final class McpSentinelCommands extends DrushCommands {
    *
    * Resets the row to 'pending' and re-queues it so the worker replays the
    * stored payload byte-for-byte. Exits with a failure code when no positive
-   * delivery ID is given or the row/endpoint no longer exists.
+   * delivery ID is given, the row is held or discarded, the event name is
+   * not live, or the row/endpoint no longer exists.
    */
   #[CLI\Command(name: 'mcp-sentinel:webhook-replay', aliases: ['mcps:webhook-replay'])]
   #[CLI\Argument(name: 'deliveryId', description: 'Delivery log row ID to replay.')]
@@ -330,7 +331,28 @@ final class McpSentinelCommands extends DrushCommands {
       return self::EXIT_FAILURE;
     }
     if (!$this->webhookQueueManager->replayDelivery($deliveryId)) {
-      $this->logger()->error(sprintf('Delivery %d not found or its endpoint is no longer configured.', $deliveryId));
+      $hold = $this->webhookQueueManager->replayHoldStatus($deliveryId);
+      $refused = $this->webhookQueueManager->refusedReplayEventName($deliveryId);
+      if ($hold !== NULL) {
+        $this->logger()->error(sprintf(
+          'Delivery %d could not be replayed (%s).',
+          $deliveryId,
+          $hold,
+        ));
+      }
+      elseif ($refused !== NULL) {
+        $this->logger()->error(sprintf(
+          'Delivery %d could not be replayed: event name %s was refused.',
+          $deliveryId,
+          $refused,
+        ));
+      }
+      else {
+        $this->logger()->error(sprintf(
+          'Delivery %d not found or its endpoint is no longer configured.',
+          $deliveryId,
+        ));
+      }
       return self::EXIT_FAILURE;
     }
     $this->logger()->success(sprintf('Delivery %d reset to pending and re-queued for replay.', $deliveryId));

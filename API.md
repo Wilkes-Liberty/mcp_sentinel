@@ -73,8 +73,10 @@ public function onDestructiveOp(McpDestructiveOpEvent $event): void {
 Dispatched whenever a **governed** MCP operation creates, updates, or deletes an
 entity. This is the extension point the reliable-webhook pipeline rides on: the
 `McpEventDispatcher` service both fires this Symfony event and enqueues a
-configured webhook delivery. Subscribe to stream governed changes into your own
-SIEM, queue, or notification system without touching the audit log.
+configured webhook delivery. Unknown event names are refused: no
+in-process event fires and nothing is queued. Subscribe to stream
+governed changes into your own SIEM, queue, or notification system
+without touching the audit log.
 
 | Method | Returns |
 |--------|---------|
@@ -194,8 +196,10 @@ sources skip that scope check. JSON:API, GraphQL, and
   compiler pass with installed PHP can silently forge
   `container.modules`, or delete the compile-refusal
   parameter. Neither case writes a refusal audit row;
-  after a deletion the hook stays refused. Provider
-  attribution uses the longest
+  after a deletion the hook stays refused. The runtime
+  `core.extension` cross-check is tracked as the
+  DEV-1043 follow-up and is not implemented yet.
+  Provider attribution uses the longest
   path prefix.
   Sites on 3.4.0 apply this with `drush cr`, not
   `updatedb` (last hook is 10039). Audit enabled
@@ -634,7 +638,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.access_checker` | `McpAccessChecker` | entity/create access decisions, JSON:API filter access, `isClientIpAllowed()`, `checkConfigAccess()`, `checkBundleFloor()` (attested portable-policy deny, d.o #3617702) |
 | `mcp_sentinel.policy_bundle_registry` | `McpPolicyBundleRegistry` | mint / verify / activate / simulate / revoke / rollback / emergency deny for portable policy bundles. Live access consults `simulate()` through `McpAccessChecker` |
 | `mcp_sentinel.audit_logger` | `McpAuditLogger` | MCP policy in front of the shared chain: read-suppression, change diffs (`computeChangeDiff()` / `computeConfigDiff()`), redaction and DLP. Chain mechanics live in `audit_chain.logger`; write there directly if you want tamper-evident audit for something other than MCP traffic |
-| `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — fires `McpEntityEvent` + enqueues webhooks |
+| `mcp_sentinel.event_dispatcher` | `McpEventDispatcher` | `dispatch($eventName, $entity)` — entity names only (`mcp.entity.presave`, `mcp.entity.delete`); unknown or `mcp.anomaly.alert` names are a refused audited no-op |
 | `mcp_sentinel.webhook_queue_manager` | `McpWebhookQueueManager` | enqueue/prune/requeue/replay webhook deliveries |
 | `mcp_sentinel.oauth_context` | `McpOauthContext` | detect the OAuth agent channel (token + agent scope) or a verified sealed token (`mcs1.` prefix) |
 | `mcp_sentinel.admin_status` | `McpAdminStatus` | admin status strip: MCP on/off, designated clients, readiness, last whoami |
@@ -643,7 +647,7 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and a `denied_access` row, returns `CALLER_MESSAGE`, and stamps `principal_key` / `human_key` `unverified` when the holder is missing or has no sealed context (or when key derivation throws; that case also sets `principal_unverified`) |
 | `mcp_sentinel.principal_context_dispatcher` | `McpPrincipalContextDispatcher` | seals and admits a verified principal. A NULL service on the JSON:API / GraphQL / `/drupal-mcp/context` admit paths is audited as `missing_dispatcher` (not `missing_principal`). Caller-facing copy stays `MCP access is denied.` |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
-| `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic |
+| `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic. When the Status report WARNING `not_governing` names the same gap as this contract ERROR (`agent_scopes_missing` or `active_profile_missing`), both severities share one ERROR row |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |
 | `mcp_sentinel.rate_limiter` | `McpRateLimiter` | flood-backed per-profile rate limiting |
 | `mcp_sentinel.exfiltration_guard` | `McpExfiltrationGuard` | result-count / response-size caps |

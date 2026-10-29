@@ -11,6 +11,7 @@
 
 use Drupal\mcp_sentinel\Controller\McpBannerController;
 use Drupal\mcp_sentinel\Enum\McpKillSelectorType;
+use Drupal\mcp_sentinel\McpWebhookEvents;
 use Drupal\mcp_sentinel\Event\McpKillUnavailableConfirmerEvent;
 use Drupal\mcp_sentinel\Value\McpKillSelector;
 use Drupal\Core\Entity\EntityTypeInterface;
@@ -398,7 +399,8 @@ function mcp_sentinel_entity_presave(EntityInterface $entity): void {
     );
   }
 
-  \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.presave', $entity);
+  \Drupal::service('mcp_sentinel.event_dispatcher')
+    ->dispatch(McpWebhookEvents::ENTITY_PRESAVE, $entity);
 }
 
 /**
@@ -636,7 +638,8 @@ function mcp_sentinel_entity_delete(EntityInterface $entity): void {
     else {
       $logger->log('entity_delete', $metadata);
     }
-    \Drupal::service('mcp_sentinel.event_dispatcher')->dispatch('mcp.entity.delete', $entity);
+    \Drupal::service('mcp_sentinel.event_dispatcher')
+      ->dispatch(McpWebhookEvents::ENTITY_DELETE, $entity);
   }
 }
 

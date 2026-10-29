@@ -79,6 +79,8 @@ libsodium
 loadRevisionUnchang
 lookback
 ltrim
+mb_scrub
+mb_substr
 materialised
 materialising
 mcs
@@ -163,6 +165,11 @@ varchar
 vocabs
 webcms
 webonyx
+xwpn
+qjjm
+xhqq
+xzvx
+pcrr
 wilkesliberty
 working_vid
 xaxis
