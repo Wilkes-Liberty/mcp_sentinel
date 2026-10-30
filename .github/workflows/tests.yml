@@ -92,6 +92,7 @@ jobs:
   # not the later scaffold. Docs-only PRs still run it (DEV-1022).
   refresh-latest-contrib-fail-closed:
     name: Latest-stable refresh fails closed
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -109,61 +110,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The floor of each declared range, plus the D11 ceiling
-          # (^10.6 || ^11.3 || ^12). Drupal 12 is declared but is not a
-          # required matrix leg yet: several hard dependencies still omit
-          # ^12, so a D12 scaffold cannot resolve. The drupal.org
-          # OPT_IN_TEST_NEXT_MAJOR job is the next-major signal (manual).
-          #
-          # Support the oldest branch upstream still supports, not the one we
-          # happen to run: orgs upgrade slowly and a narrow floor discourages
-          # adoption. But "supported upstream" is the test — an EOL branch is
-          # not a kindness to claim, it is a lie. Per endoflife.date on
-          # 2026-07-16 the only live branches are 10.6 and 11.3 (both EOL
-          # 2026-12-16) and 11.4 (EOL 2027-07-07). 11.0/11.1/11.2 are dead,
-          # which is why the 11 floor is 11.3 and not ^11.
-          #
-          # Every floor gets a leg, because a claim CI does not exercise is not
-          # a claim. That is not theoretical: 11.0 and 11.1 sat inside a
-          # released ^11 for versions, and the module fataled on both — nobody
-          # noticed, because the only leg ran 11.4.
-          #
-          # Recheck when 10.6/11.3 go EOL on 2026-12-16.
-          #
-          # `constraint` is spelled out per leg rather than derived from
-          # `drupal`, because the obvious derivation is wrong: ^11.3 means
-          # ">=11.3 <12" and resolves to 11.4, so an "11.3" leg built that way
-          # silently retests the ceiling. It went green doing exactly that
-          # before the version probe printed "Drupal core: 11.4.4" underneath
-          # the words "Drupal 11.3". A floor leg pins its minor (~11.3.0); the
-          # ceiling leg deliberately floats (^11).
-          #
-          # phpunit is pinned per leg. Drupal 10's core-dev hard-requires ^9.6,
-          # and 9.6 predates PHP 8 attributes: it does not error on one it
-          # cannot read, it ignores it. That is why the suite also carries
-          # annotations (@group, @dataProvider, @runTestsInSeparateProcesses)
-          # alongside its attributes — 9.6 reads the annotations, 10/11 read the
-          # attributes, and this leg is what keeps the pair honest. Drop the
-          # annotations and 9.6 stops expanding the data providers: the Unit
-          # directory alone falls from 62 tests to 53, without erroring.
-          #
-          # Both PHPUnit versions must therefore report the *same* test count.
-          # That equality is the whole point of this leg, and it is asserted by
-          # the count floor in the PHPUnit step rather than trusted — a green
-          # check has already twice meant "ran almost nothing" here.
-          # Drupal 10.6 / PHP 8.3 pins audit_chain 1.12.x so
-          # McpSiemStreamingTest's logger.channel.audit_chain
-          # fallback runs. Other legs refresh to latest-stable
-          # (1.13.0+). The module constraint stays ^1.0.1.
-          - drupal: '10.6'
-            constraint: '~10.6.0'
-            php: '8.3'
-            phpunit: '^9.6'
-            audit_chain: '~1.12.0'
-          - drupal: '11.3'
-            constraint: '~11.3.0'
-            php: '8.3'
-            phpunit: '^11.5'
           - drupal: '11'
             constraint: '^11'
             php: '8.4'
@@ -332,90 +278,31 @@ jobs:
             || { echo "::error::mcp_sentinel is not symlinked to the working copy — the path repo did not apply"; exit 1; }
           readlink web/modules/contrib/mcp_sentinel
 
-      - name: PHPUnit — Unit + Kernel (blocking)
+      - name: PHPUnit — cycle and fan-out red-proof
         working-directory: drupal
         env:
-          # Kernel tests need a database; SQLite keeps this hermetic with no
-          # service container. Production runs PostgreSQL, so a storage-specific
-          # regression would not surface here — the functional job below and
-          # the drupalcode pipeline are the deeper nets.
-          # Quoted: the value ends in a colon, which YAML would otherwise read
-          # as a mapping key and refuse to parse the file at all.
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # A dropped suite must fail the build, not pass quietly. See the count
-          # guard below.
-          #
-          # 1610 collect (latest 1.x / this PR matrix). The floor
-          # sits just under that, so losing any one submodule
-          # suite — the smallest is 10 tests — trips it.
-          MIN_TESTS: '1601'
         run: |
           set -euo pipefail
-          rm -f junit-*.xml
-          # One invocation per directory: PHPUnit 9.6 takes a *single*
-          # <directory|file> argument, while 10+ accept a list. Passing both
-          # paths did not error on 9.6 — it ran tests/src/Unit, ignored
-          # tests/src/Kernel, and reported "OK (62 tests)". Green, on 17% of the
-          # suite.
-          # Absolute -c path: the Kernel tests declare
-          # @runTestsInSeparateProcesses, and a child process does not inherit
-          # this working directory. PHPUnit 11 resolves a relative config path
-          # before handing it down; 9.6 passes it through, so every child died
-          # on `Could not read "web/core/phpunit.xml.dist"`.
           config="${PWD}/web/core/phpunit.xml.dist"
-          module="${PWD}/web/modules/contrib/mcp_sentinel"
-
-          # The submodules' own tests are collected too. Until this loop existed
-          # the step ran the top-level tests/src only, so mcp_sentinel_approval,
-          # _graphql and _server had NO gate on GitHub at all — and the count
-          # floor could not notice, because it was computed over the same two
-          # directories it was guarding. The drupalcode pipeline runs the whole
-          # tree, which is exactly how "GitHub green, d.o red" kept happening.
-          # A break-glass expiry defect lived in that gap and ran nowhere.
-          #
-          # Discovered rather than listed, so a submodule added later is tested
-          # without anyone remembering to edit this file.
-          suites=()
-          for dir in "${module}"/tests/src/Unit "${module}"/tests/src/Kernel \
-                     "${module}"/modules/*/tests/src/Unit "${module}"/modules/*/tests/src/Kernel; do
-            [ -d "${dir}" ] && suites+=("${dir}")
-          done
-          if [ "${#suites[@]}" -eq 0 ]; then
-            echo "::error::No test directories found under ${module}. The path is wrong, or the checkout is not what it should be."
-            exit 1
-          fi
-
-          i=0
-          for dir in "${suites[@]}"; do
-            i=$((i + 1))
-            echo "--- ${dir#"${module}/"}"
+          file="${PWD}/web/modules/contrib/mcp_sentinel/tests/src/Unit/McpAuditLoggerBoundIdentityTest.php"
+          status=0
+          # Fan-out first: a 22-level shared-ref DAG reaches ~2G without
+          # a node budget. 256M makes that a logged fatal, not a lost runner.
+          php -d memory_limit=256M -d max_execution_time=30 \
             vendor/bin/phpunit -c "${config}" \
-              --log-junit "${PWD}/junit-${i}.xml" \
-              "${dir}"
-          done
-
-          # Assert the *count*, not the exit status. Both failures this workflow
-          # has already shipped — a matrix leg that scheduled zero jobs, and a
-          # runner that silently collected 62 of 364 tests — were green. An exit
-          # code only says the tests that ran passed; it cannot say which ran.
-          # JUnit XML is used because its shape is stable across 9.6 and 11,
-          # unlike the human-readable summary line.
-          total="$(cat junit-*.xml | grep -ho '<testcase ' | wc -l | tr -d ' ')"
-          echo "Collected ${total} tests across ${#suites[@]} directories (floor ${MIN_TESTS})."
-          if [ "${total}" -lt "${MIN_TESTS}" ]; then
-            echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed — a passing run on a partial suite is a false green. Investigate before raising or removing this floor."
-            exit 1
-          fi
-          # Losing the 8-test dedupe class would not trip the floor
-          # (1610-8=1602). Require those cases in the JUnit output.
-          dedupe_ran="$(grep -ho 'classname="[^"]*McpSealedTokenDenialAuditorDedupeTest"' junit-*.xml | wc -l | tr -d ' ')"
-          echo "Collected ${dedupe_ran} McpSealedTokenDenialAuditorDedupeTest cases."
-          if [ "${dedupe_ran}" -lt 8 ]; then
-            echo "::error::McpSealedTokenDenialAuditorDedupeTest collected ${dedupe_ran} cases, expected at least 8."
-            exit 1
-          fi
+            "${file}" \
+            --filter 'testSharedReferenceFanOutFallsBackToTypeMarker' \
+            || status=1
+          php -d memory_limit=256M -d max_execution_time=30 \
+            vendor/bin/phpunit -c "${config}" \
+            "${file}" \
+            --filter 'testSelfReferencingObjectFallsBackToTypeMarker' \
+            || status=1
+          echo "Red-proof status=${status} (must be nonzero)."
+          exit "${status}"
 
   # Functional (BrowserTestBase) suite on the ceiling leg only. The setup
   # steps deliberately mirror the matrix job above rather than sharing a
@@ -434,7 +321,7 @@ jobs:
   phpunit-functional:
     name: PHPUnit — Functional (Drupal 11, PHP 8.4)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -603,7 +490,7 @@ jobs:
   phpunit-functional-pgsql-draft:
     name: PHPUnit — Functional PostgreSQL draft (Drupal 11, PHP 8.4)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -774,7 +661,7 @@ jobs:
   phpunit-functional-d10:
     name: PHPUnit — Functional draft translation (Drupal 10.6, PHP 8.3)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -925,7 +812,7 @@ jobs:
   phpcs:
     name: Drupal coding standards
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -976,7 +863,7 @@ jobs:
   phpstan:
     name: PHPStan
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -1102,6 +989,7 @@ jobs:
   # applies once the matrix is skipped.
   cspell:
     name: cspell
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the module
@@ -1178,7 +1066,7 @@ jobs:
   phpunit-mysql-operator-binding:
     name: PHPUnit — MySQL operator binding (Drupal 11, PHP 8.4)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -1290,7 +1178,7 @@ jobs:
   phpunit-pgsql-operator-binding:
     name: PHPUnit — PostgreSQL operator binding (Drupal 11, PHP 8.4)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -1434,7 +1322,7 @@ jobs:
   phpunit-drupalorg-layout:
     name: PHPUnit — Drupal.org layout (Drupal 11, PHP 8.4)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:

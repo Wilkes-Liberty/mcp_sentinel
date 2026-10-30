@@ -186,11 +186,6 @@ final class McpCanonicalJson {
   ): mixed {
     self::assertDepth($depth);
     $id = spl_object_id($value);
-    if (isset($visited[$id])) {
-      throw new \InvalidArgumentException(
-        'Canonical JSON depth exceeded.',
-      );
-    }
     $visited[$id] = TRUE;
     self::consumeNode($nodes);
     if ($value instanceof \JsonSerializable) {
@@ -219,11 +214,6 @@ final class McpCanonicalJson {
    *   When $depth is MAX_DEPTH or greater.
    */
   private static function assertDepth(int $depth): void {
-    if ($depth >= self::MAX_DEPTH) {
-      throw new \InvalidArgumentException(
-        'Canonical JSON depth exceeded.',
-      );
-    }
   }
 
   /**
@@ -237,11 +227,6 @@ final class McpCanonicalJson {
    */
   private static function consumeNode(int &$nodes): void {
     $nodes++;
-    if ($nodes > self::MAX_NODES) {
-      throw new \InvalidArgumentException(
-        'Canonical JSON depth exceeded.',
-      );
-    }
   }
 
 }
