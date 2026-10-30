@@ -85,7 +85,10 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
-   * Deny() logs when the audit write fails and still throws the denial.
+   * Deny() surfaces an unaudited denial at critical and still throws.
+   *
+   * An empty catch (silent drop) fails this test: critical must
+   * fire with denied_access_write_failed. The caller stays denied.
    *
    * @covers ::deny
    */
@@ -109,7 +112,21 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     $audit = $this->createMock(McpAuditLogger::class);
     $audit->method('logAlways')->willThrowException(new \RuntimeException('audit down'));
     $logger = $this->createMock(LoggerInterface::class);
-    $logger->expects($this->once())->method('error');
+    $logger->expects($this->once())->method('critical')->with(
+      $this->callback(static function (string $message): bool {
+        return str_contains($message, '@event')
+          && str_contains($message, 'was not recorded');
+      }),
+      $this->callback(static function (array $context): bool {
+        $event = McpPrincipalContextDispatcher::DENIED_ACCESS_WRITE_FAILED;
+        $reason = McpPrincipalContextDeniedException::RESERVED_IDENTITY_ARGUMENT;
+        return ($context['@event'] ?? '') === $event
+          && ($context['@reason'] ?? '') === $reason
+          && ($context['@class'] ?? '') === \RuntimeException::class
+          && ($context['@message'] ?? '') === 'audit down';
+      }),
+    );
+    $logger->expects($this->never())->method('error');
     $dispatcher = $this->dispatcher($stack, $holder, $audit, $logger);
     try {
       $dispatcher->admit(['user' => '2'], 'tool-a');

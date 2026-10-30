@@ -35,7 +35,7 @@ final class McpAuditLoggerBoundIdentityTest extends UnitTestCase {
     $this->assertSame('sha256:' . $digest, $bounded['id']);
     $this->assertLessThanOrEqual(255, strlen((string) $bounded['id']));
     $this->assertSame($id, $bounded['id_original']);
-    $this->assertSame($digest, $bounded['id_sha256']);
+    $this->assertArrayNotHasKey('id_sha256', $bounded);
     $this->assertSame('part_too_long', $bounded['reason']);
   }
 
@@ -70,6 +70,47 @@ final class McpAuditLoggerBoundIdentityTest extends UnitTestCase {
     ]);
     $this->assertSame('sha256:' . hash('sha256', $type), $bounded['entity_type']);
     $this->assertSame($type, $bounded['entity_type_original']);
+    $this->assertArrayNotHasKey('entity_type_sha256', $bounded);
+  }
+
+  /**
+   * A non-scalar id is hashed, never cast to Array.
+   *
+   * @covers ::boundChainIdentity
+   */
+  public function testNonScalarIdIsHashedDeterministically(): void {
+    $id = ['nested' => 'principal'];
+    $first = McpAuditLogger::boundChainIdentity(['id' => $id]);
+    $second = McpAuditLogger::boundChainIdentity(['id' => $id]);
+    $encoded = json_encode(
+      $id,
+      JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+    );
+    $this->assertIsString($encoded);
+    $digest = hash('sha256', $encoded);
+    $this->assertSame('sha256:' . $digest, $first['id']);
+    $this->assertSame($first['id'], $second['id']);
+    $this->assertSame($encoded, $first['id_original']);
+    $this->assertArrayNotHasKey('id_sha256', $first);
+    $this->assertLessThanOrEqual(255, strlen((string) $first['id']));
+    $this->assertNotSame('Array', $first['id']);
+  }
+
+  /**
+   * An object without __toString is hashed, not a TypeError.
+   *
+   * @covers ::boundChainIdentity
+   */
+  public function testObjectIdIsHashedNotTypeError(): void {
+    $id = new \stdClass();
+    $id->x = 1;
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $id]);
+    $this->assertTrue(
+      (bool) preg_match('/^sha256:[0-9a-f]{64}$/', (string) $bounded['id']),
+      'A non-scalar object must become a sha256 digest, not a TypeError.',
+    );
+    $this->assertArrayHasKey('id_original', $bounded);
+    $this->assertArrayNotHasKey('id_sha256', $bounded);
   }
 
 }

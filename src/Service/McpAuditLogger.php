@@ -80,6 +80,24 @@ class McpAuditLogger {
   public const READ_CHANNELS = [self::CHANNEL, self::LEGACY_CHANNEL];
 
   /**
+   * audit_chain_log.entity_type width (audit_chain.install).
+   *
+   * Compared with strlen() because Audit Chain copies the raw
+   * string onto the column without truncating it.
+   */
+  public const CHAIN_ENTITY_TYPE_MAX_BYTES = 128;
+
+  /**
+   * audit_chain_log.bundle width (audit_chain.install).
+   */
+  public const CHAIN_BUNDLE_MAX_BYTES = 128;
+
+  /**
+   * audit_chain_log.entity_id width (audit_chain.install).
+   */
+  public const CHAIN_ENTITY_ID_MAX_BYTES = 255;
+
+  /**
    * Maximum number of changed fields recorded in a single change diff.
    */
   private const DIFF_MAX_FIELDS = 50;
@@ -381,41 +399,87 @@ class McpAuditLogger {
   /**
    * Bounds identity fields to audit_chain_log column widths.
    *
-   * Audit_chain 1.13.0 maps metadata.id to entity_id varchar(255)
-   * and does not truncate it (it does truncate label). entity_type
-   * and bundle are varchar(128) and are also copied unbounded.
-   * MySQL 8 and PostgreSQL refuse an oversize insert; SQLite
-   * stores it. deny() then swallows that exception, so a
+   * Audit Chain 1.13.0 maps metadata.id to entity_id
+   * (CHAIN_ENTITY_ID_MAX_BYTES) and does not truncate it (it
+   * does truncate label). entity_type and bundle
+   * (CHAIN_ENTITY_TYPE_MAX_BYTES / CHAIN_BUNDLE_MAX_BYTES)
+   * are also copied unbounded. MySQL 8 and PostgreSQL refuse
+   * an oversize insert; SQLite stores it. deny() then logs
+   * the write failure at critical and still throws, so a
    * 256-character principal subject (MAX_PART_LENGTH) can be
-   * denied with no denied_access row. Hash the oversize value
-   * into the column and keep the original in metadata.
+   * denied with no denied_access row. Hash the oversize or
+   * non-scalar value into the column and keep the original
+   * in metadata.
+   *
+   * The column value becomes `sha256:<hex>` (71 bytes). The
+   * original string (or canonical JSON for a non-scalar) is
+   * stored as `{key}_original`. A separate `{key}_sha256`
+   * copy is not stored: the digest is already in the column
+   * value, and hashing `{key}_original` reproduces it.
+   *
+   * Non-scalar values are never cast with (string): that
+   * would store `Array` or throw TypeError. They are encoded
+   * as canonical JSON and hashed so the write is deterministic
+   * and always fits the column.
    *
    * @param array<string, mixed> $metadata
    *   Metadata about to be handed to audit_chain.
    *
    * @return array<string, mixed>
-   *   The same map with oversize identity fields replaced.
+   *   The same map with oversize or non-scalar identity
+   *   fields replaced.
    */
   public static function boundChainIdentity(array $metadata): array {
     $limits = [
-      'entity_type' => 128,
-      'bundle' => 128,
-      'id' => 255,
+      'entity_type' => self::CHAIN_ENTITY_TYPE_MAX_BYTES,
+      'bundle' => self::CHAIN_BUNDLE_MAX_BYTES,
+      'id' => self::CHAIN_ENTITY_ID_MAX_BYTES,
     ];
     foreach ($limits as $key => $max) {
       if (!isset($metadata[$key])) {
         continue;
       }
-      $value = (string) $metadata[$key];
+      $raw = $metadata[$key];
+      if (!is_scalar($raw)) {
+        $value = self::canonicalIdentityPayload($raw);
+        $digest = hash('sha256', $value);
+        $metadata[$key . '_original'] = $value;
+        $metadata[$key] = 'sha256:' . $digest;
+        continue;
+      }
+      $value = (string) $raw;
       if (strlen($value) <= $max) {
         continue;
       }
       $digest = hash('sha256', $value);
       $metadata[$key . '_original'] = $value;
-      $metadata[$key . '_sha256'] = $digest;
       $metadata[$key] = 'sha256:' . $digest;
     }
     return $metadata;
+  }
+
+  /**
+   * Canonical JSON for a non-scalar identity field.
+   *
+   * Fail-closed and deterministic: never `(string)` an array
+   * or object. Unencodable values become a type marker so the
+   * hash is stable and the column write still succeeds.
+   *
+   * @param mixed $value
+   *   A non-scalar identity value.
+   *
+   * @return string
+   *   Canonical JSON, or a type marker when encoding fails.
+   */
+  private static function canonicalIdentityPayload(mixed $value): string {
+    $encoded = json_encode(
+      $value,
+      JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+    );
+    if ($encoded === FALSE) {
+      return '{"type":"' . get_debug_type($value) . '"}';
+    }
+    return $encoded;
   }
 
   /**

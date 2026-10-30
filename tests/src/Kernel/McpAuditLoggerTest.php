@@ -267,7 +267,7 @@ final class McpAuditLoggerTest extends KernelTestBase {
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
     $this->assertSame($id, $meta['id_original'] ?? NULL);
-    $this->assertSame(hash('sha256', $id), $meta['id_sha256'] ?? NULL);
+    $this->assertArrayNotHasKey('id_sha256', $meta);
     $this->assertSame('part_too_long', $meta['reason'] ?? NULL);
   }
 

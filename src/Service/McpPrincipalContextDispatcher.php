@@ -36,6 +36,14 @@ final class McpPrincipalContextDispatcher {
   public const GENERIC_REFUSAL = 'A verified principal context is required.';
 
   /**
+   * Stable event id for an unaudited principal-context denial.
+   *
+   * Logged at critical when denied_access cannot be written.
+   * Operators can alert on this string. The caller is still denied.
+   */
+  public const DENIED_ACCESS_WRITE_FAILED = 'denied_access_write_failed';
+
+  /**
    * Constructs the dispatcher.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
@@ -49,7 +57,9 @@ final class McpPrincipalContextDispatcher {
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Writes denied_access rows.
    * @param \Psr\Log\LoggerInterface $logger
-   *   Fallback when a denial audit write fails.
+   *   Critical fallback when a denial audit write fails. The
+   *   event id is DENIED_ACCESS_WRITE_FAILED. Watchdog is the
+   *   fallback record; a second chain write is not attempted.
    * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
    *   Kill registry checked on every admit() before doExecute.
    * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
@@ -570,7 +580,14 @@ final class McpPrincipalContextDispatcher {
    *
    * An audit outage must not replace the denial. The caller still
    * receives the access exception and can return 403 or a non-zero
-   * exit instead of an uncaught 500. A failed write is logged.
+   * exit instead of an uncaught 500.
+   *
+   * A failed write is a governance gap, not an allow. It is
+   * logged at critical with DENIED_ACCESS_WRITE_FAILED so a
+   * SIEM or dblog alert can page on an unaudited denial.
+   * A second chain write is not attempted: if the chain is
+   * down the fallback would fail the same way. Watchdog is
+   * the fallback record.
    *
    * $auditReason may differ from $reasonCode so a kill records
    * principal_killed on the row while the caller still sees the
@@ -589,10 +606,13 @@ final class McpPrincipalContextDispatcher {
       $this->logDenial($toolId, $rowReason, $this->auditContext(), $message);
     }
     catch (\Throwable $e) {
-      $this->logger->error(
-        'Principal-context denial audit write failed (@reason): @message',
+      $this->logger->critical(
+        '@event: principal-context denial was not recorded '
+        . '(@reason): @class: @message',
         [
+          '@event' => self::DENIED_ACCESS_WRITE_FAILED,
           '@reason' => $rowReason,
+          '@class' => $e::class,
           '@message' => $e->getMessage(),
         ],
       );
