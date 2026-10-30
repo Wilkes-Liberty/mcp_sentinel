@@ -467,12 +467,12 @@ class McpAuditLogger {
    * McpCanonicalJson (the same sorter as
    * McpPolicyBundle::normalize()). A cyclic, over-budget,
    * or over-deep graph throws inside the normalizer (visited
-   * set and node budget sit next to the depth cap) instead
-   * of fataling the deny path. Encoding can also throw from
-   * JsonSerializable::jsonSerialize() even without
-   * JSON_THROW_ON_ERROR. Any Throwable or a FALSE encode
-   * becomes a type marker so the hash is stable and the
-   * column write still succeeds.
+   * set, node budget, and byte budget sit next to the depth
+   * cap) instead of fataling the deny path. Encoding can
+   * also throw from JsonSerializable::jsonSerialize() even
+   * without JSON_THROW_ON_ERROR. Any Throwable or a FALSE
+   * encode becomes a type marker so the hash is stable and
+   * the column write still succeeds.
    *
    * @param mixed $value
    *   A non-scalar identity value.

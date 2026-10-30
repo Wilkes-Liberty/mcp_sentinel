@@ -236,6 +236,44 @@ final class McpAuditLoggerBoundIdentityTest extends UnitTestCase {
   }
 
   /**
+   * A wide scalar list falls back to the type marker.
+   *
+   * array_fill(0, 1024, array_fill(0, 8192, 'x')) is only
+   * depth 2 and 1025 containers, so a container-only budget
+   * would expand it. Counting scalars trips MAX_NODES before
+   * the copies can grow.
+   *
+   * @covers ::boundChainIdentity
+   */
+  public function testWideScalarListFallsBackToTypeMarker(): void {
+    $id = array_fill(0, 1024, array_fill(0, 8192, 'x'));
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $id]);
+    $marker = '{"type":"' . get_debug_type($id) . '"}';
+    $this->assertSame($marker, $bounded['id_original']);
+    $this->assertSame('sha256:' . hash('sha256', $marker), $bounded['id']);
+    $this->assertLessThanOrEqual(255, strlen((string) $bounded['id']));
+  }
+
+  /**
+   * Repeated large strings fall back to the type marker.
+   *
+   * Four shared 100 KiB strings stay under MAX_NODES and
+   * MAX_DEPTH. The byte budget throws before json_encode()
+   * materializes the copies.
+   *
+   * @covers ::boundChainIdentity
+   */
+  public function testRepeatedLargeStringsFallBackToTypeMarker(): void {
+    $chunk = str_repeat('x', 100000);
+    $id = array_fill(0, 4, $chunk);
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $id]);
+    $marker = '{"type":"' . get_debug_type($id) . '"}';
+    $this->assertSame($marker, $bounded['id_original']);
+    $this->assertSame('sha256:' . hash('sha256', $marker), $bounded['id']);
+    $this->assertLessThanOrEqual(255, strlen((string) $bounded['id']));
+  }
+
+  /**
    * A JsonSerializable that returns itself falls back to the marker.
    *
    * @covers ::boundChainIdentity

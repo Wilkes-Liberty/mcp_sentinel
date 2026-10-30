@@ -16,10 +16,12 @@ after expanding `JsonSerializable` and public object
 properties on the identity path only. Policy claims stay
 arrays and scalars. Empty maps encode as `{}`, empty lists as
 `[]`. Recursion is capped at `McpCanonicalJson::MAX_DEPTH`
-(512, json_encode's default). A visited-object set and a
-`MAX_NODES` budget sit next to that depth cap so a cycle or a
-shared-reference fan-out throws inside the normalizer and
-becomes a type marker instead of a fatal that skips the
+(512, json_encode's default). A visited-object set, a
+`MAX_NODES` visit budget (containers and scalars), and a
+`MAX_BYTES` payload budget sit next to that depth cap so a
+cycle, a shared-reference fan-out, a wide scalar list, or
+repeated large strings throw inside the normalizer and
+become a type marker instead of a fatal that skips the
 `denied_access` row. A throwing `jsonSerialize()` or a FALSE
 encode also falls back to that marker. Named constants cover
 the audit_chain_log 128/128/255 column widths; the digest is

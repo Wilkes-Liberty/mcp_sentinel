@@ -96,6 +96,45 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
+   * An acyclic nest deeper than MAX_DEPTH is rejected.
+   *
+   * Cycle and fan-out tests do not pin this guard: they stop
+   * at the visited set or MAX_NODES. This calls normalize()
+   * directly so json_encode()'s own depth cap cannot hide a
+   * missing assertDepth().
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalize
+   */
+  public function testNormalizeRejectsGraphDeeperThanMaxDepth(): void {
+    $value = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH + 1; $i++) {
+      $value = [$value];
+    }
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage('Canonical JSON depth exceeded.');
+    McpCanonicalJson::normalize($value);
+  }
+
+  /**
+   * A nest of exactly MAX_DEPTH arrays is accepted.
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalize
+   */
+  public function testNormalizeAcceptsGraphAtMaxDepth(): void {
+    $value = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH; $i++) {
+      $value = [$value];
+    }
+    $normalized = McpCanonicalJson::normalize($value);
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH; $i++) {
+      $this->assertIsArray($normalized);
+      $this->assertCount(1, $normalized);
+      $normalized = $normalized[0];
+    }
+    $this->assertSame('leaf', $normalized);
+  }
+
+  /**
    * Policy normalize still rejects an empty stdClass.
    *
    * Object expansion is identity-only. The shared sorter must
