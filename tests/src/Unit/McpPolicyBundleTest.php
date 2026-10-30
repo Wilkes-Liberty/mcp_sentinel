@@ -445,7 +445,7 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
-   * 1.x policy normalize: arrays and scalars, ksort maps, keep lists.
+   * The 1.x policy normalize: arrays and scalars, ksort maps, keep lists.
    *
    * @param mixed $value
    *   A JSON-able claims value.
@@ -474,7 +474,7 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
-   * 1.x canonical JSON bytes for policy claims.
+   * The 1.x canonical JSON bytes for policy claims.
    *
    * @param array<string, mixed> $claims
    *   Claims without a seal.
@@ -487,7 +487,7 @@ final class McpPolicyBundleTest extends UnitTestCase {
   }
 
   /**
-   * 1.x SHA-256 digest of policy claims.
+   * The 1.x SHA-256 digest of policy claims.
    *
    * @param array<string, mixed> $claims
    *   Claims without a seal.
