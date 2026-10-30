@@ -158,7 +158,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
-   * deny() cannot receive a non-scalar identity.
+   * The deny path cannot receive a non-scalar identity.
    *
    * McpPrincipalContext::subject() is a string.
    * denialAuditMetadata() sets metadata.id to that subject or
@@ -171,7 +171,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
    *
    * @covers ::deny
    */
-  public function testDenyPathIdentityIsAlwaysAString(): void {
+  public function testDenyPathPinsStringOnlyIdentity(): void {
     $deny = new \ReflectionMethod(McpPrincipalContextDispatcher::class, 'deny');
     foreach ([0, 1, 2] as $index) {
       $type = $deny->getParameters()[$index]->getType();
@@ -220,10 +220,8 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       );
     }
     $this->assertIsArray($captured);
-    $this->assertIsString($captured['id'] ?? NULL);
-    $this->assertSame('human-1', $captured['id'] ?? NULL);
-    $this->assertIsString($captured['entity_type'] ?? NULL);
-    $this->assertSame('principal', $captured['entity_type'] ?? NULL);
+    $this->assertSame('human-1', $captured['id']);
+    $this->assertSame('principal', $captured['entity_type']);
     $this->assertArrayNotHasKey('bundle', $captured);
   }
 

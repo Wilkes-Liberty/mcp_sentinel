@@ -658,8 +658,8 @@ final class McpPrincipalContextDispatcher {
   /**
    * Bounds or hashes a watchdog field the way entity_id is bounded.
    *
-   * @tool uses the same helper as @principal so an oversize
-   * plugin id cannot blow the critical line.
+   * Tool and principal placeholders share this helper so an
+   * oversize plugin id cannot blow the critical line.
    *
    * @param string $value
    *   Tool id or principal key.
