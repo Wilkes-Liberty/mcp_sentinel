@@ -636,8 +636,9 @@ final class McpPrincipalContextDispatcher {
    * unverified here. A composed key is passed through
    * boundChainIdentity() so a 771-character subject becomes
    * sha256:<hex> instead of a watchdog line that cannot fit.
-   * A missing or uncomposable key is "unverified". This
-   * helper must not throw: the caller still has to deny.
+   * A missing key, or a key that cannot be composed, is
+   * "unverified". This helper must not throw: the caller
+   * still has to deny.
    */
   private function watchdogPrincipalKey(): string {
     if ($this->holder->carriedPrincipal() !== NULL) {

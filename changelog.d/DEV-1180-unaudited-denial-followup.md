@@ -9,13 +9,20 @@ Only the exception class is logged, never the raw message (it
 can contain SQL fragments). The caller stays denied; an
 unaudited denial is never an allow. `boundChainIdentity()`
 hashes a non-scalar `id` / `entity_type` / `bundle` instead of
-casting it to `Array` or throwing, sorts map keys the way
-`McpPolicyBundle::normalize()` does so two orderings share a
-digest, catches a throwing `jsonSerialize()` and falls back to
-a type marker, uses named constants for the audit_chain_log
-128/128/255 column widths, and stores the digest only as
-`sha256:<hex>` (no duplicate `id_sha256`). A dispatcher admit
-of a 771-character delegated key still writes exactly one
-`denied_access` row when `entity_id` is enforced at 255 bytes
-(MySQL, PostgreSQL, and a chain decorator that matches strict
-mode on SQLite). Follow-up to DEV-1180 / #396. No `updatedb`.
+casting it to `Array` or throwing. Canonical JSON for that hash
+goes through `McpCanonicalJson` — the same recursive map-key
+sort and list-order rule as `McpPolicyBundle::normalize()` —
+after expanding `JsonSerializable` and public object
+properties. Empty maps encode as `{}`, empty lists as `[]`.
+Recursion is capped at `McpCanonicalJson::MAX_DEPTH` (512,
+json_encode's default) so a cyclic graph throws inside the
+encoder and becomes a type marker instead of a fatal that
+skips the `denied_access` row. A throwing `jsonSerialize()` or
+a FALSE encode also falls back to that marker. Named constants
+cover the audit_chain_log 128/128/255 column widths; the
+digest is stored only as `sha256:<hex>` (no duplicate
+`id_sha256`). A dispatcher admit of a 771-character delegated
+key still writes exactly one `denied_access` row when
+`entity_id` is enforced at 255 bytes (MySQL, PostgreSQL, and a
+chain decorator that matches strict mode on SQLite). Follow-up
+to DEV-1180 / #396. No `updatedb`.
