@@ -27,8 +27,8 @@ use Psr\Log\LoggerInterface;
  * plugin to process. A fast (DNS-free) SSRF check runs here (Layer 1); the
  * worker re-validates with DNS resolution (Layer 2) at send time, since DNS
  * can rebind between enqueue and delivery. Each row stores principal_key,
- * human_key, and tenant at enqueue so a kill can hold in-scope deliveries
- * (DEV-985). Held rows are never re-queued by cron. Release and discard
+ * human_key, and tenant at enqueue so a kill can hold in-scope deliveries.
+ * Held rows are never re-queued by cron. Release and discard
  * are explicit operator actions.
  */
 final class McpWebhookQueueManager {

@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * Fail-closed and secret-free. Never auto-widens an allowlist or denylist.
  * The formatted suffix is operator-facing (audit row and logs). Callers
- * receive callerMessage() only (DEV-966).
+ * receive callerMessage() only.
  */
 final class McpDenyExplainer {
 
@@ -444,7 +444,7 @@ final class McpDenyExplainer {
   /**
    * Logs the operator explainer, audits, and returns the generic caller deny.
    *
-   * Every caller-facing deny must go through this method (DEV-966).
+   * Every caller-facing deny must go through this method.
    *
    * @param string $reason
    *   Original deny reason. Written to the operator log and HMAC row.

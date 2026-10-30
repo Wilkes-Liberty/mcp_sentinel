@@ -8,7 +8,7 @@
 /**
  * Operator-decision hook when a two-person confirmer does not respond.
  *
- * DEV-985: an unconfirmed person-wide or tenant-wide freeze stays
+ * An unconfirmed person-wide or tenant-wide freeze stays
  * frozen when the confirm window ends. This hook receives every
  * target in the batch so an implementation can notify operators
  * and the break-glass path. Stopped agents are not notified.

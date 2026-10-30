@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Enum;
 
 /**
- * Durable kill-block row states (DEV-846, DEV-985).
+ * Durable kill-block row states.
  *
  * A kill_pending row is an active mass freeze: in-scope agents are
  * refused immediately. A distinct second operator confirms, extends,

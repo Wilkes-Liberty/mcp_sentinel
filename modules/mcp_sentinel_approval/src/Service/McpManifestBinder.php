@@ -18,9 +18,9 @@ use Drupal\mcp_sentinel_approval\Entity\McpApprovalRequestInterface;
 /**
  * Binds an approval decision to exactly one sealed action manifest.
  *
- * Slice 3 of #3616538. Fail-closed: a missing, invalid, expired, stale
- * or already-consumed manifest cannot execute. Recoverable refusals
- * (the approver is the requester) leave the request pending.
+ * Fail-closed: a missing, invalid, expired, stale or already-consumed
+ * manifest cannot execute. Recoverable refusals (the approver is the
+ * requester) leave the request pending.
  */
 final class McpManifestBinder {
 

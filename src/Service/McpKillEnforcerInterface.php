@@ -8,7 +8,7 @@ use Drupal\mcp_sentinel\Value\McpCarriedPrincipal;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 
 /**
- * Kill-registry lookups used at admit() and pre-commit (DEV-846).
+ * Kill-registry lookups used at admit() and pre-commit.
  */
 interface McpKillEnforcerInterface {
 

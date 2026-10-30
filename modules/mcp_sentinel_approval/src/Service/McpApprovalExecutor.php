@@ -77,7 +77,7 @@ final class McpApprovalExecutor {
   /**
    * Approves a request and replays the stored operation.
    *
-   * Status semantics (Fix 3): the request is only recorded as approved when the
+   * Status semantics: the request is only recorded as approved when the
    * operation either executed or is genuinely unexecutable (target already
    * gone, unknown/uninstalled entity type, or a UUID mismatch indicating the
    * id was reused by a different entity). A recoverable block — the approver
@@ -126,7 +126,7 @@ final class McpApprovalExecutor {
     $reason = NULL;
 
     if ($request->getOperation() === 'delete') {
-      // Guard against an invalid or uninstalled entity type (Fix 2): calling
+      // Guard against an invalid or uninstalled entity type: calling
       // getStorage() on an unknown type throws PluginNotFoundException. Treat
       // it as a non-executable target rather than a fatal that strands the
       // request pending. Mirrors the hasDefinition() guard in the bulk tool.
@@ -146,8 +146,8 @@ final class McpApprovalExecutor {
           $message = 'Target identity changed (UUID mismatch); the original entity no longer exists. Request marked approved but not executed.';
         }
         elseif (!$entity->access('delete', $this->currentUser)) {
-          // Fix 3 (option a): recoverable block — leave PENDING and surface an
-          // error so an authorized approver can retry. Do not record approved.
+          // Recoverable block — leave PENDING and surface an error so an
+          // authorized approver can retry. Do not record approved.
           return [
             'executed' => FALSE,
             'error'    => TRUE,

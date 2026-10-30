@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Enum;
 
 /**
- * Kill-registry selector kinds (DEV-846).
+ * Kill-registry selector kinds.
  *
  * Principal_key is one agent (iss|sub|actor). human_key is every
  * agent of this person (iss|sub). tenant is tenant-wide.

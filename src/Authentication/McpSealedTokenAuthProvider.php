@@ -33,7 +33,7 @@ final class McpSealedTokenAuthProvider implements AuthenticationProviderInterfac
    *   authentication provider when the collector is first resolved;
    *   a live manager argument built audit logging and DLP on that
    *   path. The cycle happens on downstream sites whose DLP graph
-   *   reaches authentication_subscriber (DEV-1014).
+   *   reaches authentication_subscriber.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   The entity type manager.
    * @param \Closure $lazyLogger

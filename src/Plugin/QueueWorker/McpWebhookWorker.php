@@ -407,7 +407,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
     $endpoint = is_array($endpointRaw) ? $this->stringKeyed($endpointRaw) : [];
     $url = McpStoredValue::string($endpoint['url'] ?? '');
 
-    // Fix 1: Enforce HTTPS at the worker (sender) level, not just at enqueue.
+    // Enforce HTTPS at the worker (sender) level, not just at enqueue.
     // A row can be replayed or directly inserted after an operator edits an
     // endpoint — catching it here prevents cleartext sends.
     if (!str_starts_with($url, 'https://')) {
@@ -420,7 +420,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    // Fix 2: Resolve the host ONCE, validate the IP(s), then pin via
+    // Resolve the host ONCE, validate the IP(s), then pin via
     // CURLOPT_RESOLVE so the TCP connect uses the validated IP, not a
     // subsequent DNS resolution (defeats DNS-rebind TOCTOU).
     $allowInternal = ($endpoint['allow_internal'] ?? FALSE) === TRUE
@@ -474,7 +474,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       return;
     }
 
-    // Fix 3: Atomic claim — update status from 'pending' to 'in_progress'
+    // Atomic claim — update status from 'pending' to 'in_progress'
     // only if status is still 'pending'. A return value of 0 means another
     // worker already claimed or delivered the row.
     $now = $this->time->getRequestTime();
@@ -503,7 +503,7 @@ final class McpWebhookWorker extends QueueWorkerBase implements ContainerFactory
       ($this->afterClaimForTest)();
     }
 
-    // Fix 4: Use the stored payload for byte-identical delivery and replay.
+    // Use the stored payload for byte-identical delivery and replay.
     // Fall back to the queue-item payload if the column is empty (legacy rows).
     $storedPayload = McpStoredValue::string($row['payload'] ?? '');
     if ($storedPayload === '') {
