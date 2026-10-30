@@ -374,10 +374,47 @@ jobs:
           run_one() {
             local file="$1"
             local filter="$2"
+            local out="/tmp/${filter}.out"
             echo "========== ${filter} =========="
+            # Capture the full PHPUnit dump (wide-list actual JSON
+            # drowned run 41093533665). Print only a short head/tail
+            # so later cases still run and record.
             vendor/bin/phpunit -c "${config}" \
+              --log-junit "/tmp/${filter}.xml" \
               "${file}" \
-              --filter "${filter}"
+              --filter "${filter}" \
+              > "${out}" 2>&1
+            local rc=$?
+            python3 - "${out}" <<'PY'
+          import sys
+          from pathlib import Path
+          data = Path(sys.argv[1]).read_bytes()
+          head = data[:1500].decode("utf-8", "replace")
+          tail = data[-1500:].decode("utf-8", "replace") if len(data) > 1500 else ""
+          print(head)
+          if tail:
+              print("...[truncated %d bytes]..." % len(data))
+              print(tail)
+          PY
+            if [ -f "/tmp/${filter}.xml" ]; then
+              python3 - "${filter}" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          name = sys.argv[1]
+          try:
+              tree = ET.parse("/tmp/%s.xml" % name)
+          except Exception as exc:
+              print("junit: unreadable (%s)" % exc)
+              raise SystemExit(0)
+          for case in tree.iter("testcase"):
+              fails = list(case.findall("failure")) + list(case.findall("error"))
+              print("junit %s failures=%d" % (case.get("name"), len(fails)))
+              for item in fails:
+                  msg = (item.get("message") or item.text or "")[:180]
+                  print("  %s: %s" % (item.tag, msg.replace("\n", " ")))
+          PY
+            fi
+            return "${rc}"
           }
 
           failed=0
@@ -395,14 +432,14 @@ jobs:
           }
 
           cases=(
-            "${identity}|testSharedReferenceFanOutFallsBackToTypeMarker"
-            "${identity}|testSelfReferencingObjectFallsBackToTypeMarker"
-            "${identity}|testWideScalarListFallsBackToTypeMarker"
-            "${identity}|testRepeatedLargeStringsFallBackToTypeMarker"
             "${policy}|testNormalizeRejectsGraphDeeperThanMaxDepth"
             "${policy}|testNormalizeAcceptsPolicyBundleWiderThanNodeBudget"
             "${policy}|testNormalizeAcceptsPolicyStringOverByteBudget"
             "${policy}|testVerifyReturnsNullForOverDepthDocument"
+            "${identity}|testRepeatedLargeStringsFallBackToTypeMarker"
+            "${identity}|testSelfReferencingObjectFallsBackToTypeMarker"
+            "${identity}|testSharedReferenceFanOutFallsBackToTypeMarker"
+            "${identity}|testWideScalarListFallsBackToTypeMarker"
           )
           for spec in "${cases[@]}"; do
             file="${spec%%|*}"
