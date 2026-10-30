@@ -80,7 +80,7 @@ class McpAuditLogger {
   public const READ_CHANNELS = [self::CHANNEL, self::LEGACY_CHANNEL];
 
   /**
-   * audit_chain_log.entity_type width (audit_chain.install).
+   * Width of audit_chain_log.entity_type (audit_chain.install).
    *
    * Compared with strlen() because Audit Chain copies the raw
    * string onto the column without truncating it.
@@ -88,12 +88,12 @@ class McpAuditLogger {
   public const CHAIN_ENTITY_TYPE_MAX_BYTES = 128;
 
   /**
-   * audit_chain_log.bundle width (audit_chain.install).
+   * Width of audit_chain_log.bundle (audit_chain.install).
    */
   public const CHAIN_BUNDLE_MAX_BYTES = 128;
 
   /**
-   * audit_chain_log.entity_id width (audit_chain.install).
+   * Width of audit_chain_log.entity_id (audit_chain.install).
    */
   public const CHAIN_ENTITY_ID_MAX_BYTES = 255;
 

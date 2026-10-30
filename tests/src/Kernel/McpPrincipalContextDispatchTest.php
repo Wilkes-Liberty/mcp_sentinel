@@ -1556,6 +1556,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
       . "SELECT RAISE(ABORT, "
       . "'SQLSTATE[22001] 1406 Data too long for column entity_id'"
       . '); END',
+      [],
+      ['allow_delimiter_in_query' => TRUE],
     );
   }
 
