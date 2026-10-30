@@ -462,8 +462,13 @@ class McpAuditLogger {
    * Canonical JSON for a non-scalar identity field.
    *
    * Fail-closed and deterministic: never `(string)` an array
-   * or object. Unencodable values become a type marker so the
-   * hash is stable and the column write still succeeds.
+   * or object. Map keys are sorted the way
+   * McpPolicyBundle::normalize() sorts them; lists keep
+   * caller order. Encoding can throw from
+   * JsonSerializable::jsonSerialize() even without
+   * JSON_THROW_ON_ERROR. Any Throwable or a FALSE encode
+   * becomes a type marker so the hash is stable and the
+   * column write still succeeds.
    *
    * @param mixed $value
    *   A non-scalar identity value.
@@ -472,14 +477,68 @@ class McpAuditLogger {
    *   Canonical JSON, or a type marker when encoding fails.
    */
   private static function canonicalIdentityPayload(mixed $value): string {
-    $encoded = json_encode(
-      $value,
-      JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
-    );
+    try {
+      $encoded = json_encode(
+        self::normalizeIdentityPayload($value),
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+      );
+    }
+    catch (\Throwable) {
+      return '{"type":"' . get_debug_type($value) . '"}';
+    }
     if ($encoded === FALSE) {
       return '{"type":"' . get_debug_type($value) . '"}';
     }
     return $encoded;
+  }
+
+  /**
+   * Recursively sorts map keys; lists keep caller order.
+   *
+   * JsonSerializable values are expanded first so a throwing
+   * serializer is caught by canonicalIdentityPayload().
+   * Empty maps stay objects (`{}`); empty lists stay `[]`.
+   *
+   * @param mixed $value
+   *   A JSON-able identity value.
+   *
+   * @return mixed
+   *   The normalized value.
+   */
+  private static function normalizeIdentityPayload(mixed $value): mixed {
+    if ($value instanceof \JsonSerializable) {
+      return self::normalizeIdentityPayload($value->jsonSerialize());
+    }
+    if (is_object($value)) {
+      return self::normalizeIdentityMap(get_object_vars($value));
+    }
+    if (!is_array($value)) {
+      if (is_string($value) || is_int($value) || is_float($value) || is_bool($value) || $value === NULL) {
+        return $value;
+      }
+      throw new \InvalidArgumentException('Unencodable identity value.');
+    }
+    if ($value === [] || array_is_list($value)) {
+      return array_map(self::normalizeIdentityPayload(...), $value);
+    }
+    return self::normalizeIdentityMap($value);
+  }
+
+  /**
+   * Sorts one map and normalizes each value.
+   *
+   * @param array<string, mixed> $value
+   *   A JSON object (not a list).
+   *
+   * @return array<string, mixed>|\stdClass
+   *   The sorted map, or an empty object when $value is empty.
+   */
+  private static function normalizeIdentityMap(array $value): array|\stdClass {
+    ksort($value);
+    foreach ($value as $key => $item) {
+      $value[$key] = self::normalizeIdentityPayload($item);
+    }
+    return $value === [] ? new \stdClass() : $value;
   }
 
   /**

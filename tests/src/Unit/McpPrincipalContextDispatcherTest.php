@@ -110,20 +110,34 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       $this->claims('human-1', 'agent-a'),
     ), $request);
     $audit = $this->createMock(McpAuditLogger::class);
-    $audit->method('logAlways')->willThrowException(new \RuntimeException('audit down'));
+    $audit->method('logAlways')->willThrowException(new \RuntimeException(
+      'SQLSTATE[22001]: String data, right truncated: '
+      . '1406 Data too long for column entity_id',
+    ));
+    $principal = 'https://idp.example/realms/agents|human-1|agent-a';
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $principal]);
     $logger = $this->createMock(LoggerInterface::class);
     $logger->expects($this->once())->method('critical')->with(
       $this->callback(static function (string $message): bool {
         return str_contains($message, '@event')
-          && str_contains($message, 'was not recorded');
+          && str_contains($message, 'was not recorded')
+          && str_contains($message, '@tool')
+          && str_contains($message, '@principal')
+          && str_contains($message, '@class')
+          && !str_contains($message, '@message');
       }),
-      $this->callback(static function (array $context): bool {
+      $this->callback(static function (array $context) use ($bounded): bool {
         $event = McpPrincipalContextDispatcher::DENIED_ACCESS_WRITE_FAILED;
         $reason = McpPrincipalContextDeniedException::RESERVED_IDENTITY_ARGUMENT;
+        $blob = implode(' ', $context);
         return ($context['@event'] ?? '') === $event
           && ($context['@reason'] ?? '') === $reason
+          && ($context['@tool'] ?? '') === 'tool-a'
+          && ($context['@principal'] ?? '') === $bounded['id']
           && ($context['@class'] ?? '') === \RuntimeException::class
-          && ($context['@message'] ?? '') === 'audit down';
+          && !array_key_exists('@message', $context)
+          && !str_contains($blob, 'SQLSTATE')
+          && !str_contains($blob, 'entity_id');
       }),
     );
     $logger->expects($this->never())->method('error');

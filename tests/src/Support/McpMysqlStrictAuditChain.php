@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Support;
 
 use Drupal\audit_chain\AuditChainLoggerInterface;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 
 /**
  * Rejects oversize identity the way MySQL 8 strict mode does.
@@ -17,12 +18,12 @@ use Drupal\audit_chain\AuditChainLoggerInterface;
 final class McpMysqlStrictAuditChain implements AuditChainLoggerInterface {
 
   /**
-   * Column widths copied from audit_chain.install.
+   * Column widths from McpAuditLogger::CHAIN_* (audit_chain.install).
    */
   private const LIMITS = [
-    'entity_type' => 128,
-    'bundle' => 128,
-    'id' => 255,
+    'entity_type' => McpAuditLogger::CHAIN_ENTITY_TYPE_MAX_BYTES,
+    'bundle' => McpAuditLogger::CHAIN_BUNDLE_MAX_BYTES,
+    'id' => McpAuditLogger::CHAIN_ENTITY_ID_MAX_BYTES,
   ];
 
   /**

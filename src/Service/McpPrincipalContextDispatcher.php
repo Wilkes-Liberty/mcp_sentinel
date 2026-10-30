@@ -585,9 +585,12 @@ final class McpPrincipalContextDispatcher {
    * A failed write is a governance gap, not an allow. It is
    * logged at critical with DENIED_ACCESS_WRITE_FAILED so a
    * SIEM or dblog alert can page on an unaudited denial.
-   * A second chain write is not attempted: if the chain is
-   * down the fallback would fail the same way. Watchdog is
-   * the fallback record.
+   * The line names @tool and a bounded or hashed principal
+   * key. Only @class is logged, never the raw exception
+   * message (it can contain SQL fragments), matching the
+   * sealed-token auditor. A second chain write is not
+   * attempted: if the chain is down the fallback would fail
+   * the same way. Watchdog is the fallback record.
    *
    * $auditReason may differ from $reasonCode so a kill records
    * principal_killed on the row while the caller still sees the
@@ -608,12 +611,13 @@ final class McpPrincipalContextDispatcher {
     catch (\Throwable $e) {
       $this->logger->critical(
         '@event: principal-context denial was not recorded '
-        . '(@reason): @class: @message',
+        . '(@reason) for @tool (@principal): @class',
         [
           '@event' => self::DENIED_ACCESS_WRITE_FAILED,
           '@reason' => $rowReason,
+          '@tool' => $toolId !== '' ? $toolId : 'unknown_tool',
+          '@principal' => $this->watchdogPrincipalKey(),
           '@class' => $e::class,
-          '@message' => $e->getMessage(),
         ],
       );
     }
@@ -623,6 +627,30 @@ final class McpPrincipalContextDispatcher {
         ? McpDenyExplainer::CALLER_MESSAGE
         : $message,
     );
+  }
+
+  /**
+   * Bounded or hashed principal for the unaudited-denial watchdog line.
+   *
+   * A carried overlay is unverified on the row, so it stays
+   * unverified here. A composed key is passed through
+   * boundChainIdentity() so a 771-character subject becomes
+   * sha256:<hex> instead of a watchdog line that cannot fit.
+   * A missing or uncomposable key is "unverified". This
+   * helper must not throw: the caller still has to deny.
+   */
+  private function watchdogPrincipalKey(): string {
+    if ($this->holder->carriedPrincipal() !== NULL) {
+      return 'unverified';
+    }
+    try {
+      $key = $this->auditContext()->principalKey();
+    }
+    catch (\Throwable) {
+      $key = 'unverified';
+    }
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $key]);
+    return (string) $bounded['id'];
   }
 
   /**

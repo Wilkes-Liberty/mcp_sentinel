@@ -113,4 +113,50 @@ final class McpAuditLoggerBoundIdentityTest extends UnitTestCase {
     $this->assertArrayNotHasKey('id_sha256', $bounded);
   }
 
+  /**
+   * A throwing jsonSerialize() falls back to the type marker.
+   *
+   * Encoding can propagate that exception even without
+   * JSON_THROW_ON_ERROR. The digest must still be written.
+   *
+   * @covers ::boundChainIdentity
+   */
+  public function testThrowingSerializerFallsBackToTypeMarker(): void {
+    $id = new class() implements \JsonSerializable {
+
+      /**
+       * {@inheritdoc}
+       */
+      public function jsonSerialize(): never {
+        throw new \RuntimeException('cannot serialize');
+      }
+
+    };
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $id]);
+    $marker = '{"type":"' . get_debug_type($id) . '"}';
+    $this->assertSame($marker, $bounded['id_original']);
+    $this->assertSame('sha256:' . hash('sha256', $marker), $bounded['id']);
+    $this->assertArrayNotHasKey('id_sha256', $bounded);
+    $this->assertLessThanOrEqual(255, strlen((string) $bounded['id']));
+  }
+
+  /**
+   * Nested maps hash the same regardless of key insertion order.
+   *
+   * @covers ::boundChainIdentity
+   */
+  public function testReorderedMapsShareTheSameDigest(): void {
+    $first = McpAuditLogger::boundChainIdentity([
+      'id' => ['b' => 2, 'a' => ['z' => 1, 'y' => 2]],
+    ]);
+    $second = McpAuditLogger::boundChainIdentity([
+      'id' => ['a' => ['y' => 2, 'z' => 1], 'b' => 2],
+    ]);
+    $this->assertSame('{"a":{"y":2,"z":1},"b":2}', $first['id_original']);
+    $this->assertSame($first['id_original'], $second['id_original']);
+    $this->assertSame($first['id'], $second['id']);
+    $this->assertSame('sha256:' . hash('sha256', $first['id_original']), $first['id']);
+    $this->assertArrayNotHasKey('id_sha256', $first);
+  }
+
 }
