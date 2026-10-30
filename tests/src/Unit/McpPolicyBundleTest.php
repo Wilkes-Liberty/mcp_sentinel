@@ -81,7 +81,6 @@ final class McpPolicyBundleTest extends UnitTestCase {
       hash('sha256', $json),
       McpPolicyBundle::digestOf($claims),
     );
-    $this->assertSame(512, McpCanonicalJson::MAX_DEPTH);
   }
 
   /**

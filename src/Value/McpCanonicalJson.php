@@ -141,8 +141,7 @@ final class McpCanonicalJson {
    *   When $depth is MAX_DEPTH or greater.
    */
   private static function assertDepth(int $depth): void {
-    // DEV-1180 red-proof: do not enforce MAX_DEPTH.
-    if ($depth < 0) {
+    if ($depth >= self::MAX_DEPTH) {
       throw new \InvalidArgumentException(
         'Canonical JSON depth exceeded.',
       );
