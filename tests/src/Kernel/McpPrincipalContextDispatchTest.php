@@ -1549,9 +1549,9 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    * admit() goes through the wrapped chain.
    */
   private function enforceMysqlStrictIdentityColumns(): void {
-    $inner = $this->container->get('audit_chain.logger');
-    $this->assertInstanceOf(AuditChainLoggerInterface::class, $inner);
-    $strict = new McpMysqlStrictAuditChain($inner);
+    $strict = new McpMysqlStrictAuditChain(
+      $this->container->get('audit_chain.logger'),
+    );
     $holder = $this->holder();
     $logger = new McpAuditLogger(
       $this->container->get('config.factory'),
