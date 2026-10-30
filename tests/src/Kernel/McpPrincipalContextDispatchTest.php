@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
+use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\Core\Queue\QueueWorkerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpLookalikeChecker;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
@@ -19,6 +21,7 @@ use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
 use Drupal\Tests\mcp_sentinel\Support\McpJobScopeQueueStub;
+use Drupal\Tests\mcp_sentinel\Support\McpMysqlStrictAuditChain;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
@@ -1231,10 +1234,10 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    * (McpPrincipalKey::MAX_PART_LENGTH) but audit_chain copies
    * metadata.id onto entity_id varchar(255) without truncating
    * it. MySQL 8 strict mode and PostgreSQL refuse that insert;
-   * SQLite does not. This test installs a SQLite trigger that
-   * rejects an oversize entity_id the same way, then admits
-   * through the real deny path. Exactly one denied_access row
-   * must land. A missing row is the d.o phpunit failure on
+   * SQLite does not. This test wraps the chain so an oversize
+   * entity_id is rejected the same way, then admits through
+   * the real deny path. Exactly one denied_access row must
+   * land. A missing row is the d.o phpunit failure on
    * aa64970 (DEV-1180 / #396).
    */
   public function testOverlongComposedPrincipalKeyWritesOneDeniedAccessRow(): void {
@@ -1540,24 +1543,42 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
    * Rejects an oversize entity_id the way MySQL 8 strict mode does.
    *
    * SQLite stores a 256-byte varchar(255) value. MySQL and
-   * PostgreSQL refuse the insert (SQLSTATE 22001). A trigger
-   * makes the kernel SQLite job ask the same question as d.o.
+   * PostgreSQL refuse the insert (SQLSTATE 22001). A chain
+   * decorator makes the kernel SQLite job ask the same
+   * question as d.o. Rebuilds the logger and dispatcher so
+   * admit() goes through the wrapped chain.
    */
   private function enforceMysqlStrictIdentityColumns(): void {
-    $connection = $this->container->get('database');
-    if ($connection->databaseType() !== 'sqlite') {
-      return;
-    }
-    $table = $connection->prefixTables('{audit_chain_log}');
-    $connection->query(
-      'CREATE TRIGGER IF NOT EXISTS mcp_sentinel_entity_id_width '
-      . 'BEFORE INSERT ON ' . $table . ' '
-      . 'FOR EACH ROW WHEN LENGTH(NEW.entity_id) > 255 BEGIN '
-      . "SELECT RAISE(ABORT, "
-      . "'SQLSTATE[22001] 1406 Data too long for column entity_id'"
-      . '); END',
-      [],
-      ['allow_delimiter_in_query' => TRUE],
+    $inner = $this->container->get('audit_chain.logger');
+    $this->assertInstanceOf(AuditChainLoggerInterface::class, $inner);
+    $strict = new McpMysqlStrictAuditChain($inner);
+    $holder = $this->holder();
+    $logger = new McpAuditLogger(
+      $this->container->get('config.factory'),
+      $this->container->get('request_stack'),
+      $strict,
+      $this->container->get('mcp_sentinel.dlp'),
+      $this->container->get('database'),
+      $this->container->get('mcp_sentinel.policy_bundle_registry'),
+      $this->container->get('mcp_sentinel.config_secret_redactor'),
+      NULL,
+      $this->container->get('current_user'),
+      $this->container->get('account_switcher'),
+    );
+    $this->container->set('audit_chain.logger', $strict);
+    $this->container->set('mcp_sentinel.audit_logger', $logger);
+    $this->container->set(
+      'mcp_sentinel.principal_context_dispatcher',
+      new McpPrincipalContextDispatcher(
+        $this->container->get('mcp_sentinel.principal_context_factory'),
+        $this->container->get('request_stack'),
+        $this->container->get('mcp_sentinel.principal_context_guard'),
+        $holder,
+        $logger,
+        $this->container->get('logger.channel.mcp_sentinel'),
+        $this->container->get('mcp_sentinel.kill_switch'),
+        $this->container->get('mcp_sentinel.deny_explainer'),
+      ),
     );
   }
 
