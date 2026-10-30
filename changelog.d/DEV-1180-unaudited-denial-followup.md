@@ -25,9 +25,12 @@ that depth cap on the identity walk so a cycle, a
 shared-reference fan-out, a wide scalar list, or repeated
 large strings throw inside the normalizer and become a type
 marker instead of a fatal that skips the `denied_access`
-row. `McpPolicyBundleRegistry::verify()` catches those
-throws and returns NULL so `simulate()` records
-`bundle_unverified` and `checkBundleFloor` audits the deny.
+row. On the policy path, an over-depth (`MAX_DEPTH`) or
+non-scalar claim throws `InvalidArgumentException` or
+`JsonException` from `McpPolicyBundle::digestOf()`;
+`McpPolicyBundleRegistry::verify()` catches it and
+returns NULL so `simulate()` records `bundle_unverified`
+and `checkBundleFloor` writes an audited deny.
 A throwing `jsonSerialize()` or a FALSE encode also falls
 back to that marker. Named constants cover the
 audit_chain_log 128/128/255 column widths; the digest is
