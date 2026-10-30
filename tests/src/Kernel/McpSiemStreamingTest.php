@@ -14,10 +14,12 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 /**
  * Kernel tests for SIEM streaming via the audit_chain stream channel.
  *
- * Audit Chain 1.13.0 emits audit_chain_event on audit_chain.stream so
- * the record does not fan out to dblog. 1.12.x still streams on
- * logger.channel.audit_chain. The spy follows whichever service the
- * installed chain actually uses.
+ * Audit Chain 1.12.x streams audit_chain_event on
+ * logger.channel.audit_chain. 1.13.0 moved it to audit_chain.stream so
+ * the record does not fan out to dblog. 1.13.1 restored
+ * logger.channel.audit_chain as the default and uses audit_chain.stream
+ * only when stream_exclude_dblog is set. The spy follows whichever
+ * service the installed chain actually uses.
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpAuditLogger
  * @group mcp_sentinel
@@ -71,9 +73,9 @@ final class McpSiemStreamingTest extends KernelTestBase {
   /**
    * Live SIEM records land on the chain's stream channel.
    *
-   * Audit Chain 1.13.0 must emit on audit_chain.stream. Presence of
-   * that service is not enough — a 1.13.0 build that still writes
-   * logger.channel.audit_chain fails this test.
+   * Exactly one channel receives the record: the one siemChannelId()
+   * resolves for the installed Audit Chain. A build that writes to the
+   * other channel fails this test.
    */
   public function testLiveSiemChannelIsAuditChain(): void {
     $this->config('audit_chain.settings')
@@ -110,6 +112,36 @@ final class McpSiemStreamingTest extends KernelTestBase {
         'SIEM stream must not emit on ' . $id . '.',
       );
     }
+  }
+
+  /**
+   * With stream_exclude_dblog set, the record moves to audit_chain.stream.
+   *
+   * Audit Chain 1.13.1 added the key. Older chains have no opt-in to test.
+   */
+  public function testExcludeDblogStreamsOnDedicatedSink(): void {
+    if ($this->config('audit_chain.settings')->get('stream_exclude_dblog') === NULL) {
+      $this->markTestSkipped('The installed Audit Chain has no stream_exclude_dblog setting.');
+    }
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
+      ->set('stream_exclude_dblog', TRUE)
+      ->save();
+    $this->assertSame('audit_chain.stream', $this->siemChannelId());
+
+    $channel_spy = new TestLogger();
+    $this->container->set('logger.channel.audit_chain', $channel_spy);
+    $stream_spy = new TestLogger();
+    $this->installSiemSpy($stream_spy);
+
+    $this->container->get('mcp_sentinel.audit_logger')->log('entity_save', [
+      'entity_type' => 'node',
+      'bundle'      => 'article',
+      'id'          => '1',
+    ]);
+
+    $this->assertCount(1, $stream_spy->records, 'SIEM stream must emit on audit_chain.stream.');
+    $this->assertCount(0, $channel_spy->records, 'SIEM stream must not emit on logger.channel.audit_chain.');
   }
 
   /**
@@ -261,7 +293,15 @@ final class McpSiemStreamingTest extends KernelTestBase {
    * Channel id audit_chain actually streams SIEM records onto.
    */
   private function siemChannelId(): string {
-    return $this->container->has('audit_chain.stream')
+    // 1.12.x has no dedicated stream service.
+    if (!$this->container->has('audit_chain.stream')) {
+      return 'logger.channel.audit_chain';
+    }
+    // 1.13.0 has no stream_exclude_dblog key and always streams on
+    // audit_chain.stream. 1.13.1 and later stream there only when the key
+    // is set.
+    $exclude_dblog = $this->config('audit_chain.settings')->get('stream_exclude_dblog');
+    return $exclude_dblog === NULL || $exclude_dblog
       ? 'audit_chain.stream'
       : 'logger.channel.audit_chain';
   }
