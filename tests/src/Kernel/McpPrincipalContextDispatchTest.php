@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Kernel;
 
-use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\Core\Queue\QueueWorkerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
