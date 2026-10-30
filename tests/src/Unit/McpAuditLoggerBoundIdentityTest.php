@@ -238,10 +238,10 @@ final class McpAuditLoggerBoundIdentityTest extends UnitTestCase {
   /**
    * A wide scalar list falls back to the type marker.
    *
-   * array_fill(0, 1024, array_fill(0, 8192, 'x')) is only
-   * depth 2 and 1025 containers, so a container-only budget
-   * would expand it. Counting scalars trips MAX_NODES before
-   * the copies can grow.
+   * The shape array_fill(0, 1024, array_fill(0, 8192, 'x'))
+   * is only depth 2 and 1025 containers, so a container-only
+   * budget would expand it. Counting scalars trips MAX_NODES
+   * before the copies can grow.
    *
    * @covers ::boundChainIdentity
    */
