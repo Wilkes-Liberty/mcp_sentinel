@@ -397,24 +397,9 @@ class McpAuditLogger {
    *   The same map with oversize identity fields replaced.
    */
   public static function boundChainIdentity(array $metadata): array {
-    $limits = [
-      'entity_type' => 128,
-      'bundle' => 128,
-      'id' => 255,
-    ];
-    foreach ($limits as $key => $max) {
-      if (!isset($metadata[$key])) {
-        continue;
-      }
-      $value = (string) $metadata[$key];
-      if (strlen($value) <= $max) {
-        continue;
-      }
-      $digest = hash('sha256', $value);
-      $metadata[$key . '_original'] = $value;
-      $metadata[$key . '_sha256'] = $digest;
-      $metadata[$key] = 'sha256:' . $digest;
-    }
+    // Weaken for red-proof: skip the identity bound so an oversize
+    // entity_id hits a MySQL-strict-like column and the deny-path
+    // test fails. Restore on the follow-up branch.
     return $metadata;
   }
 

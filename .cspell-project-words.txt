@@ -145,10 +145,12 @@ textareas
 toctou
 topsecret
 unanalysable
+unaudited
 uncacheable
 uncaches
 unconfigured
 undesignated
+unencodable
 undismissed
 unexecutable
 ungated

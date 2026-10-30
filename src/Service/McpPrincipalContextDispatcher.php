@@ -36,6 +36,14 @@ final class McpPrincipalContextDispatcher {
   public const GENERIC_REFUSAL = 'A verified principal context is required.';
 
   /**
+   * Stable event id for an unaudited principal-context denial.
+   *
+   * Present so the red-proof test can name it. deny() still
+   * logs at error only — that is the gap this branch proves.
+   */
+  public const DENIED_ACCESS_WRITE_FAILED = 'denied_access_write_failed';
+
+  /**
    * Constructs the dispatcher.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
