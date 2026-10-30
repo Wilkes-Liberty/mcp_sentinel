@@ -36,6 +36,14 @@ final class McpPrincipalContextDispatcher {
   public const GENERIC_REFUSAL = 'A verified principal context is required.';
 
   /**
+   * Stable event id for an unaudited principal-context denial.
+   *
+   * Logged at critical when denied_access cannot be written.
+   * Operators can alert on this string. The caller is still denied.
+   */
+  public const DENIED_ACCESS_WRITE_FAILED = 'denied_access_write_failed';
+
+  /**
    * Constructs the dispatcher.
    *
    * @param \Drupal\mcp_sentinel\Service\McpPrincipalContextFactory $factory
@@ -49,7 +57,9 @@ final class McpPrincipalContextDispatcher {
    * @param \Drupal\mcp_sentinel\Service\McpAuditLogger $auditLogger
    *   Writes denied_access rows.
    * @param \Psr\Log\LoggerInterface $logger
-   *   Fallback when a denial audit write fails.
+   *   Critical fallback when a denial audit write fails. The
+   *   event id is DENIED_ACCESS_WRITE_FAILED. Watchdog is the
+   *   fallback record; a second chain write is not attempted.
    * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
    *   Kill registry checked on every admit() before doExecute.
    * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
@@ -570,7 +580,17 @@ final class McpPrincipalContextDispatcher {
    *
    * An audit outage must not replace the denial. The caller still
    * receives the access exception and can return 403 or a non-zero
-   * exit instead of an uncaught 500. A failed write is logged.
+   * exit instead of an uncaught 500.
+   *
+   * A failed write is a governance gap, not an allow. It is
+   * logged at critical with DENIED_ACCESS_WRITE_FAILED so a
+   * SIEM or dblog alert can page on an unaudited denial.
+   * The line names a bounded or hashed @tool and @principal.
+   * Only @class is logged, never the raw exception message
+   * (it can contain SQL fragments), matching the sealed-token
+   * auditor. A second chain write is not attempted: if the
+   * chain is down the fallback would fail the same way.
+   * Watchdog is the fallback record.
    *
    * $auditReason may differ from $reasonCode so a kill records
    * principal_killed on the row while the caller still sees the
@@ -589,11 +609,17 @@ final class McpPrincipalContextDispatcher {
       $this->logDenial($toolId, $rowReason, $this->auditContext(), $message);
     }
     catch (\Throwable $e) {
-      $this->logger->error(
-        'Principal-context denial audit write failed (@reason): @message',
+      $this->logger->critical(
+        '@event: principal-context denial was not recorded '
+        . '(@reason) for @tool (@principal): @class',
         [
+          '@event' => self::DENIED_ACCESS_WRITE_FAILED,
           '@reason' => $rowReason,
-          '@message' => $e->getMessage(),
+          '@tool' => $this->watchdogBoundId(
+            $toolId !== '' ? $toolId : 'unknown_tool',
+          ),
+          '@principal' => $this->watchdogPrincipalKey(),
+          '@class' => $e::class,
         ],
       );
     }
@@ -603,6 +629,47 @@ final class McpPrincipalContextDispatcher {
         ? McpDenyExplainer::CALLER_MESSAGE
         : $message,
     );
+  }
+
+  /**
+   * Bounded or hashed principal for the unaudited-denial watchdog line.
+   *
+   * A carried overlay is unverified on the row, so it stays
+   * unverified here. A composed key is passed through
+   * boundChainIdentity() so a 771-character subject becomes
+   * sha256:<hex> instead of a watchdog line that cannot fit.
+   * A missing key, or a key that cannot be composed, is
+   * "unverified". This helper must not throw: the caller
+   * still has to deny.
+   */
+  private function watchdogPrincipalKey(): string {
+    if ($this->holder->carriedPrincipal() !== NULL) {
+      return 'unverified';
+    }
+    try {
+      $key = $this->auditContext()->principalKey();
+    }
+    catch (\Throwable) {
+      $key = 'unverified';
+    }
+    return $this->watchdogBoundId($key);
+  }
+
+  /**
+   * Bounds or hashes a watchdog field the way entity_id is bounded.
+   *
+   * @tool uses the same helper as @principal so an oversize
+   * plugin id cannot blow the critical line.
+   *
+   * @param string $value
+   *   Tool id or principal key.
+   *
+   * @return string
+   *   The original when it fits, otherwise sha256:<hex>.
+   */
+  private function watchdogBoundId(string $value): string {
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $value]);
+    return (string) $bounded['id'];
   }
 
   /**

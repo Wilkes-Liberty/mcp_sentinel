@@ -13,6 +13,7 @@ use Drupal\Core\State\StateInterface;
 use Drupal\key\KeyInterface;
 use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
+use Drupal\mcp_sentinel\Value\McpCanonicalJson;
 use Drupal\mcp_sentinel\Value\McpPolicyBundle;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -26,6 +27,7 @@ use PHPUnit\Framework\Attributes\Group;
  * @group mcp_sentinel
  */
 #[CoversClass(McpPolicyBundle::class)]
+#[CoversClass(McpCanonicalJson::class)]
 #[CoversClass(McpPolicyBundleRegistry::class)]
 #[Group('mcp_sentinel')]
 final class McpPolicyBundleTest extends UnitTestCase {
@@ -47,6 +49,66 @@ final class McpPolicyBundleTest extends UnitTestCase {
     $a = ['v' => 1, 'denials' => ['operations' => ['delete']], 'id' => 'x', 'issued' => 1, 'expires' => 10];
     $b = ['expires' => 10, 'id' => 'x', 'issued' => 1, 'v' => 1, 'denials' => ['operations' => ['delete']]];
     $this->assertSame(McpPolicyBundle::digestOf($a), McpPolicyBundle::digestOf($b));
+  }
+
+  /**
+   * Canonical JSON bytes are pinned so a sorter drift fails this test.
+   *
+   * @covers ::digestOf
+   * @covers ::canonicalJson
+   * @covers ::normalize
+   */
+  public function testCanonicalJsonBytesArePinned(): void {
+    $claims = [
+      'v' => 1,
+      'denials' => ['operations' => ['update', 'delete']],
+      'id' => 'bundle-a',
+      'issued' => 1,
+      'expires' => 10,
+      'extra' => ['z' => FALSE, 'a' => NULL],
+    ];
+    $json = McpPolicyBundle::canonicalJson($claims);
+    $this->assertSame(
+      '{"denials":{"operations":["update","delete"]},"expires":10,'
+      . '"extra":{"a":null,"z":false},"id":"bundle-a","issued":1,"v":1}',
+      $json,
+    );
+    $this->assertSame(
+      'd844f51f92764a2dff463270a70ef3563259d4e845c5aba78c4765f46f8093a7',
+      McpPolicyBundle::digestOf($claims),
+    );
+    $this->assertSame(
+      hash('sha256', $json),
+      McpPolicyBundle::digestOf($claims),
+    );
+  }
+
+  /**
+   * The public normalizer has no caller-supplied depth argument.
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalize
+   */
+  public function testNormalizeHasNoPublicDepthParameter(): void {
+    $method = new \ReflectionMethod(McpCanonicalJson::class, 'normalize');
+    $this->assertCount(1, $method->getParameters());
+    $this->assertSame('value', $method->getParameters()[0]->getName());
+    $this->assertFalse($method->getParameters()[0]->isDefaultValueAvailable());
+  }
+
+  /**
+   * Policy normalize still rejects an empty stdClass.
+   *
+   * Object expansion is identity-only. The shared sorter must
+   * not newly accept `{}` or change this message.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeStillRejectsEmptyObject(): void {
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage(
+      'Policy bundle claims may only contain scalars, lists and maps.',
+    );
+    McpPolicyBundle::normalize(new \stdClass());
   }
 
   /**

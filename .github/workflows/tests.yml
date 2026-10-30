@@ -1173,7 +1173,8 @@ jobs:
             .
 
   # MySQL kernel coverage for the unique uid index, update 10037
-  # (DEV-986), and overlong denied_access entity_id (DEV-1180).
+  # (DEV-986), overlong denied_access entity_id (DEV-1180), and
+  # the dispatcher deny path that must still write one row.
   phpunit-mysql-operator-binding:
     name: PHPUnit — MySQL operator binding (Drupal 11, PHP 8.4)
     needs: changes
@@ -1274,6 +1275,10 @@ jobs:
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
             --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts|testComposedOverlongDelegatedTokenIsDeniedAndAudited' \
+            || status=1
+          vendor/bin/phpunit -c "${config}" \
+            "${module}/tests/src/Kernel/McpPrincipalContextDispatchTest.php" \
+            --filter 'testOverlongComposedPrincipalKeyWritesOneDeniedAccessRow' \
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpAuditLoggerTest.php" \
@@ -1381,6 +1386,10 @@ jobs:
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpKillSwitchTest.php" \
             --filter 'testUidUniqueIndexRejectsDuplicate|testBindSecondIdentityOnSameUidConflicts|testComposedOverlongDelegatedTokenIsDeniedAndAudited' \
+            || status=1
+          vendor/bin/phpunit -c "${config}" \
+            "${module}/tests/src/Kernel/McpPrincipalContextDispatchTest.php" \
+            --filter 'testOverlongComposedPrincipalKeyWritesOneDeniedAccessRow' \
             || status=1
           vendor/bin/phpunit -c "${config}" \
             "${module}/tests/src/Kernel/McpAuditLoggerTest.php" \

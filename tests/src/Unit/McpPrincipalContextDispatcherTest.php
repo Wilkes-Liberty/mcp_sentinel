@@ -85,7 +85,10 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
-   * Deny() logs when the audit write fails and still throws the denial.
+   * Deny() surfaces an unaudited denial at critical and still throws.
+   *
+   * An empty catch (silent drop) fails this test: critical must
+   * fire with denied_access_write_failed. The caller stays denied.
    *
    * @covers ::deny
    */
@@ -107,10 +110,105 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       $this->claims('human-1', 'agent-a'),
     ), $request);
     $audit = $this->createMock(McpAuditLogger::class);
-    $audit->method('logAlways')->willThrowException(new \RuntimeException('audit down'));
+    $audit->method('logAlways')->willThrowException(new \RuntimeException(
+      'SQLSTATE[22001]: String data, right truncated: '
+      . '1406 Data too long for column entity_id',
+    ));
+    $principal = 'https://idp.example/realms/agents|human-1|agent-a';
+    $toolId = str_repeat('t', 256);
+    $bounded = McpAuditLogger::boundChainIdentity(['id' => $principal]);
+    $boundedTool = McpAuditLogger::boundChainIdentity(['id' => $toolId]);
     $logger = $this->createMock(LoggerInterface::class);
-    $logger->expects($this->once())->method('error');
+    $logger->expects($this->once())->method('critical')->with(
+      $this->callback(static function (string $message): bool {
+        return str_contains($message, '@event')
+          && str_contains($message, 'was not recorded')
+          && str_contains($message, '@tool')
+          && str_contains($message, '@principal')
+          && str_contains($message, '@class')
+          && !str_contains($message, '@message');
+      }),
+      $this->callback(static function (array $context) use ($bounded, $boundedTool): bool {
+        $event = McpPrincipalContextDispatcher::DENIED_ACCESS_WRITE_FAILED;
+        $reason = McpPrincipalContextDeniedException::RESERVED_IDENTITY_ARGUMENT;
+        $blob = implode(' ', $context);
+        return ($context['@event'] ?? '') === $event
+          && ($context['@reason'] ?? '') === $reason
+          && ($context['@tool'] ?? '') === $boundedTool['id']
+          && ($context['@principal'] ?? '') === $bounded['id']
+          && ($context['@class'] ?? '') === \RuntimeException::class
+          && !array_key_exists('@message', $context)
+          && !str_contains($blob, 'SQLSTATE')
+          && !str_contains($blob, 'entity_id')
+          && !str_contains($blob, str_repeat('t', 256));
+      }),
+    );
+    $logger->expects($this->never())->method('error');
     $dispatcher = $this->dispatcher($stack, $holder, $audit, $logger);
+    try {
+      $dispatcher->admit(['user' => '2'], $toolId);
+      $this->fail('A reserved identity argument must be denied.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::RESERVED_IDENTITY_ARGUMENT,
+        $e->reasonCode,
+      );
+    }
+  }
+
+  /**
+   * deny() cannot receive a non-scalar identity.
+   *
+   * McpPrincipalContext::subject() is a string.
+   * denialAuditMetadata() sets metadata.id to that subject or
+   * "unverified". deny() itself takes only strings (tool,
+   * reason, message). A cyclic or overly deep object therefore
+   * cannot reach deny() or boundChainIdentity() on this path.
+   * Depth, cycle, and budget guards protect other logAlways()
+   * callers and the public helper. This test pins that
+   * string-only contract through deny().
+   *
+   * @covers ::deny
+   */
+  public function testDenyPathIdentityIsAlwaysAString(): void {
+    $deny = new \ReflectionMethod(McpPrincipalContextDispatcher::class, 'deny');
+    foreach ([0, 1, 2] as $index) {
+      $type = $deny->getParameters()[$index]->getType();
+      $this->assertInstanceOf(\ReflectionNamedType::class, $type);
+      $this->assertSame('string', $type->getName());
+    }
+    $subject = new \ReflectionMethod(McpPrincipalContext::class, 'subject');
+    $return = $subject->getReturnType();
+    $this->assertInstanceOf(\ReflectionNamedType::class, $return);
+    $this->assertSame('string', $return->getName());
+
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $this->claims('human-1', 'agent-a'));
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal(new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'human-1',
+      'agent-a',
+      'agent-a',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      TRUE,
+      $this->claims('human-1', 'agent-a'),
+    ), $request);
+    $captured = NULL;
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->willReturnCallback(
+      static function (string $op, array $meta) use (&$captured): void {
+        if ($op === 'denied_access') {
+          $captured = $meta;
+        }
+      },
+    );
+    $dispatcher = $this->dispatcher($stack, $holder, $audit);
     try {
       $dispatcher->admit(['user' => '2'], 'tool-a');
       $this->fail('A reserved identity argument must be denied.');
@@ -121,6 +219,12 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
         $e->reasonCode,
       );
     }
+    $this->assertIsArray($captured);
+    $this->assertIsString($captured['id'] ?? NULL);
+    $this->assertSame('human-1', $captured['id'] ?? NULL);
+    $this->assertIsString($captured['entity_type'] ?? NULL);
+    $this->assertSame('principal', $captured['entity_type'] ?? NULL);
+    $this->assertArrayNotHasKey('bundle', $captured);
   }
 
   /**
