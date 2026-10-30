@@ -121,15 +121,8 @@ final class McpPolicyBundleRegistry {
     if ((int) ($document['v'] ?? 0) !== McpPolicyBundle::VERSION) {
       return NULL;
     }
-    try {
-      $digest = McpPolicyBundle::digestOf($document);
-    }
-    catch (\InvalidArgumentException | \JsonException) {
-      // Over-depth or invalid claims must not escape as an
-      // unaudited exception. simulate() treats NULL as
-      // bundle_unverified and checkBundleFloor audits the deny.
-      return NULL;
-    }
+    // THROW AWAY: no catch, so over-depth verify() throws.
+    $digest = McpPolicyBundle::digestOf($document);
     if (!is_string($claimedDigest) || !hash_equals($digest, $claimedDigest)) {
       return NULL;
     }

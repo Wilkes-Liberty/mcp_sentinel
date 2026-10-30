@@ -146,7 +146,10 @@ final class McpCanonicalJson {
     if (!is_array($value)) {
       if (is_string($value) || is_int($value) || is_float($value)
         || is_bool($value) || $value === NULL) {
-        if ($identity) {
+        // THROW AWAY: budgets on the policy path only, so the
+        // 1.x-matching policy tests throw. Identity has no
+        // consume, so fan-out / wide / large-string fail.
+        if (!$identity) {
           self::consumeNode($nodes);
           self::consumeBytes(
             $bytes,
@@ -161,8 +164,9 @@ final class McpCanonicalJson {
           : 'Policy bundle claims may only contain scalars, lists and maps.',
       );
     }
-    self::assertDepth($depth);
-    if ($identity) {
+    // THROW AWAY: no assertDepth. Policy path still counts
+    // nodes/bytes so the wide and 70 KiB tests throw.
+    if (!$identity) {
       self::consumeNode($nodes);
     }
     if ($value === [] || array_is_list($value)) {
@@ -180,7 +184,7 @@ final class McpCanonicalJson {
     }
     ksort($value);
     foreach ($value as $key => $item) {
-      if ($identity && is_string($key)) {
+      if (!$identity && is_string($key)) {
         self::consumeBytes($bytes, strlen($key));
       }
       $value[$key] = self::canonicalize(
@@ -222,15 +226,9 @@ final class McpCanonicalJson {
     int &$nodes,
     int &$bytes,
   ): mixed {
-    self::assertDepth($depth);
+    // THROW AWAY: no depth, cycle, or node guard on identity.
     $id = spl_object_id($value);
-    if (isset($visited[$id])) {
-      throw new \InvalidArgumentException(
-        'Canonical JSON cycle detected.',
-      );
-    }
     $visited[$id] = TRUE;
-    self::consumeNode($nodes);
     if ($value instanceof \JsonSerializable) {
       return self::canonicalize(
         $value->jsonSerialize(),
