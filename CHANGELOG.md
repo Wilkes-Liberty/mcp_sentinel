@@ -6,6 +6,57 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-10-29
+
+### Changed
+- Webhook event names are a hard allowlist (`mcp.entity.presave`, `mcp.entity.delete`, `mcp.anomaly.alert`). Unknown names are refused on settings save: the endpoint machine id is cut at 64 characters, each echoed name is cut at 128 characters, and only the first 3 names are listed (`, and N more` after that). Cuts are character-safe UTF-8 (`mb_substr` after `mb_scrub`), not raw bytes. `McpEventDispatcher::dispatch()` and `enqueueForEvent()` now drop unknown names: third-party callers of the `mcp_sentinel.event_dispatcher` service get a refused no-op that is audited. `dispatch()` accepts entity events only. The worker, requeue, and replay paths refuse a stored unknown `event_name` the same way, and the `webhook_event_refused` audit row names the delivery (and endpoint, cut at 64 characters, when known) for those stored-row refusals. Replay of a refused row tells the operator the event name was refused. The delivery-log Replay action is offered for failed or sent rows only. Drush and a direct replay of a held or discarded row name that status and do not refuse or write a refusal audit. A stored `mcp.entity.save` filter is still shown as stored and still needs the live name before anything else can be saved. Plain revert is clean; no update hook. Rows already marked failed with the refusal reason stay failed.
+- The Status report now shows one row when `contract_not_ready` (ERROR) and
+  `not_governing` (WARNING) name the same gap (`agent_scopes_missing` or
+  `active_profile_missing`). Both severities stay on that ERROR row so it
+  cannot sit as warning-only. Distinct gaps remain two rows. What is
+  reported is unchanged.
+
+### Fixed
+- A composed principal key over 770 characters is still refused
+  (`part_too_long`), but the `denied_access` row is no longer dropped
+  on MySQL or PostgreSQL. `denialAuditMetadata()` records the 256-
+  character subject on `id`; audit_chain 1.13.0 copies that onto
+  `entity_id` varchar(255) without truncating it. MySQL 8 strict mode
+  and PostgreSQL reject the insert; `deny()` then logs the write
+  failure and still throws, so the caller is denied with no audit
+  row (d.o pipeline 1023398, jobs 13226584 and 13226437). The logger
+  now replaces an oversize `id`, `entity_type`, or `bundle` with a
+  deterministic `sha256:` digest, keeps the original in metadata, and
+  writes the row. SQLite still accepts the raw 256-byte value, which
+  is why GitHub Actions on aa64970 was green. No `updatedb`.
+
+### Security
+- Separate the principal-key actor slot so a token's `act.sub` cannot occupy an `azp` identity. Delegated keys store `act:` plus the current actor; non-delegated `iss|sub|azp` keys are unchanged. An `azp` that already uses that prefix (any case) fails closed with an audited `actor_claim_collision` denial. Kill-switch matching and webhook hold selection permanently treat `iss|sub|X` and `iss|sub|act:X` as the same stop (fail-closed and over-inclusive: over-block only, never under-block). A new `iss|sub|act:X` stop also refuses a non-delegated `azp=X` token, and a new `iss|sub|X` stop also refuses a delegated `act.sub=X` token. Audit and stored `principal_key` identity stay separated. A composed principal key longer than 770 characters is refused (`part_too_long`); a 256-character `act.sub` stays accepted when `iss` and `sub` still fit that column. No `updatedb`. Rebuild caches (`drush cr`). Operators do not need to re-issue active delegated stops across this deploy. Rolling this change back restores exact-match lookup: re-issue any `act:`-prefixed stops as `iss|sub|<act.sub>` if the previous code is restored.
+- API.md now names the runtime `core.extension` cross-check as the DEV-1043 follow-up for the silent `container.modules` forge; that check is not implemented yet.
+- Sealed-token reveal is no longer a state-changing GET. After mint,
+  `GET /admin/config/services/mcp-sentinel/tokens/reveal` is a prompt
+  and never echoes the secret. Showing the bearer is a POST on that
+  path and requires Drupal's CSRF token (`_csrf_token`). A missing or
+  bad token is 403 and reveals nothing; that refusal always writes
+  `sealed_token_reveal_denied` (`reason` `csrf_invalid`, route, acting
+  uid — never the bearer or the CSRF token). A valid POST reveals once
+  and always writes `sealed_token_reveal` (never the bearer), including
+  when `audit_enabled` is off. Mint and revoke still use `log()` and
+  honour `audit_enabled`. Operators must use the **Show sealed token**
+  button instead of relying on a GET of the reveal URL.
+- DEV-1223: Enabling `mcp_sentinel_graphql` installs `webonyx/graphql-php`
+  14.x (via `drupal/graphql` 4.x), which still has three open DoS
+  advisories and no 14.x fix. The core module does not use GraphQL. Sites
+  that enable the submodule should enforce query depth/complexity limits
+  and request size limits at the edge.
+
+### Docs
+- INSTALL and README Requirements now name the hard `ext-intl` /
+  `Spoofchecker` (UTS #39) requirement. Without it, governed tool
+  calls fail closed (`lookalike_check_unavailable`). The webhook
+  class doc now shows the timestamped `X-MCP-Signature-256` verify
+  and the README clock-skew check, instead of the body-only HMAC.
+
 ## [3.5.1] - 2026-10-28
 
 ### Changed
