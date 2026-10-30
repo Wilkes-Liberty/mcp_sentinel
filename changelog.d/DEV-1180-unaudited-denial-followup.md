@@ -14,17 +14,23 @@ goes through `McpCanonicalJson` — the same recursive map-key
 sort and list-order rule as `McpPolicyBundle::normalize()` —
 after expanding `JsonSerializable` and public object
 properties on the identity path only. Policy claims stay
-arrays and scalars. Empty maps encode as `{}`, empty lists as
-`[]`. Recursion is capped at `McpCanonicalJson::MAX_DEPTH`
-(512, json_encode's default). A visited-object set, a
-`MAX_NODES` visit budget (containers and scalars), and a
-`MAX_BYTES` payload budget sit next to that depth cap so a
-cycle, a shared-reference fan-out, a wide scalar list, or
-repeated large strings throw inside the normalizer and
-become a type marker instead of a fatal that skips the
-`denied_access` row. A throwing `jsonSerialize()` or a FALSE
-encode also falls back to that marker. Named constants cover
-the audit_chain_log 128/128/255 column widths; the digest is
+arrays and scalars. An empty identity object encodes as
+`{}`; an empty list encodes as `[]`. Recursion is capped
+at `McpCanonicalJson::MAX_DEPTH` (512, json_encode's
+default) on both paths. `MAX_NODES` and `MAX_BYTES` apply
+only on the identity path so a bundle that verified on 1.x
+still verifies. A visited-object set, a visit budget
+(containers and scalars), and a payload budget sit next to
+that depth cap on the identity walk so a cycle, a
+shared-reference fan-out, a wide scalar list, or repeated
+large strings throw inside the normalizer and become a type
+marker instead of a fatal that skips the `denied_access`
+row. `McpPolicyBundleRegistry::verify()` catches those
+throws and returns NULL so `simulate()` records
+`bundle_unverified` and `checkBundleFloor` audits the deny.
+A throwing `jsonSerialize()` or a FALSE encode also falls
+back to that marker. Named constants cover the
+audit_chain_log 128/128/255 column widths; the digest is
 stored only as `sha256:<hex>` (no duplicate `id_sha256`). A
 dispatcher admit of a 771-character delegated key still writes
 exactly one `denied_access` row when `entity_id` is enforced

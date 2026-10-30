@@ -83,7 +83,8 @@ final class McpPolicyBundle {
    *
    * @throws \InvalidArgumentException
    *   When the value cannot be encoded, or the graph exceeds
-   *   McpCanonicalJson::MAX_DEPTH, MAX_NODES, or MAX_BYTES.
+   *   McpCanonicalJson::MAX_DEPTH. Node and byte budgets are
+   *   identity-only so a 1.x-verifiable bundle still verifies.
    */
   public static function normalize(mixed $value): mixed {
     return McpCanonicalJson::normalize($value);

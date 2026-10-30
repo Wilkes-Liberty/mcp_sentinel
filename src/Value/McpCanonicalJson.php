@@ -16,13 +16,12 @@ namespace Drupal\mcp_sentinel\Value;
  * property names become integer array keys, so an object whose
  * public properties are "0", "1", "2", ... is canonicalized as a list
  * (caller order), not a map. An empty identity object encodes as
- * `{}`; an empty list encodes as `[]`. Recursion stops at MAX_DEPTH.
- * A visited-object set refuses a cycle. A node budget counts
- * every container and scalar so a wide list cannot hide
- * behind a small container count. A byte budget refuses
- * repeated large strings before copies or json_encode().
- * Those throws are catchable InvalidArgumentException so the
- * caller can fall back to a type marker.
+ * `{}`; an empty list encodes as `[]`. Recursion stops at MAX_DEPTH
+ * on both paths (512, matching json_encode). A visited-object set,
+ * a node budget, and a byte budget apply on the identity path
+ * only so a 1.x-verifiable policy bundle still verifies. Those
+ * throws are catchable InvalidArgumentException so the caller
+ * can fall back to a type marker.
  */
 final class McpCanonicalJson {
 
@@ -42,7 +41,8 @@ final class McpCanonicalJson {
    * is only depth 22, but expansion duplicates every level
    * and reaches ~2G without this cap. A wide list of scalars
    * (array_fill of array_fill) stays shallow and still trips
-   * this budget.
+   * this budget. Identity path only: a policy bundle that
+   * verified on 1.x must still verify.
    */
   public const MAX_NODES = 4096;
 
@@ -52,7 +52,7 @@ final class McpCanonicalJson {
    * String values and map keys add their strlen(). Other
    * scalars add one byte. Shared large strings are counted
    * on every visit so encoding cannot blow memory while
-   * staying under MAX_NODES.
+   * staying under MAX_NODES. Identity path only.
    */
   public const MAX_BYTES = 65536;
 
@@ -72,7 +72,7 @@ final class McpCanonicalJson {
    *
    * @throws \InvalidArgumentException
    *   When the value cannot be encoded, or the graph exceeds
-   *   MAX_DEPTH, MAX_NODES, or MAX_BYTES.
+   *   MAX_DEPTH. Node and byte budgets are identity-only.
    */
   public static function normalize(mixed $value): mixed {
     $nodes = 0;
@@ -146,11 +146,13 @@ final class McpCanonicalJson {
     if (!is_array($value)) {
       if (is_string($value) || is_int($value) || is_float($value)
         || is_bool($value) || $value === NULL) {
-        self::consumeNode($nodes);
-        self::consumeBytes(
-          $bytes,
-          is_string($value) ? strlen($value) : 1,
-        );
+        if ($identity) {
+          self::consumeNode($nodes);
+          self::consumeBytes(
+            $bytes,
+            is_string($value) ? strlen($value) : 1,
+          );
+        }
         return $value;
       }
       throw new \InvalidArgumentException(
@@ -160,7 +162,9 @@ final class McpCanonicalJson {
       );
     }
     self::assertDepth($depth);
-    self::consumeNode($nodes);
+    if ($identity) {
+      self::consumeNode($nodes);
+    }
     if ($value === [] || array_is_list($value)) {
       foreach ($value as $key => $item) {
         $value[$key] = self::canonicalize(
@@ -176,7 +180,7 @@ final class McpCanonicalJson {
     }
     ksort($value);
     foreach ($value as $key => $item) {
-      if (is_string($key)) {
+      if ($identity && is_string($key)) {
         self::consumeBytes($bytes, strlen($key));
       }
       $value[$key] = self::canonicalize(
@@ -222,7 +226,7 @@ final class McpCanonicalJson {
     $id = spl_object_id($value);
     if (isset($visited[$id])) {
       throw new \InvalidArgumentException(
-        'Canonical JSON depth exceeded.',
+        'Canonical JSON cycle detected.',
       );
     }
     $visited[$id] = TRUE;
@@ -281,7 +285,7 @@ final class McpCanonicalJson {
     $nodes++;
     if ($nodes > self::MAX_NODES) {
       throw new \InvalidArgumentException(
-        'Canonical JSON depth exceeded.',
+        'Canonical JSON node budget exceeded.',
       );
     }
   }
@@ -301,7 +305,7 @@ final class McpCanonicalJson {
     $bytes += $added;
     if ($bytes > self::MAX_BYTES) {
       throw new \InvalidArgumentException(
-        'Canonical JSON depth exceeded.',
+        'Canonical JSON byte budget exceeded.',
       );
     }
   }

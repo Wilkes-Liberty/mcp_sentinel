@@ -192,6 +192,45 @@ final class McpAuditLoggerBoundIdentityTest extends UnitTestCase {
   }
 
   /**
+   * Identity normalize names a cycle separately from depth.
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalizeIdentity
+   */
+  public function testNormalizeIdentityNamesCycle(): void {
+    $id = new \stdClass();
+    $id->self = $id;
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage('Canonical JSON cycle detected.');
+    McpCanonicalJson::normalizeIdentity($id);
+  }
+
+  /**
+   * Identity normalize names a node-budget overrun separately from depth.
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalizeIdentity
+   */
+  public function testNormalizeIdentityNamesNodeBudget(): void {
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage('Canonical JSON node budget exceeded.');
+    McpCanonicalJson::normalizeIdentity(
+      array_fill(0, McpCanonicalJson::MAX_NODES + 1, 1),
+    );
+  }
+
+  /**
+   * Identity normalize names a byte-budget overrun separately from depth.
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalizeIdentity
+   */
+  public function testNormalizeIdentityNamesByteBudget(): void {
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage('Canonical JSON byte budget exceeded.');
+    McpCanonicalJson::normalizeIdentity(
+      str_repeat('x', McpCanonicalJson::MAX_BYTES + 1),
+    );
+  }
+
+  /**
    * A self-referencing object falls back to the type marker.
    *
    * Without MAX_DEPTH this recurses until a fatal and the deny

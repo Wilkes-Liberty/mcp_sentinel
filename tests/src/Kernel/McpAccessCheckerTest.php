@@ -11,6 +11,8 @@ use Drupal\mcp_sentinel\Entity\McpPolicyProfile;
 use Drupal\mcp_sentinel\Service\McpAccessChecker;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
+use Drupal\mcp_sentinel\Value\McpCanonicalJson;
+use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
 use Drupal\taxonomy\Entity\Term;
@@ -25,6 +27,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  */
 #[RunTestsInSeparateProcesses]
 final class McpAccessCheckerTest extends KernelTestBase {
+
+  use McpAuditSchemaTestTrait;
 
   /**
    * {@inheritdoc}
@@ -464,6 +468,70 @@ final class McpAccessCheckerTest extends KernelTestBase {
     $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $write->getReason());
     $read = $this->checker()->checkConfigAccess('system.site', 'read', $p);
     $this->assertFalse($read->isForbidden(), 'A bundle that names only update must not refuse config read.');
+  }
+
+  /**
+   * An over-depth attested document is an audited bundle deny.
+   *
+   * The verify() path must return NULL, not throw, so
+   * simulate() emits bundle_unverified and checkBundleFloor
+   * writes denied_access.
+   *
+   * @covers ::checkEntityAccess
+   * @covers ::checkBundleFloor
+   */
+  public function testUnverifiableOverDepthBundleIsAuditedDeny(): void {
+    $this->installAuditChainSchema();
+    $this->setMaster(TRUE);
+    $this->activateBundle([]);
+    $state = $this->container->get('state');
+    $attestation = $state->get(McpPolicyBundleRegistry::STATE_ACTIVE);
+    $this->assertIsArray($attestation);
+    $this->assertIsArray($attestation['bundle'] ?? NULL);
+    $nested = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH + 1; $i++) {
+      $nested = [$nested];
+    }
+    $attestation['bundle']['extra'] = $nested;
+    $state->set(McpPolicyBundleRegistry::STATE_ACTIVE, $attestation);
+
+    $before = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $p = $this->profile(['allow_write' => TRUE]);
+    $denied = $this->checker()->checkEntityAccess($this->node, 'view', $p);
+    $this->assertInstanceOf(AccessResultForbidden::class, $denied);
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $denied->getReason());
+    $this->assertContains(
+      McpPolicyBundleRegistry::CACHE_TAG,
+      $denied->getCacheTags(),
+    );
+    $after = (int) $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->condition('l.operation', 'denied_access')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(
+      $before + 1,
+      $after,
+      'The unverifiable bundle must write one denied_access row.',
+    );
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame(McpAccessChecker::BUNDLE_DENIAL_CODE, $meta['reason']);
   }
 
   /**
