@@ -13,7 +13,7 @@ use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Url;
 
 /**
- * Builds the admin MCP status strip (DEV-761).
+ * Builds the admin MCP status strip.
  *
  * Visible facts only: master switch, designated clients/consumers,
  * source-governance readiness, and the last whoami signal. No secrets.

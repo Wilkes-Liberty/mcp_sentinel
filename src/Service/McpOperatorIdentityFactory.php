@@ -8,7 +8,7 @@ use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 
 /**
- * Resolves a verified Paladin operator identity (DEV-986).
+ * Resolves a verified Paladin operator identity.
  *
  * Drush kill-switch commands take identity from a Paladin token:
  * iss|sub after introspection. A request-sealed principal is not

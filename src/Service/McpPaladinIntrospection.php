@@ -13,7 +13,7 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 
 /**
- * RFC 7662 Paladin token introspection for operator commands (DEV-986).
+ * RFC 7662 Paladin token introspection for operator commands.
  *
  * The iss|sub is taken only from an active introspection response. The
  * token string and any --human-key input are never used as identity.
@@ -210,6 +210,8 @@ final class McpPaladinIntrospection {
           'A verified operator identity is required.',
         );
       }
+      // Resource audience accepts aud, azp, or client_id. The operator
+      // grant below does not: that check is aud or role only.
       $audienceOk = $this->claimMatches($audience, $payload['aud'] ?? NULL)
         || $this->claimMatches($audience, $payload['azp'] ?? NULL)
         || $this->claimMatches($audience, $payload['client_id'] ?? NULL);

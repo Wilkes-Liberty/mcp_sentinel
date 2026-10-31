@@ -10,7 +10,7 @@ use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 /**
  * Immutable principal + tenant context from a validated token.
  *
- * Built at the request boundary (DEV-844 / DEV-839). Tools receive this
+ * Built at the request boundary. Tools receive this
  * as a separate parameter and must never read identity or tenant from
  * tool arguments.
  *
@@ -160,7 +160,7 @@ final readonly class McpPrincipalContext {
    * @param list<string> $scopes
    *   Granted scope names from the token.
    * @param string $tenant
-   *   Tenant claim (DEV-839). Empty when the token omitted it.
+   *   Tenant claim. Empty when the token omitted it.
    * @param list<string> $actChain
    *   RFC 8693 act delegation chain, outermost actor first. Empty when
    *   the token has no act claim.
@@ -255,7 +255,7 @@ final readonly class McpPrincipalContext {
    * TRUE when claims came from the sealed-token auth provider.
    *
    * Provenance, not the iss string. Paladin is the sole issuer
-   * for governed tools (DEV-843).
+   * for governed tools.
    */
   public function fromSealedToken(): bool {
     return $this->sealedToken;

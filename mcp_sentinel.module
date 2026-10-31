@@ -267,7 +267,7 @@ function mcp_sentinel_page_top(array &$page): void {
  * because the original (pre-change) field values are still available here.
  */
 function mcp_sentinel_entity_presave(EntityInterface $entity): void {
-  // Kill-switch re-check (DEV-846): a kill mid-request must abort
+  // Kill-switch re-check: a kill mid-request must abort
   // the write before commit, alongside the tenant re-check.
   if (\Drupal::hasService('mcp_sentinel.kill_switch')) {
     \Drupal::service('mcp_sentinel.kill_switch')->assertNotKilledAtCommitOrAccess();
@@ -1200,7 +1200,7 @@ function mcp_sentinel_scheduler_publishing_allowed(EntityInterface $entity): ?bo
  * depend on the event dispatcher (config-save subscribers also
  * consult the kill registry).
  *
- * DEV-985: an unconfirmed mass freeze stays frozen. This hook
+ * An unconfirmed mass freeze stays frozen. This hook
  * receives every target in the batch so an implementation can
  * notify operators and the break-glass path. Stopped agents
  * are not notified. It must not lift the freeze or complete a

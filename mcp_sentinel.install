@@ -65,7 +65,7 @@ function mcp_sentinel_schema(): array {
       'created'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
       'item_id'            => ['type' => 'int', 'unsigned' => TRUE, 'not null' => FALSE],
       // Principal keys stored at enqueue so a later kill can hold the
-      // row without reading the queue item (DEV-985).
+      // row without reading the queue item.
       'principal_key'      => [
         'type' => 'varchar',
         'length' => 770,
@@ -144,7 +144,7 @@ function mcp_sentinel_schema(): array {
     'primary key' => ['entity_type', 'uuid'],
   ];
 
-  // Agent kill-block registry (DEV-846). Keyed by a hash of the
+  // Agent kill-block registry. Keyed by a hash of the
   // selector because a principal_key can be 770 characters and will
   // not fit a utf8mb4 unique index. selector_key stores the full
   // iss|sub|actor, iss|sub, or tenant value.
@@ -1760,7 +1760,7 @@ function mcp_sentinel_update_10029(): string {
 }
 
 /**
- * Create the agent kill-block registry and seed TTL defaults (DEV-846).
+ * Create the agent kill-block registry and seed TTL defaults.
  */
 function mcp_sentinel_update_10030(): string {
   $schema = \Drupal::database()->schema();
@@ -1799,7 +1799,7 @@ function mcp_sentinel_update_10030(): string {
 }
 
 /**
- * Create the operator-binding table for mixed-channel kill confirm (DEV-846).
+ * Create the operator-binding table for mixed-channel kill confirm.
  */
 function mcp_sentinel_update_10031(): string {
   $schema = \Drupal::database()->schema();
@@ -1812,7 +1812,7 @@ function mcp_sentinel_update_10031(): string {
 }
 
 /**
- * Add unbind columns and drop dead Paladin introspection config (DEV-846).
+ * Add unbind columns and drop dead Paladin introspection config.
  */
 function mcp_sentinel_update_10032(): string {
   $schema = \Drupal::database()->schema();
@@ -1855,7 +1855,7 @@ function mcp_sentinel_update_10032(): string {
 }
 
 /**
- * Drop paladin_introspection_* keys seeded by an earlier 10032 (DEV-846).
+ * Drop paladin_introspection_* keys seeded by an earlier 10032.
  */
 function mcp_sentinel_update_10033(): string {
   $removed = mcp_sentinel_clear_dead_paladin_introspection_config();
@@ -1866,7 +1866,7 @@ function mcp_sentinel_update_10033(): string {
 }
 
 /**
- * Map Paladin operator identities to Drupal accounts (DEV-986).
+ * Map Paladin operator identities to Drupal accounts.
  */
 function mcp_sentinel_update_10034(): string {
   $schema = \Drupal::database()->schema();
@@ -1899,7 +1899,7 @@ function mcp_sentinel_update_10034(): string {
 }
 
 /**
- * Hold-queue columns and freeze escalation stamp (DEV-985).
+ * Hold-queue columns and freeze escalation stamp.
  */
 function mcp_sentinel_update_10036(): string {
   $schema = \Drupal::database()->schema();
@@ -1964,7 +1964,7 @@ function mcp_sentinel_update_10036(): string {
 }
 
 /**
- * Reset Paladin uids, drop leftover Drush rows, keep freezes (DEV-986).
+ * Reset Paladin uids, drop leftover Drush rows, keep freezes.
  *
  * Sites that already ran 10036 still need this. Update 10038
  * records the pre-upgrade max delivery id and drops released.
@@ -2022,7 +2022,7 @@ function mcp_sentinel_update_10037(): string {
 }
 
 /**
- * Record pre-upgrade max id, drop unused released, hold remaining (DEV-985).
+ * Record pre-upgrade max id, drop unused released, hold remaining.
  *
  * 10036 already added hold-queue columns. This hook records the
  * highest delivery id present before the upgrade, drops the unused
@@ -2087,7 +2087,7 @@ function mcp_sentinel_update_10038(): string {
 }
 
 /**
- * Deletes the unused pre-upgrade max-id state key (DEV-985).
+ * Deletes the unused pre-upgrade max-id state key.
  *
  * Update 10038 still writes mcp_sentinel.webhook_pre_upgrade_max_id.
  * Runtime no longer reads it: every keyless row is held while any

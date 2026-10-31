@@ -10,7 +10,7 @@ use Symfony\Contracts\EventDispatcher\Event;
 /**
  * Fired when a two-person confirm window elapses with no second operator.
  *
- * DEV-985: an unconfirmed mass freeze stays frozen and escalates
+ * An unconfirmed mass freeze stays frozen and escalates
  * through this event and hook_mcp_sentinel_kill_unavailable_confirmer.
  * There is no fallback that lifts the freeze or grants a pending
  * un-kill. The hook receives every target; stopped agents are not

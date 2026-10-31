@@ -17,7 +17,7 @@ use Drupal\mcp_sentinel\Value\McpOperatorIdentity;
 use Drupal\user\UserInterface;
 
 /**
- * Binds Paladin identities to Drupal operator accounts (DEV-986).
+ * Binds Paladin identities to Drupal operator accounts.
  *
  * Bind maps a Paladin iss|sub to one Drupal uid. The token claim
  * pinned in settings.php (default preferred_username) must match

@@ -38,7 +38,7 @@ final class McpPrincipalContextGuard {
   }
 
   /**
-   * Test-only injection that restores pre-DEV-844 admission.
+   * Test-only injection that restores unguarded admission (PHPUnit only).
    *
    * Impossible outside the PHPUnit process: the runner's autoload
    * constants are required. No getenv() path exists.

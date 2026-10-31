@@ -377,7 +377,7 @@
   background: var(--gin-bg-layer3, #e9ecef);
 }
 
-/* Connector admin status strip (DEV-761). */
+/* Connector admin status strip. */
 .mcp-status-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

@@ -33,7 +33,7 @@ use Psr\Log\LoggerInterface;
 /**
  * Durable agent kill registry and two-person operator API.
  *
- * DEV-846 and DEV-985. Storage is keyed by principal_key
+ * Storage is keyed by principal_key
  * (iss|sub|actor), human_key (iss|sub, all agents of this person),
  * or tenant. Writes are transactional. A killed row is never
  * downgraded to kill_pending.
@@ -276,6 +276,7 @@ final class McpKillSwitch implements McpKillEnforcerInterface {
    * {@inheritdoc}
    */
   public function isKilled(string $principalKey, string $humanKey = '', string $tenant = ''): bool {
+    // Fail-closed during a partial upgrade; writes throw TABLE_MISSING.
     if (!$this->tableReady()) {
       return TRUE;
     }

@@ -7,7 +7,7 @@ namespace Drupal\mcp_sentinel\Value;
 use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 
 /**
- * Kill-block TTL bounds (DEV-846, operator-approved).
+ * Kill-block TTL bounds (operator-approved).
  *
  * Default 24 h, maximum 7 d. A requested or configured TTL above
  * 7 d is a validation error. The maximum cannot be configured

@@ -553,8 +553,7 @@ See `mcp_sentinel.api.php`.
 ## Known limits
 
 - There is no admin UI for stops. There is no stop route over `/mcp`.
-  Drush is the only operator surface. Drupal-side kill-block records
-  are DEV-925.
+  Drush is the only operator surface.
 - A stop does not revoke tokens at your issuer.
 - A stop lasts at most 7 days. Extend it before it ends if you need
   longer.

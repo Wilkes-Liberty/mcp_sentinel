@@ -25,7 +25,7 @@ use Drush\Commands\DrushCommands;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
- * Operator commands for the agent kill switch (DEV-986).
+ * Operator commands for the agent kill switch.
  *
  * Drush-only; the dashboard is not kill ops. Permission:
  * administer agent kill switch.
