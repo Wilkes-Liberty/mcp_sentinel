@@ -109,22 +109,29 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
   }
 
   /**
-   * HasSealedContext() is false under a deny-only overlay.
+   * A request seal is visible only outside a deny-only overlay.
    *
-   * @covers ::hasSealedContext
+   * Live callers ask the dispatcher; the job helper no longer duplicates
+   * that check. The holder still hides the seal while the overlay is open.
+   *
+   * @covers ::begin
+   * @covers ::end
    */
-  public function testHasSealedContextIsFalseUnderOverlay(): void {
+  public function testRequestSealIsHiddenUnderOverlay(): void {
     $stack = new RequestStack();
     $request = Request::create('/cron/test-key');
     $stack->push($request);
     $holder = new McpPrincipalContextHolder($stack);
     $holder->seal($this->ctx('cron-human', 'cron-client'), $request);
     $job = new McpPrincipalContextJob($holder);
-    $this->assertTrue($job->hasSealedContext());
+    $this->assertFalse($holder->inJobScope());
+    $this->assertInstanceOf(McpPrincipalContext::class, $holder->get());
     $handle = $job->begin();
-    $this->assertFalse($job->hasSealedContext());
+    $this->assertTrue($holder->inJobScope());
+    $this->assertNotInstanceOf(McpPrincipalContext::class, $holder->get());
     $job->end($handle);
-    $this->assertTrue($job->hasSealedContext());
+    $this->assertFalse($holder->inJobScope());
+    $this->assertInstanceOf(McpPrincipalContext::class, $holder->get());
   }
 
   /**

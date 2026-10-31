@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * Fail-closed and secret-free. Never auto-widens an allowlist or denylist.
  * The formatted suffix is operator-facing (audit row and logs). Callers
- * receive callerMessage() only.
+ * receive CALLER_MESSAGE only.
  */
 final class McpDenyExplainer {
 
@@ -432,13 +432,6 @@ final class McpDenyExplainer {
       return $reason;
     }
     return $reason . ' ' . $this->explain($reason, $profileId)->format();
-  }
-
-  /**
-   * Generic deny the caller is allowed to see.
-   */
-  public function callerMessage(): string {
-    return self::CALLER_MESSAGE;
   }
 
   /**

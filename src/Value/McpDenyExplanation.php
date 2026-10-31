@@ -7,7 +7,7 @@ namespace Drupal\mcp_sentinel\Value;
 /**
  * Operator-facing explanation of a policy denial.
  *
- * Never carries secrets. Never sent to a caller (DEV-966). Widening is
+ * Never carries secrets. Never sent to a caller. Widening is
  * advisory only: operators must not auto-apply it.
  */
 final class McpDenyExplanation {
