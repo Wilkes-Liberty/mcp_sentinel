@@ -156,6 +156,43 @@ final class McpDenyExplainerTest extends UnitTestCase {
   }
 
   /**
+   * CallerMessage() still returns the generic deny and emits a deprecation.
+   *
+   * PHPUnit 9 and 11 do not share one expectDeprecation() API, so this
+   * catches E_USER_DEPRECATED directly. The message must stay specific
+   * enough to fail if the wrapper is dropped or goes silent.
+   *
+   * @covers ::callerMessage
+   */
+  public function testCallerMessageIsDeprecated(): void {
+    $message = NULL;
+    $triggered = NULL;
+    set_error_handler(static function (int $errno, string $errstr) use (&$triggered): bool {
+      if ($errno === E_USER_DEPRECATED) {
+        $triggered = $errstr;
+        return TRUE;
+      }
+      return FALSE;
+    });
+    try {
+      $explainer = new McpDenyExplainer();
+      // @phpstan-ignore method.deprecated (this test is the deprecation contract)
+      $message = $explainer->callerMessage();
+    }
+    finally {
+      restore_error_handler();
+    }
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $message);
+    $this->assertIsString($triggered);
+    $this->assertStringContainsString(
+      'McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2',
+      $triggered,
+    );
+    $this->assertStringContainsString('removed from mcp_sentinel:4.0.0', $triggered);
+    $this->assertStringContainsString('CALLER_MESSAGE', $triggered);
+  }
+
+  /**
    * Refuse() logs the explainer and returns only the generic caller deny.
    *
    * @covers ::refuse

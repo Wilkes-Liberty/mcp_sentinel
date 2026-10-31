@@ -182,8 +182,8 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
   /**
    * Whether a request principal is visible outside any job overlay.
    *
-   * Same visibility check the job helper used to expose. Live callers
-   * now ask the dispatcher.
+   * Tests holder overlay visibility. A request seal is hidden while a
+   * deny-only overlay is open.
    */
   private function requestSealIsVisible(McpPrincipalContextHolder $holder): bool {
     return !$holder->inJobScope()
