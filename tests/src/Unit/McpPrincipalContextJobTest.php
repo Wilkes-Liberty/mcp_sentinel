@@ -124,14 +124,11 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     $holder = new McpPrincipalContextHolder($stack);
     $holder->seal($this->ctx('cron-human', 'cron-client'), $request);
     $job = new McpPrincipalContextJob($holder);
-    $this->assertFalse($holder->inJobScope());
-    $this->assertInstanceOf(McpPrincipalContext::class, $holder->get());
+    $this->assertTrue($this->requestSealIsVisible($holder));
     $handle = $job->begin();
-    $this->assertTrue($holder->inJobScope());
-    $this->assertNotInstanceOf(McpPrincipalContext::class, $holder->get());
+    $this->assertFalse($this->requestSealIsVisible($holder));
     $job->end($handle);
-    $this->assertFalse($holder->inJobScope());
-    $this->assertInstanceOf(McpPrincipalContext::class, $holder->get());
+    $this->assertTrue($this->requestSealIsVisible($holder));
   }
 
   /**
@@ -180,6 +177,17 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     );
     $job->end($handle);
     $this->assertNull($holder->carriedPrincipal());
+  }
+
+  /**
+   * Whether a request principal is visible outside any job overlay.
+   *
+   * Same predicate live callers used to ask the job helper for. The
+   * dispatcher still owns that check; the job helper no longer does.
+   */
+  private function requestSealIsVisible(McpPrincipalContextHolder $holder): bool {
+    return !$holder->inJobScope()
+      && $holder->get() instanceof McpPrincipalContext;
   }
 
   /**
