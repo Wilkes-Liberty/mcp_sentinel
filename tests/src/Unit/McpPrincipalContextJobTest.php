@@ -182,8 +182,8 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
   /**
    * Whether a request principal is visible outside any job overlay.
    *
-   * Same predicate live callers used to ask the job helper for. The
-   * dispatcher still owns that check; the job helper no longer does.
+   * Same visibility check the job helper used to expose. Live callers
+   * now ask the dispatcher.
    */
   private function requestSealIsVisible(McpPrincipalContextHolder $holder): bool {
     return !$holder->inJobScope()
