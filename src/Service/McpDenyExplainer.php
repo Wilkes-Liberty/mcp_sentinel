@@ -435,7 +435,7 @@ final class McpDenyExplainer {
     return $reason . ' ' . $this->explain($reason, $profileId)->format();
   }
 
-  // The change record is GitHub PR 407. Coder wants a drupal.org node.
+  // The change record is GitHub PR 409. Coder wants a drupal.org node.
   // phpcs:disable Drupal.Commenting.Deprecated.DeprecatedWrongSeeUrlFormat
   // phpcs:disable Drupal.Semantics.FunctionTriggerError.TriggerErrorSeeUrlFormat
 
@@ -446,7 +446,7 @@ final class McpDenyExplainer {
    *   Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE
    *   instead.
    *
-   * @see https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407
+   * @see https://github.com/Wilkes-Liberty/mcp_sentinel/pull/409
    *
    * @return string
    *   CALLER_MESSAGE. Never a rule id or explainer suffix.
@@ -454,7 +454,7 @@ final class McpDenyExplainer {
   public function callerMessage(): string {
     // Third-party callers still hit this wrapper. Keep the body identical
     // to CALLER_MESSAGE and tell them to switch before 4.0.0.
-    @trigger_error('Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407', E_USER_DEPRECATED);
+    @trigger_error('Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/409', E_USER_DEPRECATED);
     return self::CALLER_MESSAGE;
   }
 

@@ -172,7 +172,7 @@ final class McpDenyExplainerTest extends UnitTestCase {
   public function testCallerMessageIsDeprecated(): void {
     // @phpstan-ignore method.deprecated (ExpectDeprecationTrait on D11.4+)
     $this->expectDeprecation(
-      'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407',
+      'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/409',
     );
     $explainer = new McpDenyExplainer();
     // @phpstan-ignore method.deprecated (this test is the deprecation contract)
