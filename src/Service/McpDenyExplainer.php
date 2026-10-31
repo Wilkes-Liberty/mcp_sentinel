@@ -452,9 +452,6 @@ final class McpDenyExplainer {
    *   CALLER_MESSAGE. Never a rule id or explainer suffix.
    */
   public function callerMessage(): string {
-    // Third-party callers still hit this wrapper. Keep the body identical
-    // to CALLER_MESSAGE and tell them to switch before 4.0.0.
-    @trigger_error('Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407', E_USER_DEPRECATED);
     return self::CALLER_MESSAGE;
   }
 
