@@ -8,7 +8,9 @@ use Drupal\Core\Queue\QueueWorkerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Drush\Commands\McpPrincipalContextCommands;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
+use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Plugin\tool\Tool\McpGovernedToolBase;
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpLookalikeChecker;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
@@ -18,6 +20,7 @@ use Drupal\mcp_sentinel\Service\McpSealedTokenManager;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\mcp_sentinel_downstream_test\Plugin\tool\Tool\PrincipalContextProbeTool;
 use Drupal\Tests\mcp_sentinel\Support\McpJobScopeQueueStub;
+use Drupal\Tests\mcp_sentinel\Support\McpMysqlStrictAuditChain;
 use Drupal\Tests\mcp_sentinel\Traits\McpAuditSchemaTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
@@ -1224,6 +1227,85 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
   }
 
   /**
+   * An overlong composed principal key still writes one denied_access row.
+   *
+   * A 256-character subject is a legal claim part
+   * (McpPrincipalKey::MAX_PART_LENGTH) but audit_chain copies
+   * metadata.id onto entity_id varchar(255) without truncating
+   * it. MySQL 8 strict mode and PostgreSQL refuse that insert;
+   * SQLite does not. This test wraps the chain so an oversize
+   * entity_id is rejected the same way, then admits through
+   * the real deny path. Exactly one denied_access row must
+   * land. A missing row is the d.o phpunit failure on
+   * aa64970 (DEV-1180 / #396).
+   */
+  public function testOverlongComposedPrincipalKeyWritesOneDeniedAccessRow(): void {
+    $this->enforceMysqlStrictIdentityColumns();
+    $iss = str_repeat('a', 256);
+    $sub = str_repeat('a', 256);
+    $actSub = str_repeat('a', 253);
+    $claims = [
+      'iss' => $iss,
+      'sub' => $sub,
+      'azp' => 'agent-client',
+      'act' => ['sub' => $actSub],
+      'tenant' => 'tenant-a',
+    ];
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, $claims);
+    $request->attributes->set(McpPrincipalContext::NETWORK_ATTRIBUTE, TRUE);
+    $holder = $this->holder();
+    $holder->resetForTest();
+    $stack = $this->container->get('request_stack');
+    $current = $stack->getCurrentRequest();
+    if ($current !== NULL && $current->hasSession()) {
+      $request->setSession($current->getSession());
+    }
+    $stack->push($request);
+    $ctx = $this->container->get('mcp_sentinel.principal_context_factory')
+      ->fromRequest($request);
+    $holder->seal($ctx, $request);
+    $before = $this->deniedAccessCount();
+    try {
+      $this->dispatcher()->admit(
+        ['note' => 'ok'],
+        'mcp_sentinel_principal_context_probe',
+      );
+      $this->fail('A 771-character delegated key must fail closed.');
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      $this->assertStringContainsString(
+        McpPrincipalKeyException::PART_TOO_LONG,
+        $e->getMessage(),
+      );
+    }
+    $this->assertSame(
+      $before + 1,
+      $this->deniedAccessCount(),
+      'The deny path must write exactly one denied_access row.',
+    );
+    $row = $this->container->get('database')
+      ->select('audit_chain_log', 'l')
+      ->fields('l', ['metadata', 'entity_id'])
+      ->condition('l.operation', 'denied_access')
+      ->orderBy('l.id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchAssoc();
+    $this->assertIsArray($row);
+    $this->assertLessThanOrEqual(255, strlen((string) $row['entity_id']));
+    $this->assertSame('sha256:' . hash('sha256', $sub), $row['entity_id']);
+    $meta = $this->container->get('mcp_sentinel.audit_logger')
+      ->decodeMetadata((string) $row['metadata']);
+    $this->assertSame($sub, $meta['sub'] ?? NULL);
+    $this->assertArrayNotHasKey('id_sha256', $meta);
+  }
+
+  /**
    * The context holder is not a public container service.
    */
   public function testHolderServiceIsNotPublic(): void {
@@ -1454,6 +1536,49 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     sort($top);
     sort($maps);
     return ['top_level' => $top, 'maps' => $maps];
+  }
+
+  /**
+   * Rejects an oversize entity_id the way MySQL 8 strict mode does.
+   *
+   * SQLite stores a 256-byte varchar(255) value. MySQL and
+   * PostgreSQL refuse the insert (SQLSTATE 22001). A chain
+   * decorator makes the kernel SQLite job ask the same
+   * question as d.o. Rebuilds the logger and dispatcher so
+   * admit() goes through the wrapped chain.
+   */
+  private function enforceMysqlStrictIdentityColumns(): void {
+    $strict = new McpMysqlStrictAuditChain(
+      $this->container->get('audit_chain.logger'),
+    );
+    $holder = $this->holder();
+    $logger = new McpAuditLogger(
+      $this->container->get('config.factory'),
+      $this->container->get('request_stack'),
+      $strict,
+      $this->container->get('mcp_sentinel.dlp'),
+      $this->container->get('database'),
+      $this->container->get('mcp_sentinel.policy_bundle_registry'),
+      $this->container->get('mcp_sentinel.config_secret_redactor'),
+      NULL,
+      $this->container->get('current_user'),
+      $this->container->get('account_switcher'),
+    );
+    $this->container->set('audit_chain.logger', $strict);
+    $this->container->set('mcp_sentinel.audit_logger', $logger);
+    $this->container->set(
+      'mcp_sentinel.principal_context_dispatcher',
+      new McpPrincipalContextDispatcher(
+        $this->container->get('mcp_sentinel.principal_context_factory'),
+        $this->container->get('request_stack'),
+        $this->container->get('mcp_sentinel.principal_context_guard'),
+        $holder,
+        $logger,
+        $this->container->get('logger.channel.mcp_sentinel'),
+        $this->container->get('mcp_sentinel.kill_switch'),
+        $this->container->get('mcp_sentinel.deny_explainer'),
+      ),
+    );
   }
 
   /**

@@ -13,6 +13,7 @@ use Drupal\Core\State\StateInterface;
 use Drupal\key\KeyInterface;
 use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry;
+use Drupal\mcp_sentinel\Value\McpCanonicalJson;
 use Drupal\mcp_sentinel\Value\McpPolicyBundle;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -26,6 +27,7 @@ use PHPUnit\Framework\Attributes\Group;
  * @group mcp_sentinel
  */
 #[CoversClass(McpPolicyBundle::class)]
+#[CoversClass(McpCanonicalJson::class)]
 #[CoversClass(McpPolicyBundleRegistry::class)]
 #[Group('mcp_sentinel')]
 final class McpPolicyBundleTest extends UnitTestCase {
@@ -47,6 +49,169 @@ final class McpPolicyBundleTest extends UnitTestCase {
     $a = ['v' => 1, 'denials' => ['operations' => ['delete']], 'id' => 'x', 'issued' => 1, 'expires' => 10];
     $b = ['expires' => 10, 'id' => 'x', 'issued' => 1, 'v' => 1, 'denials' => ['operations' => ['delete']]];
     $this->assertSame(McpPolicyBundle::digestOf($a), McpPolicyBundle::digestOf($b));
+  }
+
+  /**
+   * Canonical JSON bytes are pinned so a sorter drift fails this test.
+   *
+   * @covers ::digestOf
+   * @covers ::canonicalJson
+   * @covers ::normalize
+   */
+  public function testCanonicalJsonBytesArePinned(): void {
+    $claims = [
+      'v' => 1,
+      'denials' => ['operations' => ['update', 'delete']],
+      'id' => 'bundle-a',
+      'issued' => 1,
+      'expires' => 10,
+      'extra' => ['z' => FALSE, 'a' => NULL],
+    ];
+    $json = McpPolicyBundle::canonicalJson($claims);
+    $this->assertSame(
+      '{"denials":{"operations":["update","delete"]},"expires":10,'
+      . '"extra":{"a":null,"z":false},"id":"bundle-a","issued":1,"v":1}',
+      $json,
+    );
+    $this->assertSame(
+      'd844f51f92764a2dff463270a70ef3563259d4e845c5aba78c4765f46f8093a7',
+      McpPolicyBundle::digestOf($claims),
+    );
+    $this->assertSame(
+      hash('sha256', $json),
+      McpPolicyBundle::digestOf($claims),
+    );
+  }
+
+  /**
+   * An acyclic nest deeper than MAX_DEPTH is rejected.
+   *
+   * Cycle and fan-out tests do not pin this guard: they stop
+   * at the visited set or MAX_NODES. This calls normalize()
+   * directly so json_encode()'s own depth cap cannot hide a
+   * missing assertDepth().
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalize
+   */
+  public function testNormalizeRejectsGraphDeeperThanMaxDepth(): void {
+    $value = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH + 1; $i++) {
+      $value = [$value];
+    }
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage('Canonical JSON depth exceeded.');
+    McpCanonicalJson::normalize($value);
+  }
+
+  /**
+   * A nest of exactly MAX_DEPTH arrays is accepted.
+   *
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalize
+   */
+  public function testNormalizeAcceptsGraphAtMaxDepth(): void {
+    $value = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH; $i++) {
+      $value = [$value];
+    }
+    $normalized = McpCanonicalJson::normalize($value);
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH; $i++) {
+      $this->assertIsArray($normalized);
+      $this->assertCount(1, $normalized);
+      $normalized = $normalized[0];
+    }
+    $this->assertSame('leaf', $normalized);
+  }
+
+  /**
+   * A policy bundle wider than MAX_NODES still matches the 1.x digest.
+   *
+   * Node and byte budgets are identity-only. More than 4096
+   * operation strings verified on 1.x and must still verify.
+   *
+   * @covers ::digestOf
+   * @covers ::canonicalJson
+   * @covers ::normalize
+   */
+  public function testNormalizeAcceptsPolicyBundleWiderThanNodeBudget(): void {
+    $operations = [];
+    for ($i = 0; $i < McpCanonicalJson::MAX_NODES + 4; $i++) {
+      $operations[] = 'op-' . $i;
+    }
+    $claims = $this->widePolicyClaims($operations);
+    $this->assertSame(
+      $this->legacyPolicyCanonicalJson($claims),
+      McpPolicyBundle::canonicalJson($claims),
+    );
+    $this->assertSame(
+      $this->legacyPolicyDigest($claims),
+      McpPolicyBundle::digestOf($claims),
+    );
+  }
+
+  /**
+   * A 70 KiB operation string still matches the 1.x digest.
+   *
+   * MAX_BYTES is 64 KiB on the identity path only. A single
+   * 70 KiB operation verified on 1.x and must still verify.
+   *
+   * @covers ::digestOf
+   * @covers ::canonicalJson
+   * @covers ::normalize
+   */
+  public function testNormalizeAcceptsPolicyStringOverByteBudget(): void {
+    $claims = $this->widePolicyClaims([str_repeat('x', 70 * 1024)]);
+    $this->assertSame(
+      $this->legacyPolicyCanonicalJson($claims),
+      McpPolicyBundle::canonicalJson($claims),
+    );
+    $this->assertSame(
+      $this->legacyPolicyDigest($claims),
+      McpPolicyBundle::digestOf($claims),
+    );
+  }
+
+  /**
+   * Verify returns NULL when claims exceed MAX_DEPTH.
+   *
+   * The digestOf() call throws InvalidArgumentException. The
+   * verify() path must catch that and return NULL so
+   * simulate() can emit bundle_unverified instead of an
+   * unaudited exception.
+   *
+   * @covers \Drupal\mcp_sentinel\Service\McpPolicyBundleRegistry::verify
+   */
+  public function testVerifyReturnsNullForOverDepthDocument(): void {
+    $nested = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH + 1; $i++) {
+      $nested = [$nested];
+    }
+    $document = [
+      'v' => McpPolicyBundle::VERSION,
+      'denials' => ['operations' => []],
+      'id' => 'over-depth',
+      'issued' => 1,
+      'expires' => 10,
+      'extra' => $nested,
+      'digest' => 'deadbeef',
+      'seal' => McpPolicyBundle::SEAL_PREFIX . 'deadbeef',
+    ];
+    $this->assertNull($this->registry('secret')->verify($document));
+  }
+
+  /**
+   * Policy normalize still rejects an empty stdClass.
+   *
+   * Object expansion is identity-only. The shared sorter must
+   * not newly accept `{}` or change this message.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeStillRejectsEmptyObject(): void {
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage(
+      'Policy bundle claims may only contain scalars, lists and maps.',
+    );
+    McpPolicyBundle::normalize(new \stdClass());
   }
 
   /**
@@ -258,6 +423,77 @@ final class McpPolicyBundleTest extends UnitTestCase {
     }
 
     return new McpPolicyBundleRegistry($factory, $state, $time, $uuid, $keys, $invalidator);
+  }
+
+  /**
+   * Minimal claims wrapping a list of denied operations.
+   *
+   * @param string[] $operations
+   *   Operation ids.
+   *
+   * @return array<string, mixed>
+   *   Claims in the 1.x document shape.
+   */
+  private function widePolicyClaims(array $operations): array {
+    return [
+      'v' => 1,
+      'denials' => ['operations' => $operations],
+      'id' => 'wide-bundle',
+      'issued' => 1,
+      'expires' => 10,
+    ];
+  }
+
+  /**
+   * The 1.x policy normalize: arrays and scalars, ksort maps, keep lists.
+   *
+   * @param mixed $value
+   *   A JSON-able claims value.
+   *
+   * @return mixed
+   *   The normalized value.
+   */
+  private function legacyPolicyNormalize(mixed $value): mixed {
+    if (!is_array($value)) {
+      if (is_string($value) || is_int($value) || is_float($value)
+        || is_bool($value) || $value === NULL) {
+        return $value;
+      }
+      throw new \InvalidArgumentException(
+        'Policy bundle claims may only contain scalars, lists and maps.',
+      );
+    }
+    if (array_is_list($value)) {
+      return array_map($this->legacyPolicyNormalize(...), $value);
+    }
+    ksort($value);
+    foreach ($value as $key => $item) {
+      $value[$key] = $this->legacyPolicyNormalize($item);
+    }
+    return $value;
+  }
+
+  /**
+   * The 1.x canonical JSON bytes for policy claims.
+   *
+   * @param array<string, mixed> $claims
+   *   Claims without a seal.
+   */
+  private function legacyPolicyCanonicalJson(array $claims): string {
+    return json_encode(
+      $this->legacyPolicyNormalize($claims),
+      JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+    );
+  }
+
+  /**
+   * The 1.x SHA-256 digest of policy claims.
+   *
+   * @param array<string, mixed> $claims
+   *   Claims without a seal.
+   */
+  private function legacyPolicyDigest(array $claims): string {
+    return hash('sha256', $this->legacyPolicyCanonicalJson($claims));
   }
 
 }

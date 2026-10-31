@@ -68,23 +68,26 @@ final class McpPolicyBundle {
 
   /**
    * Recursively sorts map keys; lists keep caller order.
+   *
+   * Delegates to McpCanonicalJson so policy-bundle digests and
+   * audit identity hashes cannot drift on key order. The policy
+   * path stays arrays and scalars: an empty stdClass is still
+   * rejected with the historical message. Object expansion is
+   * identity-only.
+   *
+   * @param mixed $value
+   *   A JSON-able claims value.
+   *
+   * @return mixed
+   *   The normalized value.
+   *
+   * @throws \InvalidArgumentException
+   *   When the value cannot be encoded, or the graph exceeds
+   *   McpCanonicalJson::MAX_DEPTH. Node and byte budgets are
+   *   identity-only so a 1.x-verifiable bundle still verifies.
    */
   public static function normalize(mixed $value): mixed {
-    if (!is_array($value)) {
-      if (is_string($value) || is_int($value) || is_float($value) || is_bool($value) || $value === NULL) {
-        return $value;
-      }
-      throw new \InvalidArgumentException('Policy bundle claims may only contain scalars, lists and maps.');
-    }
-    $isList = array_is_list($value);
-    if ($isList) {
-      return array_map(self::normalize(...), $value);
-    }
-    ksort($value);
-    foreach ($value as $key => $item) {
-      $value[$key] = self::normalize($item);
-    }
-    return $value;
+    return McpCanonicalJson::normalize($value);
   }
 
   /**

@@ -17,6 +17,7 @@ use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\Core\Session\UserSession;
 use Drupal\mcp_sentinel\Draft\McpDraftHeaders;
+use Drupal\mcp_sentinel\Value\McpCanonicalJson;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -78,6 +79,24 @@ class McpAuditLogger {
    * silently showing an empty past is precisely the failure it exists to catch.
    */
   public const READ_CHANNELS = [self::CHANNEL, self::LEGACY_CHANNEL];
+
+  /**
+   * Width of audit_chain_log.entity_type (audit_chain.install).
+   *
+   * Compared with strlen() because Audit Chain copies the raw
+   * string onto the column without truncating it.
+   */
+  public const CHAIN_ENTITY_TYPE_MAX_BYTES = 128;
+
+  /**
+   * Width of audit_chain_log.bundle (audit_chain.install).
+   */
+  public const CHAIN_BUNDLE_MAX_BYTES = 128;
+
+  /**
+   * Width of audit_chain_log.entity_id (audit_chain.install).
+   */
+  public const CHAIN_ENTITY_ID_MAX_BYTES = 255;
 
   /**
    * Maximum number of changed fields recorded in a single change diff.
@@ -381,41 +400,100 @@ class McpAuditLogger {
   /**
    * Bounds identity fields to audit_chain_log column widths.
    *
-   * Audit_chain 1.13.0 maps metadata.id to entity_id varchar(255)
-   * and does not truncate it (it does truncate label). entity_type
-   * and bundle are varchar(128) and are also copied unbounded.
-   * MySQL 8 and PostgreSQL refuse an oversize insert; SQLite
-   * stores it. deny() then swallows that exception, so a
+   * Audit Chain 1.13.0 maps metadata.id to entity_id
+   * (CHAIN_ENTITY_ID_MAX_BYTES) and does not truncate it (it
+   * does truncate label). entity_type and bundle
+   * (CHAIN_ENTITY_TYPE_MAX_BYTES / CHAIN_BUNDLE_MAX_BYTES)
+   * are also copied unbounded. MySQL 8 and PostgreSQL refuse
+   * an oversize insert; SQLite stores it. deny() then logs
+   * the write failure at critical and still throws, so a
    * 256-character principal subject (MAX_PART_LENGTH) can be
-   * denied with no denied_access row. Hash the oversize value
-   * into the column and keep the original in metadata.
+   * denied with no denied_access row. Hash the oversize or
+   * non-scalar value into the column and keep the original
+   * in metadata.
+   *
+   * The column value becomes `sha256:<hex>` (71 bytes). The
+   * original string (or canonical JSON for a non-scalar) is
+   * stored as `{key}_original`. A separate `{key}_sha256`
+   * copy is not stored: the digest is already in the column
+   * value, and hashing `{key}_original` reproduces it.
+   *
+   * Non-scalar values are never cast with (string): that
+   * would store `Array` or throw TypeError. They are encoded
+   * as canonical JSON (McpCanonicalJson) and hashed so the
+   * write is deterministic and always fits the column.
    *
    * @param array<string, mixed> $metadata
    *   Metadata about to be handed to audit_chain.
    *
    * @return array<string, mixed>
-   *   The same map with oversize identity fields replaced.
+   *   The same map with oversize or non-scalar identity
+   *   fields replaced.
    */
   public static function boundChainIdentity(array $metadata): array {
     $limits = [
-      'entity_type' => 128,
-      'bundle' => 128,
-      'id' => 255,
+      'entity_type' => self::CHAIN_ENTITY_TYPE_MAX_BYTES,
+      'bundle' => self::CHAIN_BUNDLE_MAX_BYTES,
+      'id' => self::CHAIN_ENTITY_ID_MAX_BYTES,
     ];
     foreach ($limits as $key => $max) {
       if (!isset($metadata[$key])) {
         continue;
       }
-      $value = (string) $metadata[$key];
+      $raw = $metadata[$key];
+      if (!is_scalar($raw)) {
+        $value = self::canonicalIdentityPayload($raw);
+        $digest = hash('sha256', $value);
+        $metadata[$key . '_original'] = $value;
+        $metadata[$key] = 'sha256:' . $digest;
+        continue;
+      }
+      $value = (string) $raw;
       if (strlen($value) <= $max) {
         continue;
       }
       $digest = hash('sha256', $value);
       $metadata[$key . '_original'] = $value;
-      $metadata[$key . '_sha256'] = $digest;
       $metadata[$key] = 'sha256:' . $digest;
     }
     return $metadata;
+  }
+
+  /**
+   * Canonical JSON for a non-scalar identity field.
+   *
+   * Fail-closed and deterministic: never `(string)` an array
+   * or object. Expansion and key order go through
+   * McpCanonicalJson (the same sorter as
+   * McpPolicyBundle::normalize()). A cyclic, over-budget,
+   * or over-deep graph throws inside the normalizer (visited
+   * set, node budget, and byte budget sit next to the depth
+   * cap) instead of fataling the deny path. Encoding can
+   * also throw from JsonSerializable::jsonSerialize() even
+   * without JSON_THROW_ON_ERROR. Any Throwable or a FALSE
+   * encode becomes a type marker so the hash is stable and
+   * the column write still succeeds.
+   *
+   * @param mixed $value
+   *   A non-scalar identity value.
+   *
+   * @return string
+   *   Canonical JSON, or a type marker when encoding fails.
+   */
+  private static function canonicalIdentityPayload(mixed $value): string {
+    try {
+      $encoded = json_encode(
+        McpCanonicalJson::normalizeIdentity($value),
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
+      );
+    }
+    catch (\Throwable) {
+      return '{"type":"' . get_debug_type($value) . '"}';
+    }
+    if ($encoded === FALSE) {
+      return '{"type":"' . get_debug_type($value) . '"}';
+    }
+    return $encoded;
   }
 
   /**
