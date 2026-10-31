@@ -8,7 +8,6 @@ use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 
 /**
  * Deny explanations name a rule and never auto-widen.
@@ -159,25 +158,37 @@ final class McpDenyExplainerTest extends UnitTestCase {
   /**
    * CallerMessage() still returns the generic deny and emits a deprecation.
    *
-   * Drupal's UnitTestCase provides expectDeprecation() on D10 (Symfony
-   * bridge) and D11 (DeprecationBridge). The expected string must stay
-   * exact so the test fails if the trigger is removed or goes silent.
+   * Captures E_USER_DEPRECATED with a process error handler so the
+   * assertion does not depend on UnitTestCase::expectDeprecation().
+   * Core 11.4 deprecates ExpectDeprecationTrait for removal in
+   * drupal:12.0.0 (https://www.drupal.org/node/3545276); composer.json
+   * already declares ^12, where UnitTestCase no longer has that API.
+   * The compared string must stay exact so a silent getter fails.
    *
    * @covers ::callerMessage
-   *
-   * @group legacy
    */
-  #[Group('legacy')]
-  #[IgnoreDeprecations]
   public function testCallerMessageIsDeprecated(): void {
-    // @phpstan-ignore method.deprecated (ExpectDeprecationTrait on D11.4+)
-    $this->expectDeprecation(
-      'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/409',
-    );
-    $explainer = new McpDenyExplainer();
-    // @phpstan-ignore method.deprecated (this test is the deprecation contract)
-    $message = $explainer->callerMessage();
+    $triggered = NULL;
+    set_error_handler(static function (int $errno, string $errstr) use (&$triggered): bool {
+      if ($errno === E_USER_DEPRECATED) {
+        $triggered = $errstr;
+        return TRUE;
+      }
+      return FALSE;
+    });
+    try {
+      $explainer = new McpDenyExplainer();
+      // @phpstan-ignore-next-line
+      $message = $explainer->callerMessage();
+    }
+    finally {
+      restore_error_handler();
+    }
     $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $message);
+    $this->assertSame(
+      'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/409',
+      $triggered,
+    );
   }
 
   /**
