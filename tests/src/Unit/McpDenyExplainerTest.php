@@ -178,7 +178,7 @@ final class McpDenyExplainerTest extends UnitTestCase {
     });
     try {
       $explainer = new McpDenyExplainer();
-      // @phpstan-ignore-next-line
+      // @phpstan-ignore method.deprecated (this test is the deprecation contract)
       $message = $explainer->callerMessage();
     }
     finally {
