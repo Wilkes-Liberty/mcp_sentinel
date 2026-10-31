@@ -1,7 +1,7 @@
 ---
 section: Deprecated
 ---
-`McpDenyExplainer::callerMessage()` is deprecated and will be
-removed in 4.0.0. Use `McpDenyExplainer::refuse()` or the
-`CALLER_MESSAGE` constant. The method still returns the generic
-caller deny.
+`McpDenyExplainer::callerMessage()` is deprecated in 3.6.2 and
+will be removed in 4.0.0. It still returns `CALLER_MESSAGE`.
+Use `McpDenyExplainer::refuse()` or
+`McpDenyExplainer::CALLER_MESSAGE` instead.

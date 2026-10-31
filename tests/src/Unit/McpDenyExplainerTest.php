@@ -165,7 +165,6 @@ final class McpDenyExplainerTest extends UnitTestCase {
    * @covers ::callerMessage
    */
   public function testCallerMessageIsDeprecated(): void {
-    $message = NULL;
     $triggered = NULL;
     set_error_handler(static function (int $errno, string $errstr) use (&$triggered): bool {
       if ($errno === E_USER_DEPRECATED) {
@@ -183,13 +182,10 @@ final class McpDenyExplainerTest extends UnitTestCase {
       restore_error_handler();
     }
     $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $message);
-    $this->assertIsString($triggered);
-    $this->assertStringContainsString(
-      'McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2',
+    $this->assertSame(
+      'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407',
       $triggered,
     );
-    $this->assertStringContainsString('removed from mcp_sentinel:4.0.0', $triggered);
-    $this->assertStringContainsString('CALLER_MESSAGE', $triggered);
   }
 
   /**
