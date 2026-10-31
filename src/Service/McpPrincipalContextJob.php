@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Service;
 
 use Drupal\mcp_sentinel\Value\McpCarriedPrincipal;
-use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 
@@ -63,7 +62,7 @@ final class McpPrincipalContextJob {
    *
    * Identity is still not inherited. A killed carried principal is
    * refused at admit() with the same generic deny as an invalid
-   * principal (DEV-846).
+   * principal.
    *
    * @param string $principalKey
    *   Principal key (iss|sub|actor) from the queued work.
@@ -131,16 +130,6 @@ final class McpPrincipalContextJob {
       );
     }
     return $closed;
-  }
-
-  /**
-   * Whether a request principal is visible outside any job overlay.
-   *
-   * False under a deny-only overlay: no identity is inherited.
-   */
-  public function hasSealedContext(): bool {
-    return !$this->holder->inJobScope()
-      && $this->holder->get() instanceof McpPrincipalContext;
   }
 
   /**

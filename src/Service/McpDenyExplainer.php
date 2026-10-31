@@ -16,7 +16,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  *
  * Fail-closed and secret-free. Never auto-widens an allowlist or denylist.
  * The formatted suffix is operator-facing (audit row and logs). Callers
- * receive callerMessage() only.
+ * receive CALLER_MESSAGE only. callerMessage() is deprecated; use
+ * refuse() or the constant.
  */
 final class McpDenyExplainer {
 
@@ -434,12 +435,30 @@ final class McpDenyExplainer {
     return $reason . ' ' . $this->explain($reason, $profileId)->format();
   }
 
+  // The change record is GitHub PR 407. Coder wants a drupal.org node.
+  // phpcs:disable Drupal.Commenting.Deprecated.DeprecatedWrongSeeUrlFormat
+  // phpcs:disable Drupal.Semantics.FunctionTriggerError.TriggerErrorSeeUrlFormat
+
   /**
    * Generic deny the caller is allowed to see.
+   *
+   * @deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0.
+   *   Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE
+   *   instead.
+   *
+   * @see https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407
+   *
+   * @return string
+   *   CALLER_MESSAGE. Never a rule id or explainer suffix.
    */
   public function callerMessage(): string {
+    // Third-party callers still hit this wrapper. Keep the body identical
+    // to CALLER_MESSAGE and tell them to switch before 4.0.0.
+    @trigger_error('Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407', E_USER_DEPRECATED);
     return self::CALLER_MESSAGE;
   }
+
+  // phpcs:enable
 
   /**
    * Logs the operator explainer, audits, and returns the generic caller deny.

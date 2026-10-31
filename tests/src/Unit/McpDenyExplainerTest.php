@@ -8,6 +8,7 @@ use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\IgnoreDeprecations;
 
 /**
  * Deny explanations name a rule and never auto-widen.
@@ -136,21 +137,47 @@ final class McpDenyExplainerTest extends UnitTestCase {
   }
 
   /**
-   * Callers receive a generic deny; annotate stays operator-only (DEV-966).
+   * Callers receive a generic deny; annotate stays operator-only.
    *
-   * @covers ::callerMessage
+   * @covers ::refuse
    * @covers ::annotate
    */
-  public function testCallerMessageHidesTheRuleSuffix(): void {
+  public function testRefuseHidesTheRuleSuffix(): void {
     $explainer = new McpDenyExplainer();
-    $this->assertSame('MCP access is denied.', $explainer->callerMessage());
-    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $explainer->callerMessage());
-    $this->assertStringNotContainsString('[rule:', $explainer->callerMessage());
+    $caller = $explainer->refuse(
+      'Network calls require a tenant claim on the validated token.',
+    );
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $caller);
+    $this->assertStringNotContainsString('[rule:', $caller);
     $annotated = $explainer->annotate(
       'Network calls require a tenant claim on the validated token.',
     );
     $this->assertStringContainsString('[rule:missing_tenant_claim', $annotated);
-    $this->assertNotSame($explainer->callerMessage(), $annotated);
+    $this->assertNotSame($caller, $annotated);
+  }
+
+  /**
+   * CallerMessage() still returns the generic deny and emits a deprecation.
+   *
+   * Drupal's UnitTestCase provides expectDeprecation() on D10 (Symfony
+   * bridge) and D11 (DeprecationBridge). The expected string must stay
+   * exact so the test fails if the trigger is removed or goes silent.
+   *
+   * @covers ::callerMessage
+   *
+   * @group legacy
+   */
+  #[Group('legacy')]
+  #[IgnoreDeprecations]
+  public function testCallerMessageIsDeprecated(): void {
+    // @phpstan-ignore method.deprecated (ExpectDeprecationTrait on D11.4+)
+    $this->expectDeprecation(
+      'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/407',
+    );
+    $explainer = new McpDenyExplainer();
+    // @phpstan-ignore method.deprecated (this test is the deprecation contract)
+    $message = $explainer->callerMessage();
+    $this->assertSame(McpDenyExplainer::CALLER_MESSAGE, $message);
   }
 
   /**
