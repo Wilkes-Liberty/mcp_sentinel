@@ -1300,7 +1300,7 @@ function mcp_sentinel_update_10016(?array &$sandbox = NULL): string {
     '#finished' => 0,
   ];
 
-  if (!$sandbox['initialized']) {
+  if ($sandbox['initialized'] !== TRUE) {
     $settings = \Drupal::configFactory()->getEditable('mcp_sentinel.settings');
     $chainSettings = \Drupal::configFactory()->getEditable('audit_chain.settings');
     $chainSettings

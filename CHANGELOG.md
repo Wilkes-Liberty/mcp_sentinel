@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.6.2] - 2026-11-04
+
+### Deprecated
+- `McpDenyExplainer::callerMessage()` is deprecated in 3.6.2 and
+  will be removed in 4.0.0. It still returns `CALLER_MESSAGE`.
+  Use `McpDenyExplainer::refuse()` or
+  `McpDenyExplainer::CALLER_MESSAGE` instead.
+
 ## [3.6.1] - 2026-10-30
 
 ### Fixed
