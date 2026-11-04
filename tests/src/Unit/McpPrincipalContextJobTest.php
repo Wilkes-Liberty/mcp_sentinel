@@ -109,22 +109,26 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
   }
 
   /**
-   * HasSealedContext() is false under a deny-only overlay.
+   * A request seal is visible only outside a deny-only overlay.
    *
-   * @covers ::hasSealedContext
+   * Live callers ask the dispatcher; the job helper no longer duplicates
+   * that check. The holder still hides the seal while the overlay is open.
+   *
+   * @covers ::begin
+   * @covers ::end
    */
-  public function testHasSealedContextIsFalseUnderOverlay(): void {
+  public function testRequestSealIsHiddenUnderOverlay(): void {
     $stack = new RequestStack();
     $request = Request::create('/cron/test-key');
     $stack->push($request);
     $holder = new McpPrincipalContextHolder($stack);
     $holder->seal($this->ctx('cron-human', 'cron-client'), $request);
     $job = new McpPrincipalContextJob($holder);
-    $this->assertTrue($job->hasSealedContext());
+    $this->assertTrue($this->requestSealIsVisible($holder));
     $handle = $job->begin();
-    $this->assertFalse($job->hasSealedContext());
+    $this->assertFalse($this->requestSealIsVisible($holder));
     $job->end($handle);
-    $this->assertTrue($job->hasSealedContext());
+    $this->assertTrue($this->requestSealIsVisible($holder));
   }
 
   /**
@@ -173,6 +177,17 @@ final class McpPrincipalContextJobTest extends UnitTestCase {
     );
     $job->end($handle);
     $this->assertNull($holder->carriedPrincipal());
+  }
+
+  /**
+   * Whether a request principal is visible outside any job overlay.
+   *
+   * Tests holder overlay visibility. A request seal is hidden while a
+   * deny-only overlay is open.
+   */
+  private function requestSealIsVisible(McpPrincipalContextHolder $holder): bool {
+    return !$holder->inJobScope()
+      && $holder->get() instanceof McpPrincipalContext;
   }
 
   /**

@@ -113,7 +113,7 @@ class McpContextController extends ControllerBase {
     $this->whoamiRecorder?->record($readiness, 'context');
     // A Paladin or sealed-token caller is refused here even when the
     // source-governance contract is not ready, so the issuer and
-    // principal gates still write a denied_access row (DEV-927).
+    // principal gates still write a denied_access row.
     if ($readiness->isReady() || $this->requestHasGovernedToken()) {
       $denied = $this->principalDenial();
       if ($denied !== NULL) {

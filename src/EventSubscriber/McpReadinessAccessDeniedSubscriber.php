@@ -19,7 +19,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
  *
  * Two shapes, same refusal body:
  * - Anonymous AccessDenied on readiness becomes 403 JSON so a 403-to-login
- *   converter cannot bounce fetch (DEV-435 / 2.13.2).
+ *   converter cannot bounce fetch.
  * - Authentication 401 on /drupal-mcp/* (except the public health probe)
  *   becomes the same JSON, keeping WWW-Authenticate (d.o #3619396). An
  *   invalid bearer used to render core's HTML Unauthorized page.

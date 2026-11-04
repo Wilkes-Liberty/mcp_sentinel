@@ -61,7 +61,7 @@ final class McpConfigSaveSubscriber implements EventSubscriberInterface {
    * @param \Psr\Log\LoggerInterface $logger
    *   The mcp_sentinel logger channel.
    * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface $killSwitch
-   *   Kill registry re-checked on a governed config write (DEV-846).
+   *   Kill registry re-checked on a governed config write.
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,

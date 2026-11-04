@@ -16,9 +16,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * attribute. A subrequest cannot reseal a different principal. A
  * queue or Drush job opens a deny-only overlay that hides the
  * request seal and never stores a caller-built context. Governed
- * tools refuse under that overlay until a hop token (DEV-844)
- * supplies a Paladin principal. seal() is a no-op while an
- * overlay is open so it is not a forgery path.
+ * tools refuse under that overlay until a hop token supplies a
+ * Paladin principal. seal() is a no-op while an overlay is open
+ * so it is not a forgery path.
  */
 final class McpPrincipalContextHolder {
 

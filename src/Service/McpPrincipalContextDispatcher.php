@@ -31,7 +31,7 @@ final class McpPrincipalContextDispatcher {
   /**
    * Caller-facing refusal used for both a missing principal and a kill.
    *
-   * A killed principal must not produce a distinct signal (DEV-846).
+   * A killed principal must not produce a distinct signal.
    */
   public const GENERIC_REFUSAL = 'A verified principal context is required.';
 
@@ -594,7 +594,7 @@ final class McpPrincipalContextDispatcher {
    *
    * $auditReason may differ from $reasonCode so a kill records
    * principal_killed on the row while the caller still sees the
-   * generic missing-principal refusal (DEV-846).
+   * generic missing-principal refusal.
    *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
@@ -676,7 +676,7 @@ final class McpPrincipalContextDispatcher {
    * Refuses a killed sealed or carried principal with a generic deny.
    *
    * Behind the principal-context guard so a red run that injects
-   * disableForTest() does not enforce the kill (DEV-846).
+   * disableForTest() does not enforce the kill.
    *
    * @param string $toolId
    *   Real tool plugin id for the audit row.

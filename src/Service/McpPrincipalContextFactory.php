@@ -644,7 +644,7 @@ final class McpPrincipalContextFactory {
   /**
    * Paladin claims, an explicit mark, or a sealed-token HTTP call.
    *
-   * Sealed-token HTTP requires a tenant claim (DEV-839). CLI / stdio
+   * Sealed-token HTTP requires a tenant claim. CLI / stdio
    * with no request is not a network call.
    */
   private function isNetworkCall(?Request $request): bool {

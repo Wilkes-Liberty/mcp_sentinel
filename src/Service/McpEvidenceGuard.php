@@ -117,7 +117,7 @@ class McpEvidenceGuard {
    *   accepted for test construction, degrading to the uncertain branch.
    * @param \Drupal\mcp_sentinel\Service\McpKillEnforcerInterface|null $killSwitch
    *   Kill registry re-checked before the evidence precommit commits
-   *   with the mutation (DEV-846). Optional for test construction.
+   *   with the mutation. Optional for test construction.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,

@@ -8,7 +8,7 @@ use Drupal\mcp_sentinel\Exception\McpKillSwitchException;
 use Drupal\mcp_sentinel\Service\McpPrincipalKey;
 
 /**
- * Verified operator identity for the two-person kill rule (DEV-846).
+ * Verified operator identity for the two-person kill rule.
  *
  * Drupal uid is never this value. Paladin is iss|sub from a verified
  * token. Distinct operators compare iss|sub and mapped Drupal uids.

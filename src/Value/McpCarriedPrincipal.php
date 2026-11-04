@@ -10,7 +10,7 @@ namespace Drupal\mcp_sentinel\Value;
  * This is not a sealed identity and is never handed to tools. The
  * deny-only overlay still hides the request seal. The keys exist so
  * a job that queued work for a Paladin principal can be refused when
- * that principal is killed (DEV-846).
+ * that principal is killed.
  */
 final readonly class McpCarriedPrincipal {
 
