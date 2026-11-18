@@ -180,6 +180,11 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     $trait = new \ReflectionClass(McpEntityToolTrait::class);
     $helpers = [];
     foreach ($trait->getMethods() as $method) {
+      // Private implementation helpers are not part of the downstream API.
+      // Making a pinned helper private still removes it from the list below.
+      if ($method->isPrivate()) {
+        continue;
+      }
       self::assertTrue($method->isProtected(), $method->getName() . ' must stay protected.');
       $helpers[] = $method->getName();
     }
