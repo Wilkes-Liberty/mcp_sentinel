@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-11-18
+
+### Added
+- Allow sites to minimize audit evidence for a verified request or resolved
+  resource, including denial evidence retained after transaction rollback.
+
 ## [3.6.2] - 2026-11-04
 
 ### Deprecated
