@@ -607,8 +607,7 @@ final class McpPrincipalAuthGuardBypassTest extends KernelTestBase {
       count($logged),
       'Runtime recordRejection() must write a row the compile flush cannot explain.',
     );
-    $latest = $logged === [] ? NULL : $logged[array_key_last($logged)];
-    $this->assertIsArray($latest);
+    $latest = $logged[array_key_last($logged)];
     $this->assertSame(
       McpPrincipalContextFactory::AUTH_EXTENSION_SERVICE_ID,
       $latest['service'] ?? '',

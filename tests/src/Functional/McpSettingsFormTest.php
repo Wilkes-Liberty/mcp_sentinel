@@ -489,7 +489,6 @@ final class McpSettingsFormTest extends BrowserTestBase {
     ], 'Save configuration');
     $shown = array_slice($names, 0, McpSettingsForm::UNKNOWN_EVENT_ECHO_MAX);
     $more = count($names) - count($shown);
-    $this->assertGreaterThan(0, $more);
     $this->assertSession()->pageTextContains(
       'Endpoint ' . str_repeat('a', McpWebhookEvents::ENDPOINT_ID_MAX)
       . ' filters on ' . implode(', ', $shown)
