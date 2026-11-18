@@ -160,12 +160,12 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
 
     $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'create', $profile, FALSE);
     if ($policy = $this->denyReason($policyResult)) {
-      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', '(new)', 'create', $policy);
+      $this->logResolvedEntityDenial('mcp_sentinel_node_operations', $node, '(new)', 'create', $policy);
       return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
     $core = $this->entityTypeManager->getAccessControlHandler('node')->createAccess($bundle, $this->currentUser, [], TRUE);
     if (!$core->isAllowed()) {
-      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', '(new)', 'create', 'core access denied');
+      $this->logResolvedEntityDenial('mcp_sentinel_node_operations', $node, '(new)', 'create', 'core access denied');
       return ExecutableResult::failure($this->t('You do not have permission to create @bundle nodes.', ['@bundle' => $bundle]));
     }
 
@@ -193,11 +193,11 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
     }
     $policyResult = $this->governanceAccessChecker->checkEntityAccess($node, 'update', $profile, FALSE);
     if ($policy = $this->denyReason($policyResult)) {
-      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', (string) $node->id(), 'update', $policy);
+      $this->logResolvedEntityDenial('mcp_sentinel_node_operations', $node, (string) $node->id(), 'update', $policy);
       return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
     if (!$node->access('update', $this->currentUser)) {
-      $this->logDeniedAccess('mcp_sentinel_node_operations', 'node', (string) $node->id(), 'update', 'core access denied');
+      $this->logResolvedEntityDenial('mcp_sentinel_node_operations', $node, (string) $node->id(), 'update', 'core access denied');
       return ExecutableResult::failure($this->t('You do not have permission to edit this node.'));
     }
     if (isset($values['title'])) {
@@ -243,6 +243,7 @@ final class McpNodeOperationsTool extends McpGovernedToolBase {
       return ExecutableResult::failure($this->t('@msg', [
         '@msg' => $this->governanceDenyExplainer?->refuse(
           'Failed to save node: ' . $e->getMessage(),
+          resource: $node,
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }

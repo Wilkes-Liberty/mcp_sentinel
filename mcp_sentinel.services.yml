@@ -31,6 +31,10 @@ services:
       - '@?audit_chain.recovery'
       - '@current_user'
       - '@account_switcher'
+      - '@mcp_sentinel.audit_evidence_policy'
+
+  mcp_sentinel.audit_evidence_policy:
+    class: Drupal\mcp_sentinel\Service\McpDefaultAuditEvidencePolicy
 
   mcp_sentinel.config_secret_redactor:
     class: Drupal\mcp_sentinel\Service\McpConfigSecretRedactor

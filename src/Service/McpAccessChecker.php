@@ -132,6 +132,7 @@ final class McpAccessChecker {
         $entityType,
         $entityId,
         $operation,
+        $entity,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -145,6 +146,7 @@ final class McpAccessChecker {
         $entityType,
         $entityId,
         $operation,
+        $entity,
       )->addCacheTags($tags)->setCacheMaxAge(0);
     }
 
@@ -155,6 +157,7 @@ final class McpAccessChecker {
       $auditDeny,
       $entityId,
       $operation,
+      $entity,
     );
     if ($typeResult !== NULL) {
       return $ipRestricted ? $typeResult->setCacheMaxAge(0) : $typeResult;
@@ -167,6 +170,7 @@ final class McpAccessChecker {
         $entityType,
         $entityId,
         $operation,
+        $entity,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -177,6 +181,7 @@ final class McpAccessChecker {
         $entityType,
         $entityId,
         $operation,
+        $entity,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -187,6 +192,7 @@ final class McpAccessChecker {
         $entityType,
         $entityId,
         $operation,
+        $entity,
       )->addCacheTags($tags);
       return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
     }
@@ -198,7 +204,7 @@ final class McpAccessChecker {
     if (in_array($operation, ['view', 'view label'], TRUE) && $this->classification !== NULL) {
       $result = $this->checkClassification($entity, $profile, $result, $operation);
     }
-    $result = $this->checkBundleFloor($operation, $result, $auditDeny);
+    $result = $this->checkBundleFloor($operation, $result, $auditDeny, $entity);
     return $ipRestricted ? $result->setCacheMaxAge(0) : $result;
   }
 
@@ -498,6 +504,8 @@ final class McpAccessChecker {
    *   Entity id of the refused subject, or '(new)'.
    * @param string|null $operation
    *   Entity operation that was refused, when known.
+   * @param \Drupal\Core\Entity\EntityInterface|null $resource
+   *   The resolved resource, when available.
    *
    * @return \Drupal\Core\Access\AccessResult|null
    *   A forbidden result when the type is disallowed, NULL when permitted.
@@ -509,6 +517,7 @@ final class McpAccessChecker {
     bool $auditDeny = TRUE,
     ?string $entityId = NULL,
     ?string $operation = NULL,
+    ?EntityInterface $resource = NULL,
   ): ?AccessResult {
     if (in_array($entityTypeId, $profile->getDeniedEntityTypes(), TRUE)) {
       return $this->refuseAccess(
@@ -517,6 +526,7 @@ final class McpAccessChecker {
         $entityTypeId,
         $entityId,
         $operation,
+        $resource,
       )->addCacheTags($tags);
     }
     $allowed = $profile->getAllowedEntityTypes();
@@ -527,6 +537,7 @@ final class McpAccessChecker {
         $entityTypeId,
         $entityId,
         $operation,
+        $resource,
       )->addCacheTags($tags);
     }
     return NULL;
@@ -654,6 +665,8 @@ final class McpAccessChecker {
    *   The result after local gates.
    * @param bool $auditDeny
    *   FALSE when the caller will write its own HMAC row for this deny.
+   * @param \Drupal\Core\Entity\EntityInterface|null $resource
+   *   The resolved resource, when available.
    *
    * @return \Drupal\Core\Access\AccessResult
    *   The prior result, or a forbidden result with BUNDLE_DENIAL_CODE.
@@ -662,6 +675,7 @@ final class McpAccessChecker {
     string $operation,
     AccessResult $prior,
     bool $auditDeny = TRUE,
+    ?EntityInterface $resource = NULL,
   ): AccessResult {
     if ($this->policyBundles === NULL) {
       return $prior;
@@ -679,7 +693,7 @@ final class McpAccessChecker {
     if ($sim['allow']) {
       return $prior;
     }
-    $deny = $this->refuseAccess(self::BUNDLE_DENIAL_CODE, $auditDeny)
+    $deny = $this->refuseAccess(self::BUNDLE_DENIAL_CODE, $auditDeny, resource: $resource)
       ->addCacheableDependency($prior);
     $this->applyBundleCacheability($deny);
     return $deny;
@@ -715,6 +729,8 @@ final class McpAccessChecker {
    *   Entity id of the refused subject, or '(new)'.
    * @param string|null $operation
    *   Entity operation that was refused, when known.
+   * @param \Drupal\Core\Entity\EntityInterface|null $resource
+   *   The resolved resource, when available.
    *
    * @return \Drupal\Core\Access\AccessResult
    *   Forbidden with CALLER_MESSAGE as the reason.
@@ -725,6 +741,7 @@ final class McpAccessChecker {
     ?string $entityType = NULL,
     ?string $entityId = NULL,
     ?string $operation = NULL,
+    ?EntityInterface $resource = NULL,
   ): AccessResult {
     return AccessResult::forbidden(
       $this->denyExplainer?->refuse(
@@ -734,6 +751,7 @@ final class McpAccessChecker {
         $entityType,
         $entityId,
         $operation,
+        $resource,
       ) ?? McpDenyExplainer::CALLER_MESSAGE,
     );
   }

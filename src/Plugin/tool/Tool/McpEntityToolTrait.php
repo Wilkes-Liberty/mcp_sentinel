@@ -6,6 +6,7 @@ namespace Drupal\mcp_sentinel\Plugin\tool\Tool;
 
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
@@ -104,6 +105,27 @@ trait McpEntityToolTrait {
         'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
       ]);
     }
+  }
+
+  /**
+   * Resolves site evidence policy for a concrete entity denied by a tool.
+   */
+  private function logResolvedEntityDenial(
+    string $toolId,
+    EntityInterface $resource,
+    string $entityId,
+    string $operation,
+    string $reason,
+  ): void {
+    if ($this->governanceDenyExplainer?->auditProjectedResourceRefusal(
+      $reason,
+      $resource,
+      $operation,
+      $this->governancePolicyResolver?->resolve()?->id() ?? '',
+    )) {
+      return;
+    }
+    $this->logDeniedAccess($toolId, $resource->getEntityTypeId(), $entityId, $operation, $reason);
   }
 
   /**

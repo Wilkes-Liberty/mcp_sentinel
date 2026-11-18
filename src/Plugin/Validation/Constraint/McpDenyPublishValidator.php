@@ -10,6 +10,7 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\mcp_sentinel\Service\McpCompositeRedirect;
+use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpModerationGate;
 use Drupal\mcp_sentinel\Service\McpPolicyResolver;
 use Drupal\mcp_sentinel\Service\McpUnmoderatedForwardRevision;
@@ -68,6 +69,8 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
    * @param \Drupal\content_moderation\ModerationInformationInterface|null $moderationInformation
    *   The moderation information service, or NULL when Content Moderation is
    *   not installed.
+   * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denials
+   *   Records publish refusals when an audit projection applies.
    */
   public function __construct(
     private readonly McpPolicyResolver $policyResolver,
@@ -76,6 +79,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     private readonly McpCompositeRedirect $compositeRedirect,
     private readonly McpUnmoderatedForwardRevision $unmoderatedRedirect,
     private readonly ?ModerationInformationInterface $moderationInformation = NULL,
+    private readonly ?McpDenyExplainer $denials = NULL,
   ) {}
 
   /**
@@ -91,6 +95,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       $container->has('content_moderation.moderation_information')
         ? $container->get('content_moderation.moderation_information')
         : NULL,
+      $container->get('mcp_sentinel.deny_explainer'),
     );
   }
 
@@ -125,6 +130,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     // drafted safely is denied with a 422 — never mutated in place.
     if (!$this->moderationGate->governsPublishedStatus($value)) {
       if ($this->compositeRedirect->classify($value) === McpCompositeRedirect::DECISION_DENY) {
+        $this->auditRefusal($value, $profile->id());
         $this->context->buildViolation('Publishing is denied by MCP Sentinel: this content is pinned by published content and cannot be changed in place. A human must publish a revised version.')
           ->addViolation();
       }
@@ -135,7 +141,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       && $this->moderationInformation->isModeratedEntity($value);
 
     if (!$moderated) {
-      $this->validateUnmoderated($value, $constraint);
+      $this->validateUnmoderated($value, $constraint, $profile->id());
       return;
     }
 
@@ -156,6 +162,7 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
     // in-place mutations of published nodes, with no forward revision and
     // nothing for a human to approve. The previously-allowed "in-place edit"
     // case gets an actionable message naming the sanctioned path.
+    $this->auditRefusal($value, $profile->id());
     if (!$value->isNew() && $this->originalIsPublishedState($value)) {
       // Reported at the ENTITY level (no property path), deliberately. The
       // JSON:API PATCH path validates with the payload's field list and
@@ -191,8 +198,10 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
    *   The McpDenyPublish constraint carrying the message. Typed concretely
    *   rather than as the base Constraint: validate() has already narrowed it,
    *   and only McpDenyPublish declares the $message property read below.
+   * @param string $profileId
+   *   Resolved governance profile ID.
    */
-  private function validateUnmoderated(ContentEntityInterface $entity, McpDenyPublish $constraint): void {
+  private function validateUnmoderated(ContentEntityInterface $entity, McpDenyPublish $constraint, string $profileId): void {
     if (!$entity instanceof EntityPublishedInterface || !$entity->isPublished()) {
       return;
     }
@@ -206,15 +215,29 @@ final class McpDenyPublishValidator extends ConstraintValidator implements Conta
       // field-level violations for absent fields (see the moderated case
       // above).
       if ($this->unmoderatedRedirect->classify($entity) === McpUnmoderatedForwardRevision::DECISION_DENY) {
+        $this->auditRefusal($entity, $profileId);
         $this->context->buildViolation(McpUnmoderatedForwardRevision::IN_PLACE_DENY_MESSAGE)
           ->addViolation();
       }
       return;
     }
 
+    $this->auditRefusal($entity, $profileId);
     $this->context->buildViolation($constraint->message)
       ->atPath('status')
       ->addViolation();
+  }
+
+  /**
+   * Records evidence at the actual governed moderation refusal.
+   */
+  private function auditRefusal(ContentEntityInterface $entity, string $profileId): void {
+    $this->denials?->auditProjectedResourceRefusal(
+      'deny_publish',
+      $entity,
+      'publish',
+      $profileId,
+    );
   }
 
   /**

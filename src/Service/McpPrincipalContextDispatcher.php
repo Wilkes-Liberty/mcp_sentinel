@@ -470,12 +470,15 @@ final class McpPrincipalContextDispatcher {
    * @param string $detail
    *   Optional deny message folded into metadata.explain. Must not
    *   contain secrets.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
+   *   Request projection when already selected.
    */
   private function logDenial(
     string $toolId,
     string $reasonCode,
     McpPrincipalContext $ctx,
     string $detail = '',
+    ?McpAuditEvidenceProjectionInterface $projection = NULL,
   ): void {
     $metadata = self::denialAuditMetadata($toolId, $reasonCode, $ctx);
     $carried = $this->holder->carriedPrincipal();
@@ -486,9 +489,15 @@ final class McpPrincipalContextDispatcher {
     }
     $explainer = $this->denyExplainer ?? new McpDenyExplainer();
     $seed = $detail !== '' ? $reasonCode . ' ' . $detail : $reasonCode;
-    $metadata['explain'] = $explainer->operatorNotice($seed);
+    $projection ??= $this->auditLogger->evidenceProjection();
+    $metadata['explain'] = $explainer->operatorNotice($seed, projection: $projection);
     $metadata['rule'] = $explainer->explain($seed)->ruleId;
-    $this->auditLogger->logAlways('denied_access', $metadata);
+    if ($projection !== NULL) {
+      $this->auditLogger->logProjectedDenial($metadata, $projection);
+    }
+    else {
+      $this->auditLogger->logAlways('denied_access', $metadata);
+    }
   }
 
   /**
@@ -605,11 +614,18 @@ final class McpPrincipalContextDispatcher {
     ?string $auditReason = NULL,
   ): never {
     $rowReason = $auditReason ?? $reasonCode;
+    $projection = $this->auditLogger->evidenceProjection();
     try {
-      $this->logDenial($toolId, $rowReason, $this->auditContext(), $message);
+      $this->logDenial($toolId, $rowReason, $this->auditContext(), $message, $projection);
     }
     catch (\Throwable $e) {
-      $this->logger->critical(
+      if ($projection !== NULL) {
+        $this->auditLogger->withoutRequestDetails(fn () => $this->logger->critical(
+          self::DENIED_ACCESS_WRITE_FAILED . ': principal-context denial was not recorded.',
+        ));
+      }
+      else {
+        $this->logger->critical(
         '@event: principal-context denial was not recorded '
         . '(@reason) for @tool (@principal): @class',
         [
@@ -621,7 +637,8 @@ final class McpPrincipalContextDispatcher {
           '@principal' => $this->watchdogPrincipalKey(),
           '@class' => $e::class,
         ],
-      );
+        );
+      }
     }
     throw new McpPrincipalContextDeniedException(
       $reasonCode,
