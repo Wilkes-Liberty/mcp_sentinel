@@ -880,6 +880,25 @@ name `mcp_sentinel.audit_log` and the `mcp_sentinel.audit_export` route were
 left unchanged, so existing deep links and the filter form's reset link follow
 the new path automatically.
 
+### Optional audit evidence projection
+
+An application can replace `mcp_sentinel.audit_evidence_policy` with an
+implementation of `McpAuditEvidencePolicyInterface`. Select a projection
+from verified server context or the resource supplied by a governance gate.
+Use exact server facts for selection. Request parameters and client labels
+are evidence input and confer no authority.
+
+A `McpAuditEvidenceProjectionInterface` supplies the complete allowed
+metadata after Sentinel adds its normal audit fields. Use an immutable
+projection that carries policy only. The selected evidence is reduced before
+any rollback callback captures it. The append and related operator notices
+use the original timestamp without caller-supplied request details. Resolver
+or projection errors yield empty application metadata.
+
+The default policy returns NULL and uses standard audit attribution. The
+policy changes evidence only. Existing authorization rules, callers and
+historical rows retain their contracts.
+
 ### Resolving governance in your own code
 
 ```php

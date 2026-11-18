@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
@@ -477,6 +478,8 @@ final class McpDenyExplainer {
    *   Entity id of the refused subject, or '(new)'.
    * @param string|null $operation
    *   Entity operation that was refused, when known.
+   * @param \Drupal\Core\Entity\EntityInterface|null $resource
+   *   Resolved resource for an optional site audit evidence policy.
    *
    * @return string
    *   CALLER_MESSAGE. Never the annotated reason.
@@ -488,8 +491,10 @@ final class McpDenyExplainer {
     ?string $entityType = NULL,
     ?string $entityId = NULL,
     ?string $operation = NULL,
+    ?EntityInterface $resource = NULL,
   ): string {
-    $annotated = $this->operatorNotice($reason, $profileId);
+    $projection = $this->auditLogger?->evidenceProjection($resource);
+    $annotated = $this->operatorNotice($reason, $profileId, $projection);
     if ($audit) {
       $this->writeDeniedAccess(
         $reason,
@@ -498,9 +503,36 @@ final class McpDenyExplainer {
         $entityType,
         $entityId,
         $operation,
+        $projection,
       );
     }
     return self::CALLER_MESSAGE;
+  }
+
+  /**
+   * Audits a resource refusal only when its site opts into projection.
+   */
+  public function auditProjectedResourceRefusal(
+    string $reason,
+    EntityInterface $resource,
+    string $operation,
+    string $profileId,
+  ): bool {
+    $projection = $this->auditLogger?->evidenceProjection($resource);
+    if ($projection === NULL) {
+      return FALSE;
+    }
+    $annotated = $this->operatorNotice($reason, $profileId, $projection);
+    $this->writeDeniedAccess(
+      $reason,
+      $annotated,
+      $profileId,
+      $resource->getEntityTypeId(),
+      $resource->isNew() ? '(new)' : (string) $resource->id(),
+      $operation,
+      $projection,
+    );
+    return TRUE;
   }
 
   /**
@@ -567,6 +599,8 @@ final class McpDenyExplainer {
    *   Entity id of the refused subject, or '(new)'.
    * @param string|null $operation
    *   Entity operation that was refused, when known.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
+   *   Trusted audit projection selected for this refusal.
    */
   private function writeDeniedAccess(
     string $reason,
@@ -575,6 +609,7 @@ final class McpDenyExplainer {
     ?string $entityType = NULL,
     ?string $entityId = NULL,
     ?string $operation = NULL,
+    ?McpAuditEvidenceProjectionInterface $projection = NULL,
   ): void {
     if ($this->auditLogger === NULL) {
       return;
@@ -628,7 +663,7 @@ final class McpDenyExplainer {
 
     // A queue worker has no request; never collapse those writes.
     if ($request === NULL) {
-      $this->emitDeniedAccess($meta);
+      $this->emitDeniedAccess($meta, $projection);
       return;
     }
 
@@ -654,7 +689,7 @@ final class McpDenyExplainer {
         $this->recordedSubjects[$subject . "\0" . $operation] = TRUE;
       }
     }
-    $this->emitDeniedAccess($meta);
+    $this->emitDeniedAccess($meta, $projection);
   }
 
   /**
@@ -662,15 +697,26 @@ final class McpDenyExplainer {
    *
    * @param array<string, mixed> $meta
    *   HMAC metadata. Must not contain secrets.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
+   *   Trusted audit projection selected for this refusal.
    */
-  private function emitDeniedAccess(array $meta): void {
+  private function emitDeniedAccess(array $meta, ?McpAuditEvidenceProjectionInterface $projection): void {
     if ($this->auditLogger === NULL) {
       return;
     }
     try {
-      $this->auditLogger->logAlways('denied_access', $meta);
+      if ($projection !== NULL) {
+        $this->auditLogger->logProjectedDenial($meta, $projection);
+      }
+      else {
+        $this->auditLogger->logAlways('denied_access', $meta);
+      }
     }
     catch (\Throwable $e) {
+      if ($projection !== NULL) {
+        $this->auditLogger->withoutRequestDetails(fn () => $this->logger?->error('MCP Sentinel denied_access write failed.'));
+        return;
+      }
       $this->logger?->error('MCP Sentinel denied_access write failed: @m', [
         '@m' => $e->getMessage(),
       ]);
@@ -684,12 +730,23 @@ final class McpDenyExplainer {
    *   Original deny reason.
    * @param string|null $profileId
    *   Active policy profile id when known.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
+   *   Trusted audit projection resolved for the operator notice.
    *
    * @return string
    *   Reason plus a non-secret rule suffix.
    */
-  public function operatorNotice(string $reason, ?string $profileId = NULL): string {
+  public function operatorNotice(
+    string $reason,
+    ?string $profileId = NULL,
+    ?McpAuditEvidenceProjectionInterface $projection = NULL,
+  ): string {
     $annotated = $this->annotate($reason, $profileId);
+    $projection ??= $this->auditLogger?->evidenceProjection();
+    if ($projection !== NULL && $this->auditLogger !== NULL) {
+      $this->auditLogger->withoutRequestDetails(fn () => $this->logger?->notice('MCP Sentinel deny recorded under an evidence projection.'));
+      return $annotated;
+    }
     $this->logger?->notice('MCP Sentinel deny: @explain', [
       '@explain' => $annotated,
     ]);

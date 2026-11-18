@@ -278,6 +278,7 @@ final class McpTenantResourceBoundary {
         $entity?->getEntityTypeId(),
         $entityId,
         $operation !== '' ? $operation : NULL,
+        $entity,
       ) ?? McpDenyExplainer::CALLER_MESSAGE,
     )->setCacheMaxAge(0);
   }

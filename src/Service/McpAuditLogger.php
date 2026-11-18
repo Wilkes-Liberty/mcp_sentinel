@@ -162,6 +162,8 @@ class McpAuditLogger {
    *   The original audit actor, captured before a deferred write.
    * @param \Drupal\Core\Session\AccountSwitcherInterface|null $accountSwitcher
    *   Restores the captured actor only while appending deferred evidence.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditEvidencePolicyInterface|null $evidencePolicy
+   *   Optional server policy for minimized audit evidence.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -174,7 +176,55 @@ class McpAuditLogger {
     private readonly ?RecoverySegments $recovery = NULL,
     private readonly ?AccountProxyInterface $currentUser = NULL,
     private readonly ?AccountSwitcherInterface $accountSwitcher = NULL,
+    private readonly ?McpAuditEvidencePolicyInterface $evidencePolicy = NULL,
   ) {}
+
+  /**
+   * Selects an audit projection using trusted context or a resolved resource.
+   */
+  public function evidenceProjection(?EntityInterface $resource = NULL): ?McpAuditEvidenceProjectionInterface {
+    try {
+      return $this->evidencePolicy?->projection($this->requestStack->getCurrentRequest(), $resource);
+    }
+    catch (\Throwable) {
+      // A failed selector cannot safely fall back to full forensic metadata.
+      return new class() implements McpAuditEvidenceProjectionInterface {
+
+        /**
+         * {@inheritdoc}
+         */
+        public function project(string $operation, array $metadata): array {
+          return [];
+        }
+
+      };
+    }
+  }
+
+  /**
+   * Runs a scoped append or operator log without caller request attribution.
+   */
+  public function withoutRequestDetails(callable $write): void {
+    $source = $this->requestStack->getCurrentRequest();
+    $this->requestStack->push(new Request(server: $this->auditRequestTime($source)));
+    try {
+      $write();
+    }
+    finally {
+      $this->requestStack->pop();
+    }
+  }
+
+  /**
+   * Keeps only the original timestamp when request details are removed.
+   */
+  private function auditRequestTime(?Request $source): array {
+    $requestTime = $source?->server->get('REQUEST_TIME_FLOAT') ?? microtime(TRUE);
+    return [
+      'REQUEST_TIME' => $source?->server->get('REQUEST_TIME') ?? (int) $requestTime,
+      'REQUEST_TIME_FLOAT' => $requestTime,
+    ];
+  }
 
   /**
    * Logs an operation so the row survives a rolled-back entity transaction.
@@ -198,44 +248,66 @@ class McpAuditLogger {
    *   suppressed by the very flag it is reporting on (d.o #3616539).
    */
   public function logSurvivingRollback(string $operation, array $metadata = [], bool $always = FALSE): void {
+    $this->recordSurvivingRollback($operation, $metadata, $always, $this->evidenceProjection());
+  }
+
+  /**
+   * Records a denial under the already selected resource or request policy.
+   *
+   * Scoped evidence survives rollbacks, including those at a host write gate.
+   */
+  public function logProjectedDenial(array $metadata, McpAuditEvidenceProjectionInterface $projection): void {
+    $this->recordSurvivingRollback('denied_access', $metadata, TRUE, $projection);
+  }
+
+  /**
+   * Schedules audit only after reducing metadata for a selected policy.
+   */
+  private function recordSurvivingRollback(
+    string $operation,
+    array $metadata,
+    bool $always,
+    ?McpAuditEvidenceProjectionInterface $projection,
+  ): void {
     if ($this->database !== NULL && $this->database->inTransaction()) {
       // Retain forensic context, never credentials or the original request.
       // The response may have left the request stack before a stream closes
       // the transaction. A later actor or request must not own this evidence.
       $source = $this->requestStack->getCurrentRequest();
-      $request_time = $source?->server->get('REQUEST_TIME_FLOAT') ?? microtime(TRUE);
-      $server = [
-        'REQUEST_TIME' => $source?->server->get('REQUEST_TIME') ?? (int) $request_time,
-        'REQUEST_TIME_FLOAT' => $request_time,
-        'HTTP_USER_AGENT' => substr((string) $source?->headers->get('User-Agent', ''), 0, 512),
-        'HTTP_X_MCP_CLIENT' => substr((string) $source?->headers->get('X-MCP-Client', ''), 0, 256),
-      ];
-      if ($operation === 'denied_access') {
-        $origin = $this->boundedOriginOrHost($source, 'Origin');
-        if ($origin !== NULL) {
-          $server['HTTP_ORIGIN'] = $origin;
-        }
-        $httpHost = $this->boundedOriginOrHost($source, 'Host');
-        if ($httpHost !== NULL) {
-          $server['HTTP_HOST'] = $httpHost;
-        }
+      $server = $this->auditRequestTime($source);
+      $prepared = $projection !== NULL;
+      if ($prepared) {
+        $metadata = $this->prepareMetadata($operation, $metadata, $projection);
       }
-      // Omit an unknown address: a NULL REMOTE_ADDR makes Symfony's
-      // trusted-proxy check throw a TypeError when the row is written.
-      $client_ip = $source?->getClientIp();
-      if ($client_ip !== NULL) {
-        $server['REMOTE_ADDR'] = $client_ip;
+      else {
+        $server['HTTP_USER_AGENT'] = substr((string) $source?->headers->get('User-Agent', ''), 0, 512);
+        $server['HTTP_X_MCP_CLIENT'] = substr((string) $source?->headers->get('X-MCP-Client', ''), 0, 256);
+        if ($operation === 'denied_access') {
+          $origin = $this->boundedOriginOrHost($source, 'Origin');
+          if ($origin !== NULL) {
+            $server['HTTP_ORIGIN'] = $origin;
+          }
+          $httpHost = $this->boundedOriginOrHost($source, 'Host');
+          if ($httpHost !== NULL) {
+            $server['HTTP_HOST'] = $httpHost;
+          }
+        }
+        // Omit an unknown address: a NULL REMOTE_ADDR breaks proxy checks.
+        $client_ip = $source?->getClientIp();
+        if ($client_ip !== NULL) {
+          $server['REMOTE_ADDR'] = $client_ip;
+        }
+        if (!array_key_exists('policy_bundle_digest', $metadata)) {
+          // NULL deliberately records that no policy was attested at refusal.
+          $metadata['policy_bundle_digest'] = $this->policyBundles?->activeDigest();
+        }
       }
       $request = new Request(server: $server);
       $account = $this->currentUser !== NULL && $this->accountSwitcher !== NULL
         ? new UserSession(['uid' => (int) $this->currentUser->id()])
         : NULL;
-      if (!array_key_exists('policy_bundle_digest', $metadata)) {
-        // NULL deliberately records that no policy was attested at refusal.
-        $metadata['policy_bundle_digest'] = $this->policyBundles?->activeDigest();
-      }
       $this->database->transactionManager()->addPostTransactionCallback(
-        function () use ($operation, $metadata, $always, $request, $account): void {
+        function () use ($operation, $metadata, $always, $request, $account, $prepared): void {
           $switched = FALSE;
           try {
             if ($account !== NULL) {
@@ -244,7 +316,14 @@ class McpAuditLogger {
             }
             $this->requestStack->push($request);
             try {
-              $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
+              if ($prepared) {
+                if ($always || $this->logEnabled($operation)) {
+                  $this->appendToChain($operation, $metadata);
+                }
+              }
+              else {
+                $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
+              }
             }
             finally {
               $this->requestStack->pop();
@@ -259,6 +338,12 @@ class McpAuditLogger {
           }
         }
       );
+      return;
+    }
+    if ($projection !== NULL) {
+      if ($always || $this->logEnabled($operation)) {
+        $this->writeToChain($operation, $metadata, $projection);
+      }
       return;
     }
     $always ? $this->logAlways($operation, $metadata) : $this->log($operation, $metadata);
@@ -279,21 +364,26 @@ class McpAuditLogger {
    *   unless the caller already set it.
    */
   public function log(string $operation, array $metadata = []): void {
+    if ($this->logEnabled($operation)) {
+      $this->writeToChain($operation, $metadata);
+    }
+  }
+
+  /**
+   * Determines whether the ordinary logging gate admits an operation.
+   */
+  private function logEnabled(string $operation): bool {
     $config = $this->configFactory->get('mcp_sentinel.settings');
     // Denials are always written. audit_enabled gates allow rows only.
     if ($operation !== 'denied_access' && !$config->get('audit_enabled')) {
-      return;
+      return FALSE;
     }
     // Read operations are suppressed unless audit_log_reads is on. This covers
     // both entity reads and the config read/list tools, which are non-mutating.
     $isRead = str_starts_with($operation, 'entity_read')
       || str_starts_with($operation, 'config_read')
       || str_starts_with($operation, 'config_list');
-    if ($isRead && !$config->get('audit_log_reads')) {
-      return;
-    }
-
-    $this->writeToChain($operation, $metadata);
+    return !$isRead || (bool) $config->get('audit_log_reads');
   }
 
   /**
@@ -351,8 +441,34 @@ class McpAuditLogger {
    *   Operation identifier.
    * @param array $metadata
    *   Metadata payload.
+   * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
+   *   Resource projection when already selected.
    */
-  private function writeToChain(string $operation, array $metadata): void {
+  private function writeToChain(
+    string $operation,
+    array $metadata,
+    ?McpAuditEvidenceProjectionInterface $projection = NULL,
+  ): void {
+    $projection ??= $this->evidenceProjection();
+    $metadata = $this->prepareMetadata($operation, $metadata, $projection);
+    if ($projection !== NULL) {
+      $this->withoutRequestDetails(fn () => $this->appendToChain($operation, $metadata));
+      return;
+    }
+    $this->appendToChain($operation, $metadata);
+  }
+
+  /**
+   * Enriches and then projects before writing or capturing a deferred row.
+   *
+   * @return array<string, mixed>
+   *   The metadata to append.
+   */
+  private function prepareMetadata(
+    string $operation,
+    array $metadata,
+    ?McpAuditEvidenceProjectionInterface $projection,
+  ): array {
     // The connector's self-reported X-MCP-Client label (Integration Contract
     // v1.0). Recorded into the audit metadata as mcp_client for forensic
     // identity only — it is NEVER an enforcement signal and is not a
@@ -390,6 +506,21 @@ class McpAuditLogger {
       }
     }
 
+    if ($projection !== NULL) {
+      try {
+        return $projection->project($operation, $metadata);
+      }
+      catch (\Throwable) {
+        return [];
+      }
+    }
+    return $metadata;
+  }
+
+  /**
+   * Appends the final metadata without further enrichment.
+   */
+  private function appendToChain(string $operation, array $metadata): void {
     $this->requireChain()->log(
       self::CHANNEL,
       $operation,
