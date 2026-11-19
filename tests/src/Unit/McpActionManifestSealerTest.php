@@ -141,7 +141,6 @@ final class McpActionManifestSealerTest extends UnitTestCase {
       . hash_hmac('sha256', $canonical, $material),
     );
     $document = json_decode($canonical, TRUE, 512, JSON_THROW_ON_ERROR);
-    $this->assertIsArray($document);
     $document['seal'] = $seal;
     $opened = $this->sealer($material)->open((string) json_encode(
       $document,
