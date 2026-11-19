@@ -5,23 +5,25 @@ declare(strict_types=1);
 namespace Drupal\mcp_sentinel\Value;
 
 /**
- * Shared canonical JSON for policy-bundle and audit-identity digests.
+ * Shared canonical JSON for policy, manifest, and identity digests.
  *
  * Map keys are sorted recursively; lists keep caller order; scalars
- * pass through. Policy claims stay arrays and scalars — an empty
- * stdClass is still rejected with the historical message. Identity
- * values expand JsonSerializable, then public object properties,
- * before the same sorter. get_object_vars() only sees public
- * properties; private and protected fields are omitted. Numeric
- * property names become integer array keys, so an object whose
- * public properties are "0", "1", "2", ... is canonicalized as a list
- * (caller order), not a map. An empty identity object encodes as
- * `{}`; an empty list encodes as `[]`. Recursion stops at MAX_DEPTH
- * on both paths (512, matching json_encode). A visited-object set,
- * a node budget, and a byte budget apply on the identity path
- * only so a 1.x-verifiable policy bundle still verifies. Those
- * throws are catchable InvalidArgumentException so the caller
- * can fall back to a type marker.
+ * pass through. Policy and manifest claims stay arrays and scalars
+ * — an empty stdClass is still rejected with the historical
+ * policy-bundle or manifest message. Identity values expand
+ * JsonSerializable, then public object properties, before the same
+ * sorter. get_object_vars() only sees public properties; private
+ * and protected fields are omitted. Numeric property names become
+ * integer array keys, so an object whose public properties are
+ * "0", "1", "2", ... is canonicalized as a list (caller order),
+ * not a map. An empty identity object encodes as `{}`; an empty
+ * list encodes as `[]`. Recursion stops at MAX_DEPTH on both
+ * paths (512, matching json_encode). A visited-object set, a node
+ * budget, and a byte budget apply on the identity path only so a
+ * 1.x-verifiable policy bundle still verifies and a previously
+ * sealed action manifest still opens. Those throws are catchable
+ * InvalidArgumentException so the caller can fall back to a type
+ * marker.
  */
 final class McpCanonicalJson {
 

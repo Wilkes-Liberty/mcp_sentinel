@@ -83,34 +83,40 @@ final class McpActionManifest {
   }
 
   /**
-   * Recursively sorts object keys; leaves lists in caller order.
+   * Recursively sorts map keys; lists keep caller order.
+   *
+   * Delegates to McpCanonicalJson so sealed-manifest HMAC bytes
+   * cannot drift from policy-bundle digests and audit identity
+   * hashes. The walk is the arrays-and-scalars path: node and
+   * byte budgets stay identity-only. A non-scalar claim still
+   * throws the historical manifest message.
    *
    * @param mixed $value
    *   A JSON-able value.
    *
    * @return mixed
    *   The normalized value.
+   *
+   * @throws \InvalidArgumentException
+   *   When the value cannot be encoded, or the graph exceeds
+   *   McpCanonicalJson::MAX_DEPTH.
    */
   public static function normalize(mixed $value): mixed {
-    if (!is_array($value)) {
-      if (is_string($value) || is_int($value) || is_float($value) || is_bool($value) || $value === NULL) {
-        return $value;
+    try {
+      return McpCanonicalJson::normalize($value);
+    }
+    catch (\InvalidArgumentException $e) {
+      $policyNonScalar = 'Policy bundle claims may only contain '
+        . 'scalars, lists and maps.';
+      if ($e->getMessage() === $policyNonScalar) {
+        throw new \InvalidArgumentException(
+          'Manifest claims may only contain scalars, lists and maps.',
+          $e->getCode(),
+          $e,
+        );
       }
-      throw new \InvalidArgumentException(
-        'Manifest claims may only contain scalars, lists and maps.',
-      );
+      throw $e;
     }
-    if ($value === []) {
-      return [];
-    }
-    $isList = array_is_list($value);
-    if (!$isList) {
-      ksort($value);
-    }
-    foreach ($value as $key => $item) {
-      $value[$key] = self::normalize($item);
-    }
-    return $value;
   }
 
   /**

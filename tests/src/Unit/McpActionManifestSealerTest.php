@@ -13,6 +13,7 @@ use Drupal\key\KeyInterface;
 use Drupal\key\KeyRepositoryInterface;
 use Drupal\mcp_sentinel\Service\McpActionManifestSealer;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
+use Drupal\mcp_sentinel\Value\McpActionManifest;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -96,6 +97,61 @@ final class McpActionManifestSealerTest extends UnitTestCase {
     $tampered = json_decode($manifest->toJson(), TRUE);
     $tampered['operation'] = 'grant_mcp_admin';
     $this->assertNull($sealer->open((string) json_encode($tampered)));
+  }
+
+  /**
+   * A pinned claims document seals and opens with the same bytes.
+   */
+  public function testKnownFixtureSealThenVerify(): void {
+    $claims = [
+      'v' => 1,
+      'id' => 'aaa',
+      'actor_uid' => 2,
+      'delegation' => [
+        'consumer_client_id' => NULL,
+        'request_id' => NULL,
+      ],
+      'operation' => 'delete',
+      'arguments' => [],
+      'target' => [
+        'type' => 'node',
+        'id' => '1',
+        'uuid' => NULL,
+        'revision' => NULL,
+      ],
+      'policy_digest' => NULL,
+      'preconditions' => [],
+      'expires' => 1,
+      'idempotency_key' => 'ik',
+    ];
+    $canonical = McpActionManifest::canonicalJson($claims);
+    $this->assertSame(
+      '{"actor_uid":2,"arguments":[],"delegation":{"consumer_client_id":null,'
+      . '"request_id":null},"expires":1,"id":"aaa","idempotency_key":"ik",'
+      . '"operation":"delete","policy_digest":null,"preconditions":[],'
+      . '"target":{"id":"1","revision":null,"type":"node","uuid":null},"v":1}',
+      $canonical,
+    );
+    $material = 'fixture-secret';
+    $seal = 'hmac-sha256:'
+      . 'fcd894898db1b59d31d9c058721ff4545ea536f03df278d78d03043feacb1f0b';
+    $this->assertSame(
+      $seal,
+      McpActionManifestSealer::SEAL_PREFIX
+      . hash_hmac('sha256', $canonical, $material),
+    );
+    $document = json_decode($canonical, TRUE, 512, JSON_THROW_ON_ERROR);
+    $this->assertIsArray($document);
+    $document['seal'] = $seal;
+    $opened = $this->sealer($material)->open((string) json_encode(
+      $document,
+      JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR,
+    ));
+    $this->assertNotNull($opened);
+    $this->assertSame($seal, $opened->seal());
+    $this->assertSame('aaa', $opened->id());
+    $this->assertSame(2, $opened->actorUid());
+    $this->assertSame('delete', $opened->operation());
   }
 
   /**
