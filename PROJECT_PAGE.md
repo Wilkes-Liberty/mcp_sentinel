@@ -182,6 +182,10 @@ them rather than replacing entity or field access.
 - Drupal 10.6+, 11.3+, or 12, PHP 8.2+ (base module and approval). Optional MCP
   transport modules inherit their transport dependencies' PHP requirements;
   MCP Server currently requires PHP 8.3.
+- **PHP `ext-intl` / `Spoofchecker`.** MCP Sentinel refuses reserved
+  look-alike argument keys with intl Spoofchecker (UTS #39). Without
+  `ext-intl` / `Spoofchecker`, governed tool calls fail closed
+  (`lookalike_check_unavailable`). Install the PHP intl extension.
 - [Tool API](https://www.drupal.org/project/tool) (`drupal/tool`)
 - [Key](https://www.drupal.org/project/key) (`drupal/key`) — stores the webhook
   signing secret (and optional audit encryption key) outside exported config
@@ -207,6 +211,10 @@ composer require drupal/mcp_sentinel drupal/mcp_server drupal/simple_oauth
 drush en mcp_sentinel mcp_sentinel_server mcp_server_tool_bridge mcp_server_oauth -y
 drush mcp-sentinel:setup
 ```
+
+Install the PHP intl extension (`ext-intl` / `Spoofchecker`) as well.
+Composer does not install it. Without it, governed tool calls fail closed
+(`lookalike_check_unavailable`).
 
 Configure at **Configuration → Web services → MCP Sentinel**
 (`/admin/config/services/mcp-sentinel`). Review activity at the governance
