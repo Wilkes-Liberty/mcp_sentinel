@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
 use Drupal\mcp_sentinel\Value\McpActionManifest;
+use Drupal\mcp_sentinel\Value\McpCanonicalJson;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -17,6 +18,7 @@ use PHPUnit\Framework\Attributes\Group;
  * @group mcp_sentinel
  */
 #[CoversClass(McpActionManifest::class)]
+#[CoversClass(McpCanonicalJson::class)]
 #[Group('mcp_sentinel')]
 final class McpActionManifestTest extends UnitTestCase {
 
@@ -103,9 +105,139 @@ final class McpActionManifestTest extends UnitTestCase {
    */
   public function testNonScalarValueIsRejected(): void {
     $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage(
+      'Manifest claims may only contain scalars, lists and maps.',
+    );
     McpActionManifest::canonicalJson([
       'arguments' => ['bad' => new \stdClass()],
     ]);
+  }
+
+  /**
+   * Manifest normalize matches McpCanonicalJson on maps and scalars.
+   *
+   * @covers ::normalize
+   * @covers \Drupal\mcp_sentinel\Value\McpCanonicalJson::normalize
+   */
+  public function testNormalizeAgreesWithCanonicalJson(): void {
+    $cases = [
+      'empty list' => [],
+      'list' => ['b', 'a'],
+      'map' => ['z' => 1, 'a' => 2],
+      'nested map and list' => [
+        'z' => ['b' => 2, 'a' => 1],
+        'a' => ['x', 'y'],
+        'empty' => [],
+      ],
+      'null' => NULL,
+      'bool' => FALSE,
+      'int' => 0,
+      'float' => 1.5,
+      'string' => 'slash/path',
+    ];
+    foreach ($cases as $label => $value) {
+      $this->assertSame(
+        McpCanonicalJson::normalize($value),
+        McpActionManifest::normalize($value),
+        $label,
+      );
+    }
+  }
+
+  /**
+   * The sorter lives in McpCanonicalJson; this class must not copy it.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeDoesNotCopyTheSorter(): void {
+    $file = (new \ReflectionClass(McpActionManifest::class))->getFileName();
+    $this->assertNotFalse($file);
+    $source = file_get_contents($file);
+    $this->assertNotFalse($source);
+    $this->assertStringContainsString('McpCanonicalJson::normalize', $source);
+    $this->assertDoesNotMatchRegularExpression('/\bksort\s*\(/', $source);
+  }
+
+  /**
+   * An acyclic nest deeper than MAX_DEPTH is rejected.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeRejectsGraphDeeperThanMaxDepth(): void {
+    $value = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH + 1; $i++) {
+      $value = [$value];
+    }
+    $this->expectException(\InvalidArgumentException::class);
+    $this->expectExceptionMessage('Canonical JSON depth exceeded.');
+    McpActionManifest::normalize($value);
+  }
+
+  /**
+   * A nest of exactly MAX_DEPTH arrays is accepted.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeAcceptsGraphAtMaxDepth(): void {
+    $value = 'leaf';
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH; $i++) {
+      $value = [$value];
+    }
+    $normalized = McpActionManifest::normalize($value);
+    for ($i = 0; $i < McpCanonicalJson::MAX_DEPTH; $i++) {
+      $this->assertIsArray($normalized);
+      $this->assertCount(1, $normalized);
+      $normalized = $normalized[0];
+    }
+    $this->assertSame('leaf', $normalized);
+  }
+
+  /**
+   * A manifest wider than MAX_NODES still matches the shared helper.
+   *
+   * Node and byte budgets are identity-only.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeAcceptsManifestWiderThanNodeBudget(): void {
+    $arguments = [];
+    for ($i = 0; $i < McpCanonicalJson::MAX_NODES + 4; $i++) {
+      $arguments['k' . $i] = 'v' . $i;
+    }
+    $value = ['arguments' => $arguments];
+    $this->assertSame(
+      McpCanonicalJson::normalize($value),
+      McpActionManifest::normalize($value),
+    );
+  }
+
+  /**
+   * A 70 KiB argument string still matches the shared helper.
+   *
+   * @covers ::normalize
+   */
+  public function testNormalizeAcceptsManifestStringOverByteBudget(): void {
+    $value = ['arguments' => ['blob' => str_repeat('x', 70 * 1024)]];
+    $this->assertSame(
+      McpCanonicalJson::normalize($value),
+      McpActionManifest::normalize($value),
+    );
+  }
+
+  /**
+   * Canonical JSON bytes are pinned so a sorter drift fails this test.
+   *
+   * @covers ::canonicalJson
+   * @covers ::normalize
+   */
+  public function testCanonicalJsonBytesArePinned(): void {
+    $this->assertSame(
+      '{"actor_uid":2,"arguments":[],"delegation":{"consumer_client_id":null,'
+      . '"request_id":null},"expires":1,"id":"aaa","idempotency_key":"ik",'
+      . '"operation":"delete","policy_digest":null,"preconditions":[],'
+      . '"target":{"id":"1","revision":null,"type":"node","uuid":null},"v":1}',
+      McpActionManifest::canonicalJson($this->completeClaims()),
+    );
   }
 
   /**
