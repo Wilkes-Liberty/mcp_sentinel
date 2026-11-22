@@ -8,10 +8,10 @@ use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
-use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\tool\ExecutableResult;
 
 /**
@@ -97,11 +97,18 @@ trait McpEntityToolTrait {
       }
       $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
         ?? $reason;
+      // The holder is public: false. A compiled Drupal 10 container
+      // inlines it, so Drupal::service() throws and the caller sees a
+      // container exception instead of the denial. Tools already have
+      // the dispatcher; read the seal through that public path.
       $ctx = NULL;
-      if (\Drupal::hasService('mcp_sentinel.principal_context_holder')) {
-        $held = \Drupal::service('mcp_sentinel.principal_context_holder')->get();
-        if ($held instanceof McpPrincipalContext) {
-          $ctx = $held;
+      if (isset($this->governancePrincipalDispatcher)
+        && $this->governancePrincipalDispatcher !== NULL) {
+        try {
+          $ctx = $this->governancePrincipalDispatcher->sealedContext();
+        }
+        catch (McpPrincipalContextDeniedException) {
+          // Stamp unverified. This helper must still write the row.
         }
       }
       $logger->log(
