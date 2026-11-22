@@ -490,8 +490,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
-   * Verified denial rows carry source, azp, granted scopes, and
-   * required scopes.
+   * Verified denial rows carry source, azp, and scope fields.
    *
    * @covers ::denialAuditMetadata
    */
