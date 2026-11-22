@@ -652,8 +652,7 @@ final class McpDenyExplainer {
       $ctx instanceof McpPrincipalContext ? $ctx : NULL,
     );
     foreach ($extraMetadata as $key => $value) {
-      if (!is_string($key) || $key === ''
-        || $key === 'token' || $key === 'bearer') {
+      if ($key === '' || $key === 'token' || $key === 'bearer') {
         continue;
       }
       $meta[$key] = $value;

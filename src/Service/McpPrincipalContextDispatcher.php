@@ -579,6 +579,12 @@ final class McpPrincipalContextDispatcher {
   /**
    * Metadata for a principal-context denial.
    *
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   * @param string $reasonCode
+   *   Denial reason.
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
+   *   Principal recorded on the row.
    * @param list<string> $requiredScopes
    *   Policy-required scopes for this refusal, when known.
    *
@@ -631,7 +637,7 @@ final class McpPrincipalContextDispatcher {
     array $requiredScopes = [],
   ): array {
     if ($requiredScopes !== []) {
-      $meta['required_scopes'] = array_values($requiredScopes);
+      $meta['required_scopes'] = $requiredScopes;
     }
     if ($ctx === NULL) {
       $meta['principal_key'] = 'unverified';

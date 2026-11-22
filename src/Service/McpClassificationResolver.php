@@ -128,7 +128,7 @@ final class McpClassificationResolver {
   /**
    * Classification label of the most recent evidence() on this request.
    *
-   * refusalResponse() copies this onto the denied_access row so a
+   * The HTTP refusal copies this onto the denied_access row so a
    * classification refuse is classified even when the evidence
    * operation is a separate chain write.
    */

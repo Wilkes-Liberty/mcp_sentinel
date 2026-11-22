@@ -165,7 +165,7 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
   }
 
   /**
-   * logDeniedAccess() stamps principal fields from the sealed context.
+   * The tool helper stamps principal fields from the sealed context.
    */
   public function testLogDeniedAccessWritesPrincipalFields(): void {
     $this->actAsGovernedAgent();
