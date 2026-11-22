@@ -126,6 +126,20 @@ final class McpClassificationResolver {
   private ?string $detectorCeiling = NULL;
 
   /**
+   * Classification label of the most recent evidence() on this request.
+   *
+   * refusalResponse() copies this onto the denied_access row so a
+   * classification refuse is classified even when the evidence
+   * operation is a separate chain write.
+   */
+  private ?string $lastRefusalLabel = NULL;
+
+  /**
+   * Request object-id lastRefusalLabel belongs to, or 0.
+   */
+  private int $lastRefusalFor = 0;
+
+  /**
    * The request the detector ceiling belongs to (spl_object_id), or 0.
    */
   private int $detectorFor = 0;
@@ -511,6 +525,8 @@ final class McpClassificationResolver {
       $this->recorded = [];
       $this->recordedFor = $requestId;
     }
+    $this->lastRefusalLabel = $label;
+    $this->lastRefusalFor = $requestId;
     $surfaceValue = $surface === NULL ? 'unknown' : $surface->value;
     $key = implode("\0", [$surfaceValue, $profile->id(), $entityTypeId, $bundle, $field, $label, $ceiling]);
     if (isset($this->recorded[$key])) {
@@ -560,7 +576,12 @@ final class McpClassificationResolver {
    * decision is per principal, per surface and per declaration.
    */
   public function refusalResponse(): JsonResponse {
-    $this->denyExplainer?->refuse(self::DENIAL_CODE);
+    $extra = [];
+    $label = $this->refusalClassification();
+    if ($label !== NULL) {
+      $extra['classification'] = $label;
+    }
+    $this->denyExplainer?->refuse(self::DENIAL_CODE, extraMetadata: $extra);
     $refusal = new JsonResponse([
       'errors' => [
         [
@@ -606,6 +627,19 @@ final class McpClassificationResolver {
     }
     $this->evidence($profile, $surface, $entityTypeId, $bundle, '', $label, $ceiling);
     return FALSE;
+  }
+
+  /**
+   * Content classification remembered from evidence() on this request.
+   */
+  private function refusalClassification(): ?string {
+    $request = $this->requestStack->getCurrentRequest();
+    $id = $request === NULL ? 0 : spl_object_id($request);
+    if ($id !== $this->lastRefusalFor || $this->lastRefusalLabel === NULL
+      || $this->lastRefusalLabel === '') {
+      return NULL;
+    }
+    return $this->lastRefusalLabel;
   }
 
   /**

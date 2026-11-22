@@ -74,6 +74,31 @@ final class McpPrincipalContextFactoryTest extends UnitTestCase {
   }
 
   /**
+   * Token id is jti only; the bearer is never stored on the context.
+   *
+   * @covers ::fromRequest
+   */
+  public function testTokenIdComesFromJtiClaim(): void {
+    $oauth = $this->createMock(McpOauthContext::class);
+    $oauth->method('clientId')->willReturn(NULL);
+    $oauth->method('scopes')->willReturn([]);
+    $factory = new McpPrincipalContextFactory(
+      new RequestStack(),
+      $oauth,
+    );
+    $request = Request::create('/mcp', 'POST');
+    $request->attributes->set(McpPrincipalContext::CLAIMS_ATTRIBUTE, [
+      'iss' => 'https://idp.example/realms/agents',
+      'sub' => 'human-1',
+      'azp' => 'token-azp',
+      'tenant' => 'tenant-a',
+      'jti' => 'token-id-1',
+    ]);
+    $ctx = $factory->fromRequest($request);
+    $this->assertSame('token-id-1', $ctx->tokenId());
+  }
+
+  /**
    * A missing sub is empty; Drupal uid is never substituted.
    *
    * @covers ::fromRequest

@@ -1,6 +1,8 @@
 services:
   mcp_sentinel_server.authorization_audit_subscriber:
     class: Drupal\mcp_sentinel_server\EventSubscriber\McpAuthorizationAuditSubscriber
-    arguments: ['@mcp_sentinel.audit_logger']
+    arguments:
+      - '@mcp_sentinel.audit_logger'
+      - '@mcp_sentinel.principal_context_holder'
     tags:
       - { name: event_subscriber }

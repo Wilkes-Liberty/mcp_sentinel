@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\mcp_sentinel\Service;
 
+use Drupal\Core\Site\Settings;
 use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpPrincipalContext;
@@ -18,7 +19,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * passed to the handler / doExecute() — never a raw HTTP body. A
  * network or sealed-token HTTP call without a tenant claim fails
  * closed. Every denial writes a denied_access audit row that carries
- * the verified principal keys (or an unverified marker). Denial rows
+ * the verified principal keys (or an unverified marker),
+ * principal_source, azp, jti, and granted/required scopes.
+ * Claimed but unverified values use claimed_* names. Denial rows
  * are always written; audit_enabled gates allow rows only.
  */
 final class McpPrincipalContextDispatcher {
@@ -65,6 +68,10 @@ final class McpPrincipalContextDispatcher {
    * @param \Drupal\mcp_sentinel\Service\McpDenyExplainer|null $denyExplainer
    *   Operator explainer recorded on the HMAC row. Nullable for a
    *   cached container that predates this argument.
+   * @param \Drupal\Core\Site\Settings|null $settings
+   *   Pinned Paladin issuer. Nullable for a cached container
+   *   that predates this argument; then Settings::getInstance()
+   *   is used.
    */
   public function __construct(
     private readonly McpPrincipalContextFactory $factory,
@@ -75,6 +82,7 @@ final class McpPrincipalContextDispatcher {
     private readonly LoggerInterface $logger,
     private readonly McpKillEnforcerInterface $killSwitch,
     private readonly ?McpDenyExplainer $denyExplainer = NULL,
+    private readonly ?Settings $settings = NULL,
   ) {}
 
   /**
@@ -328,6 +336,7 @@ final class McpPrincipalContextDispatcher {
         'Paladin is the sole issuer for governed tools.',
       );
     }
+    $this->assertIssuerPinned($ctx, $toolId);
     if ($ctx->isNetwork() && $ctx->tenant() === '') {
       $this->deny(
         $toolId,
@@ -397,7 +406,56 @@ final class McpPrincipalContextDispatcher {
       $toolId,
       McpPrincipalContextDeniedException::REQUIRED_SCOPE_MISSING,
       'The token is missing the exact required OAuth scope.',
+      NULL,
+      $requiredScopes,
     );
+  }
+
+  /**
+   * Refuses a Paladin context whose iss does not match the pin.
+   *
+   * Role-fallback and kernel fixtures skip: they are not Paladin
+   * tokens. An empty pin leaves today's admit() behavior so
+   * tests without settings.php still run.
+   *
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext $ctx
+   *   The sealed context.
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the guard is on and iss does not match the pin.
+   */
+  private function assertIssuerPinned(
+    McpPrincipalContext $ctx,
+    string $toolId,
+  ): void {
+    if ($ctx->fromRoleFallback() || $ctx->fromFixture()) {
+      return;
+    }
+    $pinned = $this->pinnedIssuer();
+    if ($pinned === '' || $ctx->issuer() === $pinned) {
+      return;
+    }
+    $this->deny(
+      $toolId,
+      McpPrincipalContextDeniedException::NON_IDP_ISSUER,
+      'Paladin is the sole issuer for governed tools.',
+    );
+  }
+
+  /**
+   * Paladin issuer from settings.php, or empty when unset.
+   */
+  private function pinnedIssuer(): string {
+    try {
+      $settings = $this->settings ?? Settings::getInstance();
+    }
+    catch (\BadMethodCallException) {
+      return '';
+    }
+    $issuer = $settings->get('mcp_sentinel.paladin.issuer', '');
+    return is_string($issuer) ? $issuer : '';
   }
 
   /**
@@ -472,6 +530,8 @@ final class McpPrincipalContextDispatcher {
    *   contain secrets.
    * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
    *   Request projection when already selected.
+   * @param list<string> $requiredScopes
+   *   Policy-required scopes for this refusal, when known.
    */
   private function logDenial(
     string $toolId,
@@ -479,8 +539,14 @@ final class McpPrincipalContextDispatcher {
     McpPrincipalContext $ctx,
     string $detail = '',
     ?McpAuditEvidenceProjectionInterface $projection = NULL,
+    array $requiredScopes = [],
   ): void {
-    $metadata = self::denialAuditMetadata($toolId, $reasonCode, $ctx);
+    $metadata = self::denialAuditMetadata(
+      $toolId,
+      $reasonCode,
+      $ctx,
+      $requiredScopes,
+    );
     $carried = $this->holder->carriedPrincipal();
     if ($carried !== NULL) {
       $metadata['principal_key'] = 'unverified';
@@ -513,13 +579,17 @@ final class McpPrincipalContextDispatcher {
   /**
    * Metadata for a principal-context denial.
    *
-   * @return array<string, string>
+   * @param list<string> $requiredScopes
+   *   Policy-required scopes for this refusal, when known.
+   *
+   * @return array<string, mixed>
    *   Audit metadata including principal_key / human_key or unverified.
    */
   public static function denialAuditMetadata(
     string $toolId,
     string $reasonCode,
     McpPrincipalContext $ctx,
+    array $requiredScopes = [],
   ): array {
     $meta = [
       'tool' => $toolId !== '' ? $toolId : 'unknown_tool',
@@ -528,13 +598,62 @@ final class McpPrincipalContextDispatcher {
       'operation' => 'dispatch',
       'reason' => $reasonCode,
     ];
+    $meta = self::stampPrincipalFields($meta, $ctx, $requiredScopes);
+    if (isset($meta['principal_unverified'])) {
+      $meta['unverified_reason'] = $reasonCode;
+    }
+    return $meta;
+  }
+
+  /**
+   * Stamps verified principal fields, or claimed_* when unverified.
+   *
+   * Verified names (iss, sub, azp, tenant, jti, granted_scopes) are
+   * written only when fromClaims() succeeds. Claimed but unverified
+   * values use claimed_* so an operator cannot mistake them for a
+   * composed principal. principal_source is factory provenance, not
+   * a token claim, so it keeps that name on both paths. Never
+   * records a raw token.
+   *
+   * @param array<string, mixed> $meta
+   *   Existing denial metadata.
+   * @param \Drupal\mcp_sentinel\Value\McpPrincipalContext|null $ctx
+   *   Sealed context, or NULL when the holder is missing.
+   * @param list<string> $requiredScopes
+   *   Policy-required scopes for this refusal, when known.
+   *
+   * @return array<string, mixed>
+   *   Metadata with principal fields.
+   */
+  public static function stampPrincipalFields(
+    array $meta,
+    ?McpPrincipalContext $ctx,
+    array $requiredScopes = [],
+  ): array {
+    if ($requiredScopes !== []) {
+      $meta['required_scopes'] = array_values($requiredScopes);
+    }
+    if ($ctx === NULL) {
+      $meta['principal_key'] = 'unverified';
+      $meta['human_key'] = 'unverified';
+      return $meta;
+    }
+    $source = $ctx->source();
+    if ($source !== '') {
+      $meta['principal_source'] = $source;
+    }
     try {
       $keys = McpPrincipalKey::fromClaims($ctx->keyClaims());
       $meta['principal_key'] = $keys['principalKey'];
       $meta['human_key'] = $keys['humanKey'];
-      $meta['iss'] = $ctx->issuer();
-      $meta['sub'] = $ctx->subject();
-      $meta['tenant'] = $ctx->tenant();
+      self::copyIfPresent($meta, 'iss', $ctx->issuer());
+      self::copyIfPresent($meta, 'sub', $ctx->subject());
+      self::copyIfPresent($meta, 'azp', $ctx->azp());
+      self::copyIfPresent($meta, 'tenant', $ctx->tenant());
+      self::copyIfPresent($meta, 'jti', $ctx->tokenId());
+      if ($ctx->scopes() !== []) {
+        $meta['granted_scopes'] = $ctx->scopes();
+      }
       $parts = explode(McpPrincipalKey::SEPARATOR, $keys['principalKey']);
       $meta['actor'] = $parts[2] ?? '';
     }
@@ -542,21 +661,36 @@ final class McpPrincipalContextDispatcher {
       $meta['principal_key'] = 'unverified';
       $meta['human_key'] = 'unverified';
       $meta['principal_unverified'] = $e->reasonCode;
-      $meta['unverified_reason'] = $reasonCode;
-      if ($ctx->issuer() !== '') {
-        $meta['iss'] = $ctx->issuer();
-      }
-      if ($ctx->subject() !== '') {
-        $meta['sub'] = $ctx->subject();
-      }
-      if ($ctx->azp() !== '') {
-        $meta['azp'] = $ctx->azp();
-      }
-      if ($ctx->tenant() !== '') {
-        $meta['tenant'] = $ctx->tenant();
+      self::copyIfPresent($meta, 'claimed_iss', $ctx->issuer());
+      self::copyIfPresent($meta, 'claimed_sub', $ctx->subject());
+      self::copyIfPresent($meta, 'claimed_azp', $ctx->azp());
+      self::copyIfPresent($meta, 'claimed_tenant', $ctx->tenant());
+      self::copyIfPresent($meta, 'claimed_jti', $ctx->tokenId());
+      if ($ctx->scopes() !== []) {
+        $meta['claimed_granted_scopes'] = $ctx->scopes();
       }
     }
     return $meta;
+  }
+
+  /**
+   * Copies a non-empty string onto metadata.
+   *
+   * @param array<string, mixed> $meta
+   *   Metadata being built.
+   * @param string $key
+   *   Metadata key.
+   * @param string $value
+   *   Value to copy when non-empty.
+   */
+  private static function copyIfPresent(
+    array &$meta,
+    string $key,
+    string $value,
+  ): void {
+    if ($value !== '') {
+      $meta[$key] = $value;
+    }
   }
 
   /**
@@ -605,6 +739,17 @@ final class McpPrincipalContextDispatcher {
    * principal_killed on the row while the caller still sees the
    * generic missing-principal refusal.
    *
+   * @param string $toolId
+   *   Real tool plugin id for the audit row.
+   * @param string $reasonCode
+   *   Caller-facing denial reason.
+   * @param string $message
+   *   Exception message. Must not contain secrets.
+   * @param string|null $auditReason
+   *   Row reason when it differs from $reasonCode.
+   * @param list<string> $requiredScopes
+   *   Policy-required scopes for this refusal, when known.
+   *
    * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
    */
   private function deny(
@@ -612,11 +757,19 @@ final class McpPrincipalContextDispatcher {
     string $reasonCode,
     string $message,
     ?string $auditReason = NULL,
+    array $requiredScopes = [],
   ): never {
     $rowReason = $auditReason ?? $reasonCode;
     $projection = $this->auditLogger->evidenceProjection();
     try {
-      $this->logDenial($toolId, $rowReason, $this->auditContext(), $message, $projection);
+      $this->logDenial(
+        $toolId,
+        $rowReason,
+        $this->auditContext(),
+        $message,
+        $projection,
+        $requiredScopes,
+      );
     }
     catch (\Throwable $e) {
       if ($projection !== NULL) {

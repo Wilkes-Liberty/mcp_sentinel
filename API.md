@@ -156,14 +156,27 @@ That includes the NULL-dispatcher path on JSON:API, GraphQL,
 and `/drupal-mcp/context`, and every other `refuse()` write
 that runs before a principal is sealed. It is not limited to
 `missing_dispatcher`. When a sealed context is present and
-`principalKey()` / `humanKey()` throw, the same keys are
-`unverified` and `principal_unverified` carries the
-key-exception reason. Dispatcher `logDenial()` and
-kill-switch `writeDenialAudit()` also stamp both keys
-`unverified` when a carried queue principal is present
-(`principal_unverified` is `carried_queue_key`).
-`denialAuditMetadata()` stamps them when `fromClaims()`
+`fromClaims()` throws, the same keys are `unverified` and
+`principal_unverified` carries the key-exception reason.
+Claimed but unverified `iss` / `sub` / `azp` / `tenant` /
+`jti` / granted scopes use `claimed_*` keys so they cannot
+be mistaken for a composed principal. Verified rows also
+carry `principal_source`, `azp`, `jti` (token id only, never
+the bearer), `granted_scopes`, and `required_scopes` when
+known. Classification HTTP refuses copy the content label
+onto the `denied_access` row as `classification`.
+`McpEntityToolTrait::logDeniedAccess()` and the Server
+authorization subscriber stamp the same principal fields.
+Dispatcher `logDenial()` and kill-switch `writeDenialAudit()`
+also stamp both keys `unverified` when a carried queue
+principal is present (`principal_unverified` is
+`carried_queue_key`). `denialAuditMetadata()` /
+`stampPrincipalFields()` stamp them when `fromClaims()`
 throws (`principal_unverified` plus `unverified_reason`).
+Governed-tool `admit()` pins Paladin `iss` to
+`$settings['mcp_sentinel.paladin.issuer']` when that pin is
+non-empty. Role-fallback and kernel fixture contexts skip
+the pin and still carry `principal_source` on denial rows.
 A Paladin or
 sealed-token context that omits every required name, including a
 token that lists no scopes, is refused
@@ -662,8 +675,8 @@ the supported PHP entry points for other modules:
 | `mcp_sentinel.admin_status` | `McpAdminStatus` | admin status strip: MCP on/off, designated clients, readiness, last whoami |
 | `mcp_sentinel.whoami_recorder` | `McpWhoamiRecorder` | last `/drupal-mcp/readiness`, context, or governance-status signal (no secrets) |
 | `mcp_sentinel.sealed_token_manager` | `McpSealedTokenManager` | mint / verify / revoke short-lived client-bound sealed tokens; secret is copy-once. Admin reveal is a CSRF-protected POST (`mcp_sentinel.sealed_token_reveal_post`); GET never echoes the secret. A successful POST always writes `sealed_token_reveal` via `logAlways()` (never the bearer), including when `audit_enabled` is off. A POST with a missing or invalid CSRF token is 403, reveals nothing, and writes `sealed_token_reveal_denied` (`reason` `csrf_invalid`, route, acting uid — never the bearer or the CSRF token). Mint and revoke still use `log()`. `verify()` denials write `denied_access` (`tool: sealed_token`) with a reason from `McpSealedTokenDenyReason`. Repeat denials of the same reason and principal share one row per `sealed_token_deny_audit_window` seconds (default 60). The row keeps the site and path of the first denial in the window. The bearer is never stored. |
-| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and a `denied_access` row, returns `CALLER_MESSAGE`, and stamps `principal_key` / `human_key` `unverified` when the holder is missing or has no sealed context (or when key derivation throws; that case also sets `principal_unverified`). `callerMessage()` is deprecated in 3.6.2 and removed in 4.0.0; use `refuse()` or `McpDenyExplainer::CALLER_MESSAGE` |
-| `mcp_sentinel.principal_context_dispatcher` | `McpPrincipalContextDispatcher` | seals and admits a verified principal. A NULL service on the JSON:API / GraphQL / `/drupal-mcp/context` admit paths is audited as `missing_dispatcher` (not `missing_principal`). Caller-facing copy stays `MCP access is denied.` |
+| `mcp_sentinel.deny_explainer` | `McpDenyExplainer` | names the policy rule on a deny and whether widening is appropriate (never auto-widens). `refuse()` is the only caller-facing deny helper: it writes the explainer to the operator log and a `denied_access` row, returns `CALLER_MESSAGE`, and stamps `principal_key` / `human_key` `unverified` when the holder is missing or has no sealed context (or when `fromClaims()` throws; that case also sets `principal_unverified` and `claimed_*` for unverified claim values). Extra metadata may be passed for a content `classification` label. Never records a token or bearer. `callerMessage()` is deprecated in 3.6.2 and removed in 4.0.0; use `refuse()` or `McpDenyExplainer::CALLER_MESSAGE` |
+| `mcp_sentinel.principal_context_dispatcher` | `McpPrincipalContextDispatcher` | seals and admits a verified principal. A NULL service on the JSON:API / GraphQL / `/drupal-mcp/context` admit paths is audited as `missing_dispatcher` (not `missing_principal`). Caller-facing copy stays `MCP access is denied.` `stampPrincipalFields()` / `denialAuditMetadata()` write verified `iss` / `sub` / `azp` / `tenant` / `jti` / `granted_scopes` or `claimed_*` names when unverified, plus `principal_source` and `required_scopes` when known. Governed-tool `admit()` pins Paladin `iss` when `$settings['mcp_sentinel.paladin.issuer']` is non-empty |
 | `mcp_sentinel.install_verifier` | `McpInstallVerifier` | `verify($live, $contentTarget, $bundle)` → `McpInstallVerificationResult`. Never persists. |
 | `mcp_sentinel.governance_readiness` | `McpGovernanceReadiness` | one typed source-contract decision shared by Tool/context/JSON:API/GraphQL, the authenticated readiness endpoint, settings, and Status report. `contractStatus()` proves local wiring only; `evaluate()` adds request designation/scope and can return not-applicable for ordinary Drupal traffic. When the Status report WARNING `not_governing` names the same gap as this contract ERROR (`agent_scopes_missing` or `active_profile_missing`), both severities share one ERROR row |
 | `mcp_sentinel.dlp` | `McpDlp` | value-pattern redaction engine (email/phone/SSN/CC/custom); optional per-pattern classification tightens egress (d.o #3617061). JSON:API/REST/context/drush bodies are named residuals |

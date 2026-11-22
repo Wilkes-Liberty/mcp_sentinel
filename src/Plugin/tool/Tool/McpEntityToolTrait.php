@@ -10,6 +10,8 @@ use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Drupal\tool\ExecutableResult;
 
 /**
@@ -95,15 +97,25 @@ trait McpEntityToolTrait {
       }
       $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
         ?? $reason;
-      $logger->log('denied_access', [
-        'tool'        => $toolId,
-        'entity_type' => $entityType,
-        'id'          => $entityId,
-        'operation'   => $operation,
-        'reason'      => $reason,
-        'explain'     => $explain,
-        'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
-      ]);
+      $ctx = NULL;
+      if (\Drupal::hasService('mcp_sentinel.principal_context_holder')) {
+        $held = \Drupal::service('mcp_sentinel.principal_context_holder')->get();
+        if ($held instanceof McpPrincipalContext) {
+          $ctx = $held;
+        }
+      }
+      $logger->log(
+        'denied_access',
+        McpPrincipalContextDispatcher::stampPrincipalFields([
+          'tool'        => $toolId,
+          'entity_type' => $entityType,
+          'id'          => $entityId,
+          'operation'   => $operation,
+          'reason'      => $reason,
+          'explain'     => $explain,
+          'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
+        ], $ctx),
+      );
     }
   }
 

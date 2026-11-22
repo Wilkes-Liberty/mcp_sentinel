@@ -7,8 +7,8 @@ namespace Drupal\mcp_sentinel\Service;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
 use Drupal\mcp_sentinel\Enum\McpGovernanceReadinessReason;
-use Drupal\mcp_sentinel\Exception\McpPrincipalKeyException;
 use Drupal\mcp_sentinel\Value\McpDenyExplanation;
+use Drupal\mcp_sentinel\Value\McpPrincipalContext;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 
@@ -480,6 +480,9 @@ final class McpDenyExplainer {
    *   Entity operation that was refused, when known.
    * @param \Drupal\Core\Entity\EntityInterface|null $resource
    *   Resolved resource for an optional site audit evidence policy.
+   * @param array<string, mixed> $extraMetadata
+   *   Extra denied_access keys. Never a token or bearer. Classification
+   *   refuses pass the content label here so the HMAC row names it.
    *
    * @return string
    *   CALLER_MESSAGE. Never the annotated reason.
@@ -492,6 +495,7 @@ final class McpDenyExplainer {
     ?string $entityId = NULL,
     ?string $operation = NULL,
     ?EntityInterface $resource = NULL,
+    array $extraMetadata = [],
   ): string {
     $projection = $this->auditLogger?->evidenceProjection($resource);
     $annotated = $this->operatorNotice($reason, $profileId, $projection);
@@ -504,6 +508,7 @@ final class McpDenyExplainer {
         $entityId,
         $operation,
         $projection,
+        $extraMetadata,
       );
     }
     return self::CALLER_MESSAGE;
@@ -581,11 +586,11 @@ final class McpDenyExplainer {
    * AccessResult construction must still return forbidden when the chain
    * is not installed (kernel tests without the audit schema).
    *
-   * principal_key and human_key come from the sealed context when
-   * the holder has one that can derive them. They are stamped
+   * principal_key and human_key come from stampPrincipalFields()
+   * when the holder has a sealed context. They are stamped
    * unverified when the holder is missing, has no sealed context,
-   * or principalKey() / humanKey() throw. The last case also sets
-   * principal_unverified to the key-exception reason.
+   * or fromClaims() throws. The last case also sets
+   * principal_unverified and claimed_* for unverified values.
    *
    * @param string $reason
    *   Original deny reason. Must not contain secrets.
@@ -601,6 +606,9 @@ final class McpDenyExplainer {
    *   Entity operation that was refused, when known.
    * @param \Drupal\mcp_sentinel\Service\McpAuditEvidenceProjectionInterface|null $projection
    *   Trusted audit projection selected for this refusal.
+   * @param array<string, mixed> $extraMetadata
+   *   Extra denied_access keys from the caller (for example
+   *   classification). Never a token or bearer.
    */
   private function writeDeniedAccess(
     string $reason,
@@ -610,6 +618,7 @@ final class McpDenyExplainer {
     ?string $entityId = NULL,
     ?string $operation = NULL,
     ?McpAuditEvidenceProjectionInterface $projection = NULL,
+    array $extraMetadata = [],
   ): void {
     if ($this->auditLogger === NULL) {
       return;
@@ -638,27 +647,16 @@ final class McpDenyExplainer {
       $meta['profile'] = $profileId;
     }
     $ctx = $this->holder?->get();
-    if ($ctx !== NULL) {
-      try {
-        $meta['principal_key'] = $ctx->principalKey();
-        $meta['human_key'] = $ctx->humanKey();
-        $meta['iss'] = $ctx->issuer();
-        $meta['sub'] = $ctx->subject();
-        $meta['tenant'] = $ctx->tenant();
+    $meta = McpPrincipalContextDispatcher::stampPrincipalFields(
+      $meta,
+      $ctx instanceof McpPrincipalContext ? $ctx : NULL,
+    );
+    foreach ($extraMetadata as $key => $value) {
+      if (!is_string($key) || $key === ''
+        || $key === 'token' || $key === 'bearer') {
+        continue;
       }
-      catch (McpPrincipalKeyException $e) {
-        $meta['principal_key'] = 'unverified';
-        $meta['human_key'] = 'unverified';
-        $meta['principal_unverified'] = $e->reasonCode;
-      }
-    }
-    else {
-      // Holder is missing or has no sealed context. Every
-      // refuse() denied_access row written in that state stamps
-      // both keys unverified. missing_dispatcher is one of
-      // those rows, not the only one.
-      $meta['principal_key'] = 'unverified';
-      $meta['human_key'] = 'unverified';
+      $meta[$key] = $value;
     }
 
     // A queue worker has no request; never collapse those writes.

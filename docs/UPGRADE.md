@@ -4,6 +4,36 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Denial rows name remaining principal fields
+
+Verified `denied_access` rows now carry `principal_source`, `azp`,
+`jti` (token id only, never the bearer), `granted_scopes`, and
+`required_scopes` when known. Classification HTTP refuses also
+write the content label as `classification` on the HMAC row.
+`McpEntityToolTrait::logDeniedAccess()` and the Server
+authorization subscriber stamp the same principal fields.
+
+Unverified rows no longer write `iss`, `sub`, `azp`, `tenant`,
+`jti`, or granted scopes under the verified names. Those values
+use `claimed_iss`, `claimed_sub`, `claimed_azp`,
+`claimed_tenant`, `claimed_jti`, and `claimed_granted_scopes`.
+`principal_source` stays that name on both paths because it is
+factory provenance, not a token claim.
+
+Governed-tool `admit()` pins Paladin `iss` to
+`$settings['mcp_sentinel.paladin.issuer']` when that pin is
+non-empty. Role-fallback and kernel fixture contexts skip the
+pin. An empty pin leaves previous admit() behavior.
+
+No `updatedb`. Rebuild caches (`drush cr`). Operators that parse
+`denied_access` metadata for unverified `iss` / `azp` must read
+the `claimed_*` keys. New metadata keys are additive on new
+rows; `audit_chain` hashing is unchanged.
+
+**Rollback:** revert the module and rebuild caches. New keys
+disappear from newly written rows. Previously written rows keep
+whatever keys they already stored.
+
 ## Principal-key actor slot no longer mixes azp and act.sub
 
 `McpPrincipalKey::fromClaims()` keeps non-delegated keys as

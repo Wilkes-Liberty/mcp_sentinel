@@ -511,6 +511,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
       ],
       FALSE,
       McpPrincipalContext::SOURCE_PALADIN,
+      'token-id-1',
     );
     $meta = McpPrincipalContextDispatcher::denialAuditMetadata(
       'tool-a',
@@ -519,6 +520,7 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
     );
     $this->assertSame(McpPrincipalContext::SOURCE_PALADIN, $meta['principal_source'] ?? NULL);
     $this->assertSame('agent-client', $meta['azp'] ?? NULL);
+    $this->assertSame('token-id-1', $meta['jti'] ?? NULL);
     $this->assertSame(['mcp_read', 'mcp_write'], $meta['granted_scopes'] ?? NULL);
     $this->assertArrayNotHasKey('claimed_azp', $meta);
     $this->assertArrayNotHasKey('token', $meta);

@@ -280,6 +280,7 @@ services:
       - '@logger.channel.mcp_sentinel'
       - '@mcp_sentinel.kill_switch'
       - '@mcp_sentinel.deny_explainer'
+      - '@settings'
 
   mcp_sentinel.principal_key:
     class: Drupal\mcp_sentinel\Service\McpPrincipalKey

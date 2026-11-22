@@ -174,6 +174,9 @@ final readonly class McpPrincipalContext {
    * @param string $source
    *   Provenance of this context (Paladin, sealed token, role
    *   fallback, fixture, or empty).
+   * @param string $tokenId
+   *   Token id (jti). Never the bearer. Empty when the token
+   *   omitted it.
    */
   public function __construct(
     private string $issuer,
@@ -187,6 +190,7 @@ final readonly class McpPrincipalContext {
     private array $keyClaims = [],
     private bool $sealedToken = FALSE,
     private string $source = self::SOURCE_EMPTY,
+    private string $tokenId = '',
   ) {}
 
   /**
@@ -266,6 +270,13 @@ final readonly class McpPrincipalContext {
    */
   public function source(): string {
     return $this->source;
+  }
+
+  /**
+   * Token id (jti). Never the bearer.
+   */
+  public function tokenId(): string {
+    return $this->tokenId;
   }
 
   /**
