@@ -117,6 +117,13 @@ final class McpAuthorizationAuditTest extends KernelTestBase {
     $this->assertSame('insufficient_scope', $metadata['reason']);
     $this->assertSame('original-client', $metadata['mcp_client']);
     $this->assertSame(403, $metadata['http_status']);
+    $this->assertSame(
+      'unverified',
+      $metadata['principal_key'] ?? NULL,
+      'A Server authorization denial without a sealed principal must still classify the row.',
+    );
+    $this->assertSame('unverified', $metadata['human_key'] ?? NULL);
+    $this->assertArrayNotHasKey('token', $metadata);
     $this->assertStringNotContainsString('Private diagnostic', $rows[0]->metadata);
     $this->assertFalse($this->container->get('database')->inTransaction());
     $this->assertTrue($lock->lockMayBeAvailable($lock_name));

@@ -308,6 +308,11 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
       ->onRequest($event);
     $this->assertRefusal($event->getResponse());
     $this->assertClassificationDeniedAccessRow();
+    $this->assertSame(
+      'restricted',
+      $this->lastDenialMetadata()['classification'] ?? NULL,
+      'A classification refuse must name the label on the denied_access row.',
+    );
     $this->assertRefusalResponseWritesWhenAuditDisabled();
   }
 
@@ -331,6 +336,11 @@ final class McpClassificationEgressSeamsTest extends KernelTestBase {
       ->onResponse($event);
     $this->assertRefusal($event->getResponse());
     $this->assertClassificationDeniedAccessRow();
+    $this->assertSame(
+      'restricted',
+      $this->lastDenialMetadata()['classification'] ?? NULL,
+      'A classification refuse must name the label on the denied_access row.',
+    );
     $this->assertRefusalResponseWritesWhenAuditDisabled();
   }
 

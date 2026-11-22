@@ -357,6 +357,7 @@ final class McpContextControllerTest extends KernelTestBase {
     );
     $this->assertArrayNotHasKey('code', $payload['errors'][0]);
     $this->assertClassificationDeniedAccessRow();
+    $this->assertClassificationLabelOnDeniedAccess('internal');
 
     $this->config('mcp_sentinel.settings')
       ->set('audit_enabled', FALSE)
@@ -433,6 +434,18 @@ final class McpContextControllerTest extends KernelTestBase {
     $this->assertSame('MCP access is denied.', $payload['error'] ?? NULL);
     $this->assertStringNotContainsString(McpAccessChecker::BUNDLE_DENIAL_CODE, (string) $response->getContent());
     $this->assertArrayNotHasKey('site', $payload);
+  }
+
+  /**
+   * Asserts the denied_access row names the classification label.
+   */
+  private function assertClassificationLabelOnDeniedAccess(string $label): void {
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame(
+      $label,
+      $meta['classification'] ?? NULL,
+      'A classification refuse must name the label on the denied_access row.',
+    );
   }
 
   /**

@@ -341,6 +341,12 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
       ->decodeMetadata((string) $row['metadata']);
     self::assertSame('contract reason', $meta['reason'] ?? NULL);
     self::assertStringContainsString('[rule:unspecified', (string) ($meta['explain'] ?? ''));
+    self::assertArrayHasKey(
+      'principal_key',
+      $meta,
+      'logDeniedAccess() must classify the principal on every denied_access row.',
+    );
+    self::assertArrayNotHasKey('token', $meta);
 
     $messages = $this->call('validationMessages')->getResult()->getContextValues()['returned'];
     self::assertNotEmpty($messages);
