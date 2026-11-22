@@ -98,18 +98,15 @@ trait McpEntityToolTrait {
       $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
         ?? $reason;
       // The holder is public: false. A compiled Drupal 10 container
-      // inlines it, so Drupal::service() throws and the caller sees a
+      // inlined it, so Drupal::service() throws and the caller sees a
       // container exception instead of the denial. Tools already have
       // the dispatcher; read the seal through that public path.
       $ctx = NULL;
-      if (isset($this->governancePrincipalDispatcher)
-        && $this->governancePrincipalDispatcher !== NULL) {
-        try {
-          $ctx = $this->governancePrincipalDispatcher->sealedContext();
-        }
-        catch (McpPrincipalContextDeniedException) {
-          // Stamp unverified. This helper must still write the row.
-        }
+      try {
+        $ctx = $this->governancePrincipalDispatcher?->sealedContext();
+      }
+      catch (McpPrincipalContextDeniedException) {
+        // Stamp unverified. This helper must still write the row.
       }
       $logger->log(
         'denied_access',
