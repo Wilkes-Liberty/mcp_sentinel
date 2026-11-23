@@ -165,6 +165,39 @@ final class McpDeniedAccessOnceTest extends KernelTestBase {
   }
 
   /**
+   * The tool helper stamps principal fields from the sealed context.
+   */
+  public function testLogDeniedAccessWritesPrincipalFields(): void {
+    $this->actAsGovernedAgent();
+    $this->sealTenant(self::TENANT_A, 'subject-a');
+    $this->container->get('database')->delete('audit_chain_log')->execute();
+
+    $tool = $this->container->get('plugin.manager.tool')
+      ->createInstance('mcp_sentinel_node_operations');
+    $log = new \ReflectionMethod($tool, 'logDeniedAccess');
+    $log->invoke(
+      $tool,
+      'mcp_sentinel_node_operations',
+      'node',
+      '1',
+      'view',
+      'core access denied',
+    );
+
+    $this->assertSame(1, $this->deniedAccessCount());
+    $meta = $this->lastDenialMetadata();
+    $this->assertSame(
+      McpPrincipalContext::SOURCE_PALADIN,
+      $meta['principal_source'] ?? NULL,
+    );
+    $this->assertSame('drupal-mcp', $meta['azp'] ?? NULL);
+    $this->assertSame(['mcp_read', 'mcp_write'], $meta['granted_scopes'] ?? NULL);
+    $this->assertNotSame('unverified', $meta['principal_key'] ?? NULL);
+    $this->assertArrayNotHasKey('token', $meta);
+    $this->assertArrayNotHasKey('claimed_azp', $meta);
+  }
+
+  /**
    * Tool skip is by entity and operation, not by rule.
    *
    * The tool's own reasons map to a different rule than the hook's

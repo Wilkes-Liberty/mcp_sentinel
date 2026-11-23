@@ -254,6 +254,9 @@ $settings['mcp_sentinel.paladin.client_id'] = 'mcp-sentinel-introspect';
 $settings['mcp_sentinel.paladin.client_secret'] = 'the-introspection-client-secret';
 ```
 
+Governed-tool `admit()` uses the same issuer pin when it is
+non-empty. Role-fallback and kernel fixture contexts skip it.
+
 The token is passed as `PALADIN_TOKEN` or on stdin, never `--token`.
 Pass `--operator=<Drupal account name>` on every command. Bind that
 account first with `mcp-sentinel:operator-bind`. The introspection

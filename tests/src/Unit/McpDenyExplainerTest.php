@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\mcp_sentinel\Unit;
 
+use Drupal\mcp_sentinel\Service\McpAuditLogger;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -188,6 +189,34 @@ final class McpDenyExplainerTest extends UnitTestCase {
     $this->assertSame(
       'Drupal\mcp_sentinel\Service\McpDenyExplainer::callerMessage() is deprecated in mcp_sentinel:3.6.2 and is removed from mcp_sentinel:4.0.0. Use McpDenyExplainer::refuse() or McpDenyExplainer::CALLER_MESSAGE instead. See https://github.com/Wilkes-Liberty/mcp_sentinel/pull/409',
       $triggered,
+    );
+  }
+
+  /**
+   * Holder-missing refuse() stamps both keys unverified.
+   *
+   * Removing the else branch in writeDeniedAccess() fails this
+   * test: the row would omit principal_key / human_key instead of
+   * recording that no sealed context was available.
+   *
+   * @covers ::refuse
+   */
+  public function testRefuseStampsUnverifiedWhenHolderIsMissing(): void {
+    $audit = $this->createMock(McpAuditLogger::class);
+    $audit->expects($this->once())->method('logAlways')->with(
+      'denied_access',
+      $this->callback(static function (array $meta): bool {
+        return ($meta['principal_key'] ?? '') === 'unverified'
+          && ($meta['human_key'] ?? '') === 'unverified'
+          && !array_key_exists('iss', $meta)
+          && !array_key_exists('claimed_iss', $meta)
+          && !array_key_exists('token', $meta);
+      }),
+    );
+    $explainer = new McpDenyExplainer(NULL, $audit, NULL, NULL);
+    $this->assertSame(
+      McpDenyExplainer::CALLER_MESSAGE,
+      $explainer->refuse('Source IP not permitted by MCP Sentinel policy.'),
     );
   }
 

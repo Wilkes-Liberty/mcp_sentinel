@@ -1301,7 +1301,8 @@ final class McpPrincipalContextDispatchTest extends KernelTestBase {
     $this->assertSame('sha256:' . hash('sha256', $sub), $row['entity_id']);
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
-    $this->assertSame($sub, $meta['sub'] ?? NULL);
+    $this->assertSame($sub, $meta['claimed_sub'] ?? NULL);
+    $this->assertArrayNotHasKey('sub', $meta);
     $this->assertArrayNotHasKey('id_sha256', $meta);
   }
 

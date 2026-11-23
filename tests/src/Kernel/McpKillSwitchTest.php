@@ -362,7 +362,8 @@ final class McpKillSwitchTest extends KernelTestBase {
       McpPrincipalKeyException::PART_TOO_LONG,
       (string) ($meta['explain'] ?? '') . ' ' . (string) ($meta['reason'] ?? ''),
     );
-    $this->assertSame($sub, $meta['sub'] ?? NULL);
+    $this->assertSame($sub, $meta['claimed_sub'] ?? NULL);
+    $this->assertArrayNotHasKey('sub', $meta);
   }
 
   /**

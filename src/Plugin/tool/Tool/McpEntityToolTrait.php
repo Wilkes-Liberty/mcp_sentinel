@@ -8,8 +8,10 @@ use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Access\AccessResultReasonInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 use Drupal\mcp_sentinel\Service\McpDenyExplainer;
+use Drupal\mcp_sentinel\Service\McpPrincipalContextDispatcher;
 use Drupal\tool\ExecutableResult;
 
 /**
@@ -95,15 +97,29 @@ trait McpEntityToolTrait {
       }
       $explain = $this->governanceDenyExplainer?->operatorNotice($reason, $profileId)
         ?? $reason;
-      $logger->log('denied_access', [
-        'tool'        => $toolId,
-        'entity_type' => $entityType,
-        'id'          => $entityId,
-        'operation'   => $operation,
-        'reason'      => $reason,
-        'explain'     => $explain,
-        'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
-      ]);
+      // The holder is public: false. A compiled Drupal 10 container
+      // inlined it, so Drupal::service() throws and the caller sees a
+      // container exception instead of the denial. Tools already have
+      // the dispatcher; read the seal through that public path.
+      $ctx = NULL;
+      try {
+        $ctx = $this->governancePrincipalDispatcher?->sealedContext();
+      }
+      catch (McpPrincipalContextDeniedException) {
+        // Stamp unverified. This helper must still write the row.
+      }
+      $logger->log(
+        'denied_access',
+        McpPrincipalContextDispatcher::stampPrincipalFields([
+          'tool'        => $toolId,
+          'entity_type' => $entityType,
+          'id'          => $entityId,
+          'operation'   => $operation,
+          'reason'      => $reason,
+          'explain'     => $explain,
+          'rule'        => $this->governanceDenyExplainer?->explain($reason, $profileId)->ruleId,
+        ], $ctx),
+      );
     }
   }
 

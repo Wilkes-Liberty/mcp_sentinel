@@ -521,6 +521,7 @@ final class McpPrincipalContextFactory {
       $keyClaims,
       $this->fromSealedTokenProvider($request),
       $this->sourceFromRequest($request),
+      $this->stringClaim($claims, ['jti']),
     );
   }
 
