@@ -257,13 +257,12 @@ jobs:
           # audit_chain 1.12.2 while this job stayed on 1.12.1 (DEV-1022).
           # refresh-latest-contrib.sh updates locked drupal/* except core*.
           #
-          # twig/twig <3.30: 3.30.0 compiles Drupal's swapped escape filter
-          # straight into EscaperRuntime::escape() and every rendered page
-          # 500s (twigphp/Twig#4952). -W otherwise floats to 3.30. Drop the
-          # pin when that issue ships a fixed release.
+          # Drupal 10.6.18, 11.3.18, and 11.4.8 register their own escape
+          # filter so Twig 3.30 no longer 500s every page (d.o #3625969).
+          # Keep Twig unconstrained here so Packagist can install a patched
+          # 3.30+ instead of blocking the old <3.30 pin on new advisories.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           # core-dev brings PHPUnit; drush because the module ships Drush
           # commands whose tests instantiate them (they extend
           # Drush\Commands\DrushCommands); the rest are the contrib modules the
@@ -511,10 +510,8 @@ jobs:
             done
             return "$rc"
           }
-          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
             "phpunit/phpunit:${PHPUNIT_CONSTRAINT}" \
@@ -687,10 +684,8 @@ jobs:
             done
             return "$rc"
           }
-          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^11" \
             "phpunit/phpunit:^11.5" \
@@ -844,10 +839,8 @@ jobs:
             done
             return "$rc"
           }
-          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:~10.6.0" \
             "phpunit/phpunit:^9.6" \
@@ -1050,10 +1043,8 @@ jobs:
             done
             return "$rc"
           }
-          # twig/twig <3.30: see the matrix job. Twig 3.30.0 500s every page.
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           # The same contrib set the tests enable: phpstan resolves types
           # against these, and a missing one turns a real error into a
           # "class not found" that hides it.
@@ -1238,8 +1229,7 @@ jobs:
         run: |
           set -euo pipefail
           composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^11" \
             "phpunit/phpunit:^11.5" \
@@ -1349,8 +1339,7 @@ jobs:
         run: |
           set -euo pipefail
           composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:^11" \
             "phpunit/phpunit:^11.5" \
@@ -1499,11 +1488,6 @@ jobs:
           php expand_composer_json.php
           composer config --json policy.advisories.ignore-id "${COMPOSER_ADVISORY_IGNORE_IDS}"
           retry composer install --no-interaction --no-progress
-          # twig/twig <3.30: 3.30.0 compiles Drupal's swapped escape
-          # filter straight into EscaperRuntime::escape() and every
-          # rendered page 500s (twigphp/Twig#4952).
-          retry composer require -W --no-interaction --no-progress \
-            "twig/twig:<3.30.0"
           # gitlab_templates require-drush: Kernel tests instantiate
           # Drush command classes.
           retry composer require --dev --update-with-all-dependencies \

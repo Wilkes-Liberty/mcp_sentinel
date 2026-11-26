@@ -75,10 +75,11 @@ jobs:
           }
           # Runtime require only: this is the tree a site gets from
           # `composer require drupal/mcp_sentinel`. require-dev (mcp_server)
-          # is not installed here. twig/twig <3.30: see tests.yml.
+          # is not installed here. Twig stays unconstrained so a patched
+          # 3.30+ can install after Drupal's EscaperRuntime fix
+          # (d.o #3625969).
           retry composer require -W --no-interaction --no-progress \
-            "drupal/mcp_sentinel:*@dev" \
-            "twig/twig:<3.30.0"
+            "drupal/mcp_sentinel:*@dev"
           bash ../module/.github/ci/refresh-latest-contrib.sh
       - name: Audit the installed scaffold
         working-directory: drupal
