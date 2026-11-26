@@ -84,6 +84,12 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
       $this->logDeniedAccess('mcp_sentinel_config_get', 'config', $name, 'read', $reason);
       return ExecutableResult::failure($this->t('MCP access is denied.'));
     }
+    if ($denied = $this->auditGovernedRead('config_read', [
+      'entity_type' => 'config',
+      'id' => $name,
+    ])) {
+      return $denied;
+    }
 
     // Secrets are withheld before the data leaves this method. A value under
     // a sensitive key name is masked at any depth, and a name that holds
@@ -92,10 +98,6 @@ final class McpConfigGetTool extends McpGovernedToolBase implements ConfigScopeT
     $raw = $this->configFactory->get($name)->getRawData();
     $withheld = $this->configSecrets->isSecretBearing($name);
     $data = $this->configSecrets->redactForName($name, $raw, $profile->getRedactedFields());
-    $this->governanceAuditLogger?->log('config_read', [
-      'entity_type' => 'config',
-      'id' => $name,
-    ]);
 
     $context = ['name' => $name, 'data' => $data];
     if ($withheld) {

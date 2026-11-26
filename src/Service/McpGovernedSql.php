@@ -8,6 +8,7 @@ use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\mcp_sentinel\Enum\McpGovernedSurface;
+use Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException;
 use Drupal\mcp_sentinel\Exception\McpSqlRefusal;
 use Drupal\mcp_sentinel\McpPolicyProfileInterface;
 
@@ -22,6 +23,9 @@ final class McpGovernedSql {
 
   /**
    * Constructs the governed SELECT service.
+   *
+   * The dispatcher is optional so Drush (DEV-927) still runs when
+   * no principal is sealed. Tool-surface reads fail closed without it.
    */
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -34,6 +38,7 @@ final class McpGovernedSql {
     private readonly McpRateLimiter $rateLimiter,
     private readonly AccountProxyInterface $currentUser,
     private readonly McpReadBudgetResolver $budgets,
+    private readonly ?McpPrincipalContextDispatcher $dispatcher = NULL,
   ) {}
 
   /**
@@ -67,6 +72,11 @@ final class McpGovernedSql {
     if ($profile === NULL || !$profile->status() || !$profile->allowsRawSql()) {
       $this->refuse($query, $profile, $surface, ['An active policy with explicit raw SQL permission is required.']);
     }
+    $this->bindReadPrincipal([
+      'channel' => $surface->value,
+      'profile' => $profile->id(),
+      'statement' => $query,
+    ], $surface);
     if ($query === '' || strlen($query) > McpRawSqlGuard::MAX_LENGTH) {
       // Do not retain an unbounded submitted statement in an audit event.
       $this->refuse('', $profile, $surface, ['The statement must contain between 1 and 4096 bytes.']);
@@ -131,14 +141,60 @@ final class McpGovernedSql {
     if (strlen(json_encode($result, JSON_THROW_ON_ERROR)) > $bytes) {
       $this->refuse($query, $profile, $surface, ['The raw SQL response exceeds its byte budget.']);
     }
-    $this->audit->log('raw_sql_query', [
+    $this->audit->log('raw_sql_query', $this->bindReadPrincipal([
       'channel' => $surface->value,
       'profile' => $profile->id(),
       'statement' => $query,
       'row_count' => count($rows),
       'truncated' => $truncated,
-    ]);
+    ], $surface));
     return $result;
+  }
+
+  /**
+   * Binds frozen Paladin principal and tenant onto a Tool-surface read.
+   *
+   * /mcp SQL fails closed when the sealed principal or tenant is
+   * missing. Drush is DEV-927 and keeps today's row when no seal
+   * is present.
+   *
+   * @param array<string, mixed> $metadata
+   *   Read-audit metadata without identity keys.
+   * @param \Drupal\mcp_sentinel\Enum\McpGovernedSurface $surface
+   *   Adapter surface.
+   *
+   * @return array<string, mixed>
+   *   Metadata with verified principal fields when a seal exists.
+   */
+  private function bindReadPrincipal(
+    array $metadata,
+    McpGovernedSurface $surface,
+  ): array {
+    if ($this->dispatcher === NULL) {
+      if ($surface === McpGovernedSurface::Tool) {
+        $this->refuse(
+          (string) ($metadata['statement'] ?? ''),
+          NULL,
+          $surface,
+          ['A verified principal context is required.'],
+        );
+      }
+      return $metadata;
+    }
+    try {
+      return $this->dispatcher->stampGovernedReadFields($metadata);
+    }
+    catch (McpPrincipalContextDeniedException) {
+      if ($surface === McpGovernedSurface::Tool) {
+        $this->refuse(
+          (string) ($metadata['statement'] ?? ''),
+          NULL,
+          $surface,
+          ['A verified principal context is required.'],
+        );
+      }
+      return $metadata;
+    }
   }
 
   /**

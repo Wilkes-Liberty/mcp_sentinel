@@ -379,10 +379,12 @@ class McpAuditLogger {
       return FALSE;
     }
     // Read operations are suppressed unless audit_log_reads is on. This covers
-    // both entity reads and the config read/list tools, which are non-mutating.
+    // entity reads, config read/list tools, and tool_read rows from governed
+    // /mcp Read and Explain tools.
     $isRead = str_starts_with($operation, 'entity_read')
       || str_starts_with($operation, 'config_read')
-      || str_starts_with($operation, 'config_list');
+      || str_starts_with($operation, 'config_list')
+      || $operation === 'tool_read';
     return !$isRead || (bool) $config->get('audit_log_reads');
   }
 
