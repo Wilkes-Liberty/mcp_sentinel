@@ -153,7 +153,7 @@ class McpOauthContext {
     }
     // Simple OAuth 6.1.5 deprecates getConsumer(); 7.0.0 removes it.
     $id = $user->getClient()->getDrupalEntity()->getClientId();
-    return is_string($id) && $id !== '' ? $id : NULL;
+    return $id !== '' ? $id : NULL;
   }
 
   /**

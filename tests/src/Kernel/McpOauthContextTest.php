@@ -15,6 +15,7 @@ use Drupal\simple_oauth\Entity\Oauth2TokenInterface;
 use Drupal\simple_oauth\Oauth2ScopeInterface;
 use Drupal\simple_oauth\Plugin\Field\FieldType\Oauth2ScopeReferenceItemListInterface;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use PHPUnit\Framework\MockObject\MockObject;
 
 /**
  * Tests OAuth agent-channel detection via McpOauthContext.
@@ -236,13 +237,13 @@ final class McpOauthContextTest extends KernelTestBase {
   /**
    * Stubs Simple OAuth 6.1.5 getClient()->getDrupalEntity().
    *
-   * @param \Drupal\simple_oauth\Authentication\TokenAuthUserInterface $tokenUser
+   * @param \PHPUnit\Framework\MockObject\MockObject $tokenUser
    *   The token-auth user mock.
    * @param \Drupal\consumers\Entity\Consumer $consumer
    *   The consumer mock that supplies getClientId().
    */
   private function bindTokenConsumer(
-    TokenAuthUserInterface $tokenUser,
+    MockObject $tokenUser,
     Consumer $consumer,
   ): void {
     $client = $this->createMock(ClientEntityInterface::class);
