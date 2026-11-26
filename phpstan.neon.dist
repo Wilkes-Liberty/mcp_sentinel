@@ -104,6 +104,11 @@ parameters:
     -
       identifier: phpunit.coversMethod
       path: tests/src/Kernel/McpMetricsTest.php
+    # clampTtl() is documented as never issuing above the 24-hour choice.
+    # The assertion compares that documented ceiling to the constant map.
+    -
+      identifier: method.alreadyNarrowedType
+      path: tests/src/Unit/McpSealedTokenManagerTtlClampTest.php
     # Drupal calls these hook implementations with a fixed argument list.
     # PHP 8 rejects extra arguments, so an unused hook parameter stays.
     # PHPStan 2.3 bleeding edge reports that as function.unusedParameter.

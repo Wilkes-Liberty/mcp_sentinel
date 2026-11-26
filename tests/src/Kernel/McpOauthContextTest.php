@@ -10,6 +10,7 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\mcp_sentinel\Service\McpOauthContext;
 use Symfony\Component\HttpFoundation\Request;
 use Drupal\simple_oauth\Authentication\TokenAuthUserInterface;
+use Drupal\simple_oauth\Entities\ClientEntityInterface;
 use Drupal\simple_oauth\Entity\Oauth2TokenInterface;
 use Drupal\simple_oauth\Oauth2ScopeInterface;
 use Drupal\simple_oauth\Plugin\Field\FieldType\Oauth2ScopeReferenceItemListInterface;
@@ -23,7 +24,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * The mock method names match the real simple_oauth / consumers API
  * (verified 2026-05-30):
  *   - token scopes: $token->get('scopes')->getScopes(), each ->getName()
- *   - consumer client id: $consumer->getClientId() (ConsumerInterface)
+ *   - consumer client id: $user->getClient()->getDrupalEntity()->getClientId()
  *
  * @coversDefaultClass \Drupal\mcp_sentinel\Service\McpOauthContext
  * @group mcp_sentinel
@@ -107,7 +108,7 @@ final class McpOauthContextTest extends KernelTestBase {
     $consumer->method('getClientId')->willReturn('mcp-agent');
 
     $tokenUser->method('getToken')->willReturn($token);
-    $tokenUser->method('getConsumer')->willReturn($consumer);
+    $this->bindTokenConsumer($tokenUser, $consumer);
 
     $ctx = new McpOauthContext($proxy, $this->container->get('config.factory'));
     $this->assertSame(['mcp_write'], $ctx->scopes());
@@ -138,7 +139,7 @@ final class McpOauthContextTest extends KernelTestBase {
     $consumer->method('getClientId')->willReturn('some-other-client');
 
     $tokenUser->method('getToken')->willReturn($token);
-    $tokenUser->method('getConsumer')->willReturn($consumer);
+    $this->bindTokenConsumer($tokenUser, $consumer);
 
     $ctx = new McpOauthContext($proxy, $this->container->get('config.factory'));
     $this->assertSame(['some:other'], $ctx->scopes());
@@ -178,7 +179,7 @@ final class McpOauthContextTest extends KernelTestBase {
     $consumer->method('getClientId')->willReturn('my-designated-client');
 
     $tokenUser->method('getToken')->willReturn($token);
-    $tokenUser->method('getConsumer')->willReturn($consumer);
+    $this->bindTokenConsumer($tokenUser, $consumer);
 
     $ctx = new McpOauthContext($proxy, $this->container->get('config.factory'));
     $this->assertTrue($ctx->isAgentChannel());
@@ -230,6 +231,23 @@ final class McpOauthContextTest extends KernelTestBase {
     $this->assertSame(['mcp_read'], $ctx->scopes());
     $this->assertTrue($ctx->isAgentChannel());
     $this->assertTrue($ctx->isOauthRequest());
+  }
+
+  /**
+   * Stubs Simple OAuth 6.1.5 getClient()->getDrupalEntity().
+   *
+   * @param \Drupal\simple_oauth\Authentication\TokenAuthUserInterface $tokenUser
+   *   The token-auth user mock.
+   * @param \Drupal\consumers\Entity\Consumer $consumer
+   *   The consumer mock that supplies getClientId().
+   */
+  private function bindTokenConsumer(
+    TokenAuthUserInterface $tokenUser,
+    Consumer $consumer,
+  ): void {
+    $client = $this->createMock(ClientEntityInterface::class);
+    $client->method('getDrupalEntity')->willReturn($consumer);
+    $tokenUser->method('getClient')->willReturn($client);
   }
 
 }

@@ -151,11 +151,8 @@ class McpOauthContext {
     if ($user === NULL) {
       return NULL;
     }
-    $consumer = $this->tokenConsumer($user);
-    if ($consumer === NULL || !method_exists($consumer, 'getClientId')) {
-      return NULL;
-    }
-    $id = $consumer->getClientId();
+    // Simple OAuth 6.1.5 deprecates getConsumer(); 7.0.0 removes it.
+    $id = $user->getClient()->getDrupalEntity()->getClientId();
     return is_string($id) && $id !== '' ? $id : NULL;
   }
 
@@ -221,37 +218,6 @@ class McpOauthContext {
     }
 
     return !empty(array_intersect($this->scopes(), $agentScopes));
-  }
-
-  /**
-   * Consumer entity from a token-auth user.
-   *
-   * simple_oauth 6.1.5 deprecates getConsumer() in favor of
-   * getClient()->getDrupalEntity() (removed in 7.0.0). Older
-   * 6.x still only has getConsumer().
-   *
-   * @return object|null
-   *   An object with getClientId(), or NULL when neither accessor
-   *   yields one.
-   */
-  private function tokenConsumer(TokenAuthUserInterface $user): ?object {
-    if (method_exists($user, 'getClient')) {
-      $client = $user->getClient();
-      if (is_object($client) && method_exists($client, 'getDrupalEntity')) {
-        $entity = $client->getDrupalEntity();
-        if (is_object($entity) && method_exists($entity, 'getClientId')) {
-          return $entity;
-        }
-      }
-    }
-    if (method_exists($user, 'getConsumer')) {
-      // @phpstan-ignore method.deprecated (simple_oauth <6.1.5)
-      $consumer = $user->getConsumer();
-      if (is_object($consumer) && method_exists($consumer, 'getClientId')) {
-        return $consumer;
-      }
-    }
-    return NULL;
   }
 
   /**
