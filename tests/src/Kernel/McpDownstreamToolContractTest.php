@@ -86,6 +86,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'governanceReadiness',
     'governanceRequestStack',
     'governanceRequiredScope',
+    'governedReadAudited',
   ];
 
   /**

@@ -357,7 +357,7 @@ final class McpGovernedReadAuditPrincipalTest extends KernelTestBase {
   private function lastReadMetadata(): array {
     $row = $this->container->get('database')
       ->select('audit_chain_log', 'l')
-      ->fields('l', ['entity_id', 'metadata', 'operation'])
+      ->fields('l', ['entity_id', 'entity_type', 'metadata', 'operation'])
       ->condition('l.operation', ['tool_read', 'config_read', 'config_list'], 'IN')
       ->orderBy('l.id', 'DESC')
       ->range(0, 1)
@@ -367,6 +367,7 @@ final class McpGovernedReadAuditPrincipalTest extends KernelTestBase {
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
     $meta['id'] = (string) $row['entity_id'];
+    $meta['entity_type'] = (string) $row['entity_type'];
     $meta['_operation'] = (string) $row['operation'];
     return $meta;
   }
@@ -380,7 +381,7 @@ final class McpGovernedReadAuditPrincipalTest extends KernelTestBase {
   private function lastOperationMetadata(string $operation): array {
     $row = $this->container->get('database')
       ->select('audit_chain_log', 'l')
-      ->fields('l', ['entity_id', 'metadata'])
+      ->fields('l', ['entity_id', 'entity_type', 'metadata'])
       ->condition('l.operation', $operation)
       ->orderBy('l.id', 'DESC')
       ->range(0, 1)
@@ -390,6 +391,7 @@ final class McpGovernedReadAuditPrincipalTest extends KernelTestBase {
     $meta = $this->container->get('mcp_sentinel.audit_logger')
       ->decodeMetadata((string) $row['metadata']);
     $meta['id'] = (string) $row['entity_id'];
+    $meta['entity_type'] = (string) $row['entity_type'];
     return $meta;
   }
 

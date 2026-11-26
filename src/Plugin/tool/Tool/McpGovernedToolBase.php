@@ -170,8 +170,12 @@ abstract class McpGovernedToolBase extends ToolBase {
 
   /**
    * TRUE after this call already wrote a stamped governed-read row.
+   *
+   * Protected because DependencySerializationTrait cannot serialize
+   * private properties (https://www.drupal.org/node/3110266). Not
+   * part of the tool-author API.
    */
-  private bool $governedReadAudited = FALSE;
+  protected bool $governedReadAudited = FALSE;
 
   /**
    * {@inheritdoc}
