@@ -58,6 +58,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
    * The non-private methods McpGovernedToolBase itself declares.
    */
   private const BASE_METHODS = [
+    'auditGovernedRead',
     'checkAccess',
     'checkGovernedAccess',
     'checkGovernedDiscoveryAccess',
@@ -85,6 +86,7 @@ final class McpDownstreamToolContractTest extends KernelTestBase {
     'governanceReadiness',
     'governanceRequestStack',
     'governanceRequiredScope',
+    'governedReadAudited',
   ];
 
   /**

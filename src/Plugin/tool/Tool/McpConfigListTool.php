@@ -83,6 +83,12 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
         ) ?? McpDenyExplainer::CALLER_MESSAGE,
       ]));
     }
+    if ($denied = $this->auditGovernedRead('config_list', [
+      'entity_type' => 'config',
+      'id' => $prefix,
+    ])) {
+      return $denied;
+    }
 
     $names = $this->configFactory->listAll($prefix);
     $tags = [];
@@ -96,11 +102,6 @@ final class McpConfigListTool extends McpGovernedToolBase implements ConfigScope
       'failed' => [],
       'queued' => [],
     ], $profile)['succeeded'];
-
-    $this->governanceAuditLogger?->log('config_list', [
-      'entity_type' => 'config',
-      'id' => $prefix,
-    ]);
 
     return ExecutableResult::success(
       $this->t('Listed @count configuration object(s).', ['@count' => count($names)]),

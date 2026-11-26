@@ -131,7 +131,17 @@ a `fields` map (empty on tools that do not write entities).
 principal + tenant context sealed at the request boundary
 (DEV-844 / DEV-839). It throws when the dispatcher is missing or no
 principal is sealed; it never returns an empty context and never
-reads the request attribute. The tool guard applies **only** to
+reads the request attribute.
+`auditGovernedRead()` writes one allow-path read
+row (`config_read`, `config_list`, or `tool_read`) with the
+introspected `iss|sub|actor` key and token-derived tenant from
+that frozen context (DEV-974). Callers must not pass identity
+keys; they are stripped. A missing principal, or a network call
+with no tenant, fails closed and writes `denied_access`. The
+base class also writes `tool_read` after a successful Read or
+Explain when the tool did not already record a dedicated read
+row. `audit_log_reads` still gates these allow rows. JSON:API,
+GraphQL, Drush, and `/drupal-mcp/context` are DEV-927. The tool guard applies **only** to
 `McpGovernedToolBase` subclasses. GraphQL operations and
 `/drupal-mcp/context` call
 `McpPrincipalContextDispatcher::assertDispatchAllowed()` with an

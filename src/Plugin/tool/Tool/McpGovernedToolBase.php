@@ -169,6 +169,15 @@ abstract class McpGovernedToolBase extends ToolBase {
   protected ?McpRateLimiter $governanceRateLimiter = NULL;
 
   /**
+   * TRUE after this call already wrote a stamped governed-read row.
+   *
+   * Protected because DependencySerializationTrait cannot serialize
+   * private properties (https://www.drupal.org/node/3110266). Not
+   * part of the tool-author API.
+   */
+  protected bool $governedReadAudited = FALSE;
+
+  /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
@@ -216,7 +225,89 @@ abstract class McpGovernedToolBase extends ToolBase {
     parent::execute();
     $this->applyDlpToResult();
     $this->markUntrustedRead();
+    $this->auditSuccessfulGovernedRead();
     return $this;
+  }
+
+  /**
+   * Writes one governed-read audit row with frozen principal and tenant.
+   *
+   * Identity is never taken from tool arguments or request input.
+   * A missing Paladin principal or network tenant fails closed and
+   * is audited. Dedicated read operations (config_read, config_list)
+   * call this from doExecute() so the resource id is on the row.
+   *
+   * @param string $operation
+   *   Audit operation (config_read, config_list, or tool_read).
+   * @param array<string, mixed> $metadata
+   *   Non-identity metadata (resource type, id). Never a token.
+   *
+   * @return \Drupal\tool\ExecutableResult|null
+   *   A failure result when the read is refused, or NULL after the
+   *   row is written (or skipped because audit_log_reads is off).
+   *
+   * @api
+   */
+  protected function auditGovernedRead(
+    string $operation,
+    array $metadata = [],
+  ): ?ExecutableResult {
+    if ($this->governancePrincipalDispatcher === NULL) {
+      return $this->principalDenialResult(
+        new McpPrincipalContextDeniedException(
+          McpPrincipalContextDeniedException::MISSING_DISPATCHER,
+          'The principal-context dispatcher is required.',
+        ),
+      );
+    }
+    if (!isset($metadata['tool']) || $metadata['tool'] === '') {
+      $metadata['tool'] = $this->getPluginId();
+    }
+    try {
+      $stamped = $this->governancePrincipalDispatcher
+        ->stampGovernedReadFields($metadata);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      return $this->principalDenialResult($e);
+    }
+    $this->governanceAuditLogger?->log($operation, $stamped);
+    $this->governedReadAudited = TRUE;
+    return NULL;
+  }
+
+  /**
+   * Records a tool_read row after a successful Read or Explain result.
+   *
+   * Tools that already wrote config_read or config_list are skipped.
+   * The SQL tool writes raw_sql_query in McpGovernedSql before this
+   * runs. Missing principal or tenant turns the result into a deny.
+   */
+  private function auditSuccessfulGovernedRead(): void {
+    if ($this->governedReadAudited
+      || $this->result === NULL
+      || !$this->result->isSuccess()) {
+      return;
+    }
+    $definition = $this->getPluginDefinition();
+    if (!$definition instanceof ToolDefinition) {
+      return;
+    }
+    $reads = [ToolOperation::Read, ToolOperation::Explain];
+    if (!in_array($definition->getOperation(), $reads, TRUE)) {
+      return;
+    }
+    // Dedicated SQL audit is written in McpGovernedSql, including
+    // statement and row counts, before this post-execute stamp.
+    if ($this->getPluginId() === 'mcp_sentinel_sql_query') {
+      return;
+    }
+    $denied = $this->auditGovernedRead('tool_read', [
+      'entity_type' => 'tool',
+      'id' => $this->getPluginId(),
+    ]);
+    if ($denied !== NULL) {
+      $this->result = $denied;
+    }
   }
 
   /**

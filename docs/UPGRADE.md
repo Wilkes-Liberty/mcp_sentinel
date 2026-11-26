@@ -4,6 +4,31 @@ This document collects breaking changes and the migration steps they require.
 For first-time installation see `../INSTALL.md`; for the connector/OAuth contract
 see `CONNECTOR.md`.
 
+## Governed /mcp reads record Paladin subject and tenant
+
+Successful governed reads on the `/mcp` Tool path now write an
+audit row that includes the introspected `iss|sub|actor` key and
+the token-derived tenant, taken from the frozen principal
+context. Config get/list keep `config_read` / `config_list`.
+Other Read and Explain tools write `tool_read`. Governed SQL on
+the Tool surface stamps the same fields on `raw_sql_query`.
+
+A missing Paladin principal, or a network call with no tenant,
+refuses the read (fail closed) and writes `denied_access`.
+Identity keys in tool arguments or caller metadata are ignored.
+
+`audit_log_reads` still gates these allow rows. `denied_access`
+is still written either way. JSON:API, GraphQL, Drush, and
+`/drupal-mcp/context` are unchanged (DEV-927).
+
+No `updatedb`. No VERSION bump. Rebuild caches (`drush cr`).
+New metadata keys are additive on new rows; `audit_chain`
+hashing is unchanged.
+
+**Rollback:** revert the module and rebuild caches. Newly written
+read rows stop carrying Paladin subject and tenant. Previously
+written rows keep whatever keys they already stored.
+
 ## Denial rows name remaining principal fields
 
 Verified `denied_access` rows now carry `principal_source`, `azp`,

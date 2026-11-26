@@ -84,6 +84,12 @@ final class DownstreamContractTool extends McpGovernedToolBase implements Config
     }
     // Downstream tools read these inherited properties directly.
     $this->principalContext();
+    if ($denied = $this->auditGovernedRead('tool_read', [
+      'entity_type' => 'tool',
+      'id' => $this->getPluginId(),
+    ])) {
+      return $denied;
+    }
     $exceptions = $this->reservedArgumentExceptions();
     $nested = $this->reservedNestedMapAllowlists([]);
     $profile = $this->governancePolicyResolver?->resolve($this->currentUser);

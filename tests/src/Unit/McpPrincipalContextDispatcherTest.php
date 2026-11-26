@@ -644,6 +644,117 @@ final class McpPrincipalContextDispatcherTest extends UnitTestCase {
   }
 
   /**
+   * Governed-read rows stamp frozen Paladin fields, not caller metadata.
+   *
+   * @covers ::stampGovernedReadFields
+   */
+  public function testStampGovernedReadFieldsUsesFrozenPrincipalNotCallerMeta(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal(new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'human-1',
+      'agent-client',
+      'agent-client',
+      ['mcp_read'],
+      'tenant-a',
+      [],
+      TRUE,
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+      ],
+      FALSE,
+      McpPrincipalContext::SOURCE_PALADIN,
+    ), $request);
+    $meta = $this->dispatcher($stack, $holder)->stampGovernedReadFields([
+      'tool' => 'tool-a',
+      'tenant' => 'tenant-evil',
+      'sub' => 'spoofed',
+      'principal_key' => 'forged|key',
+    ]);
+    $this->assertSame(
+      'https://idp.example/realms/agents|human-1|agent-client',
+      $meta['principal_key'] ?? NULL,
+    );
+    $this->assertSame('tenant-a', $meta['tenant'] ?? NULL);
+    $this->assertSame('human-1', $meta['sub'] ?? NULL);
+    $this->assertSame('tool-a', $meta['tool'] ?? NULL);
+    $this->assertArrayNotHasKey('claimed_tenant', $meta);
+  }
+
+  /**
+   * A governed-read stamp without a sealed principal fails closed.
+   *
+   * @covers ::stampGovernedReadFields
+   */
+  public function testStampGovernedReadFieldsRefusesMissingPrincipal(): void {
+    $stack = new RequestStack();
+    $stack->push(Request::create('/mcp', 'POST'));
+    $holder = new McpPrincipalContextHolder($stack);
+    $this->expectException(McpPrincipalContextDeniedException::class);
+    $this->expectExceptionMessage('A verified principal context is required.');
+    try {
+      $this->dispatcher($stack, $holder)->stampGovernedReadFields([
+        'sub' => 'spoofed',
+        'tenant' => 'tenant-evil',
+      ]);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        $e->reasonCode,
+      );
+      throw $e;
+    }
+  }
+
+  /**
+   * A network governed-read stamp without a tenant fails closed.
+   *
+   * @covers ::stampGovernedReadFields
+   */
+  public function testStampGovernedReadFieldsRefusesMissingTenant(): void {
+    $stack = new RequestStack();
+    $request = Request::create('/mcp', 'POST');
+    $stack->push($request);
+    $holder = new McpPrincipalContextHolder($stack);
+    $holder->seal(new McpPrincipalContext(
+      'https://idp.example/realms/agents',
+      'human-1',
+      'agent-client',
+      'agent-client',
+      ['mcp_read'],
+      '',
+      [],
+      TRUE,
+      [
+        'iss' => 'https://idp.example/realms/agents',
+        'sub' => 'human-1',
+        'azp' => 'agent-client',
+      ],
+      FALSE,
+      McpPrincipalContext::SOURCE_PALADIN,
+    ), $request);
+    $this->expectException(McpPrincipalContextDeniedException::class);
+    try {
+      $this->dispatcher($stack, $holder)->stampGovernedReadFields([
+        'tenant' => 'tenant-evil',
+      ]);
+    }
+    catch (McpPrincipalContextDeniedException $e) {
+      $this->assertSame(
+        McpPrincipalContextDeniedException::MISSING_TENANT_CLAIM,
+        $e->reasonCode,
+      );
+      throw $e;
+    }
+  }
+
+  /**
    * Role-fallback contexts skip the Paladin issuer pin.
    *
    * @covers ::admit

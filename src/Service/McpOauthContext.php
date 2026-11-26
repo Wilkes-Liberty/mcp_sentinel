@@ -148,7 +148,12 @@ class McpOauthContext {
       return $sealed['client_id'];
     }
     $user = $this->tokenAuthUser();
-    return $user?->getConsumer()->getClientId();
+    if ($user === NULL) {
+      return NULL;
+    }
+    // Simple OAuth 6.1.5 deprecates getConsumer(); 7.0.0 removes it.
+    $id = $user->getClient()->getDrupalEntity()->getClientId();
+    return $id !== '' ? $id : NULL;
   }
 
   /**

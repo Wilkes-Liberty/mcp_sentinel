@@ -641,6 +641,7 @@ services:
       - '@mcp_sentinel.rate_limiter'
       - '@current_user'
       - '@mcp_sentinel.read_budgets'
+      - '@?mcp_sentinel.principal_context_dispatcher'
 
   mcp_sentinel.config_write_validator:
     class: Drupal\mcp_sentinel\Service\McpConfigWriteValidator

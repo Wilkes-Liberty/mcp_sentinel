@@ -23,6 +23,8 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * principal_source, azp, jti, and granted/required scopes.
  * Claimed but unverified values use claimed_* names. Denial rows
  * are always written; audit_enabled gates allow rows only.
+ * Successful /mcp reads stamp the same frozen principal and tenant
+ * via stampGovernedReadFields(); missing identity fails closed.
  */
 final class McpPrincipalContextDispatcher {
 
@@ -45,6 +47,30 @@ final class McpPrincipalContextDispatcher {
    * Operators can alert on this string. The caller is still denied.
    */
   public const DENIED_ACCESS_WRITE_FAILED = 'denied_access_write_failed';
+
+  /**
+   * Identity keys never taken from caller metadata on a governed read.
+   */
+  private const READ_AUDIT_IDENTITY_KEYS = [
+    'principal_key',
+    'human_key',
+    'iss',
+    'sub',
+    'azp',
+    'actor',
+    'tenant',
+    'jti',
+    'granted_scopes',
+    'required_scopes',
+    'principal_source',
+    'principal_unverified',
+    'claimed_iss',
+    'claimed_sub',
+    'claimed_azp',
+    'claimed_tenant',
+    'claimed_jti',
+    'claimed_granted_scopes',
+  ];
 
   /**
    * Constructs the dispatcher.
@@ -609,6 +635,52 @@ final class McpPrincipalContextDispatcher {
       $meta['unverified_reason'] = $reasonCode;
     }
     return $meta;
+  }
+
+  /**
+   * Stamps frozen Paladin principal and tenant onto a governed-read row.
+   *
+   * Identity is the sealed holder only. Request input, tool
+   * arguments, and caller metadata cannot supply subject or tenant.
+   * A missing principal, or a network call with no tenant, fails
+   * closed. Success rows never use claimed_* names.
+   *
+   * @param array<string, mixed> $meta
+   *   Existing read-audit metadata. Identity keys are stripped.
+   *
+   * @return array<string, mixed>
+   *   Metadata with verified principal fields.
+   *
+   * @throws \Drupal\mcp_sentinel\Exception\McpPrincipalContextDeniedException
+   *   When the sealed principal or tenant is missing.
+   */
+  public function stampGovernedReadFields(array $meta): array {
+    foreach (self::READ_AUDIT_IDENTITY_KEYS as $key) {
+      unset($meta[$key]);
+    }
+    $ctx = $this->holder->get();
+    if (!$ctx instanceof McpPrincipalContext || $ctx->subject() === '') {
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        self::GENERIC_REFUSAL,
+      );
+    }
+    if ($ctx->isNetwork() && $ctx->tenant() === '') {
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::MISSING_TENANT_CLAIM,
+        'Network calls require a tenant claim on the validated token.',
+      );
+    }
+    try {
+      McpPrincipalKey::fromClaims($ctx->keyClaims());
+    }
+    catch (McpPrincipalKeyException) {
+      throw new McpPrincipalContextDeniedException(
+        McpPrincipalContextDeniedException::MISSING_PRINCIPAL,
+        self::GENERIC_REFUSAL,
+      );
+    }
+    return self::stampPrincipalFields($meta, $ctx);
   }
 
   /**
